@@ -49,7 +49,7 @@ def read_existing_subject(path: Path) -> str:
     return ""
 
 
-def _atomic_write(path: Path, content: str) -> None:
+def write_text_atomic(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary_name = tempfile.mkstemp(
         dir=path.parent,
@@ -81,7 +81,7 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
         f"## 模型分析\n\n{body}\n\n---\n*生成时间: {generated_at}*\n"
     )
     path = report_path(output_dir, result.hash)
-    _atomic_write(path, content)
+    write_text_atomic(path, content)
     return path
 
 
@@ -93,5 +93,5 @@ def write_index(output_dir: Path, ordered_results: Iterable[AnalysisResult]) -> 
             f"- [{result.hash}](./{result.hash}.md) — {result.subject}{status}"
         )
     path = output_dir / "index.md"
-    _atomic_write(path, "\n".join(lines) + "\n")
+    write_text_atomic(path, "\n".join(lines) + "\n")
     return path

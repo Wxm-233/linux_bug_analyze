@@ -100,7 +100,13 @@ class GitRepository:
             ["rev-parse", "--verify", f"{commit_hash}^{{commit}}"]
         ).strip()
 
-    def get_commit(self, requested_hash: str, max_diff_chars: int) -> CommitInfo:
+    def get_commit(
+        self,
+        requested_hash: str,
+        max_diff_chars: int,
+        *,
+        include_diff: bool = True,
+    ) -> CommitInfo:
         canonical_hash = self.resolve_hash(requested_hash)
         metadata = self._run(
             [
@@ -123,17 +129,19 @@ class GitRepository:
             ["show", "--name-only", "--format=", "--no-ext-diff", canonical_hash]
         )
         files = tuple(line.strip() for line in files_raw.splitlines() if line.strip())
-        full_diff = self._run(
-            [
-                "show",
-                "--format=",
-                "--find-renames",
-                "--find-copies",
-                "--unified=3",
-                "--no-ext-diff",
-                canonical_hash,
-            ]
-        ).strip()
+        full_diff = ""
+        if include_diff:
+            full_diff = self._run(
+                [
+                    "show",
+                    "--format=",
+                    "--find-renames",
+                    "--find-copies",
+                    "--unified=3",
+                    "--no-ext-diff",
+                    canonical_hash,
+                ]
+            ).strip()
         diff, truncated = truncate_diff(full_diff, max_diff_chars)
         return CommitInfo(
             requested_hash=requested_hash,

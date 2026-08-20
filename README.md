@@ -89,6 +89,50 @@ python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
 
 上述位置参数方式继续兼容，且优先于 settings 中的 `linux_dir` 和 `hashes_file`。
 
+## 筛选候选 hash
+
+独立筛选模块可以在调用模型前，根据 Git 提交事实缩小候选集合。先在 settings 中设置：
+
+```toml
+hashes_file = "filtered_hashes.txt"
+
+[hash_filter]
+source_file = "candidate_hashes.txt"
+include = ['(^|/)arch/', '\b(architecture|risc-?v|arm64|x86)\b']
+exclude = ['\b(revert|merge)\b']
+fields = ["subject", "body", "files"]
+match = "any"
+case_sensitive = false
+```
+
+然后执行：
+
+```bash
+python filter_hashes.py
+```
+
+或者完全使用命令行：
+
+```bash
+python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt \
+  --include '(^|/)arch/' \
+  --include '\b(architecture|risc-?v|arm64|x86)\b' \
+  --fields subject body files
+```
+
+规则说明：
+
+- `include` 和 `exclude` 都是正则数组，普通关键词也可直接使用；
+- `match = "any"` 表示命中任一 include 即保留，`all` 表示必须全部命中；
+- exclude 的优先级高于 include；
+- 可筛选字段为 `subject`、`body`、`files` 和 `diff`；只有选择 `diff` 时才提取 diff；
+- diff 筛选默认不截断；若显式设置 `max_diff_chars`，审计记录会标明截断状态；
+- 未配置 include 时，所有未被 exclude 命中的有效提交都会保留；
+- 输出使用完整 commit hash，并保持原输入顺序；
+- 默认同时生成 `<输出文件>.audit.jsonl`，记录每个 hash 的决定、命中规则和错误。
+
+筛选完成后，`analyze_commits_with_llm.py` 会直接读取根级 `hashes_file` 指向的结果。
+
 常用选项：
 
 - `--start-index` / `--end-index`：只处理一段输入；
@@ -101,6 +145,7 @@ python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
 ## 模块划分
 
 - `git_repository.py`：Git 校验、hash 解析和提交事实提取；
+- `hash_filter.py` / `filter_cli.py`：确定性候选筛选、命中审计和命令行入口；
 - `prompting.py`：与研究问题对齐的提示词；
 - `llm.py`：模型接口和重试；
 - `pipeline.py`：并发分析和单任务故障隔离；

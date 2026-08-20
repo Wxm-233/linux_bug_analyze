@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -26,6 +26,22 @@ class ConfigurationError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class HashFilterSettings:
+    """候选提交筛选器的可选默认值。"""
+
+    source_file: Path | None = None
+    output_file: Path | None = None
+    audit_file: Path | None = None
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    fields: tuple[str, ...] = ("subject", "body", "files")
+    match: str = "any"
+    case_sensitive: bool = False
+    workers: int | None = None
+    max_diff_chars: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FileSettings:
     """从 TOML 文件读取的可选命令行默认值。"""
 
@@ -44,6 +60,7 @@ class FileSettings:
     api_key_file: Path | None = None
     base_url: str | None = None
     model: str | None = None
+    hash_filter: HashFilterSettings = field(default_factory=HashFilterSettings)
 
 
 _ROOT_KEYS = {
@@ -59,8 +76,21 @@ _ROOT_KEYS = {
     "start_index",
     "end_index",
     "openai",
+    "hash_filter",
 }
 _OPENAI_KEYS = {"api_key_file", "base_url", "model"}
+_HASH_FILTER_KEYS = {
+    "source_file",
+    "output_file",
+    "audit_file",
+    "include",
+    "exclude",
+    "fields",
+    "match",
+    "case_sensitive",
+    "workers",
+    "max_diff_chars",
+}
 
 
 def _read_path(data: Mapping[str, Any], key: str, base_dir: Path) -> Path | None:
@@ -102,6 +132,19 @@ def _read_string(data: Mapping[str, Any], key: str) -> str | None:
     return value.strip() or None
 
 
+def _read_string_list(
+    data: Mapping[str, Any],
+    key: str,
+    default: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    value = data.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ConfigurationError(f"settings 中的 {key} 必须是字符串数组。")
+    return tuple(item for item in (entry.strip() for entry in value) if item)
+
+
 def load_settings(path: Path, *, required: bool = False) -> FileSettings:
     """读取 TOML settings；其中的相对路径以 settings 所在目录为基准。"""
 
@@ -127,6 +170,30 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
     if unknown_openai:
         names = ", ".join(sorted(unknown_openai))
         raise ConfigurationError(f"settings 的 [openai] 包含未知字段：{names}")
+    hash_filter = data.get("hash_filter", {})
+    if not isinstance(hash_filter, dict):
+        raise ConfigurationError("settings 中的 hash_filter 必须是 TOML 表。")
+    unknown_filter = set(hash_filter) - _HASH_FILTER_KEYS
+    if unknown_filter:
+        names = ", ".join(sorted(unknown_filter))
+        raise ConfigurationError(f"settings 的 [hash_filter] 包含未知字段：{names}")
+
+    match = _read_string(hash_filter, "match") or "any"
+    if match not in {"any", "all"}:
+        raise ConfigurationError("settings 中 hash_filter.match 必须是 any 或 all。")
+    fields = _read_string_list(
+        hash_filter,
+        "fields",
+        ("subject", "body", "files"),
+    )
+    valid_fields = {"subject", "body", "files", "diff"}
+    invalid_fields = set(fields) - valid_fields
+    if invalid_fields or not fields:
+        names = ", ".join(sorted(invalid_fields)) or "（空）"
+        raise ConfigurationError(
+            "settings 中 hash_filter.fields 只能包含 subject、body、files、diff；"
+            f"当前无效值：{names}"
+        )
 
     base_dir = source.parent
     return FileSettings(
@@ -145,6 +212,18 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
         api_key_file=_read_path(openai, "api_key_file", base_dir),
         base_url=_read_string(openai, "base_url"),
         model=_read_string(openai, "model"),
+        hash_filter=HashFilterSettings(
+            source_file=_read_path(hash_filter, "source_file", base_dir),
+            output_file=_read_path(hash_filter, "output_file", base_dir),
+            audit_file=_read_path(hash_filter, "audit_file", base_dir),
+            include=_read_string_list(hash_filter, "include"),
+            exclude=_read_string_list(hash_filter, "exclude"),
+            fields=fields,
+            match=match,
+            case_sensitive=_read_bool(hash_filter, "case_sensitive") or False,
+            workers=_read_int(hash_filter, "workers"),
+            max_diff_chars=_read_int(hash_filter, "max_diff_chars"),
+        ),
     )
 
 

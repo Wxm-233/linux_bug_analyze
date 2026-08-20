@@ -27,6 +27,13 @@ force = true
 api_key_file = "secrets/key"
 base_url = "https://example.test/v1"
 model = "test-model"
+
+[hash_filter]
+source_file = "input/candidates.txt"
+include = ["riscv", "(^|/)arch/"]
+fields = ["subject", "files"]
+match = "all"
+case_sensitive = true
 """.strip(),
                 encoding="utf-8",
             )
@@ -41,6 +48,14 @@ model = "test-model"
             self.assertTrue(settings.force)
             self.assertEqual(settings.base_url, "https://example.test/v1")
             self.assertEqual(settings.model, "test-model")
+            self.assertEqual(
+                settings.hash_filter.source_file,
+                (root / "input/candidates.txt").resolve(),
+            )
+            self.assertEqual(settings.hash_filter.include, ("riscv", "(^|/)arch/"))
+            self.assertEqual(settings.hash_filter.fields, ("subject", "files"))
+            self.assertEqual(settings.hash_filter.match, "all")
+            self.assertTrue(settings.hash_filter.case_sensitive)
 
     def test_rejects_unknown_field(self) -> None:
         with TemporaryDirectory() as directory:
