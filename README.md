@@ -89,6 +89,57 @@ python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
 
 上述位置参数方式继续兼容，且优先于 settings 中的 `linux_dir` 和 `hashes_file`。
 
+## 从 linux-cve-announce 生成候选 hash
+
+新增的 CVE 来源模块直接读取本地 public-inbox v2 Git 镜像，不会在分析时访问网络。
+它从公告正文中的 `Fixed in ... with commit ...` 和 git.kernel.org 提交链接提取修复，
+再用 `linux_dir` 指向的主线仓库排除 stable 回移提交。完整数据流为：
+
+```text
+linux-cve-announce 镜像
+  -> extract_cve_hashes.py
+  -> candidate_hashes.txt
+  -> filter_hashes.py
+  -> filtered_hashes.txt
+  -> analyze_commits_with_llm.py
+```
+
+在 settings 中配置：
+
+```toml
+linux_dir = "/data/linux"
+hashes_file = "filtered_hashes.txt"
+
+[hash_filter]
+source_file = "candidate_hashes.txt"
+
+[cve_source]
+inbox_dir = "/data/lore/linux-cve-announce"
+# output_file 留空时自动使用 [hash_filter].source_file
+output_file = ""
+audit_file = ""
+prefer_mainline = true
+fallback_to_all = false
+```
+
+`inbox_dir` 可以指向 public-inbox 根目录、其中的 `git` 目录，或单个 `0.git` epoch。
+随后依次执行：
+
+```bash
+python extract_cve_hashes.py
+python filter_hashes.py
+python analyze_commits_with_llm.py
+```
+
+默认的 `prefer_mainline = true` 只保留能在 `linux_dir` 中解析为 commit 的引用；因此该仓库
+应当完整且已更新。无法解析的邮件会记入审计文件而不会悄悄回退。只有明确希望保留所有
+stable 引用时，才启用 `fallback_to_all` 或 `--no-prefer-mainline`。默认审计文件为
+`<输出文件>.audit.jsonl`，其中包含邮件 Message-ID、CVE 编号、原始/规范 hash、选择原因和
+lore.kernel.org 永久链接。
+
+镜像的克隆与更新仍是独立的运维步骤；本模块只读镜像，所以可以在本地开发并通过 Git
+同步代码，在远端 Linux 机器维护各自的 `settings.toml`、邮件镜像和内核仓库。
+
 ## 筛选候选 hash
 
 独立筛选模块可以在调用模型前，根据 Git 提交事实缩小候选集合。先在 settings 中设置：
@@ -145,6 +196,7 @@ python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt 
 ## 模块划分
 
 - `git_repository.py`：Git 校验、hash 解析和提交事实提取；
+- `public_inbox.py` / `cve_source.py` / `cve_cli.py`：读取 CVE 邮件镜像、提取主线修复并生成审计；
 - `hash_filter.py` / `filter_cli.py`：确定性候选筛选、命中审计和命令行入口；
 - `prompting.py`：与研究问题对齐的提示词；
 - `llm.py`：模型接口和重试；

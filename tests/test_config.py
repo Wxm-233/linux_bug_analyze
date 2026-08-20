@@ -34,6 +34,13 @@ include = ["riscv", "(^|/)arch/"]
 fields = ["subject", "files"]
 match = "all"
 case_sensitive = true
+
+[cve_source]
+inbox_dir = "mail/linux-cve-announce"
+output_file = "input/from-cve.txt"
+audit_file = "results/cve-audit.jsonl"
+prefer_mainline = false
+fallback_to_all = true
 """.strip(),
                 encoding="utf-8",
             )
@@ -56,6 +63,16 @@ case_sensitive = true
             self.assertEqual(settings.hash_filter.fields, ("subject", "files"))
             self.assertEqual(settings.hash_filter.match, "all")
             self.assertTrue(settings.hash_filter.case_sensitive)
+            self.assertEqual(
+                settings.cve_source.inbox_dir,
+                (root / "mail/linux-cve-announce").resolve(),
+            )
+            self.assertEqual(
+                settings.cve_source.output_file,
+                (root / "input/from-cve.txt").resolve(),
+            )
+            self.assertFalse(settings.cve_source.prefer_mainline)
+            self.assertTrue(settings.cve_source.fallback_to_all)
 
     def test_rejects_unknown_field(self) -> None:
         with TemporaryDirectory() as directory:

@@ -42,6 +42,17 @@ class HashFilterSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class CveSourceSettings:
+    """linux-cve-announce 本地镜像提取器的可选默认值。"""
+
+    inbox_dir: Path | None = None
+    output_file: Path | None = None
+    audit_file: Path | None = None
+    prefer_mainline: bool = True
+    fallback_to_all: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class FileSettings:
     """从 TOML 文件读取的可选命令行默认值。"""
 
@@ -61,6 +72,7 @@ class FileSettings:
     base_url: str | None = None
     model: str | None = None
     hash_filter: HashFilterSettings = field(default_factory=HashFilterSettings)
+    cve_source: CveSourceSettings = field(default_factory=CveSourceSettings)
 
 
 _ROOT_KEYS = {
@@ -77,6 +89,7 @@ _ROOT_KEYS = {
     "end_index",
     "openai",
     "hash_filter",
+    "cve_source",
 }
 _OPENAI_KEYS = {"api_key_file", "base_url", "model"}
 _HASH_FILTER_KEYS = {
@@ -90,6 +103,13 @@ _HASH_FILTER_KEYS = {
     "case_sensitive",
     "workers",
     "max_diff_chars",
+}
+_CVE_SOURCE_KEYS = {
+    "inbox_dir",
+    "output_file",
+    "audit_file",
+    "prefer_mainline",
+    "fallback_to_all",
 }
 
 
@@ -194,6 +214,15 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
             "settings 中 hash_filter.fields 只能包含 subject、body、files、diff；"
             f"当前无效值：{names}"
         )
+    cve_source = data.get("cve_source", {})
+    if not isinstance(cve_source, dict):
+        raise ConfigurationError("settings 中的 cve_source 必须是 TOML 表。")
+    unknown_cve_source = set(cve_source) - _CVE_SOURCE_KEYS
+    if unknown_cve_source:
+        names = ", ".join(sorted(unknown_cve_source))
+        raise ConfigurationError(f"settings 的 [cve_source] 包含未知字段：{names}")
+    prefer_mainline = _read_bool(cve_source, "prefer_mainline")
+    fallback_to_all = _read_bool(cve_source, "fallback_to_all")
 
     base_dir = source.parent
     return FileSettings(
@@ -223,6 +252,13 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
             case_sensitive=_read_bool(hash_filter, "case_sensitive") or False,
             workers=_read_int(hash_filter, "workers"),
             max_diff_chars=_read_int(hash_filter, "max_diff_chars"),
+        ),
+        cve_source=CveSourceSettings(
+            inbox_dir=_read_path(cve_source, "inbox_dir", base_dir),
+            output_file=_read_path(cve_source, "output_file", base_dir),
+            audit_file=_read_path(cve_source, "audit_file", base_dir),
+            prefer_mainline=True if prefer_mainline is None else prefer_mainline,
+            fallback_to_all=False if fallback_to_all is None else fallback_to_all,
         ),
     )
 
