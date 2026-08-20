@@ -2,7 +2,59 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from linux_bug_analyze.config import ConfigurationError, resolve_api_key
+from linux_bug_analyze.config import (
+    ConfigurationError,
+    load_settings,
+    resolve_api_key,
+    resolve_setting,
+)
+
+
+class LoadSettingsTests(TestCase):
+    def test_loads_values_and_resolves_paths_from_settings_directory(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "settings.toml"
+            path.write_text(
+                """
+linux_dir = "repos/linux"
+hashes_file = "input/hashes.txt"
+outdir = "results"
+workers = 3
+force = true
+
+[openai]
+api_key_file = "secrets/key"
+base_url = "https://example.test/v1"
+model = "test-model"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            settings = load_settings(path, required=True)
+
+            self.assertEqual(settings.linux_dir, (root / "repos/linux").resolve())
+            self.assertEqual(settings.hashes_file, (root / "input/hashes.txt").resolve())
+            self.assertEqual(settings.outdir, (root / "results").resolve())
+            self.assertEqual(settings.api_key_file, (root / "secrets/key").resolve())
+            self.assertEqual(settings.workers, 3)
+            self.assertTrue(settings.force)
+            self.assertEqual(settings.base_url, "https://example.test/v1")
+            self.assertEqual(settings.model, "test-model")
+
+    def test_rejects_unknown_field(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.toml"
+            path.write_text("workres = 3\n", encoding="utf-8")
+            with self.assertRaises(ConfigurationError):
+                load_settings(path, required=True)
+
+    def test_missing_default_is_allowed_but_explicit_file_is_required(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.toml"
+            self.assertIsNone(load_settings(path).linux_dir)
+            with self.assertRaises(ConfigurationError):
+                load_settings(path, required=True)
 
 
 class ResolveApiKeyTests(TestCase):
@@ -25,3 +77,14 @@ class ResolveApiKeyTests(TestCase):
             missing = Path(directory) / "missing"
             with self.assertRaises(ConfigurationError):
                 resolve_api_key(None, missing, {})
+
+    def test_normal_setting_priority_is_cli_then_environment_then_default(self) -> None:
+        self.assertEqual(
+            resolve_setting("cli", "OPENAI_MODEL", "settings", {"OPENAI_MODEL": "env"}),
+            "cli",
+        )
+        self.assertEqual(
+            resolve_setting(None, "OPENAI_MODEL", "settings", {"OPENAI_MODEL": "env"}),
+            "env",
+        )
+        self.assertEqual(resolve_setting(None, "OPENAI_MODEL", "settings", {}), "settings")

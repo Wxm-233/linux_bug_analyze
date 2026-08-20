@@ -22,15 +22,61 @@ python -m venv .venv
 python -m pip install -e .
 ```
 
+## Settings 配置
+
+首次使用时复制模板，并填写本机路径：
+
+```bash
+cp settings.example.toml settings.toml
+```
+
+Windows PowerShell：
+
+```powershell
+Copy-Item settings.example.toml settings.toml
+```
+
+至少设置：
+
+```toml
+linux_dir = "/data/linux"
+hashes_file = "filtered_hashes.txt"
+outdir = "analysis_out"
+```
+
+配置完成后不再需要位置参数：
+
+```bash
+python analyze_commits_with_llm.py
+```
+
+也可以选择其他配置文件：
+
+```bash
+python analyze_commits_with_llm.py --settings settings.remote.toml
+```
+
+settings 中的相对路径以该 TOML 文件所在目录为基准。命令行参数会覆盖 settings，
+因此仍可临时执行：
+
+```bash
+python analyze_commits_with_llm.py /other/linux other_hashes.txt --workers 2
+```
+
+`settings.toml` 已被 Git 忽略。本地和远端 Linux 机器应分别维护自己的文件，仓库只提交
+`settings.example.toml`。
+
 ## API 配置
 
-配置优先级为命令行、环境变量、默认值/密钥文件：
+API 配置优先级为：
 
 1. `--api-key`、`--base-url`、`--model`
 2. `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`
-3. 项目根目录的 `OPENAI_API_KEY` 文件，以及代码中的默认 API 地址和模型名
+3. settings 中的 `[openai]` 配置
+4. 项目根目录的 `OPENAI_API_KEY` 文件，以及代码中的默认 API 地址和模型名
 
-`OPENAI_API_KEY` 已被 `.gitignore` 忽略，不要把密钥提交到仓库。
+不要把 API Key 本身写入 settings；只设置 `api_key_file`。`OPENAI_API_KEY` 和
+`settings.toml` 均已被 `.gitignore` 忽略。
 
 ## 使用
 
@@ -40,6 +86,8 @@ hash 文件每行放一个十六进制 commit hash；空行和以 `#` 开头的�
 python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
   --outdir analysis_out --workers 8
 ```
+
+上述位置参数方式继续兼容，且优先于 settings 中的 `linux_dir` 和 `hashes_file`。
 
 常用选项：
 
@@ -57,6 +105,6 @@ python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
 - `llm.py`：模型接口和重试；
 - `pipeline.py`：并发分析和单任务故障隔离；
 - `reporting.py`：原子写入、断点状态和索引；
-- `config.py` / `cli.py`：配置优先级、参数校验和流程编排。
+- `config.py` / `cli.py`：TOML settings、配置优先级、参数校验和流程编排。
 
 兼容入口仍为 `analyze_commits_with_llm.py`；安装后也可使用 `linux-bug-analyze` 命令。

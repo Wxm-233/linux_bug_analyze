@@ -11,7 +11,10 @@ from .config import (
     DEFAULT_BASE_URL,
     DEFAULT_CONTEXT_PATH,
     DEFAULT_MODEL,
+    DEFAULT_SETTINGS_PATH,
     ConfigurationError,
+    FileSettings,
+    load_settings,
     resolve_api_key,
     resolve_setting,
 )
@@ -28,48 +31,112 @@ from .reporting import (
 )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(settings: FileSettings | None = None) -> argparse.ArgumentParser:
+    settings = settings or FileSettings()
+    context_default = settings.context_md or DEFAULT_CONTEXT_PATH
+    api_key_file_default = settings.api_key_file or DEFAULT_API_KEY_FILE
     parser = argparse.ArgumentParser(
         description="按论文研究框架分析 Linux 内核提交中的多架构语义缺陷。"
     )
-    parser.add_argument("linux_dir", type=Path, help="Linux 内核源码 Git 仓库")
-    parser.add_argument("hashes_file", type=Path, help="commit hash 文件，每行一个 hash")
-    parser.add_argument("--outdir", type=Path, default=Path("analysis_out"), help="输出目录")
+    parser.add_argument(
+        "linux_dir",
+        nargs="?",
+        type=Path,
+        default=settings.linux_dir,
+        help="Linux 内核源码 Git 仓库；可在 settings 中设置",
+    )
+    parser.add_argument(
+        "hashes_file",
+        nargs="?",
+        type=Path,
+        default=settings.hashes_file,
+        help="commit hash 文件，每行一个 hash；可在 settings 中设置",
+    )
+    parser.add_argument(
+        "--settings",
+        type=Path,
+        default=settings.source or DEFAULT_SETTINGS_PATH,
+        help=f"TOML 配置文件（默认 {DEFAULT_SETTINGS_PATH}，不存在时忽略）",
+    )
+    parser.add_argument(
+        "--outdir",
+        type=Path,
+        default=settings.outdir or Path("analysis_out"),
+        help="输出目录",
+    )
     parser.add_argument(
         "--context-md",
         type=Path,
-        default=DEFAULT_CONTEXT_PATH,
-        help=f"研究框架文档（默认 {DEFAULT_CONTEXT_PATH}）",
+        default=context_default,
+        help=f"研究框架文档（默认 {context_default}）",
     )
     parser.add_argument(
         "--evidence-dir",
         type=Path,
+        default=settings.evidence_dir,
         help="可选补充证据目录，文件名须为完整 hash 加 .md 或 .txt",
     )
-    parser.add_argument("--workers", type=int, default=8, help="并行线程数（默认 8）")
-    parser.add_argument("--force", action="store_true", help="忽略成功报告并重新分析")
-    parser.add_argument("--max-tokens", type=int, default=8192, help="单次最大输出 token 数")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=settings.workers if settings.workers is not None else 8,
+        help="并行线程数（默认 8）",
+    )
+    parser.add_argument(
+        "--force",
+        action=argparse.BooleanOptionalAction,
+        default=settings.force if settings.force is not None else False,
+        help="是否忽略成功报告并重新分析",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=settings.max_tokens if settings.max_tokens is not None else 8192,
+        help="单次最大输出 token 数",
+    )
     parser.add_argument(
         "--max-diff-chars",
         type=int,
-        default=50_000,
+        default=(
+            settings.max_diff_chars
+            if settings.max_diff_chars is not None
+            else 50_000
+        ),
         help="送入模型的最大 diff 字符数；0 表示不截断（默认 50000）",
     )
-    parser.add_argument("--start-index", type=int, default=0, help="起始下标，含该位置")
-    parser.add_argument("--end-index", type=int, default=-1, help="结束下标，不含；-1 表示末尾")
+    parser.add_argument(
+        "--start-index",
+        type=int,
+        default=settings.start_index if settings.start_index is not None else 0,
+        help="起始下标，含该位置",
+    )
+    parser.add_argument(
+        "--end-index",
+        type=int,
+        default=settings.end_index if settings.end_index is not None else -1,
+        help="结束下标，不含；-1 表示末尾",
+    )
     parser.add_argument("--api-key", help="API Key；优先级高于环境变量和密钥文件")
     parser.add_argument(
         "--api-key-file",
         type=Path,
-        default=DEFAULT_API_KEY_FILE,
-        help=f"API Key 文件（默认 {DEFAULT_API_KEY_FILE}）",
+        default=api_key_file_default,
+        help=f"API Key 文件（默认 {api_key_file_default}）",
     )
     parser.add_argument("--base-url", help="OpenAI 兼容 API 的 base URL")
     parser.add_argument("--model", help="模型名")
+    parser.set_defaults(
+        settings_base_url=settings.base_url,
+        settings_model=settings.model,
+    )
     return parser
 
 
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.linux_dir is None:
+        parser.error("缺少 linux_dir：请使用位置参数或在 settings 中设置")
+    if args.hashes_file is None:
+        parser.error("缺少 hashes_file：请使用位置参数或在 settings 中设置")
     if args.workers < 1:
         parser.error("--workers 必须大于 0")
     if args.max_tokens < 1:
@@ -107,10 +174,30 @@ def _existing_result(commit_hash: str, path: Path) -> AnalysisResult:
     )
 
 
+def _settings_argument(argv: list[str] | None) -> tuple[Path, bool]:
+    values = sys.argv[1:] if argv is None else argv
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS_PATH)
+    known, _ = pre_parser.parse_known_args(values)
+    explicit = any(
+        value == "--settings" or value.startswith("--settings=") for value in values
+    )
+    return known.settings, explicit
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
+    settings_path, settings_required = _settings_argument(argv)
+    try:
+        settings = load_settings(settings_path, required=settings_required)
+    except ConfigurationError as exc:
+        print(f"[错误] {exc}", file=sys.stderr)
+        return 2
+
+    parser = build_parser(settings)
     args = parser.parse_args(argv)
     _validate_args(parser, args)
+    if settings.source is not None and settings.source.is_file():
+        print(f"[信息] 已加载 settings：{settings.source}")
 
     try:
         repository = GitRepository(args.linux_dir)
@@ -156,8 +243,16 @@ def main(argv: list[str] | None = None) -> int:
     if pending:
         try:
             api_key = resolve_api_key(args.api_key, args.api_key_file)
-            base_url = resolve_setting(args.base_url, "OPENAI_BASE_URL", DEFAULT_BASE_URL)
-            model = resolve_setting(args.model, "OPENAI_MODEL", DEFAULT_MODEL)
+            base_url = resolve_setting(
+                args.base_url,
+                "OPENAI_BASE_URL",
+                args.settings_base_url or DEFAULT_BASE_URL,
+            )
+            model = resolve_setting(
+                args.model,
+                "OPENAI_MODEL",
+                args.settings_model or DEFAULT_MODEL,
+            )
             analyzer = ChatAnalyzer(
                 create_openai_client(api_key, base_url),
                 model,
