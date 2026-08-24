@@ -53,6 +53,14 @@ class CveSourceSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ResultSummarySettings:
+    """分析结果汇总器的可选默认值。"""
+
+    input_dir: Path | None = None
+    output_dir: Path | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class FileSettings:
     """从 TOML 文件读取的可选命令行默认值。"""
 
@@ -73,6 +81,7 @@ class FileSettings:
     model: str | None = None
     hash_filter: HashFilterSettings = field(default_factory=HashFilterSettings)
     cve_source: CveSourceSettings = field(default_factory=CveSourceSettings)
+    result_summary: ResultSummarySettings = field(default_factory=ResultSummarySettings)
 
 
 _ROOT_KEYS = {
@@ -90,6 +99,7 @@ _ROOT_KEYS = {
     "openai",
     "hash_filter",
     "cve_source",
+    "result_summary",
 }
 _OPENAI_KEYS = {"api_key_file", "base_url", "model"}
 _HASH_FILTER_KEYS = {
@@ -111,6 +121,7 @@ _CVE_SOURCE_KEYS = {
     "prefer_mainline",
     "fallback_to_all",
 }
+_RESULT_SUMMARY_KEYS = {"input_dir", "output_dir"}
 
 
 def _read_path(data: Mapping[str, Any], key: str, base_dir: Path) -> Path | None:
@@ -223,6 +234,15 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
         raise ConfigurationError(f"settings 的 [cve_source] 包含未知字段：{names}")
     prefer_mainline = _read_bool(cve_source, "prefer_mainline")
     fallback_to_all = _read_bool(cve_source, "fallback_to_all")
+    result_summary = data.get("result_summary", {})
+    if not isinstance(result_summary, dict):
+        raise ConfigurationError("settings 中的 result_summary 必须是 TOML 表。")
+    unknown_result_summary = set(result_summary) - _RESULT_SUMMARY_KEYS
+    if unknown_result_summary:
+        names = ", ".join(sorted(unknown_result_summary))
+        raise ConfigurationError(
+            f"settings 的 [result_summary] 包含未知字段：{names}"
+        )
 
     base_dir = source.parent
     return FileSettings(
@@ -259,6 +279,10 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
             audit_file=_read_path(cve_source, "audit_file", base_dir),
             prefer_mainline=True if prefer_mainline is None else prefer_mainline,
             fallback_to_all=False if fallback_to_all is None else fallback_to_all,
+        ),
+        result_summary=ResultSummarySettings(
+            input_dir=_read_path(result_summary, "input_dir", base_dir),
+            output_dir=_read_path(result_summary, "output_dir", base_dir),
         ),
     )
 

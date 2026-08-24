@@ -89,6 +89,55 @@ python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
 
 上述位置参数方式继续兼容，且优先于 settings 中的 `linux_dir` 和 `hashes_file`。
 
+## 结构化分析输出与统计
+
+模型响应使用“精简 JSON 分类头 + Markdown 正文”协议。程序会在写入成功报告前验证：
+
+- 分类字段、枚举和字段间约束；
+- Markdown 必需章节；
+- API 的输出是否完整结束；
+- 正文没有重复生成由程序负责的分类区块。
+
+格式不正确或输出被截断时会进行一次格式重试；仍不合格则写为失败报告，后续运行可重试。
+成功分析会生成两个文件：
+
+```text
+analysis_out/<完整 hash>.md
+analysis_out/<完整 hash>.meta.json
+```
+
+Markdown 中的“结论、类型、置信度”由程序根据元数据统一渲染，统计程序只读取 sidecar
+JSON，不依赖 Markdown 的加粗、换行或列表样式。
+
+分析完成后运行：
+
+```bash
+python summarize_results.py
+```
+
+默认读取根级 `outdir`，并在同一目录生成：
+
+- `summary.json`：成功、失败、相关、不相关、不确定及异常格式数量和相关率；
+- `results.csv`：每个提交的分类、置信度、标题、报告路径和数据来源；
+- `related_hashes.txt`：所有判定为相关的提交 hash；
+- `related_index.md`：只包含相关报告的可点击索引。
+
+也可以另设输入和输出目录：
+
+```toml
+[result_summary]
+input_dir = "analysis_out"
+output_dir = "analysis_summary"
+```
+
+```bash
+python summarize_results.py /data/analysis_out --output-dir /data/summary
+```
+
+旧版成功报告没有 `.meta.json` 时，汇总器会以只读方式兼容常见 Markdown 变体，包括字段
+加粗或多个字段出现在同一行；无法唯一识别的报告计入 `legacy_ambiguous`，不会猜测分类。
+使用 `--force` 重新分析旧报告后，会自然转换为新格式。
+
 ## 从 linux-cve-announce 生成候选 hash
 
 新增的 CVE 来源模块直接读取本地 public-inbox v2 Git 镜像，不会在分析时访问网络。
@@ -196,8 +245,10 @@ python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt 
 ## 模块划分
 
 - `git_repository.py`：Git 校验、hash 解析和提交事实提取；
+- `analysis_protocol.py`：混合输出协议、分类枚举校验和标准分类区块渲染；
 - `public_inbox.py` / `cve_source.py` / `cve_cli.py`：读取 CVE 邮件镜像、提取主线修复并生成审计；
 - `hash_filter.py` / `filter_cli.py`：确定性候选筛选、命中审计和命令行入口；
+- `result_summary.py` / `summary_cli.py`：结构化结果统计、旧报告兼容和相关提交索引；
 - `prompting.py`：与研究问题对齐的提示词；
 - `llm.py`：模型接口和重试；
 - `pipeline.py`：并发分析和单任务故障隔离；

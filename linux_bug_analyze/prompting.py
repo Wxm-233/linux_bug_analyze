@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from .analysis_protocol import METADATA_MARKER, REPORT_MARKER
 from .models import CommitInfo
 
 
 SYSTEM_PROMPT = (
     "你是熟悉 Linux 内核源码的资深研究者。严格区分已给证据、合理推断和未知信息；"
-    "不得把常识或猜测伪装成提交证据。"
+    "不得把常识或猜测伪装成提交证据。必须严格遵守用户提供的输出协议，"
+    "不能自行改用其他格式。"
 )
 
 
@@ -55,16 +57,31 @@ diff 是否截断：{truncation_note}
 ==================== 补充证据 ====================
 {supplemental}
 
-请严格按以下 Markdown 结构作答，不要省略标题：
+输出是程序接口。必须从响应的第一个字符开始严格使用以下协议；不要添加代码围栏、前言或结尾标记：
+
+{METADATA_MARKER}
+{{"schema_version":1,"relevance":"related","categories":["implicit_semantic_assumption"],"confidence":"high"}}
+{REPORT_MARKER}
+## 提交概述
+……
+
+分类 JSON 规则：
+- 只能包含 schema_version、relevance、categories、confidence 四个字段。
+- schema_version 必须是 1。
+- relevance 只能是 related、unrelated、uncertain。
+- categories 只能从 implicit_semantic_assumption、cross_arch_regression 中选择，可多选。
+- related 至少选择一个 category；unrelated 的 categories 必须为空数组；uncertain 可为空或列出疑似类型。
+- confidence 只能是 high、medium、low。
+- JSON 之后必须原样输出 {REPORT_MARKER}，再输出 Markdown 正文。
+- Markdown 正文不要再次输出结论、类型、置信度或“研究相关性判定”标题；该区块由程序根据 JSON 生成。
+
+Markdown 正文必须严格包含以下结构，不要省略二级标题：
 
 ## 提交概述
 用本科生能看懂的语言说明动机、主要改动、涉及的公共层/架构/子系统。
 
-## 研究相关性判定
-- 结论：相关 / 不相关 / 不确定
-- 类型：隐式语义假设错误 / 跨架构回归 / 两者 / 不适用
-- 置信度：高 / 中 / 低
-- 判定理由：引用具体的提交说明或 diff 事实，不复制大段原文。
+## 判定理由
+引用具体的提交说明或 diff 事实解释分类 JSON 中的判断，不复制大段原文。
 
 ## 语义卡片
 | 字段 | 分析 |
@@ -81,7 +98,7 @@ diff 是否截断：{truncation_note}
 | 建议验证手段 | 静态检查、运行期断言、构建、测试或人工审查 |
 | 错误表现 | 架构特定触发 / 跨架构回归 / 其他 / 不适用 |
 
-若判定“不相关”，语义卡片仍须保留，各字段写“不适用”并简述原因。
+若 relevance 为 unrelated，语义卡片仍须保留，各字段写“不适用”并简述原因。
 
 ## 证据审计
 ### 支持结论的证据

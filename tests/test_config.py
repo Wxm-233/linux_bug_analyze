@@ -41,6 +41,10 @@ output_file = "input/from-cve.txt"
 audit_file = "results/cve-audit.jsonl"
 prefer_mainline = false
 fallback_to_all = true
+
+[result_summary]
+input_dir = "results/reports"
+output_dir = "results/summary"
 """.strip(),
                 encoding="utf-8",
             )
@@ -73,6 +77,14 @@ fallback_to_all = true
             )
             self.assertFalse(settings.cve_source.prefer_mainline)
             self.assertTrue(settings.cve_source.fallback_to_all)
+            self.assertEqual(
+                settings.result_summary.input_dir,
+                (root / "results/reports").resolve(),
+            )
+            self.assertEqual(
+                settings.result_summary.output_dir,
+                (root / "results/summary").resolve(),
+            )
 
     def test_rejects_unknown_field(self) -> None:
         with TemporaryDirectory() as directory:

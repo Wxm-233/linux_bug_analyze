@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from linux_bug_analyze.models import CommitInfo
+from linux_bug_analyze.models import AnalysisClassification, CommitInfo, ModelAnalysis
 from linux_bug_analyze.pipeline import analyze_commits
 
 
@@ -22,7 +22,14 @@ class _Repository:
 
 class _Analyzer:
     def analyze(self, _prompt):
-        return "analysis"
+        return ModelAnalysis(
+            AnalysisClassification(
+                relevance="related",
+                categories=("implicit_semantic_assumption",),
+                confidence="medium",
+            ),
+            "analysis",
+        )
 
 
 class PipelineTests(TestCase):

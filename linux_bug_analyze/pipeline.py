@@ -9,12 +9,12 @@ from typing import Protocol
 
 from .evidence import read_supplemental_evidence
 from .git_repository import GitRepository
-from .models import AnalysisResult
+from .models import AnalysisResult, ModelAnalysis
 from .prompting import build_prompt
 
 
 class Analyzer(Protocol):
-    def analyze(self, prompt: str) -> str: ...
+    def analyze(self, prompt: str) -> ModelAnalysis: ...
 
 
 def _analyze_one(

@@ -19,7 +19,10 @@ class PromptTests(TestCase):
             original_diff_chars=60000,
         )
         prompt = build_prompt(commit, "research context")
-        self.assertIn("## 研究相关性判定", prompt)
+        self.assertIn("<<<LBA_METADATA_V1>>>", prompt)
+        self.assertIn('"relevance":"related"', prompt)
+        self.assertIn("## 判定理由", prompt)
+        self.assertIn("正文不要再次输出结论", prompt)
         self.assertIn("### 反证与替代解释", prompt)
         self.assertIn("应修改的层次", prompt)
         self.assertIn("原始 60000 字符", prompt)

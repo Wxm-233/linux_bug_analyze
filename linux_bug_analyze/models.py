@@ -22,6 +22,24 @@ class CommitInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisClassification:
+    """模型给出的、可机器验证的研究分类。"""
+
+    relevance: str
+    categories: tuple[str, ...]
+    confidence: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAnalysis:
+    """已通过协议校验的模型输出。"""
+
+    classification: AnalysisClassification
+    markdown: str
+    model: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisResult:
     """一个提交的成功分析或可重试失败。"""
 
@@ -31,6 +49,8 @@ class AnalysisResult:
     author: str
     date: str
     analysis: str = ""
+    classification: AnalysisClassification | None = None
+    model: str = ""
     error: str = ""
 
     @property
@@ -38,14 +58,16 @@ class AnalysisResult:
         return not self.error
 
     @classmethod
-    def success(cls, commit: CommitInfo, analysis: str) -> "AnalysisResult":
+    def success(cls, commit: CommitInfo, analysis: ModelAnalysis) -> "AnalysisResult":
         return cls(
             requested_hash=commit.requested_hash,
             hash=commit.hash,
             subject=commit.subject,
             author=commit.author,
             date=commit.date,
-            analysis=analysis,
+            analysis=analysis.markdown,
+            classification=analysis.classification,
+            model=analysis.model,
         )
 
     @classmethod
