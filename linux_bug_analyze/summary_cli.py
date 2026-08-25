@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         f"[完成] 总记录 {counts['total']}，成功 {statuses['success']}，"
         f"相关 {relevance['related']}，不相关 {relevance['unrelated']}，"
         f"不确定 {relevance['uncertain']}，无效元数据 {statuses['invalid_metadata']}，"
-        f"旧格式不明确 {statuses['legacy_ambiguous']}；汇总：{paths['summary']}"
+        f"旧格式不明确 {statuses['legacy_ambiguous']}；汇总：{paths['summary']}；"
+        f"相关报告：{paths['related_reports']}"
     )
     format_problems = statuses["invalid_metadata"] + statuses["legacy_ambiguous"]
     return 1 if format_problems else 0

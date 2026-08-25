@@ -86,7 +86,15 @@ class ResultSummaryTests(TestCase):
                 paths["related_hashes"].read_text(encoding="utf-8"),
                 f"{related_hash}\n",
             )
-            self.assertIn(related_hash, paths["related_index"].read_text(encoding="utf-8"))
+            related_reports = paths["related_reports"]
+            self.assertTrue((related_reports / f"{related_hash}.md").is_file())
+            self.assertTrue(
+                (related_reports / f"{related_hash}.meta.json").is_file()
+            )
+            self.assertFalse((related_reports / f"{unrelated_hash}.md").exists())
+            related_index = paths["related_index"].read_text(encoding="utf-8")
+            self.assertIn(related_hash, related_index)
+            self.assertIn(f"related_reports/{related_hash}.md", related_index)
             rows = list(
                 csv.DictReader(paths["csv"].read_text(encoding="utf-8").splitlines())
             )
@@ -110,3 +118,30 @@ class ResultSummaryTests(TestCase):
             self.assertEqual(main(["--settings", str(settings)]), 0)
             self.assertTrue((reports / "summary.json").is_file())
             self.assertTrue((reports / "related_hashes.txt").is_file())
+            self.assertTrue(
+                (reports / "related_reports" / f"{'a' * 40}.md").is_file()
+            )
+
+    def test_removes_only_stale_managed_files_from_related_folder(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            commit_hash = "a" * 40
+            write_report(root, _success(commit_hash, "related"))
+            _, paths = write_summary(root, root)
+            related_root = paths["related_reports"]
+            user_file = related_root / "notes.txt"
+            user_file.write_text("keep", encoding="utf-8")
+
+            metadata_file = root / f"{commit_hash}.meta.json"
+            metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
+            metadata["classification"]["relevance"] = "unrelated"
+            metadata["classification"]["categories"] = []
+            metadata_file.write_text(
+                json.dumps(metadata, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            write_summary(root, root)
+
+            self.assertFalse((related_root / f"{commit_hash}.md").exists())
+            self.assertFalse((related_root / f"{commit_hash}.meta.json").exists())
+            self.assertEqual(user_file.read_text(encoding="utf-8"), "keep")

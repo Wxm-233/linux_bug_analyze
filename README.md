@@ -121,6 +121,11 @@ python summarize_results.py
 - `results.csv`：每个提交的分类、置信度、标题、报告路径和数据来源；
 - `related_hashes.txt`：所有判定为相关的提交 hash；
 - `related_index.md`：只包含相关报告的可点击索引。
+- `related_reports/`：相关报告的独立副本；新格式报告同时包含对应 `.meta.json`。
+
+`related_reports/` 位于 `[result_summary].output_dir` 下；未配置时位于根级 `outdir` 下。
+重复汇总会同步其中的相关报告，并删除汇总器生成但已不再相关的 `.md`/`.meta.json` 副本；
+其他文件不会被清理，原始分析目录中的报告也不会被移动或删除。
 
 也可以另设输入和输出目录：
 

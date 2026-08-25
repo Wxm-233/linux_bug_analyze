@@ -23,6 +23,8 @@ from .reporting import (
 
 
 META_SUFFIX = ".meta.json"
+RELATED_REPORTS_DIRNAME = "related_reports"
+MANAGED_RELATED_FILE_RE = re.compile(r"^[0-9a-fA-F]{4,64}(?:\.md|\.meta\.json)$")
 
 
 class ResultSummaryError(RuntimeError):
@@ -99,9 +101,18 @@ def _read_sidecar(path: Path, input_dir: Path) -> SummaryRecord:
         )
 
     report_name = data.get("report_file")
-    report_path = (
-        input_dir / report_name if isinstance(report_name, str) and report_name else None
-    )
+    if isinstance(report_name, str) and report_name:
+        report_name_path = Path(report_name)
+        if report_name_path.is_absolute() or report_name_path.name != report_name:
+            return SummaryRecord(
+                commit_hash,
+                "invalid_metadata",
+                source_format="structured_v1",
+                error="report_file 必须是分析目录下的单个文件名。",
+            )
+        report_path = input_dir / report_name
+    else:
+        report_path = None
     if status == "failure":
         return SummaryRecord(
             commit_hash,
@@ -315,20 +326,60 @@ def _counts(records: list[SummaryRecord]) -> dict[str, Any]:
     }
 
 
+def _extract_related_reports(
+    related: list[SummaryRecord],
+    input_root: Path,
+    output_root: Path,
+) -> Path:
+    """复制相关报告及 sidecar，并清理该生成目录中的陈旧报告副本。"""
+
+    related_root = output_root / RELATED_REPORTS_DIRNAME
+    related_root.mkdir(parents=True, exist_ok=True)
+    desired_names: set[str] = set()
+    for record in related:
+        if record.report_path is None:
+            continue
+        report_name = f"{record.commit_hash}.md"
+        write_text_atomic(
+            related_root / report_name,
+            record.report_path.read_text(encoding="utf-8"),
+        )
+        desired_names.add(report_name)
+
+        source_metadata = input_root / f"{record.commit_hash}{META_SUFFIX}"
+        if source_metadata.is_file():
+            metadata_name = source_metadata.name
+            write_text_atomic(
+                related_root / metadata_name,
+                source_metadata.read_text(encoding="utf-8"),
+            )
+            desired_names.add(metadata_name)
+
+    for existing in related_root.iterdir():
+        if (
+            existing.is_file()
+            and MANAGED_RELATED_FILE_RE.fullmatch(existing.name)
+            and existing.name not in desired_names
+        ):
+            existing.unlink()
+    return related_root
+
+
 def write_summary(
     input_dir: Path,
     output_dir: Path,
 ) -> tuple[dict[str, Any], dict[str, Path]]:
     """生成 JSON、CSV、相关 hash 列表和相关报告索引。"""
 
-    records = collect_results(input_dir)
+    input_root = input_dir.expanduser().resolve()
+    records = collect_results(input_root)
     output_root = output_dir.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     counts = _counts(records)
     summary = {
         "schema_version": 1,
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "input_dir": str(input_dir.expanduser().resolve()),
+        "input_dir": str(input_root),
         "counts": counts,
     }
 
@@ -365,18 +416,22 @@ def write_summary(
         and record.classification is not None
         and record.classification.relevance == "related"
     ]
+    related_reports_dir = _extract_related_reports(
+        related,
+        input_root,
+        output_root,
+    )
     write_text_atomic(
         related_hashes_path,
         "".join(f"{record.commit_hash}\n" for record in related),
     )
     index_lines = ["# 相关提交分析索引", ""]
     for record in related:
-        if record.report_path is None:
-            continue
+        extracted_report = related_reports_dir / f"{record.commit_hash}.md"
         try:
-            relative = Path(os.path.relpath(record.report_path, output_root)).as_posix()
+            relative = Path(os.path.relpath(extracted_report, output_root)).as_posix()
         except ValueError:  # Windows 上跨盘符时无法构造相对路径
-            relative = record.report_path.resolve().as_posix()
+            relative = extracted_report.resolve().as_posix()
         link_target = f"<{relative}>" if " " in relative else relative
         index_lines.append(
             f"- [{record.commit_hash}]({link_target}) — {record.subject or '（无标题）'}"
@@ -387,4 +442,5 @@ def write_summary(
         "csv": csv_path,
         "related_hashes": related_hashes_path,
         "related_index": related_index_path,
+        "related_reports": related_reports_dir,
     }
