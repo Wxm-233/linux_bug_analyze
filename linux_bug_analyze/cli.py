@@ -128,6 +128,11 @@ def build_parser(settings: FileSettings | None = None) -> argparse.ArgumentParse
     parser.set_defaults(
         settings_base_url=settings.base_url,
         settings_model=settings.model,
+        cve_inbox_dir=settings.cve_source.inbox_dir,
+        mail_inbox_dirs=settings.evidence.mail_inbox_dirs,
+        include_fixes_commit=settings.evidence.include_fixes_commit,
+        max_evidence_chars_per_source=settings.evidence.max_chars_per_source,
+        max_evidence_chars=settings.evidence.max_total_chars,
     )
     return parser
 
@@ -151,6 +156,14 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--end-index 不能小于 --start-index")
     if args.evidence_dir is not None and not args.evidence_dir.is_dir():
         parser.error(f"--evidence-dir 不是目录：{args.evidence_dir}")
+    if (
+        args.cve_inbox_dir is not None
+        and not args.cve_inbox_dir.is_dir()
+    ):
+        parser.error(f"CVE 邮件镜像目录不存在：{args.cve_inbox_dir}")
+    for inbox_dir in args.mail_inbox_dirs:
+        if not inbox_dir.is_dir():
+            parser.error(f"本地邮件镜像目录不存在：{inbox_dir}")
 
 
 def _load_context(path: Path) -> str:
@@ -271,6 +284,11 @@ def main(argv: list[str] | None = None) -> int:
             workers=args.workers,
             max_diff_chars=args.max_diff_chars,
             evidence_dir=args.evidence_dir,
+            cve_inbox_dir=args.cve_inbox_dir,
+            mail_inbox_dirs=args.mail_inbox_dirs,
+            include_fixes_commit=args.include_fixes_commit,
+            max_evidence_chars_per_source=args.max_evidence_chars_per_source,
+            max_evidence_chars=args.max_evidence_chars,
         ):
             completed += 1
             ordered[result.requested_hash] = result

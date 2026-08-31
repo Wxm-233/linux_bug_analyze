@@ -19,7 +19,7 @@ class PromptTests(TestCase):
             original_diff_chars=60000,
         )
         prompt = build_prompt(commit, "research context")
-        self.assertIn("<<<LBA_METADATA_V1>>>", prompt)
+        self.assertIn("<<<LBA_METADATA_V2>>>", prompt)
         self.assertIn('"relevance":"related"', prompt)
         self.assertIn("## 判定理由", prompt)
         self.assertIn("正文不要再次输出结论", prompt)
@@ -27,3 +27,6 @@ class PromptTests(TestCase):
         self.assertIn("应修改的层次", prompt)
         self.assertIn("原始 60000 字符", prompt)
         self.assertIn("不得声称看过邮件", prompt)
+        self.assertIn('"related_architectures":["arm32"]', prompt)
+        self.assertIn("arch/arm 对应 arm32", prompt)
+        self.assertIn("不能只因某个", prompt)

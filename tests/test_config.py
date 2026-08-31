@@ -42,6 +42,12 @@ audit_file = "results/cve-audit.jsonl"
 prefer_mainline = false
 fallback_to_all = true
 
+[evidence]
+mail_inbox_dirs = ["mail/kvm", "mail/linux-arm-kernel"]
+include_fixes_commit = false
+max_chars_per_source = 9000
+max_total_chars = 20000
+
 [result_summary]
 input_dir = "results/reports"
 output_dir = "results/summary"
@@ -78,6 +84,16 @@ output_dir = "results/summary"
             self.assertFalse(settings.cve_source.prefer_mainline)
             self.assertTrue(settings.cve_source.fallback_to_all)
             self.assertEqual(
+                settings.evidence.mail_inbox_dirs,
+                (
+                    (root / "mail/kvm").resolve(),
+                    (root / "mail/linux-arm-kernel").resolve(),
+                ),
+            )
+            self.assertFalse(settings.evidence.include_fixes_commit)
+            self.assertEqual(settings.evidence.max_chars_per_source, 9000)
+            self.assertEqual(settings.evidence.max_total_chars, 20000)
+            self.assertEqual(
                 settings.result_summary.input_dir,
                 (root / "results/reports").resolve(),
             )
@@ -92,6 +108,14 @@ output_dir = "results/summary"
             path.write_text("workres = 3\n", encoding="utf-8")
             with self.assertRaises(ConfigurationError):
                 load_settings(path, required=True)
+
+    def test_default_filter_uses_high_recall_cross_arch_rules(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.toml"
+            path.write_text("workers = 2\n", encoding="utf-8")
+            settings = load_settings(path, required=True)
+            self.assertGreaterEqual(len(settings.hash_filter.include), 4)
+            self.assertTrue(any("loongarch" in rule for rule in settings.hash_filter.include))
 
     def test_missing_default_is_allowed_but_explicit_file_is_required(self) -> None:
         with TemporaryDirectory() as directory:

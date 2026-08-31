@@ -19,7 +19,7 @@ from .models import AnalysisResult
 
 SUCCESS_MARKER = "<!-- linux-bug-analyze-status: success -->"
 STRUCTURED_SUCCESS_MARKER = (
-    "<!-- linux-bug-analyze-status: success; report-format: 2 -->"
+    "<!-- linux-bug-analyze-status: success; report-format: 3 -->"
 )
 FAILURE_MARKER = "<!-- linux-bug-analyze-status: failure -->"
 
@@ -40,11 +40,11 @@ def _is_successful_metadata(path: Path) -> bool:
         classification = data.get("classification")
         if not isinstance(classification, dict):
             return False
-        classification_from_mapping({"schema_version": 1, **classification})
+        classification_from_mapping({"schema_version": 2, **classification})
     except (OSError, json.JSONDecodeError, AnalysisFormatError):
         return False
     return (
-        data.get("schema_version") == 1
+        data.get("schema_version") == 2
         and data.get("status") == "success"
         and data.get("commit_hash") == path.name[: -len(".meta.json")]
     )
@@ -61,16 +61,8 @@ def is_successful_report(path: Path) -> bool:
         return _is_successful_metadata(
             metadata_path(path.parent, path.name.removesuffix(".md"))
         )
-    if SUCCESS_MARKER in content:
-        return True
-    # 兼容旧版本报告。
-    if "调用失败" in content or "处理异常" in content:
-        return False
-    heading = "## 模型分析"
-    if heading not in content:
-        return False
-    analysis = content.split(heading, 1)[1].split("\n\n---", 1)[0].strip()
-    return bool(analysis)
+    # 旧报告不会作为本轮 schema v2 的断点继续使用。
+    return False
 
 
 def read_existing_subject(path: Path) -> str:
@@ -125,7 +117,7 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
     write_text_atomic(path, content)
     classification = result.classification
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "success" if result.succeeded else "failure",
         "commit_hash": result.hash,
         "requested_hash": result.requested_hash,
@@ -138,6 +130,9 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
                 "relevance": classification.relevance,
                 "categories": list(classification.categories),
                 "confidence": classification.confidence,
+                "related_architectures": list(
+                    classification.related_architectures
+                ),
             }
             if classification is not None
             else None

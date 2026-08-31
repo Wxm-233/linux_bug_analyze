@@ -28,6 +28,7 @@ class AnalysisClassification:
     relevance: str
     categories: tuple[str, ...]
     confidence: str
+    related_architectures: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

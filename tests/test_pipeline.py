@@ -27,6 +27,7 @@ class _Analyzer:
                 relevance="related",
                 categories=("implicit_semantic_assumption",),
                 confidence="medium",
+                related_architectures=("x86",),
             ),
             "analysis",
         )

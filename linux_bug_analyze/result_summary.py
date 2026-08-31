@@ -25,6 +25,7 @@ from .reporting import (
 META_SUFFIX = ".meta.json"
 RELATED_REPORTS_DIRNAME = "related_reports"
 MANAGED_RELATED_FILE_RE = re.compile(r"^[0-9a-fA-F]{4,64}(?:\.md|\.meta\.json)$")
+STRUCTURED_REPORT_PREFIX = "<!-- linux-bug-analyze-status: success; report-format:"
 
 
 class ResultSummaryError(RuntimeError):
@@ -38,7 +39,7 @@ class SummaryRecord:
     subject: str = ""
     classification: AnalysisClassification | None = None
     report_path: Path | None = None
-    source_format: str = "structured_v1"
+    source_format: str = "structured_v2"
     error: str = ""
 
     def to_csv_row(self) -> dict[str, str]:
@@ -51,6 +52,11 @@ class SummaryRecord:
                 ";".join(classification.categories) if classification else ""
             ),
             "confidence": classification.confidence if classification else "",
+            "related_architectures": (
+                ";".join(classification.related_architectures)
+                if classification
+                else ""
+            ),
             "subject": self.subject,
             "report_file": str(self.report_path or ""),
             "source_format": self.source_format,
@@ -61,7 +67,7 @@ class SummaryRecord:
 def _classification_from_sidecar(data: Any) -> AnalysisClassification:
     if not isinstance(data, dict):
         raise AnalysisFormatError("classification 必须是对象。")
-    payload = {"schema_version": 1, **data}
+    payload = {"schema_version": 2, **data}
     return classification_from_mapping(payload)
 
 
@@ -73,15 +79,15 @@ def _read_sidecar(path: Path, input_dir: Path) -> SummaryRecord:
         return SummaryRecord(
             commit_hash,
             "invalid_metadata",
-            source_format="structured_v1",
+            source_format="structured_v2",
             error=f"无法读取元数据：{exc}",
         )
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(data, dict) or data.get("schema_version") != 2:
         return SummaryRecord(
             commit_hash,
             "invalid_metadata",
-            source_format="structured_v1",
-            error="元数据顶层无效或 schema_version 不是 1。",
+            source_format="structured_v2",
+            error="元数据顶层无效或 schema_version 不是 2。",
         )
     status = data.get("status")
     stored_hash = data.get("commit_hash")
@@ -89,14 +95,14 @@ def _read_sidecar(path: Path, input_dir: Path) -> SummaryRecord:
         return SummaryRecord(
             commit_hash,
             "invalid_metadata",
-            source_format="structured_v1",
+            source_format="structured_v2",
             error="元数据缺少有效 status 或 commit_hash。",
         )
     if stored_hash != commit_hash:
         return SummaryRecord(
             commit_hash,
             "invalid_metadata",
-            source_format="structured_v1",
+            source_format="structured_v2",
             error=f"文件名 hash 与元数据 commit_hash 不一致：{stored_hash}",
         )
 
@@ -107,7 +113,7 @@ def _read_sidecar(path: Path, input_dir: Path) -> SummaryRecord:
             return SummaryRecord(
                 commit_hash,
                 "invalid_metadata",
-                source_format="structured_v1",
+                source_format="structured_v2",
                 error="report_file 必须是分析目录下的单个文件名。",
             )
         report_path = input_dir / report_name
@@ -129,7 +135,7 @@ def _read_sidecar(path: Path, input_dir: Path) -> SummaryRecord:
             "invalid_metadata",
             subject=str(data.get("subject", "")),
             report_path=report_path,
-            source_format="structured_v1",
+            source_format="structured_v2",
             error=str(exc),
         )
     if report_path is None or not report_path.is_file():
@@ -139,7 +145,7 @@ def _read_sidecar(path: Path, input_dir: Path) -> SummaryRecord:
             subject=str(data.get("subject", "")),
             classification=classification,
             report_path=report_path,
-            source_format="structured_v1",
+            source_format="structured_v2",
             error="找不到元数据引用的 Markdown 报告。",
         )
     return SummaryRecord(
@@ -190,10 +196,11 @@ def parse_legacy_classification(content: str) -> AnalysisClassification:
     ]
     return classification_from_mapping(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "relevance": relevance,
             "categories": categories,
             "confidence": confidence,
+            "related_architectures": [],
         }
     )
 
@@ -212,7 +219,7 @@ def _read_legacy_report(path: Path) -> SummaryRecord | None:
     if not any(
         marker in content
         for marker in (SUCCESS_MARKER, STRUCTURED_SUCCESS_MARKER, FAILURE_MARKER)
-    ):
+    ) and STRUCTURED_REPORT_PREFIX not in content:
         return None
     if FAILURE_MARKER in content:
         return SummaryRecord(
@@ -226,8 +233,16 @@ def _read_legacy_report(path: Path) -> SummaryRecord | None:
             path.stem,
             "invalid_metadata",
             report_path=path,
-            source_format="structured_v1",
+            source_format="structured_v2",
             error="结构化报告缺少 sidecar 元数据。",
+        )
+    if STRUCTURED_REPORT_PREFIX in content:
+        return SummaryRecord(
+            path.stem,
+            "invalid_metadata",
+            report_path=path,
+            source_format="obsolete_structured",
+            error="旧结构化报告与 schema v2 不兼容，请重新分析。",
         )
     try:
         classification = parse_legacy_classification(content)
@@ -311,6 +326,22 @@ def _counts(records: list[SummaryRecord]) -> dict[str, Any]:
             "cross_arch_regression",
         )
     }
+    architectures = {
+        value: sum(
+            record.status == "success"
+            and record.classification is not None
+            and value in record.classification.related_architectures
+            for record in records
+        )
+        for value in sorted(
+            {
+                architecture
+                for record in records
+                if record.status == "success" and record.classification is not None
+                for architecture in record.classification.related_architectures
+            }
+        )
+    }
     success = statuses["success"]
     decisive = relevance["related"] + relevance["unrelated"]
     return {
@@ -319,6 +350,7 @@ def _counts(records: list[SummaryRecord]) -> dict[str, Any]:
         "by_relevance": relevance,
         "by_confidence": confidence,
         "by_category": categories,
+        "by_architecture": architectures,
         "related_rate_among_success": relevance["related"] / success if success else None,
         "related_rate_among_decisive": (
             relevance["related"] / decisive if decisive else None
@@ -377,7 +409,7 @@ def write_summary(
     output_root.mkdir(parents=True, exist_ok=True)
     counts = _counts(records)
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "input_dir": str(input_root),
         "counts": counts,
@@ -399,6 +431,7 @@ def write_summary(
         "relevance",
         "categories",
         "confidence",
+        "related_architectures",
         "subject",
         "report_file",
         "source_format",

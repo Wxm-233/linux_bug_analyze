@@ -15,6 +15,7 @@ from linux_bug_analyze.summary_cli import main
 
 def _success(commit_hash: str, relevance: str) -> AnalysisResult:
     categories = ("implicit_semantic_assumption",) if relevance == "related" else ()
+    architectures = ("arm32",) if relevance == "related" else ()
     return AnalysisResult(
         requested_hash=commit_hash,
         hash=commit_hash,
@@ -22,7 +23,9 @@ def _success(commit_hash: str, relevance: str) -> AnalysisResult:
         author="author",
         date="date",
         analysis="## 提交概述\noverview",
-        classification=AnalysisClassification(relevance, categories, "high"),
+        classification=AnalysisClassification(
+            relevance, categories, "high", architectures
+        ),
         model="test-model",
     )
 
@@ -81,6 +84,7 @@ class ResultSummaryTests(TestCase):
             self.assertEqual(counts["by_status"]["invalid_metadata"], 1)
             self.assertEqual(counts["by_relevance"]["related"], 1)
             self.assertEqual(counts["by_relevance"]["unrelated"], 2)
+            self.assertEqual(counts["by_architecture"], {"arm32": 1})
             self.assertEqual(counts["related_rate_among_success"], 1 / 3)
             self.assertEqual(
                 paths["related_hashes"].read_text(encoding="utf-8"),
@@ -101,6 +105,10 @@ class ResultSummaryTests(TestCase):
             legacy = next(row for row in rows if row["commit_hash"] == legacy_hash)
             self.assertEqual(legacy["source_format"], "legacy_markdown")
             self.assertEqual(legacy["relevance"], "unrelated")
+            related_row = next(
+                row for row in rows if row["commit_hash"] == related_hash
+            )
+            self.assertEqual(related_row["related_architectures"], "arm32")
             persisted = json.loads(paths["summary"].read_text(encoding="utf-8"))
             self.assertEqual(persisted["counts"]["by_relevance"]["related"], 1)
 
@@ -136,6 +144,7 @@ class ResultSummaryTests(TestCase):
             metadata = json.loads(metadata_file.read_text(encoding="utf-8"))
             metadata["classification"]["relevance"] = "unrelated"
             metadata["classification"]["categories"] = []
+            metadata["classification"]["related_architectures"] = []
             metadata_file.write_text(
                 json.dumps(metadata, ensure_ascii=False),
                 encoding="utf-8",

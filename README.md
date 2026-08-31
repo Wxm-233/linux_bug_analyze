@@ -4,6 +4,7 @@
 兼容模型按 [`documents/新·论文思路梳理.md`](documents/新·论文思路梳理.md) 中的研究定义完成：
 
 - 判断提交是否属于“隐式语义假设错误”或“跨架构回归”；
+- 输出经过规范化的一个或多个相关架构（例如 `arm32`、`arm64`、`x86`）；
 - 生成包含触发范围、边界、支持/反驳证据、修复层次和验证方式的语义卡片；
 - 为每个提交生成独立 Markdown 报告，并生成有稳定链接的索引。
 
@@ -106,7 +107,7 @@ analysis_out/<完整 hash>.md
 analysis_out/<完整 hash>.meta.json
 ```
 
-Markdown 中的“结论、类型、置信度”由程序根据元数据统一渲染，统计程序只读取 sidecar
+Markdown 中的“结论、类型、相关架构、置信度”由程序根据 schema v2 元数据统一渲染，统计程序只读取 sidecar
 JSON，不依赖 Markdown 的加粗、换行或列表样式。
 
 分析完成后运行：
@@ -117,8 +118,8 @@ python summarize_results.py
 
 默认读取根级 `outdir`，并在同一目录生成：
 
-- `summary.json`：成功、失败、相关、不相关、不确定及异常格式数量和相关率；
-- `results.csv`：每个提交的分类、置信度、标题、报告路径和数据来源；
+- `summary.json`：成功、失败、相关、不相关、不确定、相关架构及异常格式数量和相关率；
+- `results.csv`：每个提交的分类、相关架构、置信度、标题、报告路径和数据来源；
 - `related_hashes.txt`：所有判定为相关的提交 hash；
 - `related_index.md`：只包含相关报告的可点击索引。
 - `related_reports/`：相关报告的独立副本；新格式报告同时包含对应 `.meta.json`。
@@ -139,9 +140,8 @@ output_dir = "analysis_summary"
 python summarize_results.py /data/analysis_out --output-dir /data/summary
 ```
 
-旧版成功报告没有 `.meta.json` 时，汇总器会以只读方式兼容常见 Markdown 变体，包括字段
-加粗或多个字段出现在同一行；无法唯一识别的报告计入 `legacy_ambiguous`，不会猜测分类。
-使用 `--force` 重新分析旧报告后，会自然转换为新格式。
+本轮分析使用 schema v2。旧结构化结果不会作为新结果沿用；建议把旧目录归档，并为本轮
+设置新的 `outdir`。少量无 sidecar 的旧 Markdown 只保留只读识别能力，不参与格式迁移。
 
 ## 从 linux-cve-announce 生成候选 hash
 
@@ -203,8 +203,7 @@ hashes_file = "filtered_hashes.txt"
 
 [hash_filter]
 source_file = "candidate_hashes.txt"
-include = ['(^|/)arch/', '\b(architecture|risc-?v|arm64|x86)\b']
-exclude = ['\b(revert|merge)\b']
+# 完整的高召回规则见 settings.example.toml；未配置 include 时也会使用同一组默认规则。
 fields = ["subject", "body", "files"]
 match = "any"
 case_sensitive = false
@@ -220,8 +219,8 @@ python filter_hashes.py
 
 ```bash
 python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt \
-  --include '(^|/)arch/' \
-  --include '\b(architecture|risc-?v|arm64|x86)\b' \
+  --include '(?:^|/)arch/' \
+  --include '\b(?:cross[- ]arch|multi[- ]arch|endianness|memory ordering)\b' \
   --fields subject body files
 ```
 
@@ -232,7 +231,7 @@ python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt 
 - exclude 的优先级高于 include；
 - 可筛选字段为 `subject`、`body`、`files` 和 `diff`；只有选择 `diff` 时才提取 diff；
 - diff 筛选默认不截断；若显式设置 `max_diff_chars`，审计记录会标明截断状态；
-- 未配置 include 时，所有未被 exclude 命中的有效提交都会保留；
+- settings 中省略 include 时使用内置高召回规则；显式设置 `include = []` 时才保留所有未被 exclude 命中的提交；
 - 输出使用完整 commit hash，并保持原输入顺序；
 - 默认同时生成 `<输出文件>.audit.jsonl`，记录每个 hash 的决定、命中规则和错误。
 
@@ -243,7 +242,20 @@ python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt 
 - `--start-index` / `--end-index`：只处理一段输入；
 - `--force`：重新分析已有成功报告；
 - `--max-diff-chars 0`：不截断 diff；默认上限是 50000 字符，截断时保留首尾并要求模型降低置信度；
-- `--evidence-dir evidence`：加入人工收集的补充证据。文件名应为完整 commit hash 加 `.md` 或 `.txt`。
+- `--evidence-dir evidence`：加入人工收集的补充证据。文件名应为完整 commit hash 加 `.md` 或 `.txt`；
+- 分析时会自动加入 `Fixes:` 指向的引入提交，并从 `[cve_source].inbox_dir` 匹配对应 CVE 公告；
+- `[evidence].mail_inbox_dirs` 可配置其他 public-inbox v2 镜像。程序按提交中的 `Link:`/`Closes:`
+  Message-ID 提取直接相关的邮件，不会把整个邮件列表送给模型。
+
+证据长度和邮件镜像可在 settings 中控制：
+
+```toml
+[evidence]
+mail_inbox_dirs = ["/data/lore/kvm", "/data/lore/linux-arm-kernel"]
+include_fixes_commit = true
+max_chars_per_source = 12000
+max_total_chars = 36000
+```
 
 失败报告有显式状态标记，下次运行会自动重试。短 hash 会先转换成完整 hash，所以断点续跑和索引链接不会因 hash 长度不同而失效。
 
@@ -253,7 +265,8 @@ python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt 
 - `analysis_protocol.py`：混合输出协议、分类枚举校验和标准分类区块渲染；
 - `public_inbox.py` / `cve_source.py` / `cve_cli.py`：读取 CVE 邮件镜像、提取主线修复并生成审计；
 - `hash_filter.py` / `filter_cli.py`：确定性候选筛选、命中审计和命令行入口；
-- `result_summary.py` / `summary_cli.py`：结构化结果统计、旧报告兼容和相关提交索引；
+- `evidence.py`：引入提交、CVE 公告、本地邮件讨论和人工材料的证据组合；
+- `result_summary.py` / `summary_cli.py`：结构化结果统计和相关提交索引；
 - `prompting.py`：与研究问题对齐的提示词；
 - `llm.py`：模型接口和重试；
 - `pipeline.py`：并发分析和单任务故障隔离；

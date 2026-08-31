@@ -63,6 +63,7 @@ class CveMailRecord:
     date: str
     cve_ids: list[str]
     fixes: list[FixReference]
+    body: str = ""
     status: str = "pending"
     reason: str = ""
 
@@ -144,6 +145,7 @@ def parse_cve_message(inbox_message: InboxMessage) -> CveMailRecord:
         date=str(message.get("Date", "")),
         cve_ids=cve_ids,
         fixes=list(references.values()),
+        body=body,
     )
 
 

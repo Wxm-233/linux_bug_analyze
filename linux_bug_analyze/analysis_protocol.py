@@ -9,9 +9,9 @@ from typing import Any, Mapping
 from .models import AnalysisClassification, ModelAnalysis
 
 
-METADATA_MARKER = "<<<LBA_METADATA_V1>>>"
-REPORT_MARKER = "<<<LBA_REPORT_V1>>>"
-SCHEMA_VERSION = 1
+METADATA_MARKER = "<<<LBA_METADATA_V2>>>"
+REPORT_MARKER = "<<<LBA_REPORT_V2>>>"
+SCHEMA_VERSION = 2
 
 RELEVANCE_VALUES = {"related", "unrelated", "uncertain"}
 CATEGORY_VALUES = {
@@ -19,6 +19,32 @@ CATEGORY_VALUES = {
     "cross_arch_regression",
 }
 CONFIDENCE_VALUES = {"high", "medium", "low"}
+ARCHITECTURE_VALUES = {
+    "alpha",
+    "arc",
+    "arm32",
+    "arm64",
+    "csky",
+    "h8300",
+    "hexagon",
+    "ia64",
+    "loongarch",
+    "m68k",
+    "microblaze",
+    "mips",
+    "nds32",
+    "nios2",
+    "openrisc",
+    "parisc",
+    "powerpc",
+    "riscv",
+    "s390",
+    "sh",
+    "sparc",
+    "um",
+    "x86",
+    "xtensa",
+}
 
 RELEVANCE_LABELS = {
     "related": "相关",
@@ -50,7 +76,13 @@ class AnalysisFormatError(ValueError):
 def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassification:
     """验证分类对象的字段、类型、枚举及字段间约束。"""
 
-    expected_keys = {"schema_version", "relevance", "categories", "confidence"}
+    expected_keys = {
+        "schema_version",
+        "relevance",
+        "categories",
+        "confidence",
+        "related_architectures",
+    }
     actual_keys = set(data)
     if actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)
@@ -70,6 +102,7 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
     relevance = data["relevance"]
     confidence = data["confidence"]
     categories = data["categories"]
+    architectures = data["related_architectures"]
     if not isinstance(relevance, str) or relevance not in RELEVANCE_VALUES:
         raise AnalysisFormatError(f"无效 relevance：{relevance!r}")
     if not isinstance(confidence, str) or confidence not in CONFIDENCE_VALUES:
@@ -90,7 +123,33 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
     if relevance == "unrelated" and categories:
         raise AnalysisFormatError("relevance=unrelated 时 categories 必须为空。")
 
-    return AnalysisClassification(relevance, tuple(categories), confidence)
+    if not isinstance(architectures, list) or not all(
+        isinstance(architecture, str) for architecture in architectures
+    ):
+        raise AnalysisFormatError("related_architectures 必须是字符串数组。")
+    if len(architectures) != len(set(architectures)):
+        raise AnalysisFormatError("related_architectures 不能包含重复值。")
+    invalid_architectures = set(architectures) - ARCHITECTURE_VALUES
+    if invalid_architectures:
+        raise AnalysisFormatError(
+            "无效 related_architectures："
+            + ", ".join(sorted(invalid_architectures))
+        )
+    if relevance == "related" and not architectures:
+        raise AnalysisFormatError(
+            "relevance=related 时 related_architectures 不能为空。"
+        )
+    if relevance == "unrelated" and architectures:
+        raise AnalysisFormatError(
+            "relevance=unrelated 时 related_architectures 必须为空。"
+        )
+
+    return AnalysisClassification(
+        relevance,
+        tuple(categories),
+        confidence,
+        tuple(architectures),
+    )
 
 
 def parse_model_output(content: str) -> ModelAnalysis:
@@ -139,12 +198,18 @@ def render_classification(classification: AnalysisClassification) -> str:
         if classification.categories
         else "不适用"
     )
+    architectures = (
+        "、".join(classification.related_architectures)
+        if classification.related_architectures
+        else "不适用"
+    )
     return "\n".join(
         (
             "## 研究相关性判定",
             "",
             f"- 结论：{RELEVANCE_LABELS[classification.relevance]}",
             f"- 类型：{categories}",
+            f"- 相关架构：{architectures}",
             f"- 置信度：{CONFIDENCE_LABELS[classification.confidence]}",
         )
     )

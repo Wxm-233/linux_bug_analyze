@@ -26,15 +26,28 @@ source_file = "candidate_hashes.txt"
 output_file = ""
 audit_file = ""
 
-# 这里使用正则表达式，普通关键词也可以直接填写。
-# 示例：include = ['(^|/)arch/', '\b(architecture|risc-?v|arm64|x86)\b']
-include = []
+# 高召回筛选：架构路径、完整架构名称、跨架构措辞和常见边界语义。
+# 命中只代表“值得交给 LLM 分析”，不代表最终相关。
+include = [
+  '(?:^|/)arch/(?:alpha|arc|arm|arm64|csky|h8300|hexagon|ia64|loongarch|m68k|microblaze|mips|nds32|nios2|openrisc|parisc|powerpc|riscv|s390|sh|sparc|um|x86|xtensa)(?:/|$)',
+  '\b(?:alpha|arc|arm(?:32)?|arm64|aarch64|csky|h8300|hexagon|ia64|loongarch|m68k|microblaze|mips|nds32|nios2|openrisc|pa-?risc|powerpc|ppc|risc[- ]?v|s390|sh|superh|sparc|uml|x86(?:[_-]64)?|i[3-6]86|xtensa)\b',
+  '\b(?:cross[- ]arch(?:itecture)?|multi[- ]arch(?:itecture)?|arch(?:itecture)?[- ](?:specific|dependent|independent)|other architectures?|all architectures?|portab(?:le|ility))\b',
+  '\b(?:big[- ]endian|little[- ]endian|endianness|32[- ]bit|64[- ]bit|word size|page size|byte order|alignment|unaligned|atomicity|memory ordering|memory barrier|cache coherency|cache maintenance|tlb|page tables?|mmio|dma|iommu|irq|interrupt controller|device tree|acpi|kvm)\b',
+]
 exclude = []
 fields = ["subject", "body", "files"]
 match = "any"
 case_sensitive = false
 workers = 8
 max_diff_chars = 0
+
+[evidence]
+# 可选：保存补丁讨论的其他 public-inbox v2 本地镜像；程序按 Link/Closes Message-ID 匹配。
+mail_inbox_dirs = []
+# 自动加入 Fixes: 指向的引入提交；CVE 公告自动读取 [cve_source].inbox_dir。
+include_fixes_commit = true
+max_chars_per_source = 12000
+max_total_chars = 36000
 
 [cve_source]
 # public-inbox-clone 输出目录、其中的 git 目录，或单个 0.git epoch。

@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from .hash_filter import DEFAULT_CROSS_ARCH_INCLUDE
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - 仅 Python 3.10 使用
@@ -32,7 +34,7 @@ class HashFilterSettings:
     source_file: Path | None = None
     output_file: Path | None = None
     audit_file: Path | None = None
-    include: tuple[str, ...] = ()
+    include: tuple[str, ...] = DEFAULT_CROSS_ARCH_INCLUDE
     exclude: tuple[str, ...] = ()
     fields: tuple[str, ...] = ("subject", "body", "files")
     match: str = "any"
@@ -61,6 +63,16 @@ class ResultSummarySettings:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceSettings:
+    """自动补充证据的可选默认值。"""
+
+    mail_inbox_dirs: tuple[Path, ...] = ()
+    include_fixes_commit: bool = True
+    max_chars_per_source: int = 12_000
+    max_total_chars: int = 36_000
+
+
+@dataclass(frozen=True, slots=True)
 class FileSettings:
     """从 TOML 文件读取的可选命令行默认值。"""
 
@@ -81,6 +93,7 @@ class FileSettings:
     model: str | None = None
     hash_filter: HashFilterSettings = field(default_factory=HashFilterSettings)
     cve_source: CveSourceSettings = field(default_factory=CveSourceSettings)
+    evidence: EvidenceSettings = field(default_factory=EvidenceSettings)
     result_summary: ResultSummarySettings = field(default_factory=ResultSummarySettings)
 
 
@@ -99,6 +112,7 @@ _ROOT_KEYS = {
     "openai",
     "hash_filter",
     "cve_source",
+    "evidence",
     "result_summary",
 }
 _OPENAI_KEYS = {"api_key_file", "base_url", "model"}
@@ -120,6 +134,12 @@ _CVE_SOURCE_KEYS = {
     "audit_file",
     "prefer_mainline",
     "fallback_to_all",
+}
+_EVIDENCE_KEYS = {
+    "mail_inbox_dirs",
+    "include_fixes_commit",
+    "max_chars_per_source",
+    "max_total_chars",
 }
 _RESULT_SUMMARY_KEYS = {"input_dir", "output_dir"}
 
@@ -174,6 +194,19 @@ def _read_string_list(
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ConfigurationError(f"settings 中的 {key} 必须是字符串数组。")
     return tuple(item for item in (entry.strip() for entry in value) if item)
+
+
+def _read_path_list(
+    data: Mapping[str, Any], key: str, base_dir: Path
+) -> tuple[Path, ...]:
+    values = _read_string_list(data, key)
+    paths: list[Path] = []
+    for value in values:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = base_dir / path
+        paths.append(path.resolve())
+    return tuple(paths)
 
 
 def load_settings(path: Path, *, required: bool = False) -> FileSettings:
@@ -234,6 +267,20 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
         raise ConfigurationError(f"settings 的 [cve_source] 包含未知字段：{names}")
     prefer_mainline = _read_bool(cve_source, "prefer_mainline")
     fallback_to_all = _read_bool(cve_source, "fallback_to_all")
+    evidence = data.get("evidence", {})
+    if not isinstance(evidence, dict):
+        raise ConfigurationError("settings 中的 evidence 必须是 TOML 表。")
+    unknown_evidence = set(evidence) - _EVIDENCE_KEYS
+    if unknown_evidence:
+        names = ", ".join(sorted(unknown_evidence))
+        raise ConfigurationError(f"settings 的 [evidence] 包含未知字段：{names}")
+    include_fixes_commit = _read_bool(evidence, "include_fixes_commit")
+    max_chars_per_source = _read_int(evidence, "max_chars_per_source")
+    max_total_chars = _read_int(evidence, "max_total_chars")
+    if max_chars_per_source is not None and max_chars_per_source < 1:
+        raise ConfigurationError("evidence.max_chars_per_source 必须大于 0。")
+    if max_total_chars is not None and max_total_chars < 1:
+        raise ConfigurationError("evidence.max_total_chars 必须大于 0。")
     result_summary = data.get("result_summary", {})
     if not isinstance(result_summary, dict):
         raise ConfigurationError("settings 中的 result_summary 必须是 TOML 表。")
@@ -265,7 +312,11 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
             source_file=_read_path(hash_filter, "source_file", base_dir),
             output_file=_read_path(hash_filter, "output_file", base_dir),
             audit_file=_read_path(hash_filter, "audit_file", base_dir),
-            include=_read_string_list(hash_filter, "include"),
+            include=_read_string_list(
+                hash_filter,
+                "include",
+                DEFAULT_CROSS_ARCH_INCLUDE,
+            ),
             exclude=_read_string_list(hash_filter, "exclude"),
             fields=fields,
             match=match,
@@ -279,6 +330,16 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
             audit_file=_read_path(cve_source, "audit_file", base_dir),
             prefer_mainline=True if prefer_mainline is None else prefer_mainline,
             fallback_to_all=False if fallback_to_all is None else fallback_to_all,
+        ),
+        evidence=EvidenceSettings(
+            mail_inbox_dirs=_read_path_list(evidence, "mail_inbox_dirs", base_dir),
+            include_fixes_commit=(
+                True if include_fixes_commit is None else include_fixes_commit
+            ),
+            max_chars_per_source=(
+                12_000 if max_chars_per_source is None else max_chars_per_source
+            ),
+            max_total_chars=36_000 if max_total_chars is None else max_total_chars,
         ),
         result_summary=ResultSummarySettings(
             input_dir=_read_path(result_summary, "input_dir", base_dir),

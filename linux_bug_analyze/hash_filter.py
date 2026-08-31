@@ -14,6 +14,26 @@ from .models import CommitInfo
 
 VALID_FIELDS = ("subject", "body", "files", "diff")
 
+# 高召回候选规则：先覆盖架构路径/名称，再覆盖常见的多架构边界语义。
+# 最终相关性仍由 LLM 和人工复核决定，不能把命中规则当作缺陷标签。
+DEFAULT_CROSS_ARCH_INCLUDE = (
+    r"(?:^|/)arch/(?:alpha|arc|arm|arm64|csky|h8300|hexagon|ia64|loongarch|m68k|"
+    r"microblaze|mips|nds32|nios2|openrisc|parisc|powerpc|riscv|s390|sh|sparc|"
+    r"um|x86|xtensa)(?:/|$)",
+    r"\b(?:alpha|arc|arm(?:32)?|arm64|aarch64|csky|h8300|hexagon|ia64|"
+    r"loongarch|m68k|microblaze|mips|nds32|nios2|openrisc|pa-?risc|"
+    r"powerpc|ppc|risc[- ]?v|s390|sh|superh|sparc|uml|x86(?:[_-]64)?|"
+    r"i[3-6]86|xtensa)\b",
+    r"\b(?:cross[- ]arch(?:itecture)?|multi[- ]arch(?:itecture)?|"
+    r"arch(?:itecture)?[- ](?:specific|dependent|independent)|"
+    r"other architectures?|all architectures?|portab(?:le|ility))\b",
+    r"\b(?:big[- ]endian|little[- ]endian|endianness|32[- ]bit|64[- ]bit|"
+    r"word size|page size|byte order|alignment|unaligned|atomicity|"
+    r"memory ordering|memory barrier|cache coherency|"
+    r"cache maintenance|tlb|page tables?|mmio|dma|iommu|irq|"
+    r"interrupt controller|device tree|acpi|kvm)\b",
+)
+
 
 class HashFilterError(ValueError):
     """筛选规则无效。"""
