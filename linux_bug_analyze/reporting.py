@@ -19,7 +19,7 @@ from .models import AnalysisResult
 
 SUCCESS_MARKER = "<!-- linux-bug-analyze-status: success -->"
 STRUCTURED_SUCCESS_MARKER = (
-    "<!-- linux-bug-analyze-status: success; report-format: 3 -->"
+    "<!-- linux-bug-analyze-status: success; report-format: 4 -->"
 )
 FAILURE_MARKER = "<!-- linux-bug-analyze-status: failure -->"
 
@@ -40,11 +40,11 @@ def _is_successful_metadata(path: Path) -> bool:
         classification = data.get("classification")
         if not isinstance(classification, dict):
             return False
-        classification_from_mapping({"schema_version": 2, **classification})
+        classification_from_mapping({"schema_version": 3, **classification})
     except (OSError, json.JSONDecodeError, AnalysisFormatError):
         return False
     return (
-        data.get("schema_version") == 2
+        data.get("schema_version") == 3
         and data.get("status") == "success"
         and data.get("commit_hash") == path.name[: -len(".meta.json")]
     )
@@ -61,7 +61,7 @@ def is_successful_report(path: Path) -> bool:
         return _is_successful_metadata(
             metadata_path(path.parent, path.name.removesuffix(".md"))
         )
-    # 旧报告不会作为本轮 schema v2 的断点继续使用。
+    # 旧报告不会作为本轮 schema v3 的断点继续使用。
     return False
 
 
@@ -117,7 +117,7 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
     write_text_atomic(path, content)
     classification = result.classification
     metadata = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "success" if result.succeeded else "failure",
         "commit_hash": result.hash,
         "requested_hash": result.requested_hash,
@@ -132,6 +132,14 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
                 "confidence": classification.confidence,
                 "related_architectures": list(
                     classification.related_architectures
+                ),
+                "semantic_origin_architectures": list(
+                    classification.semantic_origin_architectures
+                ),
+                "common_code_scope": classification.common_code_scope,
+                "assertion_sufficiency": classification.assertion_sufficiency,
+                "recommended_mechanisms": list(
+                    classification.recommended_mechanisms
                 ),
             }
             if classification is not None

@@ -4,9 +4,9 @@ from unittest import TestCase
 from linux_bug_analyze.llm import ChatAnalyzer, LLMError, is_retryable_error
 
 
-VALID_OUTPUT = """<<<LBA_METADATA_V2>>>
-{"schema_version":2,"relevance":"unrelated","categories":[],"confidence":"high","related_architectures":[]}
-<<<LBA_REPORT_V2>>>
+VALID_OUTPUT = """<<<LBA_METADATA_V3>>>
+{"schema_version":3,"relevance":"unrelated","categories":[],"confidence":"high","related_architectures":[],"semantic_origin_architectures":[],"common_code_scope":"not_applicable","assertion_sufficiency":"not_applicable","recommended_mechanisms":["none"]}
+<<<LBA_REPORT_V3>>>
 ## 提交概述
 overview
 

@@ -35,6 +35,18 @@ fields = ["subject", "files"]
 match = "all"
 case_sensitive = true
 
+[commit_source]
+output_file = "input/mainline.txt"
+audit_file = "results/mainline-audit.jsonl"
+ref = "origin/master"
+since = "2021-01-01"
+until = "2026-01-01"
+no_merges = true
+reverse = false
+max_count = 123
+shuffle = true
+random_seed = 42
+
 [cve_source]
 inbox_dir = "mail/linux-cve-announce"
 output_file = "input/from-cve.txt"
@@ -73,6 +85,16 @@ output_dir = "results/summary"
             self.assertEqual(settings.hash_filter.fields, ("subject", "files"))
             self.assertEqual(settings.hash_filter.match, "all")
             self.assertTrue(settings.hash_filter.case_sensitive)
+            self.assertEqual(
+                settings.commit_source.output_file,
+                (root / "input/mainline.txt").resolve(),
+            )
+            self.assertEqual(settings.commit_source.ref, "origin/master")
+            self.assertEqual(settings.commit_source.since, "2021-01-01")
+            self.assertFalse(settings.commit_source.reverse)
+            self.assertEqual(settings.commit_source.max_count, 123)
+            self.assertTrue(settings.commit_source.shuffle)
+            self.assertEqual(settings.commit_source.random_seed, 42)
             self.assertEqual(
                 settings.cve_source.inbox_dir,
                 (root / "mail/linux-cve-announce").resolve(),

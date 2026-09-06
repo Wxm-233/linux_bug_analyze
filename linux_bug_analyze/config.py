@@ -55,6 +55,22 @@ class CveSourceSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class CommitSourceSettings:
+    """Linux 主线 Git 提交扫描器的可选默认值。"""
+
+    output_file: Path | None = None
+    audit_file: Path | None = None
+    ref: str = "HEAD"
+    since: str = "5 years ago"
+    until: str = ""
+    no_merges: bool = True
+    reverse: bool = True
+    max_count: int = 0
+    shuffle: bool = False
+    random_seed: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ResultSummarySettings:
     """分析结果汇总器的可选默认值。"""
 
@@ -92,6 +108,7 @@ class FileSettings:
     base_url: str | None = None
     model: str | None = None
     hash_filter: HashFilterSettings = field(default_factory=HashFilterSettings)
+    commit_source: CommitSourceSettings = field(default_factory=CommitSourceSettings)
     cve_source: CveSourceSettings = field(default_factory=CveSourceSettings)
     evidence: EvidenceSettings = field(default_factory=EvidenceSettings)
     result_summary: ResultSummarySettings = field(default_factory=ResultSummarySettings)
@@ -111,6 +128,7 @@ _ROOT_KEYS = {
     "end_index",
     "openai",
     "hash_filter",
+    "commit_source",
     "cve_source",
     "evidence",
     "result_summary",
@@ -127,6 +145,18 @@ _HASH_FILTER_KEYS = {
     "case_sensitive",
     "workers",
     "max_diff_chars",
+}
+_COMMIT_SOURCE_KEYS = {
+    "output_file",
+    "audit_file",
+    "ref",
+    "since",
+    "until",
+    "no_merges",
+    "reverse",
+    "max_count",
+    "shuffle",
+    "random_seed",
 }
 _CVE_SOURCE_KEYS = {
     "inbox_dir",
@@ -267,6 +297,21 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
         raise ConfigurationError(f"settings 的 [cve_source] 包含未知字段：{names}")
     prefer_mainline = _read_bool(cve_source, "prefer_mainline")
     fallback_to_all = _read_bool(cve_source, "fallback_to_all")
+    commit_source = data.get("commit_source", {})
+    if not isinstance(commit_source, dict):
+        raise ConfigurationError("settings 中的 commit_source 必须是 TOML 表。")
+    unknown_commit_source = set(commit_source) - _COMMIT_SOURCE_KEYS
+    if unknown_commit_source:
+        names = ", ".join(sorted(unknown_commit_source))
+        raise ConfigurationError(
+            f"settings 的 [commit_source] 包含未知字段：{names}"
+        )
+    source_max_count = _read_int(commit_source, "max_count")
+    if source_max_count is not None and source_max_count < 0:
+        raise ConfigurationError("commit_source.max_count 不能为负数。")
+    source_no_merges = _read_bool(commit_source, "no_merges")
+    source_reverse = _read_bool(commit_source, "reverse")
+    source_shuffle = _read_bool(commit_source, "shuffle")
     evidence = data.get("evidence", {})
     if not isinstance(evidence, dict):
         raise ConfigurationError("settings 中的 evidence 必须是 TOML 表。")
@@ -323,6 +368,18 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
             case_sensitive=_read_bool(hash_filter, "case_sensitive") or False,
             workers=_read_int(hash_filter, "workers"),
             max_diff_chars=_read_int(hash_filter, "max_diff_chars"),
+        ),
+        commit_source=CommitSourceSettings(
+            output_file=_read_path(commit_source, "output_file", base_dir),
+            audit_file=_read_path(commit_source, "audit_file", base_dir),
+            ref=_read_string(commit_source, "ref") or "HEAD",
+            since=_read_string(commit_source, "since") or "5 years ago",
+            until=_read_string(commit_source, "until") or "",
+            no_merges=True if source_no_merges is None else source_no_merges,
+            reverse=True if source_reverse is None else source_reverse,
+            max_count=0 if source_max_count is None else source_max_count,
+            shuffle=False if source_shuffle is None else source_shuffle,
+            random_seed=_read_int(commit_source, "random_seed") or 0,
         ),
         cve_source=CveSourceSettings(
             inbox_dir=_read_path(cve_source, "inbox_dir", base_dir),

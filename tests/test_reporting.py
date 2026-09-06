@@ -42,6 +42,10 @@ class ReportingTests(TestCase):
                 categories=("implicit_semantic_assumption",),
                 confidence="high",
                 related_architectures=("arm32",),
+                semantic_origin_architectures=("arm32",),
+                common_code_scope="overbroad",
+                assertion_sufficiency="partial",
+                recommended_mechanisms=("config_guard", "test"),
             ),
             model="test-model",
         )
@@ -52,6 +56,7 @@ class ReportingTests(TestCase):
             content = report.read_text(encoding="utf-8")
             self.assertIn("- 结论：相关", content)
             self.assertIn("- 相关架构：arm32", content)
+            self.assertIn("- 断言充分性：断言只能部分解决", content)
             self.assertNotIn("**结论**", content)
             metadata = metadata_path(output_dir, "a" * 40).read_text(encoding="utf-8")
             self.assertIn('"relevance": "related"', metadata)
@@ -78,13 +83,17 @@ class ReportingTests(TestCase):
                 categories=("implicit_semantic_assumption",),
                 confidence="high",
                 related_architectures=("arm32",),
+                semantic_origin_architectures=("arm32",),
+                common_code_scope="overbroad",
+                assertion_sufficiency="partial",
+                recommended_mechanisms=("config_guard",),
             ),
         )
         with TemporaryDirectory() as directory:
             output_dir = Path(directory)
             report = write_report(output_dir, result)
             metadata_path(output_dir, "a" * 40).write_text(
-                '{"schema_version": 2, "status": "success", '
+                '{"schema_version": 3, "status": "success", '
                 f'"commit_hash": "{"a" * 40}", "classification": {{}}}}',
                 encoding="utf-8",
             )

@@ -16,6 +16,7 @@ from linux_bug_analyze.summary_cli import main
 def _success(commit_hash: str, relevance: str) -> AnalysisResult:
     categories = ("implicit_semantic_assumption",) if relevance == "related" else ()
     architectures = ("arm32",) if relevance == "related" else ()
+    origins = ("arm32",) if relevance == "related" else ()
     return AnalysisResult(
         requested_hash=commit_hash,
         hash=commit_hash,
@@ -24,7 +25,14 @@ def _success(commit_hash: str, relevance: str) -> AnalysisResult:
         date="date",
         analysis="## 提交概述\noverview",
         classification=AnalysisClassification(
-            relevance, categories, "high", architectures
+            relevance=relevance,
+            categories=categories,
+            confidence="high",
+            related_architectures=architectures,
+            semantic_origin_architectures=origins,
+            common_code_scope=("overbroad" if relevance == "related" else "not_applicable"),
+            assertion_sufficiency=("partial" if relevance == "related" else "not_applicable"),
+            recommended_mechanisms=(("config_guard", "test") if relevance == "related" else ("none",)),
         ),
         model="test-model",
     )
@@ -85,6 +93,10 @@ class ResultSummaryTests(TestCase):
             self.assertEqual(counts["by_relevance"]["related"], 1)
             self.assertEqual(counts["by_relevance"]["unrelated"], 2)
             self.assertEqual(counts["by_architecture"], {"arm32": 1})
+            self.assertEqual(counts["by_semantic_origin_architecture"], {"arm32": 1})
+            self.assertEqual(counts["by_common_code_scope"]["overbroad"], 1)
+            self.assertEqual(counts["by_assertion_sufficiency"]["partial"], 1)
+            self.assertEqual(counts["by_recommended_mechanism"]["config_guard"], 1)
             self.assertEqual(counts["related_rate_among_success"], 1 / 3)
             self.assertEqual(
                 paths["related_hashes"].read_text(encoding="utf-8"),
@@ -109,6 +121,7 @@ class ResultSummaryTests(TestCase):
                 row for row in rows if row["commit_hash"] == related_hash
             )
             self.assertEqual(related_row["related_architectures"], "arm32")
+            self.assertEqual(related_row["common_code_scope"], "overbroad")
             persisted = json.loads(paths["summary"].read_text(encoding="utf-8"))
             self.assertEqual(persisted["counts"]["by_relevance"]["related"], 1)
 
@@ -145,6 +158,10 @@ class ResultSummaryTests(TestCase):
             metadata["classification"]["relevance"] = "unrelated"
             metadata["classification"]["categories"] = []
             metadata["classification"]["related_architectures"] = []
+            metadata["classification"]["semantic_origin_architectures"] = []
+            metadata["classification"]["common_code_scope"] = "not_applicable"
+            metadata["classification"]["assertion_sufficiency"] = "not_applicable"
+            metadata["classification"]["recommended_mechanisms"] = ["none"]
             metadata_file.write_text(
                 json.dumps(metadata, ensure_ascii=False),
                 encoding="utf-8",

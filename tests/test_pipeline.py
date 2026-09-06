@@ -28,6 +28,10 @@ class _Analyzer:
                 categories=("implicit_semantic_assumption",),
                 confidence="medium",
                 related_architectures=("x86",),
+                semantic_origin_architectures=("x86",),
+                common_code_scope="appropriate",
+                assertion_sufficiency="partial",
+                recommended_mechanisms=("assertion", "test"),
             ),
             "analysis",
         )

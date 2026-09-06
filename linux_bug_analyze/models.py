@@ -29,6 +29,10 @@ class AnalysisClassification:
     categories: tuple[str, ...]
     confidence: str
     related_architectures: tuple[str, ...] = ()
+    semantic_origin_architectures: tuple[str, ...] = ()
+    common_code_scope: str = "uncertain"
+    assertion_sufficiency: str = "uncertain"
+    recommended_mechanisms: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

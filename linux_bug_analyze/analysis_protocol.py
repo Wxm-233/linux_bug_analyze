@@ -9,9 +9,9 @@ from typing import Any, Mapping
 from .models import AnalysisClassification, ModelAnalysis
 
 
-METADATA_MARKER = "<<<LBA_METADATA_V2>>>"
-REPORT_MARKER = "<<<LBA_REPORT_V2>>>"
-SCHEMA_VERSION = 2
+METADATA_MARKER = "<<<LBA_METADATA_V3>>>"
+REPORT_MARKER = "<<<LBA_REPORT_V3>>>"
+SCHEMA_VERSION = 3
 
 RELEVANCE_VALUES = {"related", "unrelated", "uncertain"}
 CATEGORY_VALUES = {
@@ -19,6 +19,21 @@ CATEGORY_VALUES = {
     "cross_arch_regression",
 }
 CONFIDENCE_VALUES = {"high", "medium", "low"}
+COMMON_CODE_SCOPE_VALUES = {"overbroad", "appropriate", "not_applicable", "uncertain"}
+ASSERTION_SUFFICIENCY_VALUES = {
+    "sufficient", "partial", "insufficient", "not_applicable", "uncertain"
+}
+RECOMMENDED_MECHANISM_VALUES = {
+    "assertion",
+    "config_guard",
+    "move_to_arch",
+    "capability_interface",
+    "type_or_api",
+    "state_machine",
+    "test",
+    "other",
+    "none",
+}
 ARCHITECTURE_VALUES = {
     "alpha",
     "arc",
@@ -60,6 +75,30 @@ CONFIDENCE_LABELS = {
     "medium": "中",
     "low": "低",
 }
+COMMON_CODE_SCOPE_LABELS = {
+    "overbroad": "公共层作用域过宽",
+    "appropriate": "公共层放置合理",
+    "not_applicable": "不适用",
+    "uncertain": "不确定",
+}
+ASSERTION_SUFFICIENCY_LABELS = {
+    "sufficient": "断言基本足够",
+    "partial": "断言只能部分解决",
+    "insufficient": "断言不足",
+    "not_applicable": "不适用",
+    "uncertain": "不确定",
+}
+RECOMMENDED_MECHANISM_LABELS = {
+    "assertion": "断言",
+    "config_guard": "条件编译或配置隔离",
+    "move_to_arch": "迁移到架构目录",
+    "capability_interface": "能力描述或接口扩展",
+    "type_or_api": "类型或 API 重构",
+    "state_machine": "状态机",
+    "test": "测试",
+    "other": "其他",
+    "none": "无",
+}
 
 REQUIRED_REPORT_HEADINGS = (
     "提交概述",
@@ -82,6 +121,10 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
         "categories",
         "confidence",
         "related_architectures",
+        "semantic_origin_architectures",
+        "common_code_scope",
+        "assertion_sufficiency",
+        "recommended_mechanisms",
     }
     actual_keys = set(data)
     if actual_keys != expected_keys:
@@ -103,6 +146,10 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
     confidence = data["confidence"]
     categories = data["categories"]
     architectures = data["related_architectures"]
+    origin_architectures = data["semantic_origin_architectures"]
+    common_code_scope = data["common_code_scope"]
+    assertion_sufficiency = data["assertion_sufficiency"]
+    mechanisms = data["recommended_mechanisms"]
     if not isinstance(relevance, str) or relevance not in RELEVANCE_VALUES:
         raise AnalysisFormatError(f"无效 relevance：{relevance!r}")
     if not isinstance(confidence, str) or confidence not in CONFIDENCE_VALUES:
@@ -144,11 +191,61 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
             "relevance=unrelated 时 related_architectures 必须为空。"
         )
 
+    if not isinstance(origin_architectures, list) or not all(
+        isinstance(architecture, str) for architecture in origin_architectures
+    ):
+        raise AnalysisFormatError("semantic_origin_architectures 必须是字符串数组。")
+    if len(origin_architectures) != len(set(origin_architectures)):
+        raise AnalysisFormatError("semantic_origin_architectures 不能包含重复值。")
+    invalid_origins = set(origin_architectures) - ARCHITECTURE_VALUES
+    if invalid_origins:
+        raise AnalysisFormatError(
+            "无效 semantic_origin_architectures：" + ", ".join(sorted(invalid_origins))
+        )
+    if not set(origin_architectures).issubset(architectures):
+        raise AnalysisFormatError(
+            "semantic_origin_architectures 必须是 related_architectures 的子集。"
+        )
+    if common_code_scope not in COMMON_CODE_SCOPE_VALUES:
+        raise AnalysisFormatError(f"无效 common_code_scope：{common_code_scope!r}")
+    if assertion_sufficiency not in ASSERTION_SUFFICIENCY_VALUES:
+        raise AnalysisFormatError(
+            f"无效 assertion_sufficiency：{assertion_sufficiency!r}"
+        )
+    if not isinstance(mechanisms, list) or not all(
+        isinstance(mechanism, str) for mechanism in mechanisms
+    ):
+        raise AnalysisFormatError("recommended_mechanisms 必须是字符串数组。")
+    if len(mechanisms) != len(set(mechanisms)):
+        raise AnalysisFormatError("recommended_mechanisms 不能包含重复值。")
+    invalid_mechanisms = set(mechanisms) - RECOMMENDED_MECHANISM_VALUES
+    if invalid_mechanisms:
+        raise AnalysisFormatError(
+            "无效 recommended_mechanisms：" + ", ".join(sorted(invalid_mechanisms))
+        )
+    if "none" in mechanisms and len(mechanisms) != 1:
+        raise AnalysisFormatError("recommended_mechanisms 中 none 不能与其他值并存。")
+    if relevance == "related" and not mechanisms:
+        raise AnalysisFormatError(
+            "relevance=related 时 recommended_mechanisms 不能为空。"
+        )
+    if relevance == "unrelated" and (
+        origin_architectures
+        or common_code_scope != "not_applicable"
+        or assertion_sufficiency != "not_applicable"
+        or mechanisms != ["none"]
+    ):
+        raise AnalysisFormatError("unrelated 的作用域、断言和机制字段必须为不适用。")
+
     return AnalysisClassification(
-        relevance,
-        tuple(categories),
-        confidence,
-        tuple(architectures),
+        relevance=relevance,
+        categories=tuple(categories),
+        confidence=confidence,
+        related_architectures=tuple(architectures),
+        semantic_origin_architectures=tuple(origin_architectures),
+        common_code_scope=common_code_scope,
+        assertion_sufficiency=assertion_sufficiency,
+        recommended_mechanisms=tuple(mechanisms),
     )
 
 
@@ -203,6 +300,19 @@ def render_classification(classification: AnalysisClassification) -> str:
         if classification.related_architectures
         else "不适用"
     )
+    origins = (
+        "、".join(classification.semantic_origin_architectures)
+        if classification.semantic_origin_architectures
+        else "未知或不适用"
+    )
+    mechanisms = (
+        "、".join(
+            RECOMMENDED_MECHANISM_LABELS[value]
+            for value in classification.recommended_mechanisms
+        )
+        if classification.recommended_mechanisms
+        else "未给出"
+    )
     return "\n".join(
         (
             "## 研究相关性判定",
@@ -210,6 +320,10 @@ def render_classification(classification: AnalysisClassification) -> str:
             f"- 结论：{RELEVANCE_LABELS[classification.relevance]}",
             f"- 类型：{categories}",
             f"- 相关架构：{architectures}",
+            f"- 语义来源架构：{origins}",
+            f"- 公共层作用域：{COMMON_CODE_SCOPE_LABELS[classification.common_code_scope]}",
+            f"- 断言充分性：{ASSERTION_SUFFICIENCY_LABELS[classification.assertion_sufficiency]}",
+            f"- 建议机制：{mechanisms}",
             f"- 置信度：{CONFIDENCE_LABELS[classification.confidence]}",
         )
     )

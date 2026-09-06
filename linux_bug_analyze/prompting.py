@@ -26,7 +26,8 @@ def build_prompt(commit: CommitInfo, research_context: str, evidence: str = "") 
     )
     supplemental = evidence.strip() or "（未提供；不得声称看过邮件、缺陷报告或硬件手册）"
 
-    return f"""请先理解研究框架，再分析提交。研究对象不是所有内核 bug，而是：
+    return f"""请先理解研究框架，再分析来自 Linux 主线提交历史的提交。候选集合不是 CVE 样本；
+是否有 CVE 编号不影响相关性判断。研究对象不是所有内核 bug，而是：
 1. 公共层与架构层对硬件语义理解不一致造成的“隐式语义假设错误”；
 2. 为架构 A 修改公共/边界代码后影响架构 B 的“跨架构回归”。
 
@@ -44,6 +45,11 @@ def build_prompt(commit: CommitInfo, research_context: str, evidence: str = "") 
   其他架构类比，但代码本身可能正是缺陷，最终判断必须说明依据。
 - 检查实际补丁是否修改了根因，是否只是绕开症状，以及在其他相关边界下是否仍正确。
 - “实际修复”只能描述 diff 已做的事情；研究者建议必须另行标明，不能混为一谈。
+- 重点检查公共代码是否无条件承担了只源于部分架构的语义。若是，判断真正必要的
+  architecture-scope，以及条件编译、移动到 arch/、能力接口、类型/API、状态机、测试或
+  断言中哪种机制更适合。不要预设断言一定足够。
+- 分析“为何最初进入公共层”时只能使用提交历史或材料中的依据；没有证据就写未知，
+  不得把“为未来复用”当成默认事实。
 - 若 diff 被截断，必须在局限性中说明可能遗漏关键改动。
 
 提交哈希：{commit.hash}
@@ -67,14 +73,13 @@ diff 是否截断：{truncation_note}
 输出是程序接口。必须从响应的第一个字符开始严格使用以下协议；不要添加代码围栏、前言或结尾标记：
 
 {METADATA_MARKER}
-{{"schema_version":2,"relevance":"related","categories":["implicit_semantic_assumption"],"confidence":"high","related_architectures":["arm32"]}}
+{{"schema_version":3,"relevance":"related","categories":["cross_arch_regression"],"confidence":"medium","related_architectures":["arm32","riscv"],"semantic_origin_architectures":["arm32"],"common_code_scope":"overbroad","assertion_sufficiency":"partial","recommended_mechanisms":["config_guard","move_to_arch","test"]}}
 {REPORT_MARKER}
 ## 提交概述
 ……
 
 分类 JSON 规则：
-- 只能包含 schema_version、relevance、categories、confidence、related_architectures 五个字段。
-- schema_version 必须是 2。
+- 只能包含示例中出现的九个字段，不得添加字段。schema_version 必须是 3。
 - relevance 只能是 related、unrelated、uncertain。
 - categories 只能从 implicit_semantic_assumption、cross_arch_regression 中选择，可多选。
 - related 至少选择一个 category；unrelated 的 categories 必须为空数组；uncertain 可为空或列出疑似类型。
@@ -86,6 +91,16 @@ diff 是否截断：{truncation_note}
 - arch/arm 对应 arm32，arch/arm64 对应 arm64；不要输出 arm、aarch64、x86_64、ppc
   等别名。仅作为对照实现而被提到的架构不要列入。
 - related 的 related_architectures 至少包含一项；unrelated 必须为空数组；uncertain 可为空。
+- semantic_origin_architectures 表示材料能够支持的“语义需求来源架构”，使用相同架构枚举；
+  无法确定时为空，并且它必须是 related_architectures 的子集。
+- common_code_scope 只能是 overbroad、appropriate、not_applicable、uncertain：overbroad 表示
+  公共层无条件承担了实际只对部分架构必要的语义；appropriate 表示共享位置合理。
+- assertion_sufficiency 只能是 sufficient、partial、insufficient、not_applicable、uncertain。
+  判断的是断言能否覆盖根因和必要作用域，不是“能否增加一条检查”。
+- recommended_mechanisms 可多选，只能是 assertion、config_guard、move_to_arch、
+  capability_interface、type_or_api、state_machine、test、other、none；none 不能与其他值并存。
+- unrelated 时 semantic_origin_architectures=[]、common_code_scope=not_applicable、
+  assertion_sufficiency=not_applicable、recommended_mechanisms=["none"]。
 - JSON 之后必须原样输出 {REPORT_MARKER}，再输出 Markdown 正文。
 - Markdown 正文不要再次输出结论、类型、置信度或“研究相关性判定”标题；该区块由程序根据 JSON 生成。
 
@@ -103,14 +118,20 @@ Markdown 正文必须严格包含以下结构，不要省略二级标题：
 |---|---|
 | 缺失或冲突的语义 d | |
 | 语义来源及冲突 | 分别列出支持、反驳或范围不同的来源；没有冲突也要说明 |
+| 语义来源架构 | 哪个架构的需求引入或要求该语义；未知则说明 |
 | 语义的提供者与消费者 | |
 | 当前边界 | 具体函数、ops 回调、对象或资源描述；未知则直说 |
 | 原边界可见信息 | 参数、返回值、状态、能力位、DT/ACPI 对象等 |
 | 触发条件 | |
 | 架构/设备/配置范围 | |
+| 公共层实际承担范围 | 哪些架构无条件经过或承担这段语义 |
+| 最小必要 architecture-scope | 应只适用于哪些架构、能力或配置 |
+| 最初进入公共层的原因 | 只写有证据的原因；否则写未知及需要查阅的历史 |
 | 原边界可检查性 | 能否精确检查，以及理由 |
 | 实际修复 | 只描述补丁实际做法 |
 | 应修改的层次 | 公共层 / 架构层 / 两者 / 不适用，并说明依据 |
+| 隔离或重构方案 | 说明为何选择条件编译、移动到 arch/、能力接口、类型/API、状态机等 |
+| 断言是否足够 | 足够 / 部分足够 / 不足 / 不适用 / 未知，并说明断言覆盖不了什么 |
 | 建议验证手段 | 静态检查、运行期断言、构建、测试或人工审查 |
 | 错误表现 | 架构特定触发 / 跨架构回归 / 其他 / 不适用 |
 

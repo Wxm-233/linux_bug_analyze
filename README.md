@@ -5,6 +5,7 @@
 
 - 判断提交是否属于“隐式语义假设错误”或“跨架构回归”；
 - 输出经过规范化的一个或多个相关架构（例如 `arm32`、`arm64`、`x86`）；
+- 标注语义来源架构、公共层 architecture-scope、断言充分性和可能的重构机制；
 - 生成包含触发范围、边界、支持/反驳证据、修复层次和验证方式的语义卡片；
 - 为每个提交生成独立 Markdown 报告，并生成有稳定链接的索引。
 
@@ -41,7 +42,7 @@ Copy-Item settings.example.toml settings.toml
 
 ```toml
 linux_dir = "/data/linux"
-hashes_file = "filtered_hashes.txt"
+hashes_file = "candidate_hashes.txt"
 outdir = "analysis_out"
 ```
 
@@ -79,12 +80,30 @@ API 配置优先级为：
 不要把 API Key 本身写入 settings；只设置 `api_key_file`。`OPENAI_API_KEY` 和
 `settings.toml` 均已被 `.gitignore` 忽略。
 
-## 使用
+## 主流程
 
-hash 文件每行放一个十六进制 commit hash；空行和以 `#` 开头的注释会被忽略。
+研究样本直接来自本地 Linux 主线 Git 历史，而不是 CVE 邮件集合：
+
+```text
+Linux 主线 Git 历史
+  -> extract_commit_hashes.py（时间范围 + 高召回正则）
+  -> candidate_hashes.txt
+  -> analyze_commits_with_llm.py
+  -> summarize_results.py
+```
+
+依次执行：
 
 ```bash
-python analyze_commits_with_llm.py /path/to/linux filtered_hashes.txt \
+python extract_commit_hashes.py
+python analyze_commits_with_llm.py
+python summarize_results.py
+```
+
+hash 文件仍可人工提供，每行一个十六进制 commit hash；空行和以 `#` 开头的注释会被忽略。
+
+```bash
+python analyze_commits_with_llm.py /path/to/linux candidate_hashes.txt \
   --outdir analysis_out --workers 8
 ```
 
@@ -107,7 +126,7 @@ analysis_out/<完整 hash>.md
 analysis_out/<完整 hash>.meta.json
 ```
 
-Markdown 中的“结论、类型、相关架构、置信度”由程序根据 schema v2 元数据统一渲染，统计程序只读取 sidecar
+Markdown 中的分类和作用域字段由程序根据 schema v3 元数据统一渲染，统计程序只读取 sidecar
 JSON，不依赖 Markdown 的加粗、换行或列表样式。
 
 分析完成后运行：
@@ -118,8 +137,8 @@ python summarize_results.py
 
 默认读取根级 `outdir`，并在同一目录生成：
 
-- `summary.json`：成功、失败、相关、不相关、不确定、相关架构及异常格式数量和相关率；
-- `results.csv`：每个提交的分类、相关架构、置信度、标题、报告路径和数据来源；
+- `summary.json`：除相关性和架构外，还统计语义来源架构、公共层作用域、断言充分性和建议机制；
+- `results.csv`：保存每个提交的全部结构化标注、标题、报告路径和数据来源；
 - `related_hashes.txt`：所有判定为相关的提交 hash；
 - `related_index.md`：只包含相关报告的可点击索引。
 - `related_reports/`：相关报告的独立副本；新格式报告同时包含对应 `.meta.json`。
@@ -140,63 +159,57 @@ output_dir = "analysis_summary"
 python summarize_results.py /data/analysis_out --output-dir /data/summary
 ```
 
-本轮分析使用 schema v2。旧结构化结果不会作为新结果沿用；建议把旧目录归档，并为本轮
+本轮分析使用 schema v3。旧结构化结果不会作为新结果沿用；建议把旧目录归档，并为本轮
 设置新的 `outdir`。少量无 sidecar 的旧 Markdown 只保留只读识别能力，不参与格式迁移。
 
-## 从 linux-cve-announce 生成候选 hash
+## 直接扫描 Linux 主线提交
 
-新增的 CVE 来源模块直接读取本地 public-inbox v2 Git 镜像，不会在分析时访问网络。
-它从公告正文中的 `Fixed in ... with commit ...` 和 git.kernel.org 提交链接提取修复，
-再用 `linux_dir` 指向的主线仓库排除 stable 回移提交。完整数据流为：
-
-```text
-linux-cve-announce 镜像
-  -> extract_cve_hashes.py
-  -> candidate_hashes.txt
-  -> filter_hashes.py
-  -> filtered_hashes.txt
-  -> analyze_commits_with_llm.py
-```
+主线入口通过一次流式 `git log` 读取指定时间范围内的提交说明和变更文件，然后复用
+`[hash_filter]` 的高召回正则。它不会为每个提交分别启动多次 `git show`，适合扫描五年历史。
 
 在 settings 中配置：
 
 ```toml
 linux_dir = "/data/linux"
-hashes_file = "filtered_hashes.txt"
+hashes_file = "candidate_hashes.txt"
 
-[hash_filter]
-source_file = "candidate_hashes.txt"
-
-[cve_source]
-inbox_dir = "/data/lore/linux-cve-announce"
-# output_file 留空时自动使用 [hash_filter].source_file
+[commit_source]
+ref = "HEAD"
+since = "5 years ago"
+until = ""
+no_merges = true
+reverse = true
+max_count = 0
+shuffle = false
+random_seed = 0
 output_file = ""
 audit_file = ""
-prefer_mainline = true
-fallback_to_all = false
+
+[hash_filter]
+fields = ["subject", "body", "files"]
+match = "any"
+case_sensitive = false
+# 完整默认 include 见 settings.example.toml。
 ```
 
-`inbox_dir` 可以指向 public-inbox 根目录、其中的 `git` 目录，或单个 `0.git` epoch。
-随后依次执行：
+`since` 和 `until` 接受 Git 日期语法。探索时可使用 `5 years ago`；正式实验应固定为明确
+日期，以便复现。默认排除 merge commit，并按旧到新输出。启用 `shuffle` 后会用
+`random_seed` 确定性打乱候选，便于人工抽样。
 
-```bash
-python extract_cve_hashes.py
-python filter_hashes.py
-python analyze_commits_with_llm.py
-```
+审计文件只记录一条扫描汇总和被选中的提交，包含扫描范围、正则、命中字段和候选数量，
+避免为数十万个未命中提交生成过大的审计文件。
 
-默认的 `prefer_mainline = true` 只保留能在 `linux_dir` 中解析为 commit 的引用；因此该仓库
-应当完整且已更新。无法解析的邮件会记入审计文件而不会悄悄回退。只有明确希望保留所有
-stable 引用时，才启用 `fallback_to_all` 或 `--no-prefer-mainline`。默认审计文件为
-`<输出文件>.audit.jsonl`，其中包含邮件 Message-ID、CVE 编号、原始/规范 hash、选择原因和
-lore.kernel.org 永久链接。
+## CVE 和邮件的角色
 
-镜像的克隆与更新仍是独立的运维步骤；本模块只读镜像，所以可以在本地开发并通过 Git
-同步代码，在远端 Linux 机器维护各自的 `settings.toml`、邮件镜像和内核仓库。
+`linux-cve-announce` 不再决定研究样本总体。原有 `extract_cve_hashes.py` 仍保留为辅助工具，
+但主要用途是对照实验；分析阶段若配置 `[cve_source].inbox_dir`，匹配到的 CVE 公告只作为
+补充证据。提交中的 `Link:`/`Closes:` 仍可从 `[evidence].mail_inbox_dirs` 指向的本地
+public-inbox 镜像提取讨论。
 
-## 筛选候选 hash
+## 可选：筛选已有 hash 文件
 
-独立筛选模块可以在调用模型前，根据 Git 提交事实缩小候选集合。先在 settings 中设置：
+`extract_commit_hashes.py` 已经应用 `[hash_filter]` 规则。只有手头已有其他来源的 hash
+文件时，才需要独立筛选模块：
 
 ```toml
 hashes_file = "filtered_hashes.txt"
@@ -243,7 +256,7 @@ python filter_hashes.py /path/to/linux candidate_hashes.txt filtered_hashes.txt 
 - `--force`：重新分析已有成功报告；
 - `--max-diff-chars 0`：不截断 diff；默认上限是 50000 字符，截断时保留首尾并要求模型降低置信度；
 - `--evidence-dir evidence`：加入人工收集的补充证据。文件名应为完整 commit hash 加 `.md` 或 `.txt`；
-- 分析时会自动加入 `Fixes:` 指向的引入提交，并从 `[cve_source].inbox_dir` 匹配对应 CVE 公告；
+- 分析时会自动加入 `Fixes:` 指向的引入提交；若配置 `[cve_source].inbox_dir`，也会匹配对应 CVE 公告；
 - `[evidence].mail_inbox_dirs` 可配置其他 public-inbox v2 镜像。程序按提交中的 `Link:`/`Closes:`
   Message-ID 提取直接相关的邮件，不会把整个邮件列表送给模型。
 
@@ -262,6 +275,7 @@ max_total_chars = 36000
 ## 模块划分
 
 - `git_repository.py`：Git 校验、hash 解析和提交事实提取；
+- `commit_source.py` / `commit_cli.py`：流式扫描 Linux 主线提交并直接生成候选 hash；
 - `analysis_protocol.py`：混合输出协议、分类枚举校验和标准分类区块渲染；
 - `public_inbox.py` / `cve_source.py` / `cve_cli.py`：读取 CVE 邮件镜像、提取主线修复并生成审计；
 - `hash_filter.py` / `filter_cli.py`：确定性候选筛选、命中审计和命令行入口；
@@ -273,4 +287,5 @@ max_total_chars = 36000
 - `reporting.py`：原子写入、断点状态和索引；
 - `config.py` / `cli.py`：TOML settings、配置优先级、参数校验和流程编排。
 
-兼容入口仍为 `analyze_commits_with_llm.py`；安装后也可使用 `linux-bug-analyze` 命令。
+主要入口为 `extract_commit_hashes.py` 和 `analyze_commits_with_llm.py`；安装后也可使用
+`extract-mainline-hashes` 和 `linux-bug-analyze` 命令。
