@@ -13,12 +13,16 @@ class SettingsArgumentTests(TestCase):
             hashes_file=Path("settings-hashes"),
             workers=3,
             force=True,
+            reasoning_effort="high",
+            thinking=True,
         )
         args = build_parser(settings).parse_args([])
         self.assertEqual(args.linux_dir, Path("settings-linux"))
         self.assertEqual(args.hashes_file, Path("settings-hashes"))
         self.assertEqual(args.workers, 3)
         self.assertTrue(args.force)
+        self.assertEqual(args.reasoning_effort, "high")
+        self.assertTrue(args.thinking)
 
     def test_command_line_overrides_settings(self) -> None:
         settings = FileSettings(

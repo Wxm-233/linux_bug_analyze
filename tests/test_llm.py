@@ -24,9 +24,11 @@ class _Completions:
     def __init__(self, outcomes):
         self.outcomes = iter(outcomes)
         self.calls = 0
+        self.requests = []
 
     def create(self, **_kwargs):
         self.calls += 1
+        self.requests.append(_kwargs)
         outcome = next(self.outcomes)
         if isinstance(outcome, Exception):
             raise outcome
@@ -49,6 +51,29 @@ def _client(outcomes):
 
 
 class ChatAnalyzerTests(TestCase):
+    def test_thinking_options_are_preserved_on_format_retry(self) -> None:
+        client, completions = _client(["bad format", VALID_OUTPUT])
+        ChatAnalyzer(
+            client, "deepseek-v4-pro", reasoning_effort="high", thinking=True,
+        ).analyze("prompt")
+        self.assertEqual(len(completions.requests), 2)
+        for request in completions.requests:
+            self.assertEqual(request["reasoning_effort"], "high")
+            self.assertEqual(request["extra_body"], {"thinking": {"type": "enabled"}})
+
+    def test_unconfigured_thinking_options_are_not_sent(self) -> None:
+        client, completions = _client([VALID_OUTPUT])
+        ChatAnalyzer(client, "model").analyze("prompt")
+        self.assertNotIn("reasoning_effort", completions.requests[0])
+        self.assertNotIn("extra_body", completions.requests[0])
+
+    def test_thinking_can_be_explicitly_disabled(self) -> None:
+        client, completions = _client([VALID_OUTPUT])
+        ChatAnalyzer(client, "model", thinking=False).analyze("prompt")
+        self.assertEqual(
+            completions.requests[0]["extra_body"], {"thinking": {"type": "disabled"}}
+        )
+
     def test_all_server_errors_are_retryable(self) -> None:
         error = RuntimeError("server failure")
         error.status_code = 501
