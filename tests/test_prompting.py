@@ -1,4 +1,7 @@
+import json
 from unittest import TestCase
+
+from linux_bug_analyze.analysis_protocol import classification_from_mapping, METADATA_MARKER, REPORT_MARKER
 
 from linux_bug_analyze.models import CommitInfo
 from linux_bug_analyze.prompting import build_prompt
@@ -19,7 +22,7 @@ class PromptTests(TestCase):
             original_diff_chars=60000,
         )
         prompt = build_prompt(commit, "research context")
-        self.assertIn("<<<LBA_METADATA_V3>>>", prompt)
+        self.assertIn("<<<LBA_METADATA_V4>>>", prompt)
         self.assertIn('"relevance":"related"', prompt)
         self.assertIn("## 判定理由", prompt)
         self.assertIn("正文不要再次输出结论", prompt)
@@ -33,3 +36,9 @@ class PromptTests(TestCase):
         self.assertIn("候选集合不是 CVE 样本", prompt)
         self.assertIn("最小必要 architecture-scope", prompt)
         self.assertIn("断言是否足够", prompt)
+        example = prompt.split(METADATA_MARKER, 1)[1].split(REPORT_MARKER, 1)[0]
+        classification = classification_from_mapping(json.loads(example))
+        self.assertEqual(len(classification.properties), 7)
+        self.assertIn("仅有 Fixes 标签不代表", prompt)
+        self.assertIn("两者并存优先 correctness_security", prompt)
+        self.assertIn("不会计入已确认性质统计", prompt)

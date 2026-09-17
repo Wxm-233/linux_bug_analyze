@@ -1,12 +1,14 @@
+import json
 from types import SimpleNamespace
 from unittest import TestCase
 
 from linux_bug_analyze.llm import ChatAnalyzer, LLMError, is_retryable_error
+from tests.property_fixtures import property_mapping
 
 
-VALID_OUTPUT = """<<<LBA_METADATA_V3>>>
-{"schema_version":3,"relevance":"unrelated","categories":[],"confidence":"high","related_architectures":[],"semantic_origin_architectures":[],"common_code_scope":"not_applicable","assertion_sufficiency":"not_applicable","recommended_mechanisms":["none"]}
-<<<LBA_REPORT_V3>>>
+VALID_OUTPUT = """<<<LBA_METADATA_V4>>>
+{"schema_version":4,"relevance":"unrelated","categories":[],"confidence":"high","related_architectures":[],"semantic_origin_architectures":[],"common_code_scope":"not_applicable","assertion_sufficiency":"not_applicable","recommended_mechanisms":["none"],"properties":PROPERTIES_PLACEHOLDER}
+<<<LBA_REPORT_V4>>>
 ## 提交概述
 overview
 
@@ -17,7 +19,7 @@ reason
 card
 
 ## 证据审计
-evidence"""
+evidence""".replace("PROPERTIES_PLACEHOLDER", json.dumps(property_mapping()))
 
 
 class _Completions:
@@ -79,6 +81,13 @@ class ChatAnalyzerTests(TestCase):
             format_retries=1,
         ).analyze("prompt")
         self.assertEqual(result.classification.confidence, "high")
+        self.assertEqual(completions.calls, 2)
+
+    def test_retries_invalid_property_value(self) -> None:
+        invalid = VALID_OUTPUT.replace('"incomplete_fix"', '"both"')
+        client, completions = _client([invalid, VALID_OUTPUT])
+        result = ChatAnalyzer(client, "model", max_retries=0, format_retries=1).analyze("prompt")
+        self.assertEqual(result.classification.properties["repair_outcome"].value, "incomplete_fix")
         self.assertEqual(completions.calls, 2)
 
     def test_reports_repeated_format_failure(self) -> None:

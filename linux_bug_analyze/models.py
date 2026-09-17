@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from .analysis_properties import PropertyAssessment
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +35,7 @@ class AnalysisClassification:
     common_code_scope: str = "uncertain"
     assertion_sufficiency: str = "uncertain"
     recommended_mechanisms: tuple[str, ...] = ()
+    properties: dict[str, PropertyAssessment] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

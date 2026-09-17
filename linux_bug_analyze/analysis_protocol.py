@@ -7,11 +7,12 @@ import re
 from typing import Any, Mapping
 
 from .models import AnalysisClassification, ModelAnalysis
+from .analysis_properties import properties_from_mapping, render_properties
 
 
-METADATA_MARKER = "<<<LBA_METADATA_V3>>>"
-REPORT_MARKER = "<<<LBA_REPORT_V3>>>"
-SCHEMA_VERSION = 3
+METADATA_MARKER = "<<<LBA_METADATA_V4>>>"
+REPORT_MARKER = "<<<LBA_REPORT_V4>>>"
+SCHEMA_VERSION = 4
 
 RELEVANCE_VALUES = {"related", "unrelated", "uncertain"}
 CATEGORY_VALUES = {
@@ -125,6 +126,7 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
         "common_code_scope",
         "assertion_sufficiency",
         "recommended_mechanisms",
+        "properties",
     }
     actual_keys = set(data)
     if actual_keys != expected_keys:
@@ -206,9 +208,9 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
         raise AnalysisFormatError(
             "semantic_origin_architectures 必须是 related_architectures 的子集。"
         )
-    if common_code_scope not in COMMON_CODE_SCOPE_VALUES:
+    if not isinstance(common_code_scope, str) or common_code_scope not in COMMON_CODE_SCOPE_VALUES:
         raise AnalysisFormatError(f"无效 common_code_scope：{common_code_scope!r}")
-    if assertion_sufficiency not in ASSERTION_SUFFICIENCY_VALUES:
+    if not isinstance(assertion_sufficiency, str) or assertion_sufficiency not in ASSERTION_SUFFICIENCY_VALUES:
         raise AnalysisFormatError(
             f"无效 assertion_sufficiency：{assertion_sufficiency!r}"
         )
@@ -237,6 +239,11 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
     ):
         raise AnalysisFormatError("unrelated 的作用域、断言和机制字段必须为不适用。")
 
+    try:
+        properties = properties_from_mapping(data["properties"])
+    except ValueError as exc:
+        raise AnalysisFormatError(str(exc)) from exc
+
     return AnalysisClassification(
         relevance=relevance,
         categories=tuple(categories),
@@ -246,6 +253,7 @@ def classification_from_mapping(data: Mapping[str, Any]) -> AnalysisClassificati
         common_code_scope=common_code_scope,
         assertion_sufficiency=assertion_sufficiency,
         recommended_mechanisms=tuple(mechanisms),
+        properties=properties,
     )
 
 
@@ -273,7 +281,7 @@ def parse_model_output(content: str) -> ModelAnalysis:
         raise AnalysisFormatError("Markdown 分析正文为空。")
     if METADATA_MARKER in markdown or REPORT_MARKER in markdown:
         raise AnalysisFormatError("Markdown 正文中不能重复输出协议标记。")
-    if re.search(r"^##\s+研究相关性判定\s*$", markdown, re.MULTILINE):
+    if re.search(r"^##\s+(?:研究相关性判定|性质判定)\s*$", markdown, re.MULTILINE):
         raise AnalysisFormatError("分类区块由程序生成，正文中不应重复输出。")
     missing_headings = [
         heading
@@ -325,5 +333,7 @@ def render_classification(classification: AnalysisClassification) -> str:
             f"- 断言充分性：{ASSERTION_SUFFICIENCY_LABELS[classification.assertion_sufficiency]}",
             f"- 建议机制：{mechanisms}",
             f"- 置信度：{CONFIDENCE_LABELS[classification.confidence]}",
+            "",
+            render_properties(classification.properties),
         )
     )

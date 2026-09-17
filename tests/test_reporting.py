@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from tests.property_fixtures import property_assessments
 
 from linux_bug_analyze.models import AnalysisClassification, AnalysisResult
 from linux_bug_analyze.reporting import (
@@ -46,6 +48,7 @@ class ReportingTests(TestCase):
                 common_code_scope="overbroad",
                 assertion_sufficiency="partial",
                 recommended_mechanisms=("config_guard", "test"),
+                properties=property_assessments(),
             ),
             model="test-model",
         )
@@ -60,6 +63,32 @@ class ReportingTests(TestCase):
             self.assertNotIn("**结论**", content)
             metadata = metadata_path(output_dir, "a" * 40).read_text(encoding="utf-8")
             self.assertIn('"relevance": "related"', metadata)
+            self.assertIn("## 性质判定", content)
+            data = json.loads(metadata)
+            self.assertEqual(data["classification"]["properties"]["repair_outcome"]["value"], "incomplete_fix")
+            self.assertEqual(data["schema_version"], 4)
+            del data["classification"]["properties"]
+            metadata_path(output_dir, "a" * 40).write_text(json.dumps(data), encoding="utf-8")
+            self.assertFalse(is_successful_report(report))
+
+    def test_old_report_is_not_reused(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / f"{'a' * 40}.md"
+            path.write_text(
+                "<!-- linux-bug-analyze-status: success; report-format: 4 -->\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(is_successful_report(path))
+
+    def test_missing_properties_cannot_be_written_as_success(self) -> None:
+        result = AnalysisResult(
+            requested_hash="abcd", hash="a" * 40, subject="subject", author="author", date="date",
+            classification=AnalysisClassification(relevance="unrelated", categories=(), confidence="high"),
+        )
+        with TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "七项性质"):
+                write_report(Path(directory), result)
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_structured_report_without_sidecar_is_not_success(self) -> None:
         with TemporaryDirectory() as directory:
@@ -87,13 +116,14 @@ class ReportingTests(TestCase):
                 common_code_scope="overbroad",
                 assertion_sufficiency="partial",
                 recommended_mechanisms=("config_guard",),
+                properties=property_assessments(),
             ),
         )
         with TemporaryDirectory() as directory:
             output_dir = Path(directory)
             report = write_report(output_dir, result)
             metadata_path(output_dir, "a" * 40).write_text(
-                '{"schema_version": 3, "status": "success", '
+                '{"schema_version": 4, "status": "success", '
                 f'"commit_hash": "{"a" * 40}", "classification": {{}}}}',
                 encoding="utf-8",
             )

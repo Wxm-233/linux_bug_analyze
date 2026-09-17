@@ -3,10 +3,12 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from tests.property_fixtures import property_assessments
 
 from linux_bug_analyze.models import AnalysisClassification, AnalysisResult
 from linux_bug_analyze.reporting import SUCCESS_MARKER, write_report
 from linux_bug_analyze.result_summary import (
+    collect_results,
     parse_legacy_classification,
     write_summary,
 )
@@ -33,12 +35,31 @@ def _success(commit_hash: str, relevance: str) -> AnalysisResult:
             common_code_scope=("overbroad" if relevance == "related" else "not_applicable"),
             assertion_sufficiency=("partial" if relevance == "related" else "not_applicable"),
             recommended_mechanisms=(("config_guard", "test") if relevance == "related" else ("none",)),
+            properties=property_assessments(),
         ),
         model="test-model",
     )
 
 
 class ResultSummaryTests(TestCase):
+    def test_old_or_missing_properties_are_invalid_not_negative(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for char in ("a", "b"):
+                write_report(root, _success(char * 40, "related"))
+                metadata_file = root / f"{char * 40}.meta.json"
+                data = json.loads(metadata_file.read_text(encoding="utf-8"))
+                if char == "a":
+                    data["schema_version"] = 3
+                else:
+                    del data["classification"]["properties"]
+                metadata_file.write_text(json.dumps(data), encoding="utf-8")
+            self.assertEqual([record.status for record in collect_results(root)], ["invalid_metadata"] * 2)
+            summary, _ = write_summary(root, root / "summary")
+            self.assertEqual(summary["counts"]["by_property"]["stale_state"], {
+                "yes": 0, "no": 0, "needs_review": 0, "missing": 0,
+            })
+
     def test_legacy_parser_accepts_bold_fields_on_one_line(self) -> None:
         classification = parse_legacy_classification(
             """## 研究相关性判定
@@ -98,6 +119,14 @@ class ResultSummaryTests(TestCase):
             self.assertEqual(counts["by_assertion_sufficiency"]["partial"], 1)
             self.assertEqual(counts["by_recommended_mechanism"]["config_guard"], 1)
             self.assertEqual(counts["related_rate_among_success"], 1 / 3)
+            self.assertEqual(summary["schema_version"], 4)
+            self.assertEqual(counts["by_property"]["stale_state"], {
+                "yes": 0, "no": 0, "needs_review": 2, "missing": 1,
+            })
+            self.assertEqual(counts["by_property"]["assumption_exceeds_guarantee"]["yes"], 2)
+            self.assertEqual(counts["related_by_property"]["assumption_exceeds_guarantee"]["yes"], 1)
+            self.assertEqual(counts["by_property"]["repair_outcome"]["incomplete_fix"], 2)
+            self.assertEqual(counts["related_by_property"]["impact_type"]["correctness_security"], 1)
             self.assertEqual(
                 paths["related_hashes"].read_text(encoding="utf-8"),
                 f"{related_hash}\n",
@@ -117,11 +146,15 @@ class ResultSummaryTests(TestCase):
             legacy = next(row for row in rows if row["commit_hash"] == legacy_hash)
             self.assertEqual(legacy["source_format"], "legacy_markdown")
             self.assertEqual(legacy["relevance"], "unrelated")
+            self.assertEqual(legacy["stale_state"], "")
             related_row = next(
                 row for row in rows if row["commit_hash"] == related_hash
             )
             self.assertEqual(related_row["related_architectures"], "arm32")
             self.assertEqual(related_row["common_code_scope"], "overbroad")
+            self.assertEqual(related_row["assumption_exceeds_guarantee"], "yes")
+            self.assertEqual(related_row["stale_state_needs_review"], "true")
+            self.assertIn("同步调用路径", related_row["stale_state_reason"])
             persisted = json.loads(paths["summary"].read_text(encoding="utf-8"))
             self.assertEqual(persisted["counts"]["by_relevance"]["related"], 1)
 

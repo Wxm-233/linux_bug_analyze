@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from .analysis_protocol import METADATA_MARKER, REPORT_MARKER
+import json
+
+from .analysis_protocol import METADATA_MARKER, REPORT_MARKER, SCHEMA_VERSION
+from .analysis_properties import pending_properties_example
 from .models import CommitInfo
 
 
@@ -25,6 +28,7 @@ def build_prompt(commit: CommitInfo, research_context: str, evidence: str = "") 
         else "否"
     )
     supplemental = evidence.strip() or "（未提供；不得声称看过邮件、缺陷报告或硬件手册）"
+    properties_example = json.dumps(pending_properties_example(), ensure_ascii=False, separators=(",", ":"))
 
     return f"""请先理解研究框架，再分析来自 Linux 主线提交历史的提交。候选集合不是 CVE 样本；
 是否有 CVE 编号不影响相关性判断。研究对象不是所有内核 bug，而是：
@@ -73,13 +77,13 @@ diff 是否截断：{truncation_note}
 输出是程序接口。必须从响应的第一个字符开始严格使用以下协议；不要添加代码围栏、前言或结尾标记：
 
 {METADATA_MARKER}
-{{"schema_version":3,"relevance":"related","categories":["cross_arch_regression"],"confidence":"medium","related_architectures":["arm32","riscv"],"semantic_origin_architectures":["arm32"],"common_code_scope":"overbroad","assertion_sufficiency":"partial","recommended_mechanisms":["config_guard","move_to_arch","test"]}}
+{{"schema_version":{SCHEMA_VERSION},"relevance":"related","categories":["cross_arch_regression"],"confidence":"medium","related_architectures":["arm32","riscv"],"semantic_origin_architectures":["arm32"],"common_code_scope":"overbroad","assertion_sufficiency":"partial","recommended_mechanisms":["config_guard","move_to_arch","test"],"properties":{properties_example}}}
 {REPORT_MARKER}
 ## 提交概述
 ……
 
 分类 JSON 规则：
-- 只能包含示例中出现的九个字段，不得添加字段。schema_version 必须是 3。
+- 只能包含示例中出现的十个顶层字段，不得添加字段。schema_version 必须是 {SCHEMA_VERSION}。
 - relevance 只能是 related、unrelated、uncertain。
 - categories 只能从 implicit_semantic_assumption、cross_arch_regression 中选择，可多选。
 - related 至少选择一个 category；unrelated 的 categories 必须为空数组；uncertain 可为空或列出疑似类型。
@@ -101,8 +105,44 @@ diff 是否截断：{truncation_note}
   capability_interface、type_or_api、state_machine、test、other、none；none 不能与其他值并存。
 - unrelated 时 semantic_origin_architectures=[]、common_code_scope=not_applicable、
   assertion_sufficiency=not_applicable、recommended_mechanisms=["none"]。
+- properties 必须逐项包含下面七项，每项只包含 value、reason、needs_review。
+  reason 是 1–600 字符的简短依据，注明提交说明、具体函数/diff 或补充证据来源；
+  needs_review 是 JSON 布尔值。示例值只是格式占位，不能机械照抄。
+- properties 判断当前提交所修复的缺陷（修复前），不把补丁新增的保护措施当成缺陷。
+  即使 relevance=unrelated，也要独立判断这些性质；研究不相关不等于没有正确性或性能问题。
+
+七项性质的判定口径：
+1. assumption_exceeds_guarantee（yes/no）：调用者使用的假设强于实现者的保证。
+   需指出调用者、实现者、所依赖的保证及差距；不能仅凭出现接口调用判 yes。
+2. representation_mismatch（yes/no）：传递的数据类型含义、解释不一致。
+   包括单位、位宽、符号、字节序、地址空间、标志位含义等。说明谁传递、谁解释及差异；
+   仅类型不同但有正确转换不算。
+3. default_config_invalid（yes/no）：默认配置在特定架构下不成立。
+   需说明哪个默认值/默认配置、哪个架构以及为何无效；只在非默认配置触发不算。
+4. intermediate_state_violation（yes/no）：实现只保证最终状态，调用者假设中间态正确。
+   需说明状态转换过程、中间态被谁观察/使用以及违反的假设；不是所有竞态都属于此项。
+5. stale_state（yes/no）：状态更新不及时。
+   说明什么状态、应在哪个时点更新/失效/同步，以及陈旧状态如何造成问题；
+   不要把一般执行缓慢当作状态更新不及时。它与第 4 项可同时成立，但需分别给出依据。
+6. repair_outcome 只能三选一：new_bug（修复后引入新漏洞）、
+   incomplete_fix（修复不完全）、neither（都不是）。判断本次修复对象的历史成因：
+   前次修复引入新的缺陷选 new_bug；前次修复未覆盖原问题的路径/架构/配置选 incomplete_fix。
+   需指出前次修复与当前缺陷的因果关系，仅有 Fixes 标签不代表它是前次修复。
+   普通功能改动引入缺陷不自动算“修复后引入”。new_bug 泛指新的缺陷，不自动证明安全可利用性。
+   若两种现象都有证据，优先 new_bug，并在 reason 写明不完全修复这一附带情况。
+   不能无证据断言当前补丁未来会引入新漏洞或仍不完整。
+7. impact_type 只能三选一：correctness_security（正确性/安全问题）、
+   performance（性能损失）、neither（都不是）。崩溃、错误结果、安全边界失效等属于前者；
+   功能正确但吞吐、延迟、资源开销恶化属于后者。两者并存优先 correctness_security，
+   在 reason 中补充性能影响。perf 等性能工具本身崩溃不等于“性能损失”；
+   正确性问题也不自动代表存在可利用安全漏洞。
+- 前五项独立判断，可多项 yes；后两项各自单选。每项的 no/neither 同样需要依据。
+- 证据不足或互相冲突无法消解时，needs_review=true，并在 reason 明确缺少什么证据。
+  无法选择时 value 暂填 no/neither；已有倾向但不确定可保留倾向值并标需复核。
+  这些暂定值不会计入已确认性质统计。证据足以作出肯定/否定判断时 needs_review=false。
 - JSON 之后必须原样输出 {REPORT_MARKER}，再输出 Markdown 正文。
-- Markdown 正文不要再次输出结论、类型、置信度或“研究相关性判定”标题；该区块由程序根据 JSON 生成。
+- Markdown 正文不要再次输出结论、类型、置信度、“研究相关性判定”或“性质判定”标题；
+  这两个区块由程序根据 JSON 生成。可在判定理由中展开性质的证据链，但不得与 JSON 矛盾。
 
 Markdown 正文必须严格包含以下结构，不要省略二级标题：
 

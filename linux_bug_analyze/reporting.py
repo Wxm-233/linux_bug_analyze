@@ -11,15 +11,17 @@ from typing import Iterable
 
 from .analysis_protocol import (
     AnalysisFormatError,
+    SCHEMA_VERSION,
     classification_from_mapping,
     render_classification,
 )
+from .analysis_properties import properties_to_mapping, properties_from_mapping
 from .models import AnalysisResult
 
 
 SUCCESS_MARKER = "<!-- linux-bug-analyze-status: success -->"
 STRUCTURED_SUCCESS_MARKER = (
-    "<!-- linux-bug-analyze-status: success; report-format: 4 -->"
+    "<!-- linux-bug-analyze-status: success; report-format: 5 -->"
 )
 FAILURE_MARKER = "<!-- linux-bug-analyze-status: failure -->"
 
@@ -40,11 +42,11 @@ def _is_successful_metadata(path: Path) -> bool:
         classification = data.get("classification")
         if not isinstance(classification, dict):
             return False
-        classification_from_mapping({"schema_version": 3, **classification})
+        classification_from_mapping({"schema_version": SCHEMA_VERSION, **classification})
     except (OSError, json.JSONDecodeError, AnalysisFormatError):
         return False
     return (
-        data.get("schema_version") == 3
+        data.get("schema_version") == SCHEMA_VERSION
         and data.get("status") == "success"
         and data.get("commit_hash") == path.name[: -len(".meta.json")]
     )
@@ -61,7 +63,7 @@ def is_successful_report(path: Path) -> bool:
         return _is_successful_metadata(
             metadata_path(path.parent, path.name.removesuffix(".md"))
         )
-    # 旧报告不会作为本轮 schema v3 的断点继续使用。
+    # 旧报告缺少本轮性质字段，不能作为断点继续使用。
     return False
 
 
@@ -103,6 +105,7 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
     marker = STRUCTURED_SUCCESS_MARKER if result.succeeded else FAILURE_MARKER
     if result.succeeded:
         assert result.classification is not None
+        properties_from_mapping(properties_to_mapping(result.classification.properties))
         body = f"{render_classification(result.classification)}\n\n{result.analysis}"
     else:
         body = f"处理失败：{result.error}"
@@ -117,7 +120,7 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
     write_text_atomic(path, content)
     classification = result.classification
     metadata = {
-        "schema_version": 3,
+        "schema_version": SCHEMA_VERSION,
         "status": "success" if result.succeeded else "failure",
         "commit_hash": result.hash,
         "requested_hash": result.requested_hash,
@@ -141,6 +144,7 @@ def write_report(output_dir: Path, result: AnalysisResult) -> Path:
                 "recommended_mechanisms": list(
                     classification.recommended_mechanisms
                 ),
+                "properties": properties_to_mapping(classification.properties),
             }
             if classification is not None
             else None

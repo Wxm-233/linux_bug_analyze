@@ -6,6 +6,7 @@
 - 判断提交是否属于“隐式语义假设错误”或“跨架构回归”；
 - 输出经过规范化的一个或多个相关架构（例如 `arm32`、`arm64`、`x86`）；
 - 标注语义来源架构、公共层 architecture-scope、断言充分性和可能的重构机制；
+- 逐项判断五种缺陷性质、修复历史与正确性/安全或性能影响，并附依据及复核标记；
 - 生成包含触发范围、边界、支持/反驳证据、修复层次和验证方式的语义卡片；
 - 为每个提交生成独立 Markdown 报告，并生成有稳定链接的索引。
 
@@ -126,7 +127,7 @@ analysis_out/<完整 hash>.md
 analysis_out/<完整 hash>.meta.json
 ```
 
-Markdown 中的分类和作用域字段由程序根据 schema v3 元数据统一渲染，统计程序只读取 sidecar
+Markdown 中的分类、作用域和性质字段由程序根据 schema v4 元数据统一渲染，统计程序只读取 sidecar
 JSON，不依赖 Markdown 的加粗、换行或列表样式。
 
 分析完成后运行：
@@ -159,8 +160,43 @@ output_dir = "analysis_summary"
 python summarize_results.py /data/analysis_out --output-dir /data/summary
 ```
 
-本轮分析使用 schema v3。旧结构化结果不会作为新结果沿用；建议把旧目录归档，并为本轮
-设置新的 `outdir`。少量无 sidecar 的旧 Markdown 只保留只读识别能力，不参与格式迁移。
+本轮分析使用 schema v4。旧结构化结果缺少性质字段，不会作为成功断点跳过，汇总时会标为
+无效元数据；建议把旧目录归档，并为本轮设置新的 `outdir`。直接使用旧 `outdir` 重跑会覆盖
+同名报告。少量无 sidecar 的旧 Markdown 只保留只读识别能力，不参与格式迁移。
+
+### 七项缺陷性质
+
+元数据的 `classification.properties` 包含以下固定字段；Markdown 自动生成“性质判定”表。
+
+| 字段 | 含义 | value 取值 |
+|---|---|---|
+| `assumption_exceeds_guarantee` | 调用者假设强于实现者保证 | `yes` / `no` |
+| `representation_mismatch` | 传递的数据类型含义、解释不一致 | `yes` / `no` |
+| `default_config_invalid` | 默认配置在特定架构下不成立 | `yes` / `no` |
+| `intermediate_state_violation` | 实现只保证最终态，调用者假设中间态正确 | `yes` / `no` |
+| `stale_state` | 状态更新不及时 | `yes` / `no` |
+| `repair_outcome` | 修复历史 | `new_bug`（修复后引入新漏洞）/ `incomplete_fix`（修复不完全）/ `neither` |
+| `impact_type` | 问题影响 | `correctness_security` / `performance` / `neither` |
+
+每项同时包含 `reason`（简短证据依据）和 `needs_review`（布尔值）。五种性质可同时成立，
+后两项各自单选。判断对象是当前提交修复前的缺陷，不是要求模型预测当前补丁会不会出问题：
+
+- 修复历史需证明前次修复与当前缺陷的关系，不能仅根据 `Fixes:` 标签判断。
+  两种修复问题并存时优先 `new_bug`，另一种写入依据；这里“新漏洞”泛指新缺陷，
+  不自动等同于可利用的安全漏洞。
+- 正确性/安全与性能影响并存时，主分类选 `correctness_security`，性能影响写入依据。
+- 证据不足时标记 `needs_review=true`；无明确倾向时暂填 `no` / `neither`，不计入确定判断。
+  `needs_review=false` 只代表模型认为证据足够，不代表已经人工确认。
+
+运行 `summarize_results.py` 后：
+
+- `summary.json` 的 `counts.by_property` 统计所有成功报告；`counts.related_by_property`
+  只统计研究相关报告。每项按枚举值、`needs_review`、`missing` 分桶，互不重复。
+  旧 Markdown 缺失字段计入 `missing`，不会被补成“否”。失败或无效结果不进入性质统计。
+- `results.csv` 为每项增加 `<字段>`、`<字段>_needs_review`、`<字段>_reason` 三列。
+  筛选确定的肯定结果时同时要求字段为 `yes` 且对应复核标记为 `false`。
+
+无需修改 settings；重新分析并汇总即可获得这些字段。建议先用少量提交检查标注质量。
 
 ## 直接扫描 Linux 主线提交
 
@@ -277,6 +313,7 @@ max_total_chars = 36000
 - `git_repository.py`：Git 校验、hash 解析和提交事实提取；
 - `commit_source.py` / `commit_cli.py`：流式扫描 Linux 主线提交并直接生成候选 hash；
 - `analysis_protocol.py`：混合输出协议、分类枚举校验和标准分类区块渲染；
+- `analysis_properties.py`：七项缺陷性质的词表、依据校验和报告展示；
 - `public_inbox.py` / `cve_source.py` / `cve_cli.py`：读取 CVE 邮件镜像、提取主线修复并生成审计；
 - `hash_filter.py` / `filter_cli.py`：确定性候选筛选、命中审计和命令行入口；
 - `evidence.py`：引入提交、CVE 公告、本地邮件讨论和人工材料的证据组合；

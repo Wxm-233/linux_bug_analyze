@@ -1,4 +1,5 @@
 from unittest import TestCase
+from tests.property_fixtures import property_assessments
 
 from linux_bug_analyze.models import AnalysisClassification, CommitInfo, ModelAnalysis
 from linux_bug_analyze.pipeline import analyze_commits
@@ -32,6 +33,7 @@ class _Analyzer:
                 common_code_scope="appropriate",
                 assertion_sufficiency="partial",
                 recommended_mechanisms=("assertion", "test"),
+                properties=property_assessments(),
             ),
             "analysis",
         )
