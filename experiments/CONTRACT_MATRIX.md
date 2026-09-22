@@ -3,6 +3,15 @@
 Status: 2026-09-15. Nine historical cases have prototypes. This is a research
 index, not a set of deployed kernel protections or a vulnerability count.
 
+2026-09-21 update: the NUMA four residual slice mismatches split into two
+maxnode/storage fixture inconsistencies (96 effective bits, fixed by allocating
+for the actual maxnode=97) and two remaining partial-word reads (65 bits).
+Real WSL kernel testing adds 64 native/compat-dispatch observations plus 16
+genuine i386 observations, including policy readback and allocated-page node
+queries. A corresponding partial-word EFAULT is observed at maxnode=1026 on
+the 1024-node-capacity host. This is current-kernel evidence, not an old/new
+historical kernel replay or a confirmed new defect. See numa_entry/README.md.
+
 Follow-up status: NUMA now also has a 32-input native/compat entry-conversion
 chain experiment with real mmap protection (96 executions over three profiles).
 It reveals limits beyond the earlier small-input matrix: five old compat-tail

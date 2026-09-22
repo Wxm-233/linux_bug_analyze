@@ -23,6 +23,15 @@ class ProtocolTests(TestCase):
             with self.subTest(ids=ids), self.assertRaises(ValueError):
                 parse_response(json.dumps(data), ['source'])
 
+    def test_multiple_evidence_lines_resolve_without_dropping(self):
+        lines=[f'source {i}' for i in range(9)]
+        for count in (4,8):
+            data=json.loads(self.payload());data['evidence_ids']=list(range(1,count+1))
+            decision,_=parse_response(json.dumps(data),lines)
+            self.assertEqual(decision['evidence'],lines[:count])
+        data['evidence_ids']=list(range(1,10))
+        with self.assertRaises(ValueError):parse_response(json.dumps(data),lines)
+
     def test_unknown_boundary_cannot_be_excluded(self):
         decision, audit = parse_response(self.payload(), ['source'])
         audit['vertical'] = 'unknown'

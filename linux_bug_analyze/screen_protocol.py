@@ -1,5 +1,6 @@
 """Short-screen wire protocol and conservative exclusion checks."""
 import json
+import re
 
 
 def evidence_lines(material):
@@ -8,14 +9,17 @@ def evidence_lines(material):
             for i in range(0, len(line), 300) if line[i:i + 300].strip()]
 
 
-def parse_response(text, lines):
+def parse_response(text, lines, *, max_evidence=8):
+    wrapped = re.fullmatch(r'\s*```(?:json)?\s*\n(.*?)\n```\s*', text, re.S)
+    if wrapped:
+        text = wrapped.group(1)
     data = json.loads(text)
     fields = {'relevance', 'reason', 'evidence_ids', 'needs_review',
               'vertical', 'horizontal', 'exclusion_basis'}
     if not isinstance(data, dict) or set(data) != fields:
         raise ValueError('短判定结构字段无效')
     ids = data['evidence_ids']
-    if (not isinstance(ids, list) or not 1 <= len(ids) <= 3
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= max_evidence
             or any(type(i) is not int or not 1 <= i <= len(lines) for i in ids)
             or len(set(ids)) != len(ids)):
         raise ValueError('证据编号无效')
