@@ -46,6 +46,8 @@ class ChatAnalyzer:
         max_tokens: int = 8192,
         max_retries: int = 4,
         format_retries: int = 1,
+        reasoning_effort: str | None = None,
+        thinking: bool | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.client = client
@@ -53,12 +55,21 @@ class ChatAnalyzer:
         self.max_tokens = max_tokens
         self.max_retries = max_retries
         self.format_retries = format_retries
+        self.reasoning_effort = reasoning_effort
+        self.thinking = thinking
         self.sleep = sleep
 
     def analyze(self, prompt: str) -> ModelAnalysis:
         transport_failures = 0
         format_failures = 0
         request_prompt = prompt
+        options: dict[str, Any] = {}
+        if self.reasoning_effort is not None:
+            options["reasoning_effort"] = self.reasoning_effort
+        if self.thinking is not None:
+            options["extra_body"] = {
+                "thinking": {"type": "enabled" if self.thinking else "disabled"}
+            }
         while True:
             try:
                 response = self.client.chat.completions.create(
@@ -69,6 +80,7 @@ class ChatAnalyzer:
                     ],
                     temperature=0.2,
                     max_tokens=self.max_tokens,
+                    **options,
                 )
             except Exception as exc:
                 if (

@@ -27,6 +27,8 @@ force = true
 api_key_file = "secrets/key"
 base_url = "https://example.test/v1"
 model = "test-model"
+reasoning_effort = "high"
+thinking = true
 
 [hash_filter]
 source_file = "input/candidates.txt"
@@ -77,6 +79,8 @@ output_dir = "results/summary"
             self.assertTrue(settings.force)
             self.assertEqual(settings.base_url, "https://example.test/v1")
             self.assertEqual(settings.model, "test-model")
+            self.assertEqual(settings.reasoning_effort, "high")
+            self.assertTrue(settings.thinking)
             self.assertEqual(
                 settings.hash_filter.source_file,
                 (root / "input/candidates.txt").resolve(),

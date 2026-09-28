@@ -18,8 +18,8 @@ except ModuleNotFoundError:  # pragma: no cover - 仅 Python 3.10 使用
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_API_KEY_FILE = PROJECT_ROOT / "OPENAI_API_KEY"
 DEFAULT_CONTEXT_PATH = PROJECT_ROOT / "documents" / "新·论文思路梳理.md"
-DEFAULT_BASE_URL = "https://llmapi.isrc.ac.cn/v1"
-DEFAULT_MODEL = "DeepSeek-V4-Pro"
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_SETTINGS_PATH = Path("settings.toml")
 
 
@@ -107,6 +107,8 @@ class FileSettings:
     api_key_file: Path | None = None
     base_url: str | None = None
     model: str | None = None
+    reasoning_effort: str | None = None
+    thinking: bool | None = None
     hash_filter: HashFilterSettings = field(default_factory=HashFilterSettings)
     commit_source: CommitSourceSettings = field(default_factory=CommitSourceSettings)
     cve_source: CveSourceSettings = field(default_factory=CveSourceSettings)
@@ -133,7 +135,7 @@ _ROOT_KEYS = {
     "evidence",
     "result_summary",
 }
-_OPENAI_KEYS = {"api_key_file", "base_url", "model"}
+_OPENAI_KEYS = {"api_key_file", "base_url", "model", "reasoning_effort", "thinking"}
 _HASH_FILTER_KEYS = {
     "source_file",
     "output_file",
@@ -353,6 +355,8 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
         api_key_file=_read_path(openai, "api_key_file", base_dir),
         base_url=_read_string(openai, "base_url"),
         model=_read_string(openai, "model"),
+        reasoning_effort=_read_string(openai, "reasoning_effort"),
+        thinking=_read_bool(openai, "thinking"),
         hash_filter=HashFilterSettings(
             source_file=_read_path(hash_filter, "source_file", base_dir),
             output_file=_read_path(hash_filter, "output_file", base_dir),

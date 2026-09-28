@@ -128,6 +128,8 @@ def build_parser(settings: FileSettings | None = None) -> argparse.ArgumentParse
     parser.set_defaults(
         settings_base_url=settings.base_url,
         settings_model=settings.model,
+        reasoning_effort=settings.reasoning_effort,
+        thinking=settings.thinking,
         cve_inbox_dir=settings.cve_source.inbox_dir,
         mail_inbox_dirs=settings.evidence.mail_inbox_dirs,
         include_fixes_commit=settings.evidence.include_fixes_commit,
@@ -270,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
                 create_openai_client(api_key, base_url),
                 model,
                 max_tokens=args.max_tokens,
+                reasoning_effort=args.reasoning_effort,
+                thinking=args.thinking,
             )
         except (ConfigurationError, LLMError) as exc:
             print(f"[错误] {exc}", file=sys.stderr)
