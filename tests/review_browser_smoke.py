@@ -1,0 +1,98 @@
+"""Optional real-browser smoke test; synthetic commits and a mock LLM only.
+
+Run: python -X utf8 -m tests.review_browser_smoke
+Requires playwright and an installed Chrome (or PLAYWRIGHT_CHANNEL).
+"""
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import threading
+from types import SimpleNamespace as NS
+
+from playwright.sync_api import sync_playwright, expect
+
+from linux_bug_analyze.config import FileSettings, CommitSourceSettings
+from linux_bug_analyze.review_config import ReviewSettings
+from linux_bug_analyze.review_workflow import ReviewWorkflow
+from linux_bug_analyze.review_web import ReviewApplication, make_server
+from tests.test_commit_source import _git, _commit
+from tests.test_screening import response
+
+
+def main():
+    with TemporaryDirectory() as d:
+        root=Path(d);repo=root/'linux';repo.mkdir()
+        _git('init',cwd=repo);_git('config','user.email','tests@example.test',cwd=repo)
+        _git('config','user.name','Tests',cwd=repo)
+        hashes=[_commit(repo,'kernel/test.c',f'line {i}\n',title) for i,title in enumerate([
+            'arm memory ordering fix','x86 spelling typo','riscv cache fix','mips alignment fix',
+            's390 memory bug','arm64 page table fix','dma ordering fix','ordinary typo'])]
+        settings=FileSettings(linux_dir=repo,commit_source=CommitSourceSettings(since='2000-01-01'),
+            review=ReviewSettings(output_dir=root/'work',training_target=2,validation_size=2,
+                                  audit_minimum=2,boundary_sample=1,workers=1))
+        workflow=ReviewWorkflow(settings)
+        original_screen=workflow.screen
+        calls=[]
+        def create(**kw):calls.append(kw);return response('related')
+        workflow.screen=lambda: original_screen(NS(chat=NS(completions=NS(create=create))))
+        app=ReviewApplication(workflow);server=make_server(app,0)
+        thread=threading.Thread(target=server.serve_forever);thread.start()
+        try:
+            with sync_playwright() as p:
+                browser=p.chromium.launch(channel=os.environ.get('PLAYWRIGHT_CHANNEL','chrome'),headless=True)
+                page=browser.new_page(viewport={'width':1280,'height':900})
+                errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                page.goto(f'http://127.0.0.1:{server.server_port}/#{app.token}')
+                page.locator('[data-action="prepare"]').click()
+                expect(page.locator('#record')).to_be_visible(timeout=30000)
+                expect(page.locator('#error')).to_have_text('')
+                page.locator('#seed-search > summary').click()
+                for h,label in zip(hashes[:2],['related','unrelated']):
+                    page.locator('#query').fill(h)
+                    page.locator('#search').click()
+                    page.locator('#search-results button').first.click()
+                    expect(page.locator('#identity')).to_contain_text(h)
+                    page.locator('#note').fill('人工测试依据')
+                    page.locator(f'[data-label="{label}"]').click()
+                    expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                    expect(page.locator('#error')).to_have_text('')
+                page.locator('[data-action="freeze"]').click()
+                expect(page.locator('#role')).to_have_value('validation')
+                for _ in range(2):
+                    expect(page.locator('#record')).to_be_visible(timeout=30000)
+                    page.locator('[data-label="unrelated"]').click()
+                    expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                page.locator('#threshold').fill('0')
+                page.locator('#preview').click()
+                expect(page.locator('#preview-result')).to_contain_text('"count": 3')
+                page.on('dialog',lambda dialog:dialog.accept())
+                page.locator('#select').click()
+                expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                assert calls == [], 'No LLM calls before explicit confirmation'
+                page.locator('#approve-api').check()
+                page.locator('#screen').click()
+                expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                expect(page.locator('#llm-status')).to_contain_text('相关 3')
+                page.locator('[data-action="sample"]').click()
+                expect(page.locator('#role')).to_have_value('audit')
+                for _ in range(3):
+                    expect(page.locator('#record')).to_be_visible(timeout=30000)
+                    page.locator('[data-label="related"]').click()
+                    expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                expect(page.locator('#audit-stats')).to_contain_text('100.0%')
+                page.locator('[data-action="export"]').click()
+                expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                with page.expect_download() as download:
+                    page.locator('[data-download="summary.md"]').click()
+                assert download.value.suggested_filename == 'summary.md'
+                assert not errors, errors
+                assert len(calls)==3
+                browser.close()
+                print('Browser smoke passed: prepare -> seeds -> freeze -> validation -> threshold -> mock LLM -> blind audit -> download.')
+        finally:
+            server.shutdown();server.server_close();thread.join()
+            if app.thread:app.thread.join()
+
+
+if __name__=='__main__':
+    main()

@@ -107,3 +107,20 @@ class FastTests(TestCase):
         r=self.runner(create,compact_chars=200,full_chars=200)
         r.screen(replace(self.c,diff='line\n'*150))
         self.assertEqual(len(calls),1)
+
+    def test_hash_loader_does_not_eagerly_read_whole_input(self):
+        loaded=[]
+        def load(h):
+            loaded.append(h)
+            return replace(self.c,hash=h)
+        r=self.runner(lambda **kw:response('related'),workers=1,max_requests=1)
+        hashes=[f'{i:04x}' for i in range(100)]
+        r.run_hashes(hashes,load)
+        self.assertLessEqual(len(loaded),2)
+        self.assertEqual(json.loads((self.path/'input.json').read_text()),hashes)
+        self.assertEqual(len(json.loads((self.path/'checkpoint.json').read_text())['pending']),99)
+
+    def test_hash_loader_rejects_wrong_commit(self):
+        r=self.runner(lambda **kw:self.fail('wrong commit must not reach API'),workers=1)
+        with self.assertRaises(ValueError):
+            r.run_hashes(['bbbb'],lambda h:self.c)

@@ -32,6 +32,19 @@ DEFAULT_CROSS_ARCH_INCLUDE = (
     r"memory ordering|memory barrier|cache coherency|"
     r"cache maintenance|tlb|page tables?|mmio|dma|iommu|irq|"
     r"interrupt controller|device tree|acpi|kvm)\b",
+    r"\b(?:amd64|x86_32|x86_64|aarch32|armv[4-9]\w*|riscv(?:32|64)?|"
+    r"rv(?:32|64)\w*|ppc(?:32|64)(?:le)?|powerpc64|s390x|sparc64|"
+    r"mips(?:32|64)(?:el)?|loongarch64)\b",
+    r"\b(?:CONFIG_(?:ARCH_\w+|ARM\w*|X86\w*|RISCV\w*|PPC\w*|MIPS\w*|"
+    r"S390\w*|SPARC\w*|LOONGARCH\w*|64BIT|32BIT|CPU_BIG_ENDIAN)|"
+    r"BITS_PER_LONG|PAGE_SHIFT|PAGE_SIZE|__LITTLE_ENDIAN|__BIG_ENDIAN|"
+    r"phys_addr_t|dma_addr_t|smp_[rw]?mb|smp_(?:load_acquire|store_release)|"
+    r"read[blwq]|write[blwq]|virt_to_phys|phys_to_virt)\b",
+    r"\b(?:numa|smp|ipi|cache[- ]?lines?|huge[- ]?pages?|"
+    r"atomic operations?|memory model|weak(?:ly)?[- ]order(?:ed|ing)|"
+    r"compat(?:ibility)? ABI|CONFIG_NUMA|CONFIG_SMP|"
+    r"atomic(?:64)?_t|cmpxchg|READ_ONCE|WRITE_ONCE|"
+    r"(?:cpu_to_(?:be|le)|(?:be|le)(?:16|32|64)_to_cpu)\w*)\b",
 )
 
 

@@ -1,6 +1,41 @@
 # Linux Bug Analyze
 
-## 当前状态（2026-09-22）
+## 人机协同筛选工作台（2026-10-07）
+
+现在可以在一个浏览器页面完成：**宽松正则初筛 → ASReview 人工反馈排序 →
+阈值选取 → LLM 短判断 → 抽样盲审 → 结果统计**。标注自动保存，同一目录重启即可恢复。
+这是使用 ASReview 学习组件的 commit 专用界面，不是修改 ASReview LAB 本身。
+
+首次安装（Python 3.10+）：
+
+```bash
+python -m pip install -e ".[review]"
+```
+
+在 `settings.toml` 中配置 `linux_dir`、`[commit_source]` 的时间范围及 `[openai]`。
+可从 `settings.example.toml` 复制新增的 `[review]` 段；不复制也有默认值。
+然后每次只需运行：
+
+```bash
+python review_commits.py
+```
+
+打开终端给出的链接，按页面四个阶段操作。**启动网页和人工标注不调用 LLM；
+只有勾选确认并点击“启动 / 续跑短判断”才会调用配置的接口。**
+远程 Linux 部署、抽样与统计解释见 [工作台使用说明](documents/人机协同筛选工作台.md)。
+
+主要结果保存在 `review_workspace/`：
+
+- `summary.md` / `summary.json`：数量、分层抽查结果、加权准确率及统计边界。
+- `results.csv`：完整筛选结果（阶段完成或点击“更新全部导出结果”后刷新）。
+- `labels.csv` / `label_events.csv`：自动保存的人工标签和改判历史。
+- `confirmed_related_hashes.txt`：人工确认相关；`provisional_related_hashes.txt`：仅 LLM 判相关、仍待确认。
+
+默认前期标注为 160 条训练 + 40 条阈值检查，最终复核另算。
+抽样默认 1%、最少 100 条，并另抽查低分与正则未命中各最多 20 条。
+这些是可配置的试验预算，不是准确率或召回率保证。
+
+## 之前的初筛入口（2026-09-22）
 
 当前优先使用 `screen_fast.py` 和 `DeepSeek-V4.1-Flash` 做有预算初筛，暂不自动生成详细报告。
 原500条分层样本已完成初筛；新入口的50条试跑也已完成，保留2条候选。

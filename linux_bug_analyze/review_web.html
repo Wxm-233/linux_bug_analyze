@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Linux commit 筛选工作台</title>
+<style>
+body{font:16px/1.65 system-ui,sans-serif;background:#f5f7fa;color:#1c2b3b;margin:0}main{max-width:1120px;margin:24px auto;padding:0 20px}h1{font-size:26px}h2{font-size:20px}section{background:white;border:1px solid #dce3eb;border-radius:10px;padding:20px;margin:18px 0}button,select,input,textarea{font:inherit;padding:7px 12px;margin:4px;border:1px solid #b8c5d4;border-radius:5px}button{cursor:pointer;background:#edf3fa}button.primary{background:#195d9e;color:white}button:disabled{opacity:.45;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6f8;padding:14px;max-height:600px;overflow:auto;font-size:14px}textarea{display:block;width:90%;height:65px}small,.muted{color:#526779}.error{color:#a31b24;white-space:pre-wrap}.cards{display:flex;gap:12px;flex-wrap:wrap}.card{background:#edf3fa;border-radius:8px;padding:10px 18px}.card strong{display:block;font-size:24px}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;padding:8px;border-bottom:1px solid #dde4ec}.hidden{display:none}#search-results button{display:block;text-align:left;width:100%}#progress{position:sticky;top:0;background:#e5edf7;padding:8px;z-index:1}a{color:#195d9e}summary{cursor:pointer}
+</style></head><body><main>
+<h1>Linux commit 筛选工作台</h1>
+<p>宽松正则 → 人工反馈排序 → 冻结阈值 → LLM 短判断 → 盲审与统计</p>
+<div id="progress">正在连接…</div><p id="error" class="error"></p>
+<div id="cards" class="cards"></div>
+<section><h2>1 · 准备与标注</h2>
+<p>使用 settings.toml 中的 Linux 仓库和时间范围。首次扫描后集合固定；重新打开本入口会恢复进度。</p>
+<button data-action="prepare" class="primary">准备候选 / 恢复项目</button>
+<button data-action="retrain">重算排序（恢复训练失败时使用）</button>
+<p id="training-hint"></p>
+<details><summary>标注口径与操作说明</summary>
+<p>相关：材料具体支持纵向语义失配（公共功能与架构/平台实现对能力、数据布局或执行语义的预期不一致），或横向回归（为架构 A 修改共享行为，导致架构 B 回归）。两者任一成立即可；不要求同时修改公共和 arch/ 目录，也不要求点名第二种架构。问题可以涉及正确性、安全或性能。仅出现架构名不足以判断相关。无法确定时请选“不确定”，不要强行归为负例。</p>
+<p>先找少量明确正负例，再按推荐顺序标注；每隔数条穿插随机探索。训练只使用人工确定的正负标签。排序文本为提交标题、正文与路径；完整 diff 可在下方查看。分数不代表准确率。</p>
+<p>训练目标是阅读条数，不保证模型已充分训练。阈值检查不参与训练；抽样复核不展示模型结论。历史记录可以改判，冻结后不能修改训练标签。</p></details>
+<div><label>当前队列 <select id="role"><option value="train">训练标注</option><option value="validation">阈值检查</option><option value="audit">抽样盲审</option></select></label>
+<button id="next">下一条</button><button id="history">历史 / 改判</button></div>
+<details id="seed-search"><summary>查找已知案例（仅训练阶段）</summary><input id="query" placeholder="标题关键词或 hash"><button id="search">查找</button><div id="search-results"></div></details>
+<div id="history-results"></div><p id="queue-hint"></p>
+<article id="record" class="hidden"><h3 id="subject"></h3><p id="identity" class="muted"></p><a id="commit-link" target="_blank" rel="noreferrer">打开 commit 页面</a>
+<pre id="body"></pre><pre id="files"></pre><details><summary>完整 diff（无截断）</summary><pre id="diff"></pre></details>
+<textarea id="note" placeholder="简短依据、疑问或需要补充的材料"></textarea>
+<button data-label="related" class="primary">相关</button><button data-label="unrelated">不相关</button><button data-label="uncertain">不确定 / 待复核</button>
+</article></section>
+<section><h2>2 · 冻结模型与选择阈值</h2>
+<button data-action="freeze">完成训练，冻结模型并抽取阈值检查集</button>
+<p>先完成阈值检查队列，再预览阈值。低于阈值只是暂不处理；人工已确认正例直接保留，人工负例不送 LLM。</p>
+<label>相关性分数阈值 <input id="threshold" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+<button id="preview">预览规模</button><button id="select">确认并冻结本轮 LLM 清单</button><pre id="preview-result">尚未选择阈值</pre>
+</section>
+<section><h2>3 · LLM 短判断</h2>
+<p>只有点击启动才会调用付费接口。使用 [openai] 配置；预算为本轮累计上限。达到上限后提高 [review] 的预算并重启，即可续跑。不会自动只取前 500 条。</p>
+<label><input id="approve-api" type="checkbox">我确认启动模型调用，允许在配置预算内发送提交材料</label><br>
+<button id="screen" class="primary">启动 / 续跑短判断</button><button data-action="stop">停止派发 / 停止扫描</button>
+<pre id="llm-status"></pre></section>
+<section><h2>4 · 抽样复核与结果</h2>
+<p>全部短判断成功后抽样；抽样清单固定，不能反复抽取。覆盖 LLM 各类结果，并单独检查低分和正则未命中集合。复核时先独立判断。</p>
+<button data-action="sample">生成 / 恢复抽样复核集</button><button data-action="export">更新全部导出结果</button>
+<div id="audit-stats"></div>
+<p>每次标注后统计和人工标签自动刷新；下载完整 CSV 前请先点击“更新全部导出结果”。</p>
+<p><button data-download="summary.md">统计报告 Markdown</button><button data-download="results.csv">全部结果 CSV</button><button data-download="labels.csv">人工标签 CSV</button><button data-download="confirmed_related_hashes.txt">人工确认相关 hashes</button><button data-download="provisional_related_hashes.txt">LLM 待确认相关 hashes</button></p>
+<p id="output" class="muted"></p>
+</section></main><script src="/app.js"></script></body></html>

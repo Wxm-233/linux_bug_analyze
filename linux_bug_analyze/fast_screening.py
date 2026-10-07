@@ -27,7 +27,7 @@ class SharedBudget:
         self.lock=threading.RLock()
         self.stopped=threading.Event()
         self.max_requests,self.token_budget=max_requests,token_budget
-        self.data=json.loads(self.path.read_text()) if self.path.exists() else {
+        self.data=json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {
             'requests':0,'charged_tokens':0,'reported_tokens':0,'records':[]}
 
     def persist(self):
@@ -66,7 +66,7 @@ class FastScreener:
                       full_chars=full_chars,max_tokens=max_tokens,format_retries=format_retries,
                       transport_retries=transport_retries)
         p=output/'identity.json'
-        if p.exists() and json.loads(p.read_text())!=identity:
+        if p.exists() and json.loads(p.read_text(encoding='utf-8'))!=identity:
             raise ValueError('运行配置变化，请使用新输出目录')
         save(p,identity);self.identity=digest(identity)
 
@@ -82,7 +82,7 @@ class FastScreener:
         fp=digest([self.identity,asdict(c),signals,tier])
         path=self.output/'stages'/tier/(c.hash+'.json')
         if path.exists():
-            old=json.loads(path.read_text())
+            old=json.loads(path.read_text(encoding='utf-8'))
             if old.get('fingerprint')==fp:
                 parse_screen(json.dumps(old['decision']),material,max_evidence=32)
                 return old
@@ -140,15 +140,28 @@ class FastScreener:
     def run(self,commits):
         unique=list({c.hash:c for c in reversed(commits)}.values())[::-1]
         hashes=[c.hash for c in unique]
+        by_hash={c.hash:c for c in unique}
+        return self.run_hashes(hashes,by_hash.__getitem__,duplicates=len(commits)-len(unique))
+
+    def run_hashes(self,hashes,load_commit,*,duplicates=0):
+        """Load at most `workers` patches at a time, retaining the full input manifest."""
+        original_count=len(hashes)
+        hashes=list(dict.fromkeys(hashes))
+        duplicates+=original_count-len(hashes)
         p=self.output/'input.json'
-        if p.exists() and json.loads(p.read_text())!=hashes:raise ValueError('输入变化，请使用新目录')
-        save(p,hashes);results={};iterator=iter(unique)
+        if p.exists() and json.loads(p.read_text(encoding='utf-8'))!=hashes:raise ValueError('输入变化，请使用新目录')
+        save(p,hashes);results={};iterator=iter(hashes)
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
             active={}
+            def load_and_screen(h):
+                if self.budget.stopped.is_set():raise StopRun('停止派发')
+                commit=load_commit(h)
+                if commit.hash!=h:raise ValueError('加载的提交与输入清单不一致')
+                return self.screen(commit)
             def submit():
                 if self.budget.stopped.is_set():return
-                c=next(iterator,None)
-                if c is not None:active[pool.submit(self.screen,c)]=c.hash
+                h=next(iterator,None)
+                if h is not None:active[pool.submit(load_and_screen,h)]=h
             for _ in range(self.workers):submit()
             try:
                 while active:
@@ -159,7 +172,7 @@ class FastScreener:
                         except StopRun:pass
                         except Exception:
                             self.budget.stopped.set();raise
-                        self.export(hashes,results,len(commits)-len(unique))
+                        self.export(hashes,results,duplicates)
                         if h in results:
                             print(h+': '+results[h].get('decision',{}).get('relevance',results[h]['status']),flush=True)
                         submit()
@@ -170,18 +183,22 @@ class FastScreener:
                 pool.shutdown(wait=True)
                 for h in hashes:
                     p=self.output/'results'/(h+'.json')
-                    if p.exists():results[h]=json.loads(p.read_text())
-                self.export(hashes,results,len(commits)-len(unique))
+                    if p.exists():results[h]=json.loads(p.read_text(encoding='utf-8'))
+                self.export(hashes,results,duplicates)
         return results
 
     def export(self,hashes,results,duplicates):
-        counts={k:0 for k in ('related','uncertain','unrelated')};selected=[];pending=[]
+        counts={k:0 for k in ('related','uncertain','unrelated')};selected=[];pending=[];failed=0
         for h in hashes:
             r=results.get(h)
-            if not r or r['status']!='success':pending.append(h);continue
+            if not r or r['status']!='success':
+                pending.append(h)
+                failed+=int(r is not None)
+                continue
             d=r['decision'];counts[d['relevance']]+=1
             if d['relevance']!='unrelated' or d['needs_review']:selected.append(h)
         write_text_atomic(self.output/'selected_hashes.txt',''.join(h+'\n' for h in selected))
         save(self.output/'checkpoint.json',dict(pending=pending,selected=selected))
         save(self.output/'summary.json',dict(total=len(hashes),counts=counts,pending=len(pending),
+            failed=failed,unprocessed=len(pending)-failed,
             duplicates_removed=duplicates,status='stopped' if self.budget.stopped.is_set() else 'completed' if not pending else 'partial'))

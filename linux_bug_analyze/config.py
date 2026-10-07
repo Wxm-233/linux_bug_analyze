@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .hash_filter import DEFAULT_CROSS_ARCH_INCLUDE
+from .review_config import ReviewSettings, parse_review_settings
 
 try:
     import tomllib
@@ -114,6 +115,7 @@ class FileSettings:
     cve_source: CveSourceSettings = field(default_factory=CveSourceSettings)
     evidence: EvidenceSettings = field(default_factory=EvidenceSettings)
     result_summary: ResultSummarySettings = field(default_factory=ResultSummarySettings)
+    review: ReviewSettings = field(default_factory=ReviewSettings)
 
 
 _ROOT_KEYS = {
@@ -134,6 +136,7 @@ _ROOT_KEYS = {
     "cve_source",
     "evidence",
     "result_summary",
+    "review",
 }
 _OPENAI_KEYS = {"api_key_file", "base_url", "model", "reasoning_effort", "thinking"}
 _HASH_FILTER_KEYS = {
@@ -339,7 +342,12 @@ def load_settings(path: Path, *, required: bool = False) -> FileSettings:
         )
 
     base_dir = source.parent
+    try:
+        review = parse_review_settings(data.get("review", {}), base_dir)
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
     return FileSettings(
+        review=review,
         source=source,
         linux_dir=_read_path(data, "linux_dir", base_dir),
         hashes_file=_read_path(data, "hashes_file", base_dir),
