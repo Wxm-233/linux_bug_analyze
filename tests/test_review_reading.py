@@ -5,13 +5,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
 from unittest import TestCase
+from unittest.mock import patch
 
 from linux_bug_analyze.config import FileSettings
 from linux_bug_analyze.models import CommitInfo
 from linux_bug_analyze.review_config import ReviewSettings, parse_review_settings
 from linux_bug_analyze.review_reading import ReadingSummarizer
 from linux_bug_analyze.review_workflow import ReviewWorkflow
-from linux_bug_analyze.review_prefetch import ReadingPrefetch
+from linux_bug_analyze.review_prefetch import ReadingPrefetch, retry_delay, retryable
 from linux_bug_analyze.review_web import ReviewApplication
 from linux_bug_analyze.fast_screening import digest
 from linux_bug_analyze.screening import StopRun
@@ -75,12 +76,45 @@ class ReadingTests(TestCase):
         self.assertTrue(result['material_truncated'])
 
     def test_summary_configuration_validation(self):
-        for data in ({'summary_max_requests':0},{'summary_token_budget':True},{'summary_diff_chars':-1}):
+        for data in ({'summary_max_requests':0},{'summary_token_budget':True},{'summary_diff_chars':-1},
+                     {'summary_retries':-1},{'summary_retries':True},{'summary_retries':11}):
             with self.assertRaises(ValueError):parse_review_settings(data,self.path)
+        self.assertEqual(parse_review_settings({'summary_retries':0},self.path).summary_retries,0)
+
+    def test_json_wrappers_and_strict_evidence(self):
+        text=response().choices[0].message.content
+        for wrapped in (text,'\ufeff'+text,'```\n'+text+'\n```','```JSON\r\n'+text+'\r\n```'):
+            self.assertEqual(ReadingSummarizer.parse(wrapped,['source'])['evidence_ids'],[1])
+        for ids in ([1,1],['1'],[True],[0],[2]):
+            value=json.loads(text);value['evidence_ids']=ids
+            with self.assertRaisesRegex(ValueError,'evidence_ids'):
+                ReadingSummarizer.parse(json.dumps(value),['source'])
+
+    def test_specific_diagnostics_persist_without_raw_exception(self):
+        for reply,reason in [(response('broken'),'JSON'),(response(finish='length'),'token'),
+                             (NS(choices=[],usage=None),'choices')]:
+            with self.assertRaisesRegex(ValueError,reason):
+                self.summarizer().generate(self.commit,lambda:NS(chat=NS(completions=NS(create=lambda **kw:reply))))
+            usage=json.loads((self.path/'usage.json').read_text(encoding='utf-8'))
+            self.assertIn(reason,usage['records'][-1]['error_reason'])
+
+    def test_retry_after_and_permanent_quota(self):
+        exc=RuntimeError('private');exc.status_code=429
+        exc.response=NS(headers={'retry-after':'12'})
+        self.assertGreaterEqual(retry_delay(exc,1),12)
+        exc.response.headers['retry-after']='120'
+        self.assertIsNone(retry_delay(exc,1))
+        exc.response.headers['retry-after']='invalid'
+        self.assertGreaterEqual(retry_delay(exc,1),2)
+        self.assertTrue(retryable(exc))
+        exc.code='insufficient_quota'
+        self.assertFalse(retryable(exc))
 
 
 class AutoReadingTests(TestCase):
     def setUp(self):
+        self.delay_patch=patch('linux_bug_analyze.review_prefetch.retry_delay',return_value=0)
+        self.delay_patch.start();self.addCleanup(self.delay_patch.stop)
         self.tmp=TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
         settings=FileSettings(linux_dir=self.root,model='test',review=ReviewSettings(
@@ -172,6 +206,81 @@ class AutoReadingTests(TestCase):
         text=''.join(p.read_text(encoding='utf-8') for p in (self.w.output/'reading_summaries').rglob('*.json'))
         self.assertNotIn('secret-test-token',text)
         self.assertEqual(self.w.store.labels('train'),{})
+        usage=json.loads((self.w.output/'reading_summaries'/'usage.json').read_text(encoding='utf-8'))
+        self.assertEqual(usage['requests'],1)
+
+    def test_format_retry_recovers_with_feedback_and_each_attempt_is_charged(self):
+        def create(**kw):
+            self.calls.append(kw)
+            return response('not JSON') if len(self.calls)==1 else response()
+        self.client.chat.completions.create=create
+        self.prefetch.request('train',['1111','2222']);self.wait_done()
+        self.assertEqual(len(self.calls),3)
+        self.assertIn('上次输出未通过校验',self.calls[1]['messages'][1]['content'])
+        self.assertIsNone(self.prefetch.snapshot()['error'])
+        self.assertEqual(self.prefetch.snapshot()['completed'],['1111','2222'])
+        usage=json.loads((self.w.output/'reading_summaries'/'usage.json').read_text(encoding='utf-8'))
+        self.assertEqual(usage['requests'],3)
+        self.assertEqual(usage['charged_tokens'],300)
+
+    def test_retry_limit_skips_failed_article_but_continues_next(self):
+        def create(**kw):
+            self.calls.append(kw)
+            return response('bad') if 'hash: 1111' in kw['messages'][1]['content'] else response()
+        self.client.chat.completions.create=create
+        self.prefetch.request('train',['1111','2222']);self.wait_done()
+        self.assertEqual(len(self.calls),5) # Initial + 3 retries, then next article.
+        state=self.prefetch.snapshot()
+        self.assertEqual(state['completed'],['2222'])
+        self.assertIn('JSON',state['error'])
+        self.assertIn('3 次自动重试',state['error'])
+        self.prefetch.request('train',['1111','2222']);self.wait_done()
+        self.assertEqual(len(self.calls),5) # Polling/repeated window must not restart failures.
+
+    def test_transient_error_retries_without_exposing_credentials(self):
+        def create(**kw):
+            self.calls.append(kw)
+            if len(self.calls)==1:
+                exc=RuntimeError('secret-api-token');exc.status_code=503;raise exc
+            return response()
+        self.client.chat.completions.create=create
+        self.prefetch.request('train',['1111']);self.wait_done()
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.prefetch.snapshot()['completed'],['1111'])
+        self.assertNotIn('secret-api-token',(self.w.output/'reading_summaries'/'usage.json').read_text())
+
+    def test_retry_stops_at_budget(self):
+        self.w.options=replace(self.w.options,summary_max_requests=1)
+        def create(**kw):self.calls.append(kw);return response('bad')
+        self.client.chat.completions.create=create
+        self.prefetch.request('train',['1111','2222']);self.wait_done()
+        self.assertEqual(len(self.calls),1)
+        self.assertIn('预算',self.prefetch.snapshot()['error'])
+
+    def test_disable_interrupts_retry_wait(self):
+        def create(**kw):self.calls.append(kw);return response('bad')
+        self.client.chat.completions.create=create
+        with patch('linux_bug_analyze.review_prefetch.retry_delay',return_value=30):
+            self.prefetch.request('train',['1111','2222'])
+            with self.prefetch.condition:
+                self.assertTrue(self.prefetch.condition.wait_for(lambda:self.prefetch.retry is not None,timeout=3))
+                self.assertEqual(self.prefetch.snapshot()['retry']['attempt'],1)
+            self.prefetch.request();self.wait_done()
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.prefetch.snapshot()['completed'],[])
+
+    def test_navigation_interrupts_retry_wait(self):
+        def create(**kw):
+            self.calls.append(kw)
+            return response('bad') if len(self.calls)==1 else response()
+        self.client.chat.completions.create=create
+        with patch('linux_bug_analyze.review_prefetch.retry_delay',return_value=30):
+            self.prefetch.request('train',['1111','2222'])
+            with self.prefetch.condition:
+                self.assertTrue(self.prefetch.condition.wait_for(lambda:self.prefetch.retry is not None,timeout=3))
+            self.prefetch.request('train',['3333']);self.wait_done()
+        self.assertEqual(len(self.calls),2)
+        self.assertEqual(self.prefetch.snapshot()['completed'],['3333'])
 
     def block_first_request(self):
         entered,release=threading.Event(),threading.Event()

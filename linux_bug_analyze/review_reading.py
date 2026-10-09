@@ -1,5 +1,6 @@
 """Cached, evidence-grounded reading aids, independent of screening decisions."""
 import json
+import re
 
 from .fast_screening import SharedBudget, digest, save
 from .git_repository import truncate_diff
@@ -13,6 +14,10 @@ TASK = '''帮助人工快速读懂这条 commit，不替人工做研究相关性
 不输出相关/不相关标签、置信度或筛选建议；不猜测涉及的架构、不编造邮件讨论和漏洞背景。
 仅输出 JSON：{"summary":"约150–300字的摘要","evidence_ids":[1],"limitations":"证据不足或不确定之处；没有则为空字符串"}。
 evidence_ids 选择支持摘要的1–6个材料行号，不复制或编造引文。'''
+
+
+class ReadingFormatError(ValueError):
+    """Locally generated validation reason, safe to show without API credentials."""
 
 
 class ReadingSummarizer:
@@ -36,19 +41,23 @@ class ReadingSummarizer:
 
     @staticmethod
     def parse(text, lines):
-        text = text.strip()
-        if text.startswith('```json\n') and text.endswith('```'):
-            text = text[8:-3].strip()
-        value = json.loads(text)
+        text = text.strip().lstrip('\ufeff').strip()
+        wrapped = re.fullmatch(r'```(?:json)?\s*\n(.*?)\n\s*```', text, re.S | re.I)
+        if wrapped:
+            text = wrapped.group(1)
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ReadingFormatError(f'摘要不是有效 JSON（第 {exc.lineno} 行，第 {exc.colno} 列）') from exc
         if not isinstance(value, dict) or set(value) != {'summary','evidence_ids','limitations'}:
-            raise ValueError('摘要字段无效')
+            raise ReadingFormatError('摘要字段无效：必须包含 summary、evidence_ids、limitations 三个字段')
         if not isinstance(value['summary'], str) or not 1 <= len(value['summary'].strip()) <= 1600:
-            raise ValueError('摘要长度无效')
+            raise ReadingFormatError('summary 必须为非空字符串且不超过 1600 字符')
         if not isinstance(value['limitations'], str) or len(value['limitations']) > 800:
-            raise ValueError('摘要限制说明无效')
+            raise ReadingFormatError('limitations 必须为字符串且不超过 800 字符')
         ids = value['evidence_ids']
         if not isinstance(ids, list) or not 1 <= len(ids) <= 6 or any(type(i) is not int or not 1 <= i <= len(lines) for i in ids) or len(set(ids)) != len(ids):
-            raise ValueError('摘要证据编号无效')
+            raise ReadingFormatError(f'evidence_ids 必须为 1–6 个不重复整数，范围为 1–{len(lines)}')
         return value
 
     def cached(self, commit):
@@ -64,12 +73,15 @@ class ReadingSummarizer:
                 pass
         return None
 
-    def generate(self, commit, client_factory):
+    def generate(self, commit, client_factory, *, correction=None):
         cached = self.cached(commit)
         if cached:
             return cached
         fingerprint, lines, limited = self.material(commit)
         prompt = TASK + '\n材料：\n' + '\n'.join(f'[{i}] {line}' for i,line in enumerate(lines,1))
+        if correction:
+            prompt += ('\n\n上次输出未通过校验：' + correction +
+                       '\n请重新生成完整 JSON，不要加说明或代码围栏。压缩摘要措辞，证据仅列材料中存在的整数行号。')
         reservation = self.budget.reserve(len((SYSTEM+prompt).encode('utf-8')) + self.max_tokens + 1024,
                                           commit.hash, 'reading_summary')
         total = None
@@ -79,12 +91,21 @@ class ReadingSummarizer:
                 messages=[{'role':'system','content':SYSTEM},{'role':'user','content':prompt}],
                 max_tokens=self.max_tokens, timeout=120, extra_body={'thinking':{'type':'disabled'}})
             total = getattr(getattr(response, 'usage', None), 'total_tokens', None)
-            choice = response.choices[0]
+            choices = getattr(response, 'choices', None)
+            if not choices:
+                raise ReadingFormatError('模型响应缺少 choices')
+            choice = choices[0]
+            finish = getattr(choice, 'finish_reason', None)
+            text = getattr(getattr(choice, 'message', None), 'content', None)
             save(self.output / 'responses' / f'{reservation["id"]}.json', dict(hash=commit.hash,
-                 fingerprint=fingerprint, finish_reason=choice.finish_reason, content=choice.message.content))
-            if choice.finish_reason != 'stop' or not isinstance(choice.message.content, str):
-                raise ValueError('摘要未完整返回')
-            content = self.parse(choice.message.content, lines)
+                 fingerprint=fingerprint, finish_reason=finish, content=text))
+            if finish == 'length':
+                raise ReadingFormatError('摘要被输出 token 上限截断，请缩短摘要与限制说明')
+            if finish != 'stop':
+                raise ReadingFormatError('模型未正常结束输出（finish_reason 不是 stop）')
+            if not isinstance(text, str) or not text.strip():
+                raise ReadingFormatError('模型返回空摘要或非文本内容')
+            content = self.parse(text, lines)
             result = dict(hash=commit.hash, fingerprint=fingerprint, model=self.model,
                           content=content, material_truncated=limited,
                           evidence=[dict(line=i, text=lines[i-1]) for i in content['evidence_ids']])
@@ -93,6 +114,8 @@ class ReadingSummarizer:
             return result
         except Exception as exc:
             status['error_type'] = type(exc).__name__
+            if isinstance(exc, ReadingFormatError):
+                status['error_reason'] = str(exc)
             status['http_status'] = getattr(exc, 'status_code', None)
             raise
         finally:

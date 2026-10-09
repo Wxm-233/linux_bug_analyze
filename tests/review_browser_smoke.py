@@ -37,7 +37,10 @@ def main():
         def create(**kw):calls.append(kw);return response('related')
         workflow.screen=lambda: original_screen(NS(chat=NS(completions=NS(create=create))))
         reading_calls=[]
-        def create_reading(**kw):reading_calls.append(kw);return reading_response()
+        def create_reading(**kw):
+            reading_calls.append(kw)
+            # Current article recovers once; the next exhausts its automatic retries.
+            return reading_response('bad JSON') if len(reading_calls) in (1,3,4,5,6) else reading_response()
         workflow.reading_client=lambda:NS(chat=NS(completions=NS(create=create_reading)))
         app=ReviewApplication(workflow);server=make_server(app,0)
         thread=threading.Thread(target=server.serve_forever);thread.start()
@@ -72,12 +75,14 @@ def main():
                 expect(page.locator('#reading-summary')).to_contain_text('提交修改了内存访问方式',timeout=30000)
                 expect(page.locator('#identity')).to_have_text(current_hash)
                 expect(page.locator('#note')).to_have_value('保留人工备注')
-                expect(page.locator('#reading-state')).to_contain_text('已就绪',timeout=30000)
-                assert len(reading_calls)==2
+                expect(page.locator('#reading-state')).to_contain_text('已用完 3 次自动重试',timeout=30000)
+                expect(page.locator('#auto-summary')).to_be_checked()
+                expect(page.locator('#note')).to_have_value('保留人工备注')
+                assert len(reading_calls)==6
                 page.locator('#auto-summary').uncheck()
                 page.locator('#auto-summary').check()
                 expect(page.locator('#reading-state')).to_contain_text('已就绪',timeout=30000)
-                assert len(reading_calls)==2, 'Cache must avoid repeat API'
+                assert len(reading_calls)==7, 'Only failed next article should be requested again'
                 # Hold an idle status response across a label submission. It must not
                 # consume the completion transition or re-enable the old article.
                 page.wait_for_function('() => !refreshing && !submitting')

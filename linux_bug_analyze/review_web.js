@@ -68,14 +68,14 @@ function renderReading(summary) {
   el('reading-summary').textContent = summary ? `${summary.content.summary}\n\n${summary.content.limitations ? '局限：'+summary.content.limitations+'\n' : ''}${summary.material_truncated ? '注意：摘要输入材料已截断，完整 diff 仍可在下方查看。\n' : ''}\n证据：\n${summary.evidence.map(e=>'['+e.line+'] '+e.text).join('\n')}\n\n模型：${summary.model}` : '尚无摘要；开启自动生成后会在后台处理，也可先阅读原始材料。';
 }
 async function refreshReading(state) {
-  if (state.error && state.targets[0] === current?.hash && state.role === el('role').value) {
-    readingFailure = state.error;
-    el('auto-summary').checked = false;
-    await syncReading();
-  }
-  el('reading-state').textContent = readingFailure || (el('auto-summary').checked ?
-    (state.busy ? '正在后台准备当前 / 下一篇摘要，可继续阅读和标注。' : '当前 / 下一篇摘要已就绪，或正在等待当前条目。') :
-    (state.in_flight ? '已关闭自动摘要；已发出的请求正在完成并缓存。' : '自动摘要未开启；已有缓存仍可查看。'));
+  const matches = state.targets[0] === current?.hash && state.role === el('role').value;
+  readingFailure = matches ? state.error || '' : '';
+  const retry = matches && state.retry;
+  const retryText = retry ? `${retry.hash.slice(0,12)}：${retry.reason}；自动重试 ${retry.attempt}/${retry.max_retries}（等待约 ${retry.delay} 秒后重发）。` : '';
+  el('reading-state').textContent = [readingFailure, retryText, (el('auto-summary').checked ?
+    (!matches ? '正在同步摘要任务，或等待当前条目。' : state.busy ? '正在后台准备当前 / 下一篇摘要，可继续阅读和标注。' :
+      readingFailure ? '仍可按原始材料标注；切换篇目会更新任务，关闭再开启可手动重试。' : '当前 / 下一篇摘要已就绪，或正在等待当前条目。') :
+    (state.in_flight ? '已关闭自动摘要；已发出的请求正在完成并缓存。' : '自动摘要未开启；已有缓存仍可查看。'))].filter(Boolean).join('\n');
   if (!busy && current && !current.reading_summary && state.completed.includes(current.hash)) {
     const hash=current.hash, role=el('role').value, v=recordVersion;
     const summary=await api('/api/reading-summary?hash='+hash+'&role='+role);
