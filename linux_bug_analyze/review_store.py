@@ -29,6 +29,12 @@ class ReviewStore:
                     id INTEGER PRIMARY KEY, hash TEXT, role TEXT, label TEXT, note TEXT,
                     updated TEXT);
                 CREATE INDEX IF NOT EXISTS candidates ON commits(candidate);
+                CREATE TABLE IF NOT EXISTS reading_views (
+                    hash TEXT, role TEXT, fingerprint TEXT, model TEXT, provided TEXT,
+                    PRIMARY KEY(hash,role));
+                CREATE TABLE IF NOT EXISTS reading_labels (
+                    event_id INTEGER PRIMARY KEY, hash TEXT, role TEXT, fingerprint TEXT,
+                    model TEXT, provided TEXT);
             ''')
 
     @contextmanager
@@ -85,7 +91,24 @@ class ReviewStore:
         values = (commit_hash, role, label, str(note)[:4000], timestamp)
         with self.connect() as db:
             db.execute('INSERT OR REPLACE INTO labels VALUES (?,?,?,?,?)', values)
-            db.execute('INSERT INTO events(hash,role,label,note,updated) VALUES (?,?,?,?,?)', values)
+            event = db.execute('INSERT INTO events(hash,role,label,note,updated) VALUES (?,?,?,?,?)', values)
+            db.execute('INSERT INTO reading_labels SELECT ?,hash,role,fingerprint,model,provided '
+                       'FROM reading_views WHERE hash=? AND role=?', (event.lastrowid,commit_hash,role))
+
+    def reading_provided(self, h, role, result):
+        if role not in ('train','validation','audit'):
+            raise ValueError('无效队列')
+        with self.connect() as db:
+            db.execute('INSERT OR REPLACE INTO reading_views VALUES (?,?,?,?,?)',
+                       (h,role,result['fingerprint'],result['model'],now()))
+
+    def reading_assistance(self):
+        """Only summaries supplied BEFORE the latest label count as assisted labeling."""
+        with self.connect() as db:
+            rows = db.execute('SELECT r.* FROM reading_labels r JOIN '
+                '(SELECT hash,role,MAX(id) AS latest FROM events GROUP BY hash,role) e '
+                'ON r.event_id=e.latest').fetchall()
+        return {(r['hash'],r['role']):dict(r) for r in rows}
 
     def scores(self, scores):
         with self.connect() as db:

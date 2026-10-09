@@ -22,12 +22,15 @@ class ReviewApplication:
             w.cancel.set()
             if w.runner:
                 w.runner.budget.stopped.set()
+            if w.reading_runner:
+                w.reading_runner.budget.stopped.set()
             return
         actions = {
             'prepare': w.prepare, 'freeze': w.freeze, 'screen': w.screen,
             'sample': w.sample, 'export': w.export, 'retrain': w.train,
             'label': lambda: w.label(values['hash'], values['role'], values['label'], values.get('note', '')),
             'select': lambda: w.select(values['threshold']),
+            'summarize_queue': lambda: w.summarize_queue(values['role'],include_hash=values.get('include_hash')),
         }
         if action not in actions:
             raise ValueError('未知操作')
@@ -107,19 +110,26 @@ def make_server(application, port):
                     if usage_path.exists():
                         ledger = json.loads(usage_path.read_text(encoding='utf-8'))
                         usage = {k: ledger.get(k, 0) for k in ('requests','charged_tokens','reported_tokens')}
+                    reading_usage = {}
+                    reading_path = w.output / 'reading_summaries' / 'usage.json'
+                    if reading_path.exists():
+                        ledger = json.loads(reading_path.read_text(encoding='utf-8'))
+                        reading_usage = {k:ledger.get(k,0) for k in ('requests','charged_tokens')}
                     return self.reply(dict(busy=application.busy, error=application.error,
                                            progress=w.progress, summary=w.summary(), live_llm=live,
                                            budget=dict(max_requests=w.options.max_requests,
                                                        token_budget=w.options.token_budget, **usage),
+                                           reading_budget=dict(max_requests=w.options.summary_max_requests,
+                                               token_budget=w.options.summary_token_budget, **reading_usage),
                                            configured_model=w.settings.model or 'deepseek-v4-flash'))
                 if application.busy:
                     return self.reply({'error': '任务运行中，请稍后。'}, status=409)
                 if path == '/api/next':
                     role = params.get('role', ['train'])[0]
                     h = w.next_record(role)
-                    return self.reply(w.material(h) if h else None)
+                    return self.reply(w.material(h,role) if h else None)
                 if path == '/api/material':
-                    return self.reply(w.material(params['hash'][0]))
+                    return self.reply(w.material(params['hash'][0],params.get('role',['train'])[0]))
                 if path == '/api/history':
                     return self.reply(list(w.store.labels(params.get('role', ['train'])[0]).values()))
                 if path == '/api/search':

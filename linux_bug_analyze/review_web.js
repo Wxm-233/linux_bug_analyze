@@ -2,6 +2,7 @@
 const token = location.hash.slice(1);
 const el = id => document.getElementById(id);
 let current = null, wasBusy = false, busy = false, refreshing = false, recordVersion = 0;
+let summaryReturn = null;
 async function api(path, values) {
   const response = await fetch(path, {method: values ? 'POST' : 'GET',
     headers: {'X-Review-Token': token, ...(values ? {'Content-Type': 'application/json'} : {})},
@@ -18,8 +19,11 @@ async function action(name, values = {}) {
   try {
     await api('/api/action', {action: name, ...values});
     wasBusy = true; busy = true;
-    if (name === 'freeze') el('role').value = 'validation';
-    if (name === 'sample') el('role').value = 'audit';
+    if (name === 'freeze' || name === 'sample') {
+      el('role').value = name === 'freeze' ? 'validation' : 'audit';
+      ++recordVersion;
+      showRecord(null);
+    }
     await refresh();
   }
   catch(e) { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); error(e); }
@@ -34,6 +38,8 @@ function showRecord(r) {
   el('files').textContent = r.files.join('\n');
   el('commit-link').href = r.url;
   el('note').value = '';
+  const summary = r.reading_summary;
+  el('reading-summary').textContent = summary ? `${summary.content.summary}\n\n${summary.content.limitations ? '局限：'+summary.content.limitations+'\n' : ''}${summary.material_truncated ? '注意：摘要输入材料已截断，完整 diff 仍可在下方查看。\n' : ''}\n证据：\n${summary.evidence.map(e=>'['+e.line+'] '+e.text).join('\n')}\n\n模型：${summary.model}` : '尚无摘要；请先批量生成当前队列摘要。';
 }
 async function next() {
   if (busy) return;
@@ -42,7 +48,7 @@ async function next() {
 }
 async function loadRecord(hash) {
   const requestVersion = ++recordVersion;
-  const r = await api('/api/material?hash=' + hash);
+  const r = await api('/api/material?hash=' + hash + '&role=' + el('role').value);
   if (requestVersion === recordVersion) showRecord(r);
 }
 function table(headers, rows) {
@@ -63,6 +69,7 @@ async function refresh() {
     el('progress').textContent = (busy ? '运行中 · ' : '') + r.progress;
     el('error').textContent = r.error || '';
     document.querySelectorAll('button').forEach(b => b.disabled = busy && b.dataset.action !== 'stop');
+    el('role').disabled = busy;
     el('cards').replaceChildren();
     const labeled = Object.values(s.labels.train).reduce((a,b) => a+b, 0);
     for (const [title, number] of [['已扫描',s.dataset?.scanned || 0],['正则候选',s.dataset?.candidates || 0],['训练已读',labeled],['LLM 清单',s.selected ?? '未生成'],['待复核',s.audit_total ?? '未抽样']]) {
@@ -77,6 +84,7 @@ async function refresh() {
       `累计预算计费 token ${r.budget.charged_tokens || 0}/${r.budget.token_budget}（含未知用量预留）\n` +
       (r.live_llm?.status === 'stopped' ? '本轮已停止；请检查预算/接口状态后续跑。' : '');
     el('output').textContent = '结果目录：' + s.output_dir;
+    el('reading-budget').textContent = `摘要独立累计预算：请求 ${r.reading_budget.requests || 0}/${r.reading_budget.max_requests}，token ${r.reading_budget.charged_tokens || 0}/${r.reading_budget.token_budget}。`;
     el('seed-search').classList.toggle('hidden', el('role').value !== 'train' || s.frozen);
     el('audit-stats').replaceChildren();
     if (s.audit) {
@@ -84,10 +92,16 @@ async function refresh() {
       el('audit-stats').append(table(['分层','总体','抽样','已复核','人工相关/已确定','人工不确定'], rows));
       const p=document.createElement('p'); p.textContent='本轮加权二分类准确率：' + (s.audit.weighted_binary_accuracy === null ? '暂不估计（样本未全部解决或没有二分类结果）' : (s.audit.weighted_binary_accuracy*100).toFixed(1)+'%');
       el('audit-stats').append(p);
+      const aid=document.createElement('p');aid.textContent=`其中 ${s.summary_assisted_labels.audit} 条已标注复核记录在标注前获得过 LLM 摘要。使用摘要的部分属于 LLM 辅助人工复核，不是完全独立盲审。`;el('audit-stats').append(aid);
     }
     const finished = wasBusy && !busy;
     wasBusy = busy;
-    if (finished && !r.error && s.dataset) await next();
+    if (finished && summaryReturn) {
+      const previous=summaryReturn; summaryReturn=null;
+      if (previous.hash && previous.role===el('role').value) {
+        await loadRecord(previous.hash); el('note').value=previous.note;
+      } else if (s.dataset) await next();
+    } else if (finished && !r.error && s.dataset) await next();
   } catch(e) { error(e); }
   finally { refreshing = false; }
 }
@@ -97,6 +111,11 @@ document.querySelectorAll('[data-label]').forEach(b => b.onclick=async()=>{
   await action('label', {hash:current.hash,role:el('role').value,label:b.dataset.label,note:el('note').value});
 });
 el('next').onclick=next;
+el('summarize-queue').onclick=()=>{
+  if (!confirm('将为当前人工审查队列批量生成事实摘要，使用独立摘要预算；已有缓存免费复用。确认调用模型？')) return;
+  summaryReturn={hash:current?.hash,role:el('role').value,note:el('note').value};
+  action('summarize_queue',{role:el('role').value,include_hash:current?.hash ?? null});
+};
 el('role').onchange=()=>{ el('history-results').replaceChildren(); el('search-results').replaceChildren(); showRecord(null); next(); refresh(); };
 el('preview').onclick=async()=>{try{el('preview-result').textContent=JSON.stringify(await api('/api/preview?threshold='+encodeURIComponent(el('threshold').value)),null,2);}catch(e){error(e);}};
 el('select').onclick=()=>{if(confirm('冻结后本轮不能修改阈值。确认使用当前阈值？'))action('select',{threshold:Number(el('threshold').value)});};

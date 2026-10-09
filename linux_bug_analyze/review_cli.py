@@ -39,7 +39,7 @@ def main(argv=None):
             server = make_server(app, port)
             print(f'筛选工作台：http://127.0.0.1:{port}/#{app.token}', flush=True)
             print(f'远程服务器：先在本机运行 ssh -N -L {port}:127.0.0.1:{port} 用户@服务器，再打开上述链接。', flush=True)
-            print('Ctrl+C 停止服务；标注自动保存。仅点击网页中“启动短判断”才调用 LLM。', flush=True)
+            print('Ctrl+C 停止服务；标注自动保存。批量摘要或启动短判断会调用 LLM，浏览原始材料不调用。', flush=True)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
@@ -48,6 +48,8 @@ def main(argv=None):
                 workflow.cancel.set()
                 if workflow.runner:
                     workflow.runner.budget.stopped.set()
+                if workflow.reading_runner:
+                    workflow.reading_runner.budget.stopped.set()
                 if app.thread:
                     app.thread.join()
                 server.server_close()

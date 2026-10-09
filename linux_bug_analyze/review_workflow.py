@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from .commit_source import iter_mainline_commits
-from .config import DEFAULT_API_KEY_FILE, DEFAULT_BASE_URL, DEFAULT_MODEL, resolve_api_key
+from .config import DEFAULT_API_KEY_FILE, DEFAULT_BASE_URL, DEFAULT_MODEL, resolve_api_key, ConfigurationError
 from .fast_screening import FastScreener, digest, save
 from .git_repository import GitRepository
 from .hash_filter import compile_rules, evaluate_commit, DEFAULT_CROSS_ARCH_INCLUDE
@@ -16,6 +16,8 @@ from .reporting import write_text_atomic
 from .review_audit import make_audit_plan, audit_statistics
 from .review_learning import ReviewRanker, choose_next, score_stratified_sample
 from .review_store import ReviewStore, now
+from .review_reading import ReadingSummarizer
+from .screening import StopRun
 
 
 def csv_text(rows, fields):
@@ -39,6 +41,7 @@ class ReviewWorkflow:
         self.ranker = ReviewRanker(self.options.random_seed)
         self.progress = '就绪'
         self.runner = None
+        self.reading_runner = None
         self.cancel = threading.Event()
         self.repo = GitRepository(settings.linux_dir) if settings.linux_dir else None
 
@@ -269,14 +272,91 @@ class ReviewWorkflow:
             raise ValueError('无效队列')
         return next((h for h in pool if h not in labels), None)
 
-    def material(self, h):
+    def reading_summarizer(self):
+        return ReadingSummarizer(self.output / 'reading_summaries',
+            model=self.settings.model or DEFAULT_MODEL, endpoint=self.settings.base_url or DEFAULT_BASE_URL,
+            max_requests=self.options.summary_max_requests, token_budget=self.options.summary_token_budget,
+            diff_chars=self.options.summary_diff_chars)
+
+    def reading_queue(self, role):
+        self.require_ready()
+        if role == 'train':
+            if self.store.get('frozen'):
+                return list(self.store.labels('train'))
+            labels = self.store.labels('train')
+            remaining = max(0, self.options.training_target - len(labels))
+            # Snapshot the current ranking; later feedback can change membership.
+            records = self.store.records(True)
+            chosen = []
+            simulated = dict(labels)
+            for _ in range(remaining):
+                h = choose_next(records, simulated, self.options.random_seed, self.options.exploration_every)
+                if h is None:
+                    break
+                chosen.append(h)
+                simulated[h] = {'label':'uncertain'}
+            return chosen
+        if role == 'validation':
+            return self.store.get('validation', [])
+        if role == 'audit':
+            return [r['hash'] for r in self.store.get('audit', {}).get('samples', [])]
+        raise ValueError('无效队列')
+
+    def summarize_queue(self, role, client=None, include_hash=None):
+        hashes = self.reading_queue(role)
+        if include_hash is not None and include_hash not in hashes:
+            if role != 'train' or not self.store.record(include_hash)['candidate']:
+                raise ValueError('当前例子不属于该人工队列。')
+            hashes.insert(0,include_hash)
+        if not hashes:
+            raise ValueError('当前队列为空；请先准备候选、冻结模型或生成抽样清单。')
+        runner = self.reading_summarizer()
+        self.reading_runner = runner
+        batch = dict(role=role, hashes=hashes, completed=[], failed={}, status='running')
+        path = self.output / 'reading_summaries' / f'{role}_batch.json'
+        save(path, batch)
+        def get_client():
+            nonlocal client
+            if client is None:
+                from .llm import create_openai_client
+                client = create_openai_client(resolve_api_key(None,self.settings.api_key_file or DEFAULT_API_KEY_FILE),
+                                              self.settings.base_url or DEFAULT_BASE_URL)
+            return client
+        try:
+            for i,h in enumerate(hashes):
+                if self.cancel.is_set():
+                    break
+                self.progress = f'批量摘要 {role}：{i+1}/{len(hashes)}；已有有效缓存直接复用'
+                try:
+                    runner.generate(self.repo.get_commit(h,0), get_client)
+                    batch['completed'].append(h)
+                except StopRun:
+                    break
+                except Exception as exc:
+                    # Do not persist API error messages containing credentials.
+                    batch['failed'][h] = type(exc).__name__
+                    if isinstance(exc,ConfigurationError) or not isinstance(exc,(ValueError,TypeError,AttributeError,IndexError)):
+                        break
+                save(path,batch)
+        finally:
+            batch['pending'] = [h for h in hashes if h not in batch['completed']]
+            batch['status'] = 'completed' if not batch['pending'] else 'partial'
+            save(path,batch)
+            self.reading_runner = None
+        if batch['pending']:
+            raise ValueError(f'摘要已完成 {len(batch["completed"])}/{len(hashes)}，其余尚未完成。请检查摘要预算/接口或停止状态后再次批量生成；已完成项不会重复收费。')
+
+    def material(self, h, role='train'):
         self.require_ready()
         row = self.store.record(h)
         commit = self.repo.get_commit(h, 0)
+        reading = self.reading_summarizer().cached(commit)
+        if reading:
+            self.store.reading_provided(h,role,reading)
         # No predicted label, score, stratum, or model reasoning in the blind view.
         return dict(hash=h, subject=row['subject'], body=row['body'], date=row['date'],
                     files=json.loads(row['files']), diff=commit.diff,
-                    url='https://git.kernel.org/torvalds/c/' + h)
+                    url='https://git.kernel.org/torvalds/c/' + h, reading_summary=reading)
 
     def summary(self):
         dataset = self.store.get('dataset')
@@ -290,7 +370,9 @@ class ReviewWorkflow:
             r = results.get(h)
             llm['pending' if not r else 'failed' if r['status'] != 'success' else r['decision']['relevance']] += 1
         plan = self.store.get('audit')
+        assisted = self.store.reading_assistance()
         return dict(dataset=dataset, labels=counts, frozen=bool(self.store.get('frozen')),
+                    summary_assisted_labels={role:sum(r == role for h,r in assisted) for role in labels},
                     training_target=self.options.training_target,
                     validation_total=len(self.store.get('validation', [])),
                     selected=selection['count'] if selection else None,
@@ -324,8 +406,13 @@ class ReviewWorkflow:
                   'llm_status','llm_label','needs_review','reason']
         if full:
             write_text_atomic(self.output / 'results.csv', csv_text(rows, fields))
-        all_labels = [row for role in ('train','validation','audit') for row in self.store.labels(role).values()]
-        write_text_atomic(self.output / 'labels.csv', csv_text(all_labels, ['hash','role','label','note','updated']))
+        assistance = self.store.reading_assistance()
+        all_labels = [{**row, 'summary_assisted': (row['hash'],role) in assistance,
+                      'summary_model': assistance.get((row['hash'],role),{}).get('model',''),
+                      'summary_fingerprint': assistance.get((row['hash'],role),{}).get('fingerprint','')}
+                     for role in ('train','validation','audit') for row in self.store.labels(role).values()]
+        write_text_atomic(self.output / 'labels.csv', csv_text(all_labels,
+            ['hash','role','label','note','updated','summary_assisted','summary_model','summary_fingerprint']))
         write_text_atomic(self.output / 'label_events.csv', csv_text(self.store.events(), ['id','hash','role','label','note','updated']))
         for name, hashes in (('confirmed_related_hashes.txt', confirmed), ('provisional_related_hashes.txt', provisional)):
             write_text_atomic(self.output / name, ''.join(h + '\n' for h in hashes))
@@ -338,6 +425,8 @@ class ReviewWorkflow:
                  '', '## 人工标注', '', '| 阶段 | 相关 | 不相关 | 不确定 |', '|---|---:|---:|---:|']
         for role, c in summary['labels'].items():
             lines.append(f'| {role} | {c["related"]} | {c["unrelated"]} | {c["uncertain"]} |')
+        lines += ['', f'标注前已提供 LLM 摘要的记录数：{summary["summary_assisted_labels"]}。',
+                  '摘要只辅助阅读，不自动生成标签。使用摘要的复核属于 LLM 辅助人工复核，不能称为完全独立盲审；此计数记录页面曾提供摘要，不证明实际阅读。']
         if summary['audit']:
             stats = summary['audit']
             lines += ['', '## 抽样复核', '', '| 分层 | 总体 | 抽样 | 已复核 | 人工相关/可确定 | 相关比例的 95% Wilson 区间 |',

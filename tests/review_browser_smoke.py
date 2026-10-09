@@ -17,6 +17,7 @@ from linux_bug_analyze.review_workflow import ReviewWorkflow
 from linux_bug_analyze.review_web import ReviewApplication, make_server
 from tests.test_commit_source import _git, _commit
 from tests.test_screening import response
+from tests.test_review_reading import response as reading_response
 
 
 def main():
@@ -35,6 +36,11 @@ def main():
         calls=[]
         def create(**kw):calls.append(kw);return response('related')
         workflow.screen=lambda: original_screen(NS(chat=NS(completions=NS(create=create))))
+        original_summarize=workflow.summarize_queue
+        reading_calls=[]
+        def create_reading(**kw):reading_calls.append(kw);return reading_response()
+        workflow.summarize_queue=lambda role,include_hash=None: original_summarize(role,
+            NS(chat=NS(completions=NS(create=create_reading))),include_hash=include_hash)
         app=ReviewApplication(workflow);server=make_server(app,0)
         thread=threading.Thread(target=server.serve_forever);thread.start()
         try:
@@ -42,6 +48,7 @@ def main():
                 browser=p.chromium.launch(channel=os.environ.get('PLAYWRIGHT_CHANNEL','chrome'),headless=True)
                 page=browser.new_page(viewport={'width':1280,'height':900})
                 errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+                page.on('dialog',lambda dialog:dialog.accept())
                 page.goto(f'http://127.0.0.1:{server.server_port}/#{app.token}')
                 page.locator('[data-action="prepare"]').click()
                 expect(page.locator('#record')).to_be_visible(timeout=30000)
@@ -58,6 +65,19 @@ def main():
                     expect(page.locator('#error')).to_have_text('')
                 page.locator('[data-action="freeze"]').click()
                 expect(page.locator('#role')).to_have_value('validation')
+                expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                assert reading_calls == [], 'No summary API before explicit batch action'
+                expect(page.locator('#record')).to_be_visible(timeout=30000)
+                current_hash=page.locator('#identity').inner_text()
+                page.locator('#note').fill('保留人工备注')
+                page.locator('#summarize-queue').click()
+                expect(page.locator('#reading-summary')).to_contain_text('提交修改了内存访问方式',timeout=30000)
+                expect(page.locator('#identity')).to_have_text(current_hash)
+                expect(page.locator('#note')).to_have_value('保留人工备注')
+                assert len(reading_calls)==2
+                page.locator('#summarize-queue').click()
+                expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
+                assert len(reading_calls)==2, 'Batch cache must avoid repeat API'
                 for _ in range(2):
                     expect(page.locator('#record')).to_be_visible(timeout=30000)
                     page.locator('[data-label="unrelated"]').click()
@@ -65,7 +85,6 @@ def main():
                 page.locator('#threshold').fill('0')
                 page.locator('#preview').click()
                 expect(page.locator('#preview-result')).to_contain_text('"count": 3')
-                page.on('dialog',lambda dialog:dialog.accept())
                 page.locator('#select').click()
                 expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
                 assert calls == [], 'No LLM calls before explicit confirmation'
@@ -87,6 +106,7 @@ def main():
                 assert download.value.suggested_filename == 'summary.md'
                 assert not errors, errors
                 assert len(calls)==3
+                assert workflow.summary()['summary_assisted_labels']['validation']==2
                 browser.close()
                 print('Browser smoke passed: prepare -> seeds -> freeze -> validation -> threshold -> mock LLM -> blind audit -> download.')
         finally:

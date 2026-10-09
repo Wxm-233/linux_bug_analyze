@@ -18,6 +18,9 @@ class ReviewSettings:
     max_requests: int = 100
     token_budget: int = 2_000_000
     workers: int = 4
+    summary_max_requests: int = 500
+    summary_token_budget: int = 4_000_000
+    summary_diff_chars: int = 12000
 
 
 def parse_review_settings(data, base_dir):
