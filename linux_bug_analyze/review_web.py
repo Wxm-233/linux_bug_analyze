@@ -1,10 +1,11 @@
-"""Loopback-only workbench. One writer, token authentication, no shell execution."""
+"""Loopback workbench: one foreground job and a bounded background summary worker."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import secrets
 import threading
 from urllib.parse import urlsplit, parse_qs
+from .review_prefetch import ReadingPrefetch
 
 
 class ReviewApplication:
@@ -15,22 +16,32 @@ class ReviewApplication:
         self.thread = None
         self.busy = False
         self.error = None
+        self.reading = ReadingPrefetch(workflow)
 
     def dispatch(self, action, values):
         w = self.workflow
+        if action == 'auto_summary':
+            with self.lock:
+                h = values.get('hash')
+                if h is None:
+                    self.reading.request()
+                elif self.busy:
+                    raise ValueError('排序正在更新，请稍后重试')
+                else:
+                    role = values['role']
+                    self.reading.request(role,w.reading_window(role,h))
+            return
         if action == 'stop':
             w.cancel.set()
             if w.runner:
                 w.runner.budget.stopped.set()
-            if w.reading_runner:
-                w.reading_runner.budget.stopped.set()
+            self.reading.request()
             return
         actions = {
             'prepare': w.prepare, 'freeze': w.freeze, 'screen': w.screen,
             'sample': w.sample, 'export': w.export, 'retrain': w.train,
             'label': lambda: w.label(values['hash'], values['role'], values['label'], values.get('note', '')),
             'select': lambda: w.select(values['threshold']),
-            'summarize_queue': lambda: w.summarize_queue(values['role'],include_hash=values.get('include_hash')),
         }
         if action not in actions:
             raise ValueError('未知操作')
@@ -38,6 +49,7 @@ class ReviewApplication:
             if self.busy:
                 raise ValueError('已有任务运行，请等待或停止 LLM 派发。')
             self.busy = True
+            self.reading.request()  # Discard stale queued prefetch before a label changes the ranking.
             self.error = None
             w.cancel.clear()
             w.progress = '正在执行：' + action
@@ -117,6 +129,7 @@ def make_server(application, port):
                         reading_usage = {k:ledger.get(k,0) for k in ('requests','charged_tokens')}
                     return self.reply(dict(busy=application.busy, error=application.error,
                                            progress=w.progress, summary=w.summary(), live_llm=live,
+                                           reading=application.reading.snapshot(),
                                            budget=dict(max_requests=w.options.max_requests,
                                                        token_budget=w.options.token_budget, **usage),
                                            reading_budget=dict(max_requests=w.options.summary_max_requests,
@@ -130,6 +143,8 @@ def make_server(application, port):
                     return self.reply(w.material(h,role) if h else None)
                 if path == '/api/material':
                     return self.reply(w.material(params['hash'][0],params.get('role',['train'])[0]))
+                if path == '/api/reading-summary':
+                    return self.reply(w.reading_summary(params['hash'][0],params['role'][0]))
                 if path == '/api/history':
                     return self.reply(list(w.store.labels(params.get('role', ['train'])[0]).values()))
                 if path == '/api/search':

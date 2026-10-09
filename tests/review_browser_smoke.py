@@ -36,11 +36,9 @@ def main():
         calls=[]
         def create(**kw):calls.append(kw);return response('related')
         workflow.screen=lambda: original_screen(NS(chat=NS(completions=NS(create=create))))
-        original_summarize=workflow.summarize_queue
         reading_calls=[]
         def create_reading(**kw):reading_calls.append(kw);return reading_response()
-        workflow.summarize_queue=lambda role,include_hash=None: original_summarize(role,
-            NS(chat=NS(completions=NS(create=create_reading))),include_hash=include_hash)
+        workflow.reading_client=lambda:NS(chat=NS(completions=NS(create=create_reading)))
         app=ReviewApplication(workflow);server=make_server(app,0)
         thread=threading.Thread(target=server.serve_forever);thread.start()
         try:
@@ -66,23 +64,46 @@ def main():
                 page.locator('[data-action="freeze"]').click()
                 expect(page.locator('#role')).to_have_value('validation')
                 expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
-                assert reading_calls == [], 'No summary API before explicit batch action'
+                assert reading_calls == [], 'No summary API before opt-in'
                 expect(page.locator('#record')).to_be_visible(timeout=30000)
                 current_hash=page.locator('#identity').inner_text()
                 page.locator('#note').fill('保留人工备注')
-                page.locator('#summarize-queue').click()
+                page.locator('#auto-summary').check()
                 expect(page.locator('#reading-summary')).to_contain_text('提交修改了内存访问方式',timeout=30000)
                 expect(page.locator('#identity')).to_have_text(current_hash)
                 expect(page.locator('#note')).to_have_value('保留人工备注')
+                expect(page.locator('#reading-state')).to_contain_text('已就绪',timeout=30000)
                 assert len(reading_calls)==2
-                page.locator('#summarize-queue').click()
-                expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
-                assert len(reading_calls)==2, 'Batch cache must avoid repeat API'
-                for _ in range(2):
+                page.locator('#auto-summary').uncheck()
+                page.locator('#auto-summary').check()
+                expect(page.locator('#reading-state')).to_contain_text('已就绪',timeout=30000)
+                assert len(reading_calls)==2, 'Cache must avoid repeat API'
+                # Hold an idle status response across a label submission. It must not
+                # consume the completion transition or re-enable the old article.
+                page.wait_for_function('() => !refreshing && !submitting')
+                page.evaluate('''() => {
+                    const originalFetch = window.fetch;
+                    let hold = true;
+                    window.fetch = async (...args) => {
+                        const response = await originalFetch(...args);
+                        if (hold && args[0] === '/api/status') {
+                            hold = false;
+                            window.statusHeld = true;
+                            await new Promise(resolve => window.releaseStatus = resolve);
+                        }
+                        return response;
+                    };
+                    void refresh();
+                }''')
+                page.wait_for_function('() => window.statusHeld')
+                for i in range(2):
                     expect(page.locator('#record')).to_be_visible(timeout=30000)
                     page.locator('[data-label="unrelated"]').click()
+                    if i == 0:
+                        page.evaluate('window.releaseStatus()')
                     expect(page.locator('#progress')).not_to_contain_text('运行中',timeout=30000)
                 page.locator('#threshold').fill('0')
+                page.locator('#auto-summary').uncheck()
                 page.locator('#preview').click()
                 expect(page.locator('#preview-result')).to_contain_text('"count": 3')
                 page.locator('#select').click()
@@ -110,6 +131,7 @@ def main():
                 browser.close()
                 print('Browser smoke passed: prepare -> seeds -> freeze -> validation -> threshold -> mock LLM -> blind audit -> download.')
         finally:
+            app.reading.close()
             server.shutdown();server.server_close();thread.join()
             if app.thread:app.thread.join()
 

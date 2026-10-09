@@ -1,5 +1,6 @@
 from dataclasses import replace
 import json
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
@@ -10,6 +11,9 @@ from linux_bug_analyze.models import CommitInfo
 from linux_bug_analyze.review_config import ReviewSettings, parse_review_settings
 from linux_bug_analyze.review_reading import ReadingSummarizer
 from linux_bug_analyze.review_workflow import ReviewWorkflow
+from linux_bug_analyze.review_prefetch import ReadingPrefetch
+from linux_bug_analyze.review_web import ReviewApplication
+from linux_bug_analyze.fast_screening import digest
 from linux_bug_analyze.screening import StopRun
 
 
@@ -75,7 +79,7 @@ class ReadingTests(TestCase):
             with self.assertRaises(ValueError):parse_review_settings(data,self.path)
 
 
-class BatchReadingTests(TestCase):
+class AutoReadingTests(TestCase):
     def setUp(self):
         self.tmp=TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
@@ -91,29 +95,44 @@ class BatchReadingTests(TestCase):
         self.calls=[]
         def create(**kw):self.calls.append(kw);return response()
         self.client=NS(chat=NS(completions=NS(create=create)))
+        self.prefetch=ReadingPrefetch(self.w,lambda:self.client)
+        self.addCleanup(self.prefetch.close)
 
-    def test_training_only_remaining_target_batch_and_resume(self):
-        self.w.summarize_queue('train',self.client)
+    def wait_done(self):
+        with self.prefetch.condition:
+            self.assertTrue(self.prefetch.condition.wait_for(
+                lambda:not self.prefetch.pending and not self.prefetch.in_flight,timeout=5))
+
+    def test_only_current_and_next_and_cache_reuse(self):
+        self.assertEqual(self.calls,[])
+        hashes=self.w.reading_window('train','1111')
+        self.assertEqual(len(hashes),2)
+        self.assertEqual(hashes[0],'1111')
+        self.prefetch.request('train',hashes);self.wait_done()
         self.assertEqual(len(self.calls),2)
-        self.w.summarize_queue('train',self.client)
+        self.prefetch.request()
+        self.prefetch.request('train',hashes);self.wait_done()
         self.assertEqual(len(self.calls),2)
         self.assertEqual(self.w.store.labels('train'),{})
         self.assertFalse((self.w.output/'llm').exists())
         self.assertEqual(self.w.store.reading_assistance(),{})
 
-    def test_manually_opened_seed_is_also_included(self):
-        selected=set(self.w.reading_queue('train'))
-        h=next(h for h in self.commits if h not in selected)
-        self.w.summarize_queue('train',self.client,include_hash=h)
-        self.assertEqual(len(self.calls),3)
-        self.assertIsNotNone(self.w.material(h)['reading_summary'])
-        with self.assertRaises(ValueError):self.w.summarize_queue('audit',self.client,include_hash=h)
+    def test_recompute_after_label_and_ranking_change(self):
+        for h,label in [('1111','related'),('2222','unrelated')]:self.w.store.label(h,'train',label)
+        self.w.store.scores({'3333':.9,'4444':.8,'5555':.1})
+        self.assertEqual(self.w.reading_window('train','3333'),['3333','4444'])
+        self.w.store.label('3333','train','related')
+        self.w.store.scores({'4444':.1,'5555':.95})
+        self.w.store.put('model_label_digest',digest(self.w.store.labels('train')))
+        self.assertEqual(self.w.next_record('train'),'5555')
+        self.assertEqual(self.w.reading_window('train','5555'),['5555','4444'])
+        self.assertNotIn('3333',self.w.reading_window('train','5555'))
 
-    def test_fixed_queue_all_processed_and_assistance_recorded_only_at_label(self):
+    def test_fixed_queue_two_only_and_assistance_recorded_only_at_label(self):
         hashes=list(self.commits)
         self.w.store.put('audit',{'samples':[{'hash':h} for h in hashes]})
-        self.w.summarize_queue('audit',self.client)
-        self.assertEqual(len(self.calls),5)
+        self.prefetch.request('audit',self.w.reading_window('audit',hashes[0]));self.wait_done()
+        self.assertEqual(len(self.calls),2)
         h=hashes[0]
         self.w.store.label(h,'audit','related')
         self.assertEqual(self.w.store.reading_assistance(),{})
@@ -127,25 +146,80 @@ class BatchReadingTests(TestCase):
         self.w.store.label(h,'train','related')
         self.assertNotIn((h,'train'),self.w.store.reading_assistance())
 
-    def test_budget_pending_and_restart_finish(self):
+    def test_budget_failure_is_not_retried_and_restart_can_resume(self):
         hashes=list(self.commits)
         self.w.store.put('validation',hashes)
-        self.w.options=replace(self.w.options,summary_max_requests=2)
-        with self.assertRaisesRegex(ValueError,'2/5'):self.w.summarize_queue('validation',self.client)
-        batch=json.loads((self.w.output/'reading_summaries/validation_batch.json').read_text(encoding='utf-8'))
-        self.assertEqual(len(batch['pending']),3)
+        self.w.options=replace(self.w.options,summary_max_requests=1)
+        window=self.w.reading_window('validation',hashes[0])
+        self.prefetch.request('validation',window);self.wait_done()
+        self.assertIn('预算',self.prefetch.snapshot()['error'])
+        self.prefetch.request('validation',window);self.wait_done()
+        self.assertEqual(len(self.calls),1)
+        self.prefetch.close()
         self.w.options=replace(self.w.options,summary_max_requests=10)
-        self.w.summarize_queue('validation',self.client)
-        self.assertEqual(len(self.calls),5)
+        self.prefetch=ReadingPrefetch(self.w,lambda:self.client)
+        self.addCleanup(self.prefetch.close)
+        self.prefetch.request('validation',window);self.wait_done()
+        self.assertEqual(len(self.calls),2)
 
-    def test_stop_and_failed_auth_do_not_mark_labels_or_expose_secret(self):
-        self.w.cancel.set()
-        with self.assertRaises(ValueError):self.w.summarize_queue('train',self.client)
-        self.assertEqual(self.calls,[])
-        self.w.cancel.clear()
+    def test_failed_auth_does_not_mark_labels_or_expose_secret(self):
         def fail(**kw):
             error=RuntimeError('secret-test-token');error.status_code=401;raise error
-        with self.assertRaises(ValueError):self.w.summarize_queue('train',NS(chat=NS(completions=NS(create=fail))))
+        self.client.chat.completions.create=fail
+        self.prefetch.request('train',['1111','2222']);self.wait_done()
+        self.assertIn('失败',self.prefetch.snapshot()['error'])
+        self.assertNotIn('secret-test-token',self.prefetch.snapshot()['error'])
         text=''.join(p.read_text(encoding='utf-8') for p in (self.w.output/'reading_summaries').rglob('*.json'))
         self.assertNotIn('secret-test-token',text)
         self.assertEqual(self.w.store.labels('train'),{})
+
+    def block_first_request(self):
+        entered,release=threading.Event(),threading.Event()
+        self.addCleanup(release.set)
+        def create(**kw):
+            self.calls.append(kw)
+            if len(self.calls)==1:
+                entered.set();release.wait(5)
+            return response()
+        self.client.chat.completions.create=create
+        self.prefetch.request('train',['1111','2222'])
+        self.assertTrue(entered.wait(3))
+        return release
+
+    def test_navigation_replaces_unstarted_next_and_does_not_duplicate_inflight(self):
+        release=self.block_first_request()
+        self.prefetch.request('train',['1111','3333'])
+        release.set();self.wait_done()
+        self.assertEqual(len(self.calls),2)
+        prompts=''.join(call['messages'][1]['content'] for call in self.calls)
+        self.assertIn('hash: 3333',prompts)
+        self.assertNotIn('hash: 2222',prompts)
+
+    def test_disable_discards_next_but_keeps_inflight_cache(self):
+        release=self.block_first_request()
+        self.prefetch.request()
+        release.set();self.wait_done()
+        self.assertEqual(len(self.calls),1)
+        self.assertIsNotNone(self.w.reading_summary('1111','train'))
+        self.assertEqual(self.prefetch.snapshot()['targets'],[])
+
+    def test_label_is_not_blocked_by_summary_and_cancels_old_prefetch(self):
+        release=self.block_first_request()
+        app=ReviewApplication(self.w)
+        app.reading=self.prefetch
+        app.dispatch('label',dict(hash='1111',role='train',label='related'))
+        app.thread.join(3)
+        self.assertFalse(app.busy)
+        self.assertIsNone(app.error)
+        self.assertEqual(self.w.store.labels('train')['1111']['label'],'related')
+        release.set();self.wait_done()
+        self.assertEqual(len(self.calls),1)
+
+    def test_last_record_history_and_invalid_scope(self):
+        self.w.store.put('validation',['1111','2222'])
+        self.w.store.label('1111','validation','related')
+        self.assertEqual(self.w.reading_window('validation','2222'),['2222'])
+        self.assertEqual(self.w.reading_window('validation','1111'),['1111','2222'])
+        with self.assertRaises(ValueError):self.w.reading_window('validation','3333')
+        with self.assertRaises(ValueError):self.w.reading_window('unknown','1111')
+        with self.assertRaises(ValueError):self.prefetch.request('train',['1111','2222','3333'])

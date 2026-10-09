@@ -2,7 +2,19 @@
 const token = location.hash.slice(1);
 const el = id => document.getElementById(id);
 let current = null, wasBusy = false, busy = false, refreshing = false, recordVersion = 0;
-let summaryReturn = null;
+let submitting = false, actionVersion = 0;
+let readingSerial = Promise.resolve(), readingKey = null, readingFailure = '';
+function syncReading() {
+  // Serialize changes and read the latest UI state when sending: never replay a stale navigation.
+  readingSerial = readingSerial.catch(()=>{}).then(async()=>{
+    const hash = el('auto-summary').checked && current && !busy ? current.hash : null;
+    const role = el('role').value, key = JSON.stringify([role,hash]);
+    if (key === readingKey) return;
+    await api('/api/action',{action:'auto_summary',role,hash});
+    readingKey = key;
+  });
+  return readingSerial;
+}
 async function api(path, values) {
   const response = await fetch(path, {method: values ? 'POST' : 'GET',
     headers: {'X-Review-Token': token, ...(values ? {'Content-Type': 'application/json'} : {})},
@@ -13,12 +25,23 @@ async function api(path, values) {
 }
 function error(e) { el('error').textContent = e.message; }
 async function action(name, values = {}) {
+  if (submitting) return;
+  submitting = true;
+  ++actionVersion;
+  if (name === 'stop') el('auto-summary').checked = false;
   busy = true;
+  if (name === 'label') {
+    ++recordVersion;
+    showRecord(null); // Do not allow a fast second click to relabel the previous article.
+  }
   el('progress').textContent = '运行中 · 提交操作 ' + name;
   document.querySelectorAll('button').forEach(b => b.disabled = b.dataset.action !== 'stop');
   try {
+    await syncReading();
     await api('/api/action', {action: name, ...values});
     wasBusy = true; busy = true;
+    submitting = false;
+    ++actionVersion;
     if (name === 'freeze' || name === 'sample') {
       el('role').value = name === 'freeze' ? 'validation' : 'audit';
       ++recordVersion;
@@ -26,20 +49,41 @@ async function action(name, values = {}) {
     }
     await refresh();
   }
-  catch(e) { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); error(e); }
+  catch(e) { submitting = false; ++actionVersion; busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); error(e); }
 }
 function showRecord(r) {
   current = r;
   el('record').classList.toggle('hidden', !r);
   el('queue-hint').textContent = r ? '' : '当前队列没有待标注记录；可查看历史改判，或进入下一阶段。';
+  syncReading().catch(error);
   if (!r) return;
   for (const k of ['subject', 'body', 'diff']) el(k).textContent = r[k];
   el('identity').textContent = `${r.hash} · ${r.date}`;
   el('files').textContent = r.files.join('\n');
   el('commit-link').href = r.url;
   el('note').value = '';
-  const summary = r.reading_summary;
-  el('reading-summary').textContent = summary ? `${summary.content.summary}\n\n${summary.content.limitations ? '局限：'+summary.content.limitations+'\n' : ''}${summary.material_truncated ? '注意：摘要输入材料已截断，完整 diff 仍可在下方查看。\n' : ''}\n证据：\n${summary.evidence.map(e=>'['+e.line+'] '+e.text).join('\n')}\n\n模型：${summary.model}` : '尚无摘要；请先批量生成当前队列摘要。';
+  renderReading(r.reading_summary);
+}
+function renderReading(summary) {
+  el('reading-summary').textContent = summary ? `${summary.content.summary}\n\n${summary.content.limitations ? '局限：'+summary.content.limitations+'\n' : ''}${summary.material_truncated ? '注意：摘要输入材料已截断，完整 diff 仍可在下方查看。\n' : ''}\n证据：\n${summary.evidence.map(e=>'['+e.line+'] '+e.text).join('\n')}\n\n模型：${summary.model}` : '尚无摘要；开启自动生成后会在后台处理，也可先阅读原始材料。';
+}
+async function refreshReading(state) {
+  if (state.error && state.targets[0] === current?.hash && state.role === el('role').value) {
+    readingFailure = state.error;
+    el('auto-summary').checked = false;
+    await syncReading();
+  }
+  el('reading-state').textContent = readingFailure || (el('auto-summary').checked ?
+    (state.busy ? '正在后台准备当前 / 下一篇摘要，可继续阅读和标注。' : '当前 / 下一篇摘要已就绪，或正在等待当前条目。') :
+    (state.in_flight ? '已关闭自动摘要；已发出的请求正在完成并缓存。' : '自动摘要未开启；已有缓存仍可查看。'));
+  if (!busy && current && !current.reading_summary && state.completed.includes(current.hash)) {
+    const hash=current.hash, role=el('role').value, v=recordVersion;
+    const summary=await api('/api/reading-summary?hash='+hash+'&role='+role);
+    if (summary && current?.hash===hash && role===el('role').value && v===recordVersion) {
+      current.reading_summary=summary;
+      renderReading(summary); // Never reload the article or clear a note while typing.
+    }
+  }
 }
 async function next() {
   if (busy) return;
@@ -61,10 +105,13 @@ function table(headers, rows) {
 }
 const names = {related:'LLM 相关', unrelated:'LLM 不相关', uncertain:'LLM 不确定', below_threshold:'低于阈值', regex_rejected:'正则未命中'};
 async function refresh() {
-  if (refreshing) return;
+  if (refreshing || submitting) return;
   refreshing = true;
+  const version = actionVersion;
   try {
     const r = await api('/api/status'), s = r.summary;
+    // A status request started before a new action cannot complete that action.
+    if (submitting || version !== actionVersion) return;
     busy = r.busy;
     el('progress').textContent = (busy ? '运行中 · ' : '') + r.progress;
     el('error').textContent = r.error || '';
@@ -96,12 +143,8 @@ async function refresh() {
     }
     const finished = wasBusy && !busy;
     wasBusy = busy;
-    if (finished && summaryReturn) {
-      const previous=summaryReturn; summaryReturn=null;
-      if (previous.hash && previous.role===el('role').value) {
-        await loadRecord(previous.hash); el('note').value=previous.note;
-      } else if (s.dataset) await next();
-    } else if (finished && !r.error && s.dataset) await next();
+    if (finished && !r.error && s.dataset) await next();
+    if (version === actionVersion) await refreshReading(r.reading);
   } catch(e) { error(e); }
   finally { refreshing = false; }
 }
@@ -111,10 +154,10 @@ document.querySelectorAll('[data-label]').forEach(b => b.onclick=async()=>{
   await action('label', {hash:current.hash,role:el('role').value,label:b.dataset.label,note:el('note').value});
 });
 el('next').onclick=next;
-el('summarize-queue').onclick=()=>{
-  if (!confirm('将为当前人工审查队列批量生成事实摘要，使用独立摘要预算；已有缓存免费复用。确认调用模型？')) return;
-  summaryReturn={hash:current?.hash,role:el('role').value,note:el('note').value};
-  action('summarize_queue',{role:el('role').value,include_hash:current?.hash ?? null});
+el('auto-summary').onchange=async()=>{
+  if (el('auto-summary').checked && !confirm('开启后会自动调用模型生成当前和下一篇摘要，按独立摘要预算计费，已有缓存复用。确认开启？')) el('auto-summary').checked=false;
+  readingFailure='';
+  try { await syncReading(); await refresh(); } catch(e) { el('auto-summary').checked=false; error(e); }
 };
 el('role').onchange=()=>{ el('history-results').replaceChildren(); el('search-results').replaceChildren(); showRecord(null); next(); refresh(); };
 el('preview').onclick=async()=>{try{el('preview-result').textContent=JSON.stringify(await api('/api/preview?threshold='+encodeURIComponent(el('threshold').value)),null,2);}catch(e){error(e);}};
@@ -137,4 +180,5 @@ document.querySelectorAll('[data-download]').forEach(b=>b.onclick=async()=>{try{
   if(!response.ok)throw new Error((await response.json()).error);
   const url=URL.createObjectURL(await response.blob()),a=document.createElement('a');a.href=url;a.download=b.dataset.download;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }catch(e){error(e);}});
+syncReading().catch(error); // A page reload starts with automatic generation disabled.
 refresh(); setInterval(refresh,2500);

@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 
 from .commit_source import iter_mainline_commits
-from .config import DEFAULT_API_KEY_FILE, DEFAULT_BASE_URL, DEFAULT_MODEL, resolve_api_key, ConfigurationError
+from .config import DEFAULT_API_KEY_FILE, DEFAULT_BASE_URL, DEFAULT_MODEL, resolve_api_key
 from .fast_screening import FastScreener, digest, save
 from .git_repository import GitRepository
 from .hash_filter import compile_rules, evaluate_commit, DEFAULT_CROSS_ARCH_INCLUDE
@@ -17,7 +17,6 @@ from .review_audit import make_audit_plan, audit_statistics
 from .review_learning import ReviewRanker, choose_next, score_stratified_sample
 from .review_store import ReviewStore, now
 from .review_reading import ReadingSummarizer
-from .screening import StopRun
 
 
 def csv_text(rows, fields):
@@ -41,7 +40,6 @@ class ReviewWorkflow:
         self.ranker = ReviewRanker(self.options.random_seed)
         self.progress = '就绪'
         self.runner = None
-        self.reading_runner = None
         self.cancel = threading.Event()
         self.repo = GitRepository(settings.linux_dir) if settings.linux_dir else None
 
@@ -278,73 +276,44 @@ class ReviewWorkflow:
             max_requests=self.options.summary_max_requests, token_budget=self.options.summary_token_budget,
             diff_chars=self.options.summary_diff_chars)
 
-    def reading_queue(self, role):
+    def reading_window(self, role, current_hash):
+        """Current record plus one provisional successor, without inventing a label."""
         self.require_ready()
+        current = self.store.record(current_hash)
+        labels = self.store.labels(role)
         if role == 'train':
+            if not current['candidate']:
+                raise ValueError('当前例子不属于训练候选集')
             if self.store.get('frozen'):
-                return list(self.store.labels('train'))
-            labels = self.store.labels('train')
-            remaining = max(0, self.options.training_target - len(labels))
-            # Snapshot the current ranking; later feedback can change membership.
-            records = self.store.records(True)
-            chosen = []
+                return [current_hash]
             simulated = dict(labels)
-            for _ in range(remaining):
-                h = choose_next(records, simulated, self.options.random_seed, self.options.exploration_every)
-                if h is None:
-                    break
-                chosen.append(h)
-                simulated[h] = {'label':'uncertain'}
-            return chosen
-        if role == 'validation':
-            return self.store.get('validation', [])
-        if role == 'audit':
-            return [r['hash'] for r in self.store.get('audit', {}).get('samples', [])]
-        raise ValueError('无效队列')
+            simulated.setdefault(current_hash, {'label':'uncertain'})
+            following = choose_next(self.store.records(True), simulated, self.options.random_seed,
+                                    self.options.exploration_every)
+        else:
+            if role == 'validation':
+                pool = self.store.get('validation', [])
+            elif role == 'audit':
+                pool = [r['hash'] for r in self.store.get('audit', {}).get('samples', [])]
+            else:
+                raise ValueError('无效队列')
+            if current_hash not in pool:
+                raise ValueError('当前例子不属于该人工队列')
+            following = next((h for h in pool if h != current_hash and h not in labels), None)
+        return [current_hash] + ([following] if following else [])
 
-    def summarize_queue(self, role, client=None, include_hash=None):
-        hashes = self.reading_queue(role)
-        if include_hash is not None and include_hash not in hashes:
-            if role != 'train' or not self.store.record(include_hash)['candidate']:
-                raise ValueError('当前例子不属于该人工队列。')
-            hashes.insert(0,include_hash)
-        if not hashes:
-            raise ValueError('当前队列为空；请先准备候选、冻结模型或生成抽样清单。')
-        runner = self.reading_summarizer()
-        self.reading_runner = runner
-        batch = dict(role=role, hashes=hashes, completed=[], failed={}, status='running')
-        path = self.output / 'reading_summaries' / f'{role}_batch.json'
-        save(path, batch)
-        def get_client():
-            nonlocal client
-            if client is None:
-                from .llm import create_openai_client
-                client = create_openai_client(resolve_api_key(None,self.settings.api_key_file or DEFAULT_API_KEY_FILE),
-                                              self.settings.base_url or DEFAULT_BASE_URL)
-            return client
-        try:
-            for i,h in enumerate(hashes):
-                if self.cancel.is_set():
-                    break
-                self.progress = f'批量摘要 {role}：{i+1}/{len(hashes)}；已有有效缓存直接复用'
-                try:
-                    runner.generate(self.repo.get_commit(h,0), get_client)
-                    batch['completed'].append(h)
-                except StopRun:
-                    break
-                except Exception as exc:
-                    # Do not persist API error messages containing credentials.
-                    batch['failed'][h] = type(exc).__name__
-                    if isinstance(exc,ConfigurationError) or not isinstance(exc,(ValueError,TypeError,AttributeError,IndexError)):
-                        break
-                save(path,batch)
-        finally:
-            batch['pending'] = [h for h in hashes if h not in batch['completed']]
-            batch['status'] = 'completed' if not batch['pending'] else 'partial'
-            save(path,batch)
-            self.reading_runner = None
-        if batch['pending']:
-            raise ValueError(f'摘要已完成 {len(batch["completed"])}/{len(hashes)}，其余尚未完成。请检查摘要预算/接口或停止状态后再次批量生成；已完成项不会重复收费。')
+    def reading_client(self):
+        from .llm import create_openai_client
+        return create_openai_client(resolve_api_key(None,self.settings.api_key_file or DEFAULT_API_KEY_FILE),
+                                    self.settings.base_url or DEFAULT_BASE_URL)
+
+    def reading_summary(self, h, role):
+        self.require_ready()
+        self.store.record(h)
+        reading = self.reading_summarizer().cached(self.repo.get_commit(h,0))
+        if reading:
+            self.store.reading_provided(h,role,reading)
+        return reading
 
     def material(self, h, role='train'):
         self.require_ready()
