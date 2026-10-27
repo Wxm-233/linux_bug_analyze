@@ -1,0 +1,60 @@
+commit ba831b7b1a517ba7f25d6fa9736a8092d07b0c74
+Author:     Thomas Gleixner <tglx@kernel.org>
+AuthorDate: Fri May 12 23:07:00 2023 +0200
+Commit:     Peter Zijlstra <peterz@infradead.org>
+CommitDate: Mon May 15 13:44:47 2023 +0200
+
+    cpu/hotplug: Mark arch_disable_smp_support() and bringup_nonboot_cpus() __init
+    
+    No point in keeping them around.
+    
+    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+    Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>
+    Tested-by: Michael Kelley <mikelley@microsoft.com>
+    Tested-by: Oleksandr Natalenko <oleksandr@natalenko.name>
+    Tested-by: Helge Deller <deller@gmx.de> # parisc
+    Tested-by: Guilherme G. Piccoli <gpiccoli@igalia.com> # Steam Deck
+    Link: https://lore.kernel.org/r/20230512205255.551974164@linutronix.de
+
+diff --git a/arch/x86/kernel/smpboot.c b/arch/x86/kernel/smpboot.c
+index bca9692862f8..8eb7721bae87 100644
+--- a/arch/x86/kernel/smpboot.c
++++ b/arch/x86/kernel/smpboot.c
+@@ -1269,9 +1269,9 @@ int native_cpu_up(unsigned int cpu, struct task_struct *tidle)
+ }
+ 
+ /**
+- * arch_disable_smp_support() - disables SMP support for x86 at runtime
++ * arch_disable_smp_support() - Disables SMP support for x86 at boottime
+  */
+-void arch_disable_smp_support(void)
++void __init arch_disable_smp_support(void)
+ {
+ 	disable_ioapic_support();
+ }
+diff --git a/kernel/cpu.c b/kernel/cpu.c
+index f4a2c5845bcb..c0d859c68168 100644
+--- a/kernel/cpu.c
++++ b/kernel/cpu.c
+@@ -1502,7 +1502,7 @@ int bringup_hibernate_cpu(unsigned int sleep_cpu)
+ 	return 0;
+ }
+ 
+-void bringup_nonboot_cpus(unsigned int setup_max_cpus)
++void __init bringup_nonboot_cpus(unsigned int setup_max_cpus)
+ {
+ 	unsigned int cpu;
+ 
+diff --git a/kernel/smp.c b/kernel/smp.c
+index ab3e5dad6cfe..71dce748dbf0 100644
+--- a/kernel/smp.c
++++ b/kernel/smp.c
+@@ -892,7 +892,7 @@ EXPORT_SYMBOL(setup_max_cpus);
+  * SMP mode to <NUM>.
+  */
+ 
+-void __weak arch_disable_smp_support(void) { }
++void __weak __init arch_disable_smp_support(void) { }
+ 
+ static int __init nosmp(char *str)
+ {

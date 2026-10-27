@@ -1,0 +1,23 @@
+# 声明来源门控与单次执行器的独立静态审阅
+
+2026-10-09。结论：固定的8项合成边界和1项已保存父版候选可以进入首次执行，ready_to_run=true。这是执行前静态审阅，不是已运行通过的报告。
+
+审核了protocol_pre.md、fixtures_pre_v2.json、real_input_pre.json、freeze_inputs_v2_pre.json、source_gate.py及run_once.py。独立核对冻结清单14项当前字节；只做实现/执行器AST解析，没有导入门控、调用evaluate、执行runner、Git、编译、模型或旧检测器。
+
+最终source_gate.py SHA256：c1ac912982d058eadc47f020a1c1f89796f2a826b6a9b850b3a612d23362efa1。run_once.py SHA256：b99b217e1deec5f36d221483f1ebeb6f30bcc64e5c2c7130370f700c09eae760。输入锁SHA256：8f233d7a7432570be71cda193aca757fbc65d24bf95fed8b15189cf9a5c10496。
+
+## 证据与拒判路径
+
+文档先核对同修订、源相对路径、SHA256与Git风格blob指纹，所有候选/路线引文核对行区间和精确行文。赋值、include和对象声明必须落在候选唯一源码文档内；完整quoted include token按引文支持的显式搜索根展开与归一，不只取文件名。已提供primary/root路径出现竞争命中则拒判；公共包装头的literal angle include也必须连到所引用声明。只支持单一直接struct、明确字段/编码类型以及落在该声明内的候选字段引文，赋值原文与candidate RHS严格对应。
+
+正常输出最多是conditional_static_source_route与条件性representation_normalization_review。输入自报proven/_proven/_certified不能升级输出，12项requirements均恒为proven=false。缺少registry文件给出不足，不等于证明文件不存在；正常输出也明确missing_in_registry_is_proven_absence=false。拒判时顶层check_proposal=None，source_gate维持insufficient；upstream_candidate原样保留，其中既有proposal属于被标注的保存输入，不是本门控通过结论。
+
+执行前审阅曾指出部分容器类型防御、显式转换与raw metadata冲突、导入前snapshot一致性三项可加强之处；根已在首次执行前补齐，原固定输入未因此扩大。仍不重新运行旧检测器：宏转换、别名、消费者真实契约、同名对象作用域及数据流并非本门控完整解析对象。
+
+## 执行器
+
+freeze先核对独立输入审阅与本审阅及对应实现hash；正常launch拒绝已有run目录，复制代码原字节，再启动一个child worker。worker导入前核对锁定原文件以及gate/runner snapshot一致性。循环固定8项合成加1项保存候选，每项仅将item.input传给evaluate，id与expected留在调用外，并在返回后验收。保存原生stdout/stderr、returncode、结果及收据，无自动失败重试。手工直接调用__execute不构成防重放安全机制，本审阅保证的是协议内正常launch的有限单次流程。
+
+## 结论的范围
+
+这是一套显式reviewed搜索根和literal/direct struct证据的一致性门控，不是完整C/Make实现，不证明实际include绑定、真实预处理、配置、类型宽度/布局、完整长度/容量、范围、控制流或运行。引用哈希证明当前字节一致，不认证Git来源或外部标准权威。条件性检查建议不能当成强制C断言、自动补丁、新确认案例或独立阳性。首次执行是否满足8+1验收须以随后保存结果单独判定。

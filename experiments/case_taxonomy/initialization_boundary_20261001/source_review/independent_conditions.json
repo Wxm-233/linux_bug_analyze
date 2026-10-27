@@ -1,0 +1,46 @@
+{
+  "date": "2026-10-01",
+  "state": "source_expectation_saved_before_harness_output_review",
+  "parent": "cef456cd354ef485f12d57000c455e83e416a2b6",
+  "fix": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+  "actual_initialization_entry": "__hci_init",
+  "model_entry_assumption": "already entered __hci_init; outer caller requires prior ret==0 && !HCI_UNCONFIGURED && !HCI_USER_CHANNEL at hci_core.c:1501-1504, not modeled by this matrix",
+  "target_opcode": "0x2024",
+  "local_stage4_condition": "hdev->le_features[0] & HCI_LE_DATA_LEN_EXT",
+  "local_stage4_extra_LE_gate": false,
+  "local_stage4_extra_primary_gate": false,
+  "source_entry_condition": "stage1/2 sync nonnegative && dev_type==HCI_PRIMARY && stage3 sync nonnegative && stage4 DLE feature true",
+  "model_protocol": {
+    "boolean_variables": ["primary", "lmp_le_capable", "data_len_feature", "init1_sync_error"],
+    "early_error_stage": 1,
+    "early_error_return": "-EIO",
+    "other_sync_stages": "modeled successful",
+    "expected_model_target_call": "primary && data_len_feature && !init1_sync_error",
+    "rows": 16,
+    "expected_target_present_rows": 2,
+    "expected_matrix": "expected_matrix_pre_harness.json",
+    "sync_calls_if_init1_error": [1],
+    "sync_calls_if_other_success": [1, 2],
+    "sync_calls_if_primary_success": [1, 2, 3, 4]
+  },
+  "LE_variable_qualification": {
+    "means": "LMP_LE capability at features[0][4], defined by lmp_le_capable",
+    "does_not_mean": "HCI_LE_ENABLED user/config enable flag",
+    "data_len_variable": "independent le_features[0] HCI_LE_DATA_LEN_EXT=0x20",
+    "LE_false_DLE_true_source_result": "target call still attempted if primary and preceding modeled stages succeed",
+    "LE_false_DLE_true_hardware_state": "not established; possible inconsistent capability injection",
+    "stage_state_update_limit": "LE off skips LE feature and max/default data-length reads; fixed injected state/value is not the real device-response chain"
+  },
+  "actual_queue_qualification": "hci_req_add attempt is not skb queue success; req->err must be zero and hci_prepare_cmd allocation/copy must succeed before skb_queue_tail",
+  "evidence_references": [
+    {"path": "net/bluetooth/hci_core.c", "parent_blob": "04bc79359a1736b28e83f0eb88828ceefd430f25", "parent_source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8", "lines": [[427,428],[613,614],[760,765],[841,848],[864,892]]},
+    {"path": "include/net/bluetooth/hci_core.h", "parent_blob": "b689aceb636b115aff038902cb14119384949955", "parent_source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a", "lines": [[1165,1165]]},
+    {"path": "include/net/bluetooth/hci.h", "parent_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0", "parent_source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca", "lines": [[69,70],[435,435],[1547,1551]]},
+    {"path": "net/bluetooth/hci_request.c", "parent_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2", "lines": [[192,230],[239,266],[312,346]], "full_blob_sha_original_text": "request_evidence.json"}
+  ],
+  "other_flags_or_paths_not_covered": ["HCI_LE_ENABLED", "HCI_SETUP", "HCI_CONFIG", "BR/EDR capability", "quirks", "commands masks", "other feature bits", "outer configured-controller/open entry", "real device completions", "stage2/3/4 and allocation errors"],
+  "coverage_conclusion": "all selected four-boolean source condition combinations, not all initialization states or real architectures/devices",
+  "harness_reviewed": false,
+  "hardware_reachability_claim": false,
+  "confirmed_case_count_change": 0
+}

@@ -1,0 +1,67 @@
+{
+  "quotes": [
+    {
+      "source": "analysis_out/numa-entry-20260915-v2/followup/harness.c",
+      "sha256": "9c0f8a5698915b124a251f5e26c2df04f14626434d4f9f87087a450ff43f7cf4",
+      "line_start": 14,
+      "line_end": 24,
+      "quote": "typedef uint32_t compat_ulong_t;\n#define BITS_PER_COMPAT_LONG 32\n#define BITS_PER_LONG 64\n#define BITS_PER_BYTE 8\n#define PAGE_SIZE 4096\n#define MAX_NUMNODES 64\n#define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))\n#define BITS_TO_LONGS(n) (((n)+63)/64)\n#define BITS_TO_COMPAT_LONGS(n) (((n)+31)/32)\n#define min_t(t,a,b) ((t)(a)<(t)(b)?(t)(a):(t)(b))\n#define DECLARE_BITMAP(n,b) unsigned long n[BITS_TO_LONGS(b)]"
+    },
+    {
+      "source": "analysis_out/numa-entry-20260915-v2/followup/harness.c",
+      "sha256": "9c0f8a5698915b124a251f5e26c2df04f14626434d4f9f87087a450ff43f7cf4",
+      "line_start": 32,
+      "line_end": 54,
+      "quote": "#define SYSCALL_DEFINE3(name,t1,a1,t2,a2,t3,a3) long native_entry(t1 a1,t2 a2,t3 a3)\n#define COMPAT_SYSCALL_DEFINE3(name,t1,a1,t2,a2,t3,a3) long compat_entry(t1 a1,t2 a2,t3 a3)\nstatic int compat_mode,consumed;static unsigned long captured;\nstatic sigjmp_buf recovery;static volatile sig_atomic_t armed,faults;\nstatic void handler(int sig) {if(armed) {faults++;siglongjmp(recovery,1);} _exit(128+sig);}\nstatic size_t checked_copy(void *dst,const void *src,size_t n) {\n if(sigsetjmp(recovery,1)) {armed=0;return n;}\n armed=1;\n for(size_t i=0;i<n;i++) ((volatile unsigned char*)dst)[i]=((const volatile unsigned char*)src)[i];\n armed=0;return 0;\n}\n#define copy_from_user(d,s,n) checked_copy(d,s,n)\n#define copy_to_user(d,s,n) checked_copy(d,s,n)\n#define get_user(v,p) (checked_copy(&(v),(p),sizeof(*(p)))?-EFAULT:0)\n#define user_read_access_begin(p,n) ((void)(p),(void)(n),true)\n#define user_read_access_end() do {} while(0)\n#define unsafe_get_user(v,p,label) do {compat_ulong_t tmp;const compat_ulong_t *q=(p);if(checked_copy(&tmp,q,sizeof(tmp))) goto label;(v)=tmp;} while(0)\nstatic inline int in_compat_syscall(void) {return compat_mode;}\nstatic unsigned long temporary[4];\nstatic inline void *compat_alloc_user_space(size_t n) {if(n>sizeof(temporary)) abort();memset(temporary,0,sizeof(temporary));return temporary;}\nstatic int do_set_mempolicy(int mode,unsigned short flags,nodemask_t *nodes) {\n (void)mode;(void)flags;consumed++;captured=nodes->bits[0];return 0;\n}"
+    },
+    {
+      "source": "analysis_out/numa-entry-20260915-v2/followup/harness.c",
+      "sha256": "9c0f8a5698915b124a251f5e26c2df04f14626434d4f9f87087a450ff43f7cf4",
+      "line_start": 55,
+      "line_end": 103,
+      "quote": "long compat_get_bitmap(unsigned long *mask, const compat_ulong_t __user *umask,\n\t\t       unsigned long bitmap_size)\n{\n\tunsigned long nr_compat_longs;\n\n\t/* align bitmap up to nearest compat_long_t boundary */\n\tbitmap_size = ALIGN(bitmap_size, BITS_PER_COMPAT_LONG);\n\tnr_compat_longs = BITS_TO_COMPAT_LONGS(bitmap_size);\n\n\tif (!user_read_access_begin(umask, bitmap_size / 8))\n\t\treturn -EFAULT;\n\n\twhile (nr_compat_longs > 1) {\n\t\tcompat_ulong_t l1, l2;\n\t\tunsafe_get_user(l1, umask++, Efault);\n\t\tunsafe_get_user(l2, umask++, Efault);\n\t\t*mask++ = ((unsigned long)l2 << BITS_PER_COMPAT_LONG) | l1;\n\t\tnr_compat_longs -= 2;\n\t}\n\tif (nr_compat_longs)\n\t\tunsafe_get_user(*mask, umask++, Efault);\n\tuser_read_access_end();\n\treturn 0;\n\nEfault:\n\tuser_read_access_end();\n\treturn -EFAULT;\n}static int get_bitmap(unsigned long *mask, const unsigned long __user *nmask,\n\t\t      unsigned long maxnode)\n{\n\tunsigned long nlongs = BITS_TO_LONGS(maxnode);\n\tint ret;\n\n\tif (in_compat_syscall())\n\t\tret = compat_get_bitmap(mask,\n\t\t\t\t\t(const compat_ulong_t __user *)nmask,\n\t\t\t\t\tmaxnode);\n\telse\n\t\tret = copy_from_user(mask, nmask,\n\t\t\t\t     nlongs * sizeof(unsigned long));\n\n\tif (ret)\n\t\treturn -EFAULT;\n\n\tif (maxnode % BITS_PER_LONG)\n\t\tmask[nlongs - 1] &= (1UL << (maxnode % BITS_PER_LONG)) - 1;\n\n\treturn 0;\n}"
+    },
+    {
+      "source": "analysis_out/numa-entry-20260915-v2/followup/harness.c",
+      "sha256": "9c0f8a5698915b124a251f5e26c2df04f14626434d4f9f87087a450ff43f7cf4",
+      "line_start": 104,
+      "line_end": 137,
+      "quote": "static int get_nodes(nodemask_t *nodes, const unsigned long __user *nmask,\n\t\t     unsigned long maxnode)\n{\n\t--maxnode;\n\tnodes_clear(*nodes);\n\tif (maxnode == 0 || !nmask)\n\t\treturn 0;\n\tif (maxnode > PAGE_SIZE*BITS_PER_BYTE)\n\t\treturn -EINVAL;\n\n\t/*\n\t * When the user specified more nodes than supported just check\n\t * if the non supported part is all zero, one word at a time,\n\t * starting at the end.\n\t */\n\twhile (maxnode > MAX_NUMNODES) {\n\t\tunsigned long bits = min_t(unsigned long, maxnode, BITS_PER_LONG);\n\t\tunsigned long t;\n\n\t\tif (get_bitmap(&t, &nmask[(maxnode - 1) / BITS_PER_LONG], bits))\n\t\t\treturn -EFAULT;\n\n\t\tif (maxnode - bits >= MAX_NUMNODES) {\n\t\t\tmaxnode -= bits;\n\t\t} else {\n\t\t\tmaxnode = MAX_NUMNODES;\n\t\t\tt &= ~((1UL << (MAX_NUMNODES % BITS_PER_LONG)) - 1);\n\t\t}\n\t\tif (t)\n\t\t\treturn -EINVAL;\n\t}\n\n\treturn get_bitmap(nodes_addr(*nodes), nmask, maxnode);\n}"
+    },
+    {
+      "source": "analysis_out/numa-entry-20260915-v2/followup/harness.c",
+      "sha256": "9c0f8a5698915b124a251f5e26c2df04f14626434d4f9f87087a450ff43f7cf4",
+      "line_start": 150,
+      "line_end": 177,
+      "quote": "static long kernel_set_mempolicy(int mode, const unsigned long __user *nmask,\n\t\t\t\t unsigned long maxnode)\n{\n\tunsigned short mode_flags;\n\tnodemask_t nodes;\n\tint lmode = mode;\n\tint err;\n\n\terr = sanitize_mpol_flags(&lmode, &mode_flags);\n\tif (err)\n\t\treturn err;\n\n\terr = get_nodes(&nodes, nmask, maxnode);\n\tif (err)\n\t\treturn err;\n\n\treturn do_set_mempolicy(lmode, mode_flags, &nodes);\n}\nSYSCALL_DEFINE3(set_mempolicy, int, mode, const unsigned long __user *, nmask,\n\t\tunsigned long, maxnode)\n{\n\treturn kernel_set_mempolicy(mode, nmask, maxnode);\n}\nCOMPAT_SYSCALL_DEFINE3(set_mempolicy, int, mode, compat_ulong_t __user *, nmask,\n\t\t       compat_ulong_t, maxnode)\n{\n\treturn kernel_set_mempolicy(mode, (unsigned long __user *)nmask, maxnode);\n}"
+    },
+    {
+      "source": "analysis_out/numa-entry-20260915-v2/followup/harness.c",
+      "sha256": "9c0f8a5698915b124a251f5e26c2df04f14626434d4f9f87087a450ff43f7cf4",
+      "line_start": 180,
+      "line_end": 196,
+      "quote": " unsigned bits=atoi(argv[1]);compat_mode=atoi(argv[2]);int pattern=atoi(argv[3]);int short_input=atoi(argv[4]);\n if(bits<1 || bits>256) return 3;\n long page=sysconf(_SC_PAGESIZE);if(page!=4096) return 4;\n unsigned char *mem=mmap(NULL,2*page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);\n if(mem==MAP_FAILED || mprotect(mem+page,page,PROT_NONE)) return 5;\n unsigned word=compat_mode?32:64;size_t bytes=((bits+word-1)/word)*(word/8);\n unsigned char *input=mem+page-bytes+(short_input?word/8:0);\n memset(mem,0,page);\n // Logical node zero is always requested. Pattern 1 additionally selects node 64.\n unsigned char data[64]={0};\n if(compat_mode) {((uint32_t*)data)[0]=1;if(pattern && bits>64)((uint32_t*)data)[2]=1;}\n else {((unsigned long*)data)[0]=1;if(pattern && bits>64)((unsigned long*)data)[1]=1;}\n memcpy(input,data,bytes-(short_input?word/8:0));\n struct sigaction sa={0};sa.sa_handler=handler;sigemptyset(&sa.sa_mask);\n sigaction(SIGSEGV,&sa,NULL);sigaction(SIGBUS,&sa,NULL);\n long rc=compat_mode?compat_entry(2,(compat_ulong_t*)input,bits+1):native_entry(2,(unsigned long*)input,bits+1);\n printf(\"{\\\"rc\\\":%ld,\\\"consumed\\\":%d,\\\"value\\\":%lu,\\\"page_faults\\\":%d}\\n\",rc,consumed,captured,(int)faults);"
+    },
+    {
+      "source": "experiments/case_taxonomy/numa_padding_probe.c",
+      "sha256": "a242a502c646c3f11805f3d8f225bc0a4d2d1b942f7cf4663ac53ece425151b9",
+      "line_start": 6,
+      "line_end": 13,
+      "quote": "typedef unsigned int u32;\nextern int call6(int, int, int, int, int, int, int);\n\nstatic int sc(int n, int a, int b, int c, int d, int e)\n{\n\treturn call6(n, a, b, c, d, e, 0);\n}\n"
+    },
+    {
+      "source": "experiments/case_taxonomy/numa_padding_probe.c",
+      "sha256": "a242a502c646c3f11805f3d8f225bc0a4d2d1b942f7cf4663ac53ece425151b9",
+      "line_start": 45,
+      "line_end": 53,
+      "quote": "\tunsigned char *mem;\n\tconst int maxnodes[] = { 1026, 1026, 1026, 1057 };\n\tconst int bytes[] = { 132, 136, 136, 136 };\n\tconst int poison[] = { 0, 0, 1, 1 };\n\n\tif (rc)\n\t\treturn 77;\n\tfor (int i = 0; i < 32768; i++) {\n\t\tif (allowed[i / 32] & (1U << (i % 32))) {"
+    },
+    {
+      "source": "experiments/case_taxonomy/numa_padding_probe.c",
+      "sha256": "a242a502c646c3f11805f3d8f225bc0a4d2d1b942f7cf4663ac53ece425151b9",
+      "line_start": 65,
+      "line_end": 83,
+      "quote": "\n\tfor (int i = 0; i < 4; i++) {\n\t\tunsigned char *p;\n\t\tfor (int j = 0; j < 4096; j++)\n\t\t\tmem[j] = 0;\n\t\tp = mem + 4096 - bytes[i];\n\t\tp[node / 8] |= 1U << (node % 8);\n\t\tif (poison[i])\n\t\t\tp[132] = 1; /* 34th compat word, outside maxnode=1026. */\n\t\trc = sc(276, 2, (int)p, maxnodes[i], 0, 0);\n\t\ttext(\"{\\\"maxnode\\\":\"); number(maxnodes[i]);\n\t\ttext(\",\\\"bytes\\\":\"); number(bytes[i]);\n\t\ttext(\",\\\"poison_word34\\\":\"); number(poison[i]);\n\t\ttext(\",\\\"first_allowed_node\\\":\"); number(node);\n\t\ttext(\",\\\"set_rc\\\":\"); number(rc); text(\"}\\n\");\n\t\tif (sc(276, 0, 0, 0, 0, 0))\n\t\t\treturn 81;\n\t}\n\treturn sc(91, (int)mem, 8192, 0, 0, 0) ? 82 : 0;"
+    }
+  ]
+}

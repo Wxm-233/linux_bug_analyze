@@ -1,0 +1,80 @@
+{
+  "scope": "cross_arch_candidate",
+  "checks": [
+    {
+      "id": "cpu_smt_mask_contains_self",
+      "title": "cpu_smt_mask(cpu)必须包含cpu自身",
+      "providers": [
+        {
+          "architecture": "x86",
+          "value": "per_cpu(cpu_sibling_map, cpu)",
+          "eligibility": "set_cpu_sibling_map在notify_cpu_starting前调用(smp_callin流程第192行先于第208行)，第582、585或599-600行确保cpu加入自身sibling_cpumask",
+          "evidence": [
+            {"document": "S_x86_header", "start_line": 118, "end_line": 118},
+            {"document": "S_x86_callin", "start_line": 192, "end_line": 192},
+            {"document": "S_x86_callin", "start_line": 208, "end_line": 208},
+            {"document": "S_x86_prepare", "start_line": 582, "end_line": 600}
+          ]
+        },
+        {
+          "architecture": "s390",
+          "value": "&cpu_topology[cpu].thread_mask",
+          "eligibility": "update_cpu_masks在notify_cpu_starting之后调用(第911行vs第905行)，且cpu_thread_map依赖cpu_online检查(第102行)，启动时序中thread_mask初始状态未显示",
+          "evidence": [
+            {"document": "S_s390_header", "start_line": 31, "end_line": 31},
+            {"document": "S_s390_start", "start_line": 905, "end_line": 905},
+            {"document": "S_s390_start", "start_line": 910, "end_line": 911},
+            {"document": "S_s390_map", "start_line": 102, "end_line": 104}
+          ]
+        }
+      ],
+      "configuration": [
+        {
+          "architecture": "x86",
+          "requires": ["CONFIG_SCHED_SMT=y", "CONFIG_SCHED_CORE=y"],
+          "evidence": [
+            {"document": "S_interface", "start_line": 202, "end_line": 202},
+            {"document": "C_x86", "start_line": 5, "end_line": 6}
+          ]
+        },
+        {
+          "architecture": "s390",
+          "requires": ["CONFIG_SCHED_SMT=y", "CONFIG_SCHED_CORE=y", "CONFIG_SCHED_TOPOLOGY=y"],
+          "evidence": [
+            {"document": "S_interface", "start_line": 202, "end_line": 202},
+            {"document": "S_s390_guard", "start_line": 11, "end_line": 11},
+            {"document": "C_s390", "start_line": 5, "end_line": 7}
+          ]
+        }
+      ],
+      "consumer": {
+        "function": "sched_core_cpu_starting",
+        "event": "first_read",
+        "anchor": "cpu_smt_mask(cpu)",
+        "evidence": [
+          {"document": "S_core", "start_line": 5755, "end_line": 5755},
+          {"document": "S_starting", "start_line": 8836, "end_line": 8836},
+          {"document": "S_table", "start_line": 1694, "end_line": 1694}
+        ]
+      },
+      "predicate": {
+        "op": "contains",
+        "args": [
+          {"symbol": "cpu_smt_mask(cpu)"},
+          {"symbol": "cpu"}
+        ]
+      },
+      "polarity": "must_hold",
+      "authority_status": "existing_requirement",
+      "basis": "sched_core_cpu_starting第5765行检查cpumask_weight假定掩码非空，第5769行for_each_cpu迭代要求掩码至少含cpu自身以找到core leader，x86通过set_cpu_sibling_map显式满足",
+      "evidence": [
+        {"document": "S_core", "start_line": 5755, "end_line": 5755},
+        {"document": "S_core", "start_line": 5765, "end_line": 5765},
+        {"document": "S_core", "start_line": 5769, "end_line": 5777},
+        {"document": "S_core", "start_line": 5779, "end_line": 5779}
+      ],
+      "unknown": []
+    }
+  ],
+  "unknown": []
+}

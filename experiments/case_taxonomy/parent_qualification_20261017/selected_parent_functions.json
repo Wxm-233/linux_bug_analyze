@@ -1,0 +1,103 @@
+{
+  "documents": [
+    {
+      "id": "A:arch/x86/kernel/cpu/common.c",
+      "revision": "2a38e4ca302280fdcce370ba2bee79bac16c4587",
+      "path": "arch/x86/kernel/cpu/common.c",
+      "start_line": 896,
+      "end_line": 919,
+      "text": "void cpu_detect(struct cpuinfo_x86 *c)\n{\n\t/* Get vendor name */\n\tcpuid(0x00000000, (unsigned int *)&c->cpuid_level,\n\t      (unsigned int *)&c->x86_vendor_id[0],\n\t      (unsigned int *)&c->x86_vendor_id[8],\n\t      (unsigned int *)&c->x86_vendor_id[4]);\n\n\tc->x86 = 4;\n\t/* Intel-defined flags: level 0x00000001 */\n\tif (c->cpuid_level >= 0x00000001) {\n\t\tu32 junk, tfms, cap0, misc;\n\n\t\tcpuid(0x00000001, &tfms, &misc, &junk, &cap0);\n\t\tc->x86\t\t= x86_family(tfms);\n\t\tc->x86_model\t= x86_model(tfms);\n\t\tc->x86_stepping\t= x86_stepping(tfms);\n\n\t\tif (cap0 & (1<<19)) {\n\t\t\tc->x86_clflush_size = ((misc >> 8) & 0xff) * 8;\n\t\t\tc->x86_cache_alignment = c->x86_clflush_size;\n\t\t}\n\t}\n}\n",
+      "function": "cpu_detect",
+      "function_sha256": "83b751376ff7a928cba1a7d835a806da7dfce5dcd30f667caf915aeaf666e68b",
+      "selection_origin": "parent source populates CPUID metadata"
+    },
+    {
+      "id": "A:arch/x86/kernel/cpu/common.c",
+      "revision": "2a38e4ca302280fdcce370ba2bee79bac16c4587",
+      "path": "arch/x86/kernel/cpu/common.c",
+      "start_line": 1737,
+      "end_line": 1774,
+      "text": "static void generic_identify(struct cpuinfo_x86 *c)\n{\n\tc->extended_cpuid_level = 0;\n\n\tif (!have_cpuid_p())\n\t\tidentify_cpu_without_cpuid(c);\n\n\t/* cyrix could have cpuid enabled via c_identify()*/\n\tif (!have_cpuid_p())\n\t\treturn;\n\n\tcpu_detect(c);\n\n\tget_cpu_vendor(c);\n\n\tget_cpu_cap(c);\n\n\tget_cpu_address_sizes(c);\n\n\tget_model_name(c); /* Default name */\n\n\t/*\n\t * ESPFIX is a strange bug.  All real CPUs have it.  Paravirt\n\t * systems that run Linux at CPL > 0 may or may not have the\n\t * issue, but, even if they have the issue, there's absolutely\n\t * nothing we can do about it because we can't use the real IRET\n\t * instruction.\n\t *\n\t * NB: For the time being, only 32-bit kernels support\n\t * X86_BUG_ESPFIX as such.  64-bit kernels directly choose\n\t * whether to apply espfix using paravirt hooks.  If any\n\t * non-paravirt system ever shows up that does *not* have the\n\t * ESPFIX issue, we can change this.\n\t */\n#ifdef CONFIG_X86_32\n\tset_cpu_bug(c, X86_BUG_ESPFIX);\n#endif\n}\n",
+      "function": "generic_identify",
+      "function_sha256": "b03ed95e5acf68e4e042c4b4ff704960c3a893fc0d464e5957b7c1a9d8ad3a72",
+      "selection_origin": "parent source identifies CPU using populated metadata"
+    },
+    {
+      "id": "A:arch/x86/kernel/cpu/intel.c",
+      "revision": "2a38e4ca302280fdcce370ba2bee79bac16c4587",
+      "path": "arch/x86/kernel/cpu/intel.c",
+      "start_line": 272,
+      "end_line": 410,
+      "text": "static void early_init_intel(struct cpuinfo_x86 *c)\n{\n\tu64 misc_enable;\n\n\t/* Unmask CPUID levels if masked: */\n\tif (c->x86 > 6 || (c->x86 == 6 && c->x86_model >= 0xd)) {\n\t\tif (msr_clear_bit(MSR_IA32_MISC_ENABLE,\n\t\t\t\t  MSR_IA32_MISC_ENABLE_LIMIT_CPUID_BIT) > 0) {\n\t\t\tc->cpuid_level = cpuid_eax(0);\n\t\t\tget_cpu_cap(c);\n\t\t}\n\t}\n\n\tif ((c->x86 == 0xf && c->x86_model >= 0x03) ||\n\t\t(c->x86 == 0x6 && c->x86_model >= 0x0e))\n\t\tset_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);\n\n\tif (c->x86 >= 6 && !cpu_has(c, X86_FEATURE_IA64))\n\t\tc->microcode = intel_get_microcode_revision();\n\n\t/* Now if any of them are set, check the blacklist and clear the lot */\n\tif ((cpu_has(c, X86_FEATURE_SPEC_CTRL) ||\n\t     cpu_has(c, X86_FEATURE_INTEL_STIBP) ||\n\t     cpu_has(c, X86_FEATURE_IBRS) || cpu_has(c, X86_FEATURE_IBPB) ||\n\t     cpu_has(c, X86_FEATURE_STIBP)) && bad_spectre_microcode(c)) {\n\t\tpr_warn(\"Intel Spectre v2 broken microcode detected; disabling Speculation Control\\n\");\n\t\tsetup_clear_cpu_cap(X86_FEATURE_IBRS);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_IBPB);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_STIBP);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_SPEC_CTRL);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_MSR_SPEC_CTRL);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_INTEL_STIBP);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_SSBD);\n\t\tsetup_clear_cpu_cap(X86_FEATURE_SPEC_CTRL_SSBD);\n\t}\n\n\t/*\n\t * Atom erratum AAE44/AAF40/AAG38/AAH41:\n\t *\n\t * A race condition between speculative fetches and invalidating\n\t * a large page.  This is worked around in microcode, but we\n\t * need the microcode to have already been loaded... so if it is\n\t * not, recommend a BIOS update and disable large pages.\n\t */\n\tif (c->x86 == 6 && c->x86_model == 0x1c && c->x86_stepping <= 2 &&\n\t    c->microcode < 0x20e) {\n\t\tpr_warn(\"Atom PSE erratum detected, BIOS microcode update recommended\\n\");\n\t\tclear_cpu_cap(c, X86_FEATURE_PSE);\n\t}\n\n#ifdef CONFIG_X86_64\n\tset_cpu_cap(c, X86_FEATURE_SYSENTER32);\n#else\n\t/* Netburst reports 64 bytes clflush size, but does IO in 128 bytes */\n\tif (c->x86 == 15 && c->x86_cache_alignment == 64)\n\t\tc->x86_cache_alignment = 128;\n#endif\n\n\t/* CPUID workaround for 0F33/0F34 CPU */\n\tif (c->x86 == 0xF && c->x86_model == 0x3\n\t    && (c->x86_stepping == 0x3 || c->x86_stepping == 0x4))\n\t\tc->x86_phys_bits = 36;\n\n\t/*\n\t * c->x86_power is 8000_0007 edx. Bit 8 is TSC runs at constant rate\n\t * with P/T states and does not stop in deep C-states.\n\t *\n\t * It is also reliable across cores and sockets. (but not across\n\t * cabinets - we turn it off in that case explicitly.)\n\t */\n\tif (c->x86_power & (1 << 8)) {\n\t\tset_cpu_cap(c, X86_FEATURE_CONSTANT_TSC);\n\t\tset_cpu_cap(c, X86_FEATURE_NONSTOP_TSC);\n\t}\n\n\t/* Penwell and Cloverview have the TSC which doesn't sleep on S3 */\n\tif (c->x86 == 6) {\n\t\tswitch (c->x86_model) {\n\t\tcase INTEL_FAM6_ATOM_SALTWELL_MID:\n\t\tcase INTEL_FAM6_ATOM_SALTWELL_TABLET:\n\t\tcase INTEL_FAM6_ATOM_SILVERMONT_MID:\n\t\tcase INTEL_FAM6_ATOM_AIRMONT_NP:\n\t\t\tset_cpu_cap(c, X86_FEATURE_NONSTOP_TSC_S3);\n\t\t\tbreak;\n\t\tdefault:\n\t\t\tbreak;\n\t\t}\n\t}\n\n\t/*\n\t * There is a known erratum on Pentium III and Core Solo\n\t * and Core Duo CPUs.\n\t * \" Page with PAT set to WC while associated MTRR is UC\n\t *   may consolidate to UC \"\n\t * Because of this erratum, it is better to stick with\n\t * setting WC in MTRR rather than using PAT on these CPUs.\n\t *\n\t * Enable PAT WC only on P4, Core 2 or later CPUs.\n\t */\n\tif (c->x86 == 6 && c->x86_model < 15)\n\t\tclear_cpu_cap(c, X86_FEATURE_PAT);\n\n\t/*\n\t * If fast string is not enabled in IA32_MISC_ENABLE for any reason,\n\t * clear the fast string and enhanced fast string CPU capabilities.\n\t */\n\tif (c->x86 > 6 || (c->x86 == 6 && c->x86_model >= 0xd)) {\n\t\trdmsrl(MSR_IA32_MISC_ENABLE, misc_enable);\n\t\tif (!(misc_enable & MSR_IA32_MISC_ENABLE_FAST_STRING)) {\n\t\t\tpr_info(\"Disabled fast string operations\\n\");\n\t\t\tsetup_clear_cpu_cap(X86_FEATURE_REP_GOOD);\n\t\t\tsetup_clear_cpu_cap(X86_FEATURE_ERMS);\n\t\t}\n\t}\n\n\t/*\n\t * Intel Quark Core DevMan_001.pdf section 6.4.11\n\t * \"The operating system also is required to invalidate (i.e., flush)\n\t *  the TLB when any changes are made to any of the page table entries.\n\t *  The operating system must reload CR3 to cause the TLB to be flushed\"\n\t *\n\t * As a result, boot_cpu_has(X86_FEATURE_PGE) in arch/x86/include/asm/tlbflush.h\n\t * should be false so that __flush_tlb_all() causes CR3 instead of CR4.PGE\n\t * to be modified.\n\t */\n\tif (c->x86 == 5 && c->x86_model == 9) {\n\t\tpr_info(\"Disabling PGE capability bit\\n\");\n\t\tsetup_clear_cpu_cap(X86_FEATURE_PGE);\n\t}\n\n\tcheck_memory_type_self_snoop_errata(c);\n\n\t/*\n\t * Adjust the number of physical bits early because it affects the\n\t * valid bits of the MTRR mask registers.\n\t */\n\tif (cpu_has(c, X86_FEATURE_TME))\n\t\tdetect_tme_early(c);\n}\n",
+      "function": "early_init_intel",
+      "function_sha256": "0c13707f7a70cfb1f0740f6223c08047499133dc24dc726694023e6bf33d13e8",
+      "selection_origin": "parent source vendor preparation hook"
+    },
+    {
+      "id": "B:drivers/iommu/intel/perfmon.c",
+      "revision": "08155c7f2a2cc6ff99886ea5743da274be24ebe4",
+      "path": "drivers/iommu/intel/perfmon.c",
+      "start_line": 776,
+      "end_line": 787,
+      "text": "static int iommu_pmu_cpu_online(unsigned int cpu, struct hlist_node *node)\n{\n\tstruct iommu_pmu *iommu_pmu = hlist_entry_safe(node, typeof(*iommu_pmu), cpuhp_node);\n\n\tif (cpumask_empty(&iommu_pmu_cpu_mask))\n\t\tcpumask_set_cpu(cpu, &iommu_pmu_cpu_mask);\n\n\tif (cpumask_test_cpu(cpu, &iommu_pmu_cpu_mask))\n\t\tiommu_pmu->cpu = cpu;\n\n\treturn 0;\n}\n",
+      "function": "iommu_pmu_cpu_online",
+      "function_sha256": "5d54c13c34d88a484b70eca4db446d65e5b64b1b7c415405ed7ddb0edea443d0",
+      "selection_origin": "parent source CPUHP online callback"
+    },
+    {
+      "id": "B:drivers/iommu/intel/perfmon.c",
+      "revision": "08155c7f2a2cc6ff99886ea5743da274be24ebe4",
+      "path": "drivers/iommu/intel/perfmon.c",
+      "start_line": 789,
+      "end_line": 819,
+      "text": "static int iommu_pmu_cpu_offline(unsigned int cpu, struct hlist_node *node)\n{\n\tstruct iommu_pmu *iommu_pmu = hlist_entry_safe(node, typeof(*iommu_pmu), cpuhp_node);\n\tint target = cpumask_first(&iommu_pmu_cpu_mask);\n\n\t/*\n\t * The iommu_pmu_cpu_mask has been updated when offline the CPU\n\t * for the first iommu_pmu. Migrate the other iommu_pmu to the\n\t * new target.\n\t */\n\tif (target < nr_cpu_ids && target != iommu_pmu->cpu) {\n\t\tperf_pmu_migrate_context(&iommu_pmu->pmu, cpu, target);\n\t\tiommu_pmu->cpu = target;\n\t\treturn 0;\n\t}\n\n\tif (!cpumask_test_and_clear_cpu(cpu, &iommu_pmu_cpu_mask))\n\t\treturn 0;\n\n\ttarget = cpumask_any_but(cpu_online_mask, cpu);\n\n\tif (target < nr_cpu_ids)\n\t\tcpumask_set_cpu(target, &iommu_pmu_cpu_mask);\n\telse\n\t\treturn 0;\n\n\tperf_pmu_migrate_context(&iommu_pmu->pmu, cpu, target);\n\tiommu_pmu->cpu = target;\n\n\treturn 0;\n}\n",
+      "function": "iommu_pmu_cpu_offline",
+      "function_sha256": "6354141379e5a44345518094236dff14a64b1c57e06715ceba594ef88a4017f9",
+      "selection_origin": "parent source CPUHP offline callback"
+    },
+    {
+      "id": "B:drivers/iommu/intel/perfmon.c",
+      "revision": "08155c7f2a2cc6ff99886ea5743da274be24ebe4",
+      "path": "drivers/iommu/intel/perfmon.c",
+      "start_line": 824,
+      "end_line": 847,
+      "text": "static int iommu_pmu_cpuhp_setup(struct iommu_pmu *iommu_pmu)\n{\n\tint ret;\n\n\tif (!nr_iommu_pmu) {\n\t\tret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,\n\t\t\t\t\t      \"driver/iommu/intel/perfmon:online\",\n\t\t\t\t\t      iommu_pmu_cpu_online,\n\t\t\t\t\t      iommu_pmu_cpu_offline);\n\t\tif (ret < 0)\n\t\t\treturn ret;\n\t\tiommu_cpuhp_slot = ret;\n\t}\n\n\tret = cpuhp_state_add_instance(iommu_cpuhp_slot, &iommu_pmu->cpuhp_node);\n\tif (ret) {\n\t\tif (!nr_iommu_pmu)\n\t\t\tcpuhp_remove_multi_state(iommu_cpuhp_slot);\n\t\treturn ret;\n\t}\n\tnr_iommu_pmu++;\n\n\treturn 0;\n}\n",
+      "function": "iommu_pmu_cpuhp_setup",
+      "function_sha256": "f1079d952f582fc1a7fc60a8e58c9b61ee7f5306e0bd278bca7d0daeca43ace7",
+      "selection_origin": "parent source hotplug callback registration"
+    },
+    {
+      "id": "B:drivers/iommu/intel/perfmon.c",
+      "revision": "08155c7f2a2cc6ff99886ea5743da274be24ebe4",
+      "path": "drivers/iommu/intel/perfmon.c",
+      "start_line": 849,
+      "end_line": 857,
+      "text": "static void iommu_pmu_cpuhp_free(struct iommu_pmu *iommu_pmu)\n{\n\tcpuhp_state_remove_instance(iommu_cpuhp_slot, &iommu_pmu->cpuhp_node);\n\n\tif (--nr_iommu_pmu)\n\t\treturn;\n\n\tcpuhp_remove_multi_state(iommu_cpuhp_slot);\n}\n",
+      "function": "iommu_pmu_cpuhp_free",
+      "function_sha256": "fd8bc9886f4ab21294c3551ae390cdfd60d20b5f9140f464ec31529f6bb47fca",
+      "selection_origin": "parent source hotplug callback removal"
+    },
+    {
+      "id": "B:drivers/iommu/intel/perfmon.c",
+      "revision": "08155c7f2a2cc6ff99886ea5743da274be24ebe4",
+      "path": "drivers/iommu/intel/perfmon.c",
+      "start_line": 859,
+      "end_line": 885,
+      "text": "void iommu_pmu_register(struct intel_iommu *iommu)\n{\n\tstruct iommu_pmu *iommu_pmu = iommu->pmu;\n\n\tif (!iommu_pmu)\n\t\treturn;\n\n\tif (__iommu_pmu_register(iommu))\n\t\tgoto err;\n\n\tif (iommu_pmu_cpuhp_setup(iommu_pmu))\n\t\tgoto unregister;\n\n\t/* Set interrupt for overflow */\n\tif (iommu_pmu_set_interrupt(iommu))\n\t\tgoto cpuhp_free;\n\n\treturn;\n\ncpuhp_free:\n\tiommu_pmu_cpuhp_free(iommu_pmu);\nunregister:\n\tperf_pmu_unregister(&iommu_pmu->pmu);\nerr:\n\tpr_err(\"Failed to register PMU for iommu (seq_id = %d)\\n\", iommu->seq_id);\n\tfree_iommu_pmu(iommu);\n}\n",
+      "function": "iommu_pmu_register",
+      "function_sha256": "12b7e366d376da9b323a1642ac24d1ab8b871a8ddbd76c76b7d8c00232b8d6f4",
+      "selection_origin": "unchanged model source_claim function location"
+    },
+    {
+      "id": "B:drivers/iommu/intel/perfmon.c",
+      "revision": "08155c7f2a2cc6ff99886ea5743da274be24ebe4",
+      "path": "drivers/iommu/intel/perfmon.c",
+      "start_line": 551,
+      "end_line": 571,
+      "text": "static int __iommu_pmu_register(struct intel_iommu *iommu)\n{\n\tstruct iommu_pmu *iommu_pmu = iommu->pmu;\n\n\tiommu_pmu->pmu.name\t\t= iommu->name;\n\tiommu_pmu->pmu.task_ctx_nr\t= perf_invalid_context;\n\tiommu_pmu->pmu.event_init\t= iommu_pmu_event_init;\n\tiommu_pmu->pmu.pmu_enable\t= iommu_pmu_enable;\n\tiommu_pmu->pmu.pmu_disable\t= iommu_pmu_disable;\n\tiommu_pmu->pmu.add\t\t= iommu_pmu_add;\n\tiommu_pmu->pmu.del\t\t= iommu_pmu_del;\n\tiommu_pmu->pmu.start\t\t= iommu_pmu_start;\n\tiommu_pmu->pmu.stop\t\t= iommu_pmu_stop;\n\tiommu_pmu->pmu.read\t\t= iommu_pmu_event_update;\n\tiommu_pmu->pmu.attr_groups\t= iommu_pmu_attr_groups;\n\tiommu_pmu->pmu.attr_update\t= iommu_pmu_attr_update;\n\tiommu_pmu->pmu.capabilities\t= PERF_PMU_CAP_NO_EXCLUDE;\n\tiommu_pmu->pmu.module\t\t= THIS_MODULE;\n\n\treturn perf_pmu_register(&iommu_pmu->pmu, iommu_pmu->pmu.name, -1);\n}\n",
+      "function": "__iommu_pmu_register",
+      "function_sha256": "5ad0669c1061f239ce96b10c3499ed53916731ea6b88e8bdf14fbabe532ead0a",
+      "selection_origin": "unchanged model source_claim function location"
+    }
+  ]
+}

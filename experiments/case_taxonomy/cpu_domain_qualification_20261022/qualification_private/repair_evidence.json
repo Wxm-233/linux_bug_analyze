@@ -1,0 +1,42 @@
+{
+  "task": "N2.20",
+  "case": "P01",
+  "child": "8b37357a78d7fa13d88ea822b35b40137da1c85e",
+  "parent": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+  "released_at_utc": "2026-10-22T07:46:18.958993+00:00",
+  "input_freeze_sha256": "aa946f500e90c29506a90a47c223eedab2bee7d72dc1130c0933c05190cf7a99",
+  "evidence": [
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/root/repos/linux",
+        "show",
+        "-s",
+        "--format=fuller",
+        "8b37357a78d7fa13d88ea822b35b40137da1c85e"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "a96f02af7511609620ee0afec4ed0d72eda43056295db03b5312a9937414959e",
+      "text": "commit 8b37357a78d7fa13d88ea822b35b40137da1c85e\nAuthor:     Petr Vaněk <arkamar@atlas.cz>\nAuthorDate: Mon Apr 7 15:24:27 2025 +0200\nCommit:     Thomas Gleixner <tglx@kernel.org>\nCommitDate: Mon Apr 7 16:35:21 2025 +0200\n\n    x86/acpi: Don't limit CPUs to 1 for Xen PV guests due to disabled ACPI\n    \n    Xen disables ACPI for PV guests in DomU, which causes acpi_mps_check() to\n    return 1 when CONFIG_X86_MPPARSE is not set. As a result, the local APIC is\n    disabled and the guest is later limited to a single vCPU, despite being\n    configured with more.\n    \n    This regression was introduced in version 6.9 in commit 7c0edad3643f\n    (\"x86/cpu/topology: Rework possible CPU management\"), which added an\n    early check that limits CPUs to 1 if apic_is_disabled.\n    \n    Update the acpi_mps_check() logic to return 0 early when running as a Xen\n    PV guest in DomU, preventing APIC from being disabled in this specific case\n    and restoring correct multi-vCPU behaviour.\n    \n    Fixes: 7c0edad3643f (\"x86/cpu/topology: Rework possible CPU management\")\n    Signed-off-by: Petr Vaněk <arkamar@atlas.cz>\n    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>\n    Link: https://lore.kernel.org/all/20250407132445.6732-2-arkamar@atlas.cz\n"
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/root/repos/linux",
+        "diff",
+        "--no-ext-diff",
+        "--no-renames",
+        "0af2f6be1b4281385b618cb86ad946eded089ac8",
+        "8b37357a78d7fa13d88ea822b35b40137da1c85e",
+        "--",
+        "arch/x86/kernel/acpi/boot.c"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "cd2df36571c3e985e0f87a968b514d2a70637285a774afedcaf5374b3bd859c3",
+      "text": "diff --git a/arch/x86/kernel/acpi/boot.c b/arch/x86/kernel/acpi/boot.c\nindex dae6a73be40e..9fa321a95eb3 100644\n--- a/arch/x86/kernel/acpi/boot.c\n+++ b/arch/x86/kernel/acpi/boot.c\n@@ -23,6 +23,8 @@\n #include <linux/serial_core.h>\n #include <linux/pgtable.h>\n \n+#include <xen/xen.h>\n+\n #include <asm/e820/api.h>\n #include <asm/irqdomain.h>\n #include <asm/pci_x86.h>\n@@ -1729,6 +1731,15 @@ int __init acpi_mps_check(void)\n {\n #if defined(CONFIG_X86_LOCAL_APIC) && !defined(CONFIG_X86_MPPARSE)\n /* mptable code is not built-in*/\n+\n+\t/*\n+\t * Xen disables ACPI in PV DomU guests but it still emulates APIC and\n+\t * supports SMP. Returning early here ensures that APIC is not disabled\n+\t * unnecessarily and the guest is not limited to a single vCPU.\n+\t */\n+\tif (xen_pv_domain() && !xen_initial_domain())\n+\t\treturn 0;\n+\n \tif (acpi_disabled || acpi_noirq) {\n \t\tpr_warn(\"MPS support code is not built-in, using acpi=off or acpi=noirq or pci=noacpi may have problem\\n\");\n \t\treturn 1;\n"
+    }
+  ],
+  "only_qualification_role_should_read_full_until_gate_or_saved_predictions": true
+}

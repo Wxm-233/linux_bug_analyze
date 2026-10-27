@@ -1,0 +1,38 @@
+{
+  "status": "prepared_not_executed",
+  "date": "2026-10-27",
+  "question": "Does the ACPI legacy-MADT compatibility policy (accept Enabled=0 LAPIC entries only for guests) reach the environments it was written for? The fixed predicate keys on a recognized hypervisor type (!hypervisor_is_type(X86_HYPER_NATIVE)), not on being a guest.",
+  "basis": {
+    "fixed_commit": "adbf61cc47cb72b102682e690ad323e1eda652c2 (v7.0-rc1; mainline df2908090cda unchanged predicate)",
+    "intent_text": "commit message: allow the QEMU use case only for guests and keep ACPI spec behaviour for bare metal",
+    "source_facts": [
+      "QEMU 8.2.2 q35 firmware tables observed in archived boots: FACP v03, APIC v03 (legacy; acpi_support_online_capable false)",
+      "hypervisor list: xen_pv, xen_hvm, vmware, ms_hyperv, kvm(CONFIG_KVM_GUEST), jailhouse, acrn, bhyve; a QEMU TCG guest matches none",
+      "x86_hyper_kvm has no ignore_nopv, so the nopv boot parameter skips KVM detection",
+      "init_hypervisor_platform precedes acpi_boot_init and topology_init_possible_cpus in setup_arch"
+    ]
+  },
+  "kernel": "one fresh x86_64 build of the fixed revision from x86_64_defconfig (verify CONFIG_HYPERVISOR_GUEST/KVM_GUEST/ACPI_HOTPLUG_CPU/HOTPLUG_CPU from .config, add only if absent and record); no fixture, no source change except LOCALVERSION; static PID1 that prints /sys/devices/system/cpu/{possible,present,online} and onlines hot-added CPUs",
+  "qemu_common": "q35, -cpu qemu64, -smp 1,maxcpus=4, -m 512, serial console, QMP socket; unmodified QEMU-generated ACPI tables",
+  "environments": [
+    {"name": "kvm", "accel": "kvm", "append": "", "hypothesis": "Hypervisor detected: KVM; possible 0-3; device_add CPU then online succeeds"},
+    {"name": "kvm_nopv", "accel": "kvm", "append": "nopv", "hypothesis": "no hypervisor line; possible 0 only; hot-added CPU cannot be onlined"},
+    {"name": "tcg", "accel": "tcg", "append": "", "hypothesis": "no hypervisor line; possible 0 only; hot-added CPU cannot be onlined"},
+    {"name": "tcg_cpu_max", "accel": "tcg", "append": "", "cpu": "max", "hypothesis": "same as tcg; reproduces the archived KUnit CPU model without the fixture"}
+  ],
+  "hypotheses_are_researcher_source_predictions_not_observations": true,
+  "optional_after_primary": "parent 8f0b4cce4481 build on kvm and tcg as historical comparison; note the fix also changed arch/x86/kernel/cpu/topology.c, so it is not a single-predicate contrast",
+  "observations": ["dmesg hypervisor and 'Allowing N present CPUs plus M hotplug CPUs' lines", "sysfs possible/present/online before and after QMP device_add", "QMP replies", "image/config/initrd/console SHA"],
+  "relations": {
+    "P1_policy_reach": "if the environment is a QEMU guest relying on legacy Enabled=0 slots for hotplug, those slots are possible",
+    "P2_bare_metal_spec": "not testable locally: no bare-metal legacy-MADT machine; keep from acpi_contracts/acpi_kunit projections",
+    "P3_hotplug_consumption": "a hot-added CPU is present and can be onlined only if its slot was possible at boot"
+  },
+  "cost_estimate": {"kernel_builds": 1, "optional_kernel_builds": 1, "pid1_builds": 1, "qemu_boots": 4, "optional_qemu_boots": 2, "expected_wall_minutes": "about 10-25 with 20 CPUs (ARM64 small build took 50 s; x86_64 defconfig is larger)"},
+  "not_claimed": [
+    "a TCG guest losing hotplug would be a policy-scope observation in a development case, not a confirmed defect: upstream may consider TCG out of scope",
+    "no bare-metal or vendor firmware validation",
+    "no Xen environment (QEMU Xen HVM emulation unavailable on this host KVM; Xen PV not emulated by QEMU)"
+  ],
+  "model_calls_planned": 0
+}

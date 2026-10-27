@@ -1,0 +1,85 @@
+{
+  "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+  "scope": "same known historical case, source-only; no fix/runtime/oracle/manual review",
+  "documents": [
+    {
+      "id": "S_interface",
+      "kind": "source",
+      "path": "include/linux/topology.h",
+      "start_line": 197,
+      "end_line": 208,
+      "text": "197: #endif\n198: #ifndef topology_die_cpumask\n199: #define topology_die_cpumask(cpu)\t\tcpumask_of(cpu)\n200: #endif\n201: \n202: #if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)\n203: static inline const struct cpumask *cpu_smt_mask(int cpu)\n204: {\n205: \treturn topology_sibling_cpumask(cpu);\n206: }\n207: #endif\n208: "
+    },
+    {
+      "id": "X_x86_topology",
+      "kind": "source",
+      "path": "arch/x86/include/asm/topology.h",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 110,
+      "end_line": 132,
+      "full_original_file_sha256": "640230a5ebe90c4c5fcf9907907c68d49526daf8d43482dc736ee85b9eb042bd",
+      "source": "local_git_object_original_uninstrumented",
+      "text": "110: #define topology_die_id(cpu)\t\t\t(cpu_data(cpu).cpu_die_id)\n111: #define topology_core_id(cpu)\t\t\t(cpu_data(cpu).cpu_core_id)\n112: \n113: extern unsigned int __max_die_per_package;\n114: \n115: #ifdef CONFIG_SMP\n116: #define topology_die_cpumask(cpu)\t\t(per_cpu(cpu_die_map, cpu))\n117: #define topology_core_cpumask(cpu)\t\t(per_cpu(cpu_core_map, cpu))\n118: #define topology_sibling_cpumask(cpu)\t\t(per_cpu(cpu_sibling_map, cpu))\n119: \n120: extern unsigned int __max_logical_packages;\n121: #define topology_max_packages()\t\t\t(__max_logical_packages)\n122: \n123: static inline int topology_max_die_per_package(void)\n124: {\n125: \treturn __max_die_per_package;\n126: }\n127: \n128: extern int __max_smt_threads;\n129: \n130: static inline int topology_max_smt_threads(void)\n131: {\n132: \treturn __max_smt_threads;"
+    },
+    {
+      "id": "S_x86_callin_entry",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "start_line": 162,
+      "end_line": 165,
+      "text": "162: static void smp_callin(void)\n163: {\n164: \tint cpuid;\n165: "
+    },
+    {
+      "id": "S_x86_id",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "start_line": 172,
+      "end_line": 173,
+      "text": "172: \tcpuid = smp_processor_id();\n173: "
+    },
+    {
+      "id": "S_x86_callin",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "start_line": 186,
+      "end_line": 214,
+      "text": "186: \tsmp_store_cpu_info(cpuid);\n187: \n188: \t/*\n189: \t * The topology information must be up to date before\n190: \t * calibrate_delay() and notify_cpu_starting().\n191: \t */\n192: \tset_cpu_sibling_map(raw_smp_processor_id());\n193: \n194: \tinit_freq_invariance(true, false);\n195: \n196: \t/*\n197: \t * Get our bogomips.\n198: \t * Update loops_per_jiffy in cpu_data. Previous call to\n199: \t * smp_store_cpu_info() stored a value that is close but not as\n200: \t * accurate as the value just calculated.\n201: \t */\n202: \tcalibrate_delay();\n203: \tcpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;\n204: \tpr_debug(\"Stack at about %p\\n\", &cpuid);\n205: \n206: \twmb();\n207: \n208: \tnotify_cpu_starting(cpuid);\n209: \n210: \t/*\n211: \t * Allow the master to continue.\n212: \t */\n213: \tcpumask_set_cpu(cpuid, cpu_callin_mask);\n214: }"
+    },
+    {
+      "id": "S_x86_start",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "start_line": 229,
+      "end_line": 264,
+      "text": "229: \n230: #ifdef CONFIG_X86_32\n231: \t/* switch away from the initial page table */\n232: \tload_cr3(swapper_pg_dir);\n233: \t__flush_tlb_all();\n234: #endif\n235: \tcpu_init_secondary();\n236: \trcu_cpu_starting(raw_smp_processor_id());\n237: \tx86_cpuinit.early_percpu_clock_init();\n238: \tsmp_callin();\n239: \n240: \tenable_start_cpu0 = 0;\n241: \n242: \t/* otherwise gcc will move up smp_processor_id before the cpu_init */\n243: \tbarrier();\n244: \t/*\n245: \t * Check TSC synchronization with the boot CPU:\n246: \t */\n247: \tcheck_tsc_sync_target();\n248: \n249: \tspeculative_store_bypass_ht_init();\n250: \n251: \t/*\n252: \t * Lock vector_lock, set CPU online and bring the vector\n253: \t * allocator online. Online must be set with vector_lock held\n254: \t * to prevent a concurrent irq setup/teardown from seeing a\n255: \t * half valid vector space.\n256: \t */\n257: \tlock_vector_lock();\n258: \tset_cpu_online(smp_processor_id(), true);\n259: \tlapic_online();\n260: \tunlock_vector_lock();\n261: \tcpu_set_state_online(smp_processor_id());\n262: \tx86_platform.nmi_init();\n263: \n264: \t/* enable local interrupts */"
+    },
+    {
+      "id": "S_x86_link",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "start_line": 427,
+      "end_line": 434,
+      "text": "427: #define link_mask(mfunc, c1, c2)\t\t\t\t\t\\\n428: do {\t\t\t\t\t\t\t\t\t\\\n429: \tcpumask_set_cpu((c1), mfunc(c2));\t\t\t\t\\\n430: \tcpumask_set_cpu((c2), mfunc(c1));\t\t\t\t\\\n431: } while (0)\n432: \n433: static bool match_smt(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)\n434: {"
+    },
+    {
+      "id": "R_x86_prepare_complete",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 574,
+      "end_line": 644,
+      "full_original_file_sha256": "7b58b6f8639680531710bff12fa4b575bd29520515c54e2236cdc183b21dbff8",
+      "source": "local_git_object_original_uninstrumented",
+      "text": "574: void set_cpu_sibling_map(int cpu)\n575: {\n576: \tbool has_smt = smp_num_siblings > 1;\n577: \tbool has_mp = has_smt || boot_cpu_data.x86_max_cores > 1;\n578: \tstruct cpuinfo_x86 *c = &cpu_data(cpu);\n579: \tstruct cpuinfo_x86 *o;\n580: \tint i, threads;\n581: \n582: \tcpumask_set_cpu(cpu, cpu_sibling_setup_mask);\n583: \n584: \tif (!has_mp) {\n585: \t\tcpumask_set_cpu(cpu, topology_sibling_cpumask(cpu));\n586: \t\tcpumask_set_cpu(cpu, cpu_llc_shared_mask(cpu));\n587: \t\tcpumask_set_cpu(cpu, topology_core_cpumask(cpu));\n588: \t\tcpumask_set_cpu(cpu, topology_die_cpumask(cpu));\n589: \t\tc->booted_cores = 1;\n590: \t\treturn;\n591: \t}\n592: \n593: \tfor_each_cpu(i, cpu_sibling_setup_mask) {\n594: \t\to = &cpu_data(i);\n595: \n596: \t\tif (match_pkg(c, o) && !topology_same_node(c, o))\n597: \t\t\tx86_has_numa_in_package = true;\n598: \n599: \t\tif ((i == cpu) || (has_smt && match_smt(c, o)))\n600: \t\t\tlink_mask(topology_sibling_cpumask, cpu, i);\n601: \n602: \t\tif ((i == cpu) || (has_mp && match_llc(c, o)))\n603: \t\t\tlink_mask(cpu_llc_shared_mask, cpu, i);\n604: \n605: \t\tif ((i == cpu) || (has_mp && match_die(c, o)))\n606: \t\t\tlink_mask(topology_die_cpumask, cpu, i);\n607: \t}\n608: \n609: \tthreads = cpumask_weight(topology_sibling_cpumask(cpu));\n610: \tif (threads > __max_smt_threads)\n611: \t\t__max_smt_threads = threads;\n612: \n613: \t/*\n614: \t * This needs a separate iteration over the cpus because we rely on all\n615: \t * topology_sibling_cpumask links to be set-up.\n616: \t */\n617: \tfor_each_cpu(i, cpu_sibling_setup_mask) {\n618: \t\to = &cpu_data(i);\n619: \n620: \t\tif ((i == cpu) || (has_mp && match_pkg(c, o))) {\n621: \t\t\tlink_mask(topology_core_cpumask, cpu, i);\n622: \n623: \t\t\t/*\n624: \t\t\t *  Does this new cpu bringup a new core?\n625: \t\t\t */\n626: \t\t\tif (threads == 1) {\n627: \t\t\t\t/*\n628: \t\t\t\t * for each core in package, increment\n629: \t\t\t\t * the booted_cores for this new cpu\n630: \t\t\t\t */\n631: \t\t\t\tif (cpumask_first(\n632: \t\t\t\t    topology_sibling_cpumask(i)) == i)\n633: \t\t\t\t\tc->booted_cores++;\n634: \t\t\t\t/*\n635: \t\t\t\t * increment the core count for all\n636: \t\t\t\t * the other cpus in this package\n637: \t\t\t\t */\n638: \t\t\t\tif (i != cpu)\n639: \t\t\t\t\tcpu_data(i).booted_cores++;\n640: \t\t\t} else if (i != cpu && !c->booted_cores)\n641: \t\t\t\tc->booted_cores = cpu_data(i).booted_cores;\n642: \t\t}\n643: \t}\n644: }",
+      "scope_note": "Complete set_cpu_sibling_map function; other writers are not surveyed."
+    },
+    {
+      "id": "C_x86",
+      "kind": "configuration",
+      "path": "../arch_witness_checks_20261014/generated/config/startup_x86.txt",
+      "start_line": 1,
+      "end_line": 7,
+      "text": "1: CONFIG_X86_64=y\n2: CONFIG_SMP=y\n3: CONFIG_SYSFS=y\n4: CONFIG_NR_CPUS=4\n5: CONFIG_SCHED_SMT=y\n6: CONFIG_SCHED_CORE=y\n7: CONFIG_HOTPLUG_CPU=y"
+    }
+  ]
+}

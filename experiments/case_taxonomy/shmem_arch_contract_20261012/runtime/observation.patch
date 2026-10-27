@@ -1,0 +1,32 @@
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -802,9 +802,17 @@
+ 	if (xas_error(&xas)) {
+ 		folio->mapping = NULL;
+ 		folio_ref_sub(folio, nr);
++		if (current->pid == 1)
++			trace_printk("SC_INSERT folio=%px mapping=%px index=%lu fmap=%px findex=%lu order=%u rc=%d\n",
++				folio, mapping, index, folio->mapping, folio->index,
++				folio_order(folio), xas_error(&xas));
+ 		return xas_error(&xas);
+ 	}
+ 
++	if (current->pid == 1)
++		trace_printk("SC_INSERT folio=%px mapping=%px index=%lu fmap=%px findex=%lu order=%u rc=%d\n",
++			folio, mapping, index, folio->mapping, folio->index,
++			folio_order(folio), 0);
+ 	return 0;
+ }
+ 
+@@ -1613,6 +1621,11 @@
+ 	mpol = shmem_get_pgoff_policy(info, index, HPAGE_PMD_ORDER, &ilx);
+ 	page = alloc_pages_mpol(gfp, HPAGE_PMD_ORDER, mpol, ilx, numa_node_id());
+ 	mpol_cond_put(mpol);
++	/* Lab-only observation; allocation and return behavior are unchanged. */
++	if (current->pid == 1)
++		trace_printk("SC_ALLOC page=%px order=%u requested=%u\n",
++			page, page ? folio_order(page_folio(page)) : 0,
++			(unsigned int)HPAGE_PMD_ORDER);
+ 
+ 	return page_rmappable_folio(page);
+ }

@@ -1,0 +1,13 @@
+# 三开发输入的独立事前预期
+
+仅查看已锁定协议、三输入、同版两份Kconfig和人工控制目录，未查看新实现或结果，未运行旧提取器、C投影或编译器，也未取得Git/patch。原文件和对照只在第665行的一个配置token不同；寄存器/mask、载体、set/clear、write/readback位置相同。
+
+原输入预期真实配置引用CONFIG_BIG_ENDIAN、支持guard1、模式复核候选1。两份保存的Kconfig中没有该符号完整声明，所以声明状态为unobserved_in_saved_material；这不是整个历史版本不存在该符号的证明，更不是编译或运行错误。
+
+CPU属性fixture预期配置引用CONFIG_CPU_BIG_ENDIAN、支持guard1、模式复核候选1。声明状态observed_in_saved_material，证据为同父版ARM64第1083–1087行及ARM/mm第740–748行的两份完整条目。声明存在仍不证明generated/autoconf、外部宏或有效配置，不能输出正确版本已验证。
+
+无模式fixture预期支持guard1，但只有trace_tag赋值，没有目录中的模式set/clear、reg_write和readback操作。因此候选0、状态not_applicable_no_mode_operation。这是限定模板不适用，不是历史真阴性、不相关判定或无缺陷证明。
+
+前两候选的有效配置、构建/执行路径、硬件模式和下游消费者契约均unknown。提取的位置只是词法共处与顺序，不能认证CFG支配、数据流完整性、分支实际执行或首次消费者。模式mask与CPU属性关联由助手审阅的source-intent目录人工提供，不是自动推断出的硬件规范。
+
+建议复核位置仅列第665行谓词，以及668/678行模式写入；不自动替换名字，不生成补丁。没有因fixture增加确认案例或独立阳性。本轮只验证该开发模板能否保存有来源的候选和止步边界。

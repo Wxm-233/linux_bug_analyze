@@ -1,0 +1,51 @@
+{
+  "parent": "2a38e4ca302280fdcce370ba2bee79bac16c4587",
+  "documents": [
+    {
+      "id": "cpu_parse_topology",
+      "revision": "2a38e4ca302280fdcce370ba2bee79bac16c4587",
+      "path": "arch/x86/kernel/cpu/topology_common.c",
+      "function": "cpu_parse_topology",
+      "start_line": 166,
+      "end_line": 193,
+      "text": "void cpu_parse_topology(struct cpuinfo_x86 *c)\n{\n\tunsigned int dom, cpu = smp_processor_id();\n\tstruct topo_scan tscan = { .c = c, };\n\n\tparse_topology(&tscan, false);\n\n\tif (IS_ENABLED(CONFIG_X86_LOCAL_APIC)) {\n\t\tif (c->topo.initial_apicid != c->topo.apicid) {\n\t\t\tpr_err(FW_BUG \"CPU%4u: APIC ID mismatch. CPUID: 0x%04x APIC: 0x%04x\\n\",\n\t\t\t       cpu, c->topo.initial_apicid, c->topo.apicid);\n\t\t}\n\n\t\tif (c->topo.apicid != cpuid_to_apicid[cpu]) {\n\t\t\tpr_err(FW_BUG \"CPU%4u: APIC ID mismatch. Firmware: 0x%04x APIC: 0x%04x\\n\",\n\t\t\t       cpu, cpuid_to_apicid[cpu], c->topo.apicid);\n\t\t}\n\t}\n\n\tfor (dom = TOPO_SMT_DOMAIN; dom < TOPO_MAX_DOMAIN; dom++) {\n\t\tif (tscan.dom_shifts[dom] == x86_topo_system.dom_shifts[dom])\n\t\t\tcontinue;\n\t\tpr_err(FW_BUG \"CPU%d: Topology domain %u shift %u != %u\\n\", cpu, dom,\n\t\t       tscan.dom_shifts[dom], x86_topo_system.dom_shifts[dom]);\n\t}\n\n\ttopo_set_ids(&tscan, false);\n}\n",
+      "function_sha256": "c23eb7d29000c1501befbdb208f574ace18c73846eaf7dcdfaf666b1c8fb22af",
+      "full_file_sha256": "01a9340c2a46f90488d748a8f9eeb8ac196dab759a70fe7d3d08b13ee247d2a3",
+      "location_method": "unchanged_existing_complete_function",
+      "semantic_analysis_automated": false,
+      "actual_configuration_proved": false
+    },
+    {
+      "id": "cpu_init_topology",
+      "revision": "2a38e4ca302280fdcce370ba2bee79bac16c4587",
+      "path": "arch/x86/kernel/cpu/topology_common.c",
+      "function": "cpu_init_topology",
+      "start_line": 195,
+      "end_line": 220,
+      "text": "void __init cpu_init_topology(struct cpuinfo_x86 *c)\n{\n\tstruct topo_scan tscan = { .c = c, };\n\tunsigned int dom, sft;\n\n\tparse_topology(&tscan, true);\n\n\t/* Copy the shift values and calculate the unit sizes. */\n\tmemcpy(x86_topo_system.dom_shifts, tscan.dom_shifts, sizeof(x86_topo_system.dom_shifts));\n\n\tdom = TOPO_SMT_DOMAIN;\n\tx86_topo_system.dom_size[dom] = 1U << x86_topo_system.dom_shifts[dom];\n\n\tfor (dom++; dom < TOPO_MAX_DOMAIN; dom++) {\n\t\tsft = x86_topo_system.dom_shifts[dom] - x86_topo_system.dom_shifts[dom - 1];\n\t\tx86_topo_system.dom_size[dom] = 1U << sft;\n\t}\n\n\ttopo_set_ids(&tscan, true);\n\n\t/*\n\t * AMD systems have Nodes per package which cannot be mapped to\n\t * APIC ID.\n\t */\n\t__amd_nodes_per_pkg = tscan.amd_nodes_per_pkg;\n}\n",
+      "function_sha256": "b0c46cd280ea5e2c7cc39f1404fe774da837c8b61586f1a90cc54088e1db512d",
+      "full_file_sha256": "01a9340c2a46f90488d748a8f9eeb8ac196dab759a70fe7d3d08b13ee247d2a3",
+      "location_method": "researcher_exact_location_balanced_original_collection_only",
+      "semantic_analysis_automated": false,
+      "actual_configuration_proved": false
+    }
+  ],
+  "prior_locator_failures": [
+    {
+      "function": "cpu_init_topology",
+      "old_locator_error": "Expected one complete supported definition of cpu_init_topology, found 0",
+      "raw_not_modified": true
+    }
+  ],
+  "source_files": [
+    {
+      "path": "arch/x86/kernel/cpu/topology_common.c",
+      "sha256": "01a9340c2a46f90488d748a8f9eeb8ac196dab759a70fe7d3d08b13ee247d2a3",
+      "bytes": 5743
+    }
+  ],
+  "helper_body_inspection_in_scope": false,
+  "project_model_requests": 0,
+  "builds": 0,
+  "kernel_runs": 0
+}

@@ -1,0 +1,178 @@
+{
+  "tools": {
+    "qemu-system-aarch64": "/usr/bin/qemu-system-aarch64",
+    "qemu-system-x86_64": "/usr/bin/qemu-system-x86_64",
+    "aarch64-linux-gnu-gcc": "/usr/bin/aarch64-linux-gnu-gcc",
+    "aarch64-linux-gnu-gdb": null,
+    "gdb": null,
+    "dtc": null,
+    "cpio": "/usr/bin/cpio",
+    "busybox": null,
+    "pahole": "/usr/bin/pahole",
+    "readelf": "/usr/bin/readelf"
+  },
+  "kernel_git": {
+    "code": 0,
+    "stdout": "df2908090cda368b01ff43709f51890076c56157\n",
+    "stderr": ""
+  },
+  "parent_makefile": {
+    "code": 0,
+    "stdout": "# SPDX-License-Identifier: GPL-2.0\nVERSION = 6\nPATCHLEVEL = 19\nSUBLEVEL = 0\nEXTRAVERSION = -rc2\nNAME = Baby Opossum Posse\n\n# *DOCUMENTATION*\n# To see a list of typical targets execute \"make help\"\n# More info can be located in ./README\n# Comments in this file are targeted only to the developer, do not\n# expect to learn how to build the kernel reading this file.\n\nifeq ($(filter output-sync,$(.FEATURES)),)\n$(error GNU Make >= 4.0 is required. Your Make version is $(MAKE_VERSION))\nendif\n\n$(if $(filter __%, $(MAKECMDGOALS)), \\\n\t$(error targets prefixed with '__' are only for internal use))\n\n# That's our default target when none is given on the command line\nPHONY := __all\n__all:\n\n# We are using a recursive build, so we need to do a little thinking\n# to get the ordering right.\n#\n# Most importantly: sub-Makefiles should only ever modify files in\n# their own directory. If in some directory we have a dependency on\n# a file in another dir (which doesn't happen often, but it's often\n# unavoidable when linking the built-in.a targets which finally\n# turn into vmlinux), we will call a sub make in that other dir, and\n# after that we are sure that everything which is in that other dir\n# is now up to date.\n#\n# The only cases where we need to modify files which have global\n# effects are thus separated out and done before the recursive\n# descending is started. They are now explicitly listed as the\n# prepare rule.\n\nthis-makefile := $(lastword $(MAKEFILE_LIST))\nabs_srctree := $(realpath $(dir $(this-makefile)))\nabs_output := $(CURDIR)\n\nifneq ($(sub_make_done),1)\n\n# Do not use make's built-in rules and variables\n# (this increases performance and avoids hard-to-debug behaviour)\nMAKEFLAGS += -rR\n\n# Avoid funny character set dependencies\nunexport LC_ALL\nLC_COLLATE=C\nLC_NUMERIC=C\nexport LC_COLLATE LC_NUMERIC\n\n# Avoid interference with shell env settings\nunexport GREP_OPTIONS\n\n# Beautify output\n# ---------------------------------------------------------------------------\n#\n# Most of build commands in Kbuild start with \"cmd_\". You can optionally define\n# \"quiet_cmd_*\". If defined, the short log is printed. Otherwise, no log from\n# that command is printed by default.\n#\n# e.g.)\n#    quiet_cmd_depmod = DEPMOD  $(MODLIB)\n#          cmd_depmod = $(srctree)/scripts/depmod.sh $(DEPMOD) $(KERNELRELEASE)\n#\n# A simple variant is to prefix commands with $(Q) - that's useful\n# for commands that shall be hidden in non-verbose mode.\n#\n#    $(Q)$(MAKE) $(build)=scripts/basic\n#\n# If KBUILD_VERBOSE contains 1, the whole command is echoed.\n# If KBUILD_VERBOSE contains 2, the reason for rebuilding is printed.\n#\n# To put more focus on warnings, be less verbose as default\n# Use 'make V=1' to see the full commands\n\nifeq (\"$(origin V)\", \"command line\")\n  KBUILD_VERBOSE = $(V)\nendif\n\nquiet = quiet_\nQ = @\n\nifneq ($(findstring 1, $(KBUILD_VERBOSE)),)\n  quiet =\n  Q =\nendif\n\n# If the user is running make -s (silent mode), suppress echoing of\n# commands\nifneq ($(findstring s,$(firstword -$(MAKEFLAGS))),)\nquiet=silent_\noverride KBUILD_VERBOSE :=\nendif\n\nexport quiet Q KBUILD_VERBOSE\n\n# Call a source code checker (by default, \"sparse\") as part of the\n# C compilation.\n#\n# Use 'make C=1' to enable checking of only re-compiled files.\n# Use 'make C=2' to enable checking of *all* source files, regardless\n# of whether they are re-compiled or not.\n#\n# See the file \"Documentation/dev-tools/sparse.rst\" for more details,\n# including where to get the \"sparse\" utility.\n\nifeq (\"$(origin C)\", \"command line\")\n  KBUILD_CHECKSRC = $(C)\nendif\nifndef KBUILD_CHECKSRC\n  KBUILD_CHECKSRC = 0\nendif\n\nexport KBUILD_CHECKSRC\n\n# Enable \"clippy\" (a linter) as part of the Rust compilation.\n#\n# Use 'make CLIPPY=1' to enable it.\nifeq (\"$(origin CLIPPY)\", \"command line\")\n  KBUILD_CLIPPY := $(CLIPPY)\nendif\n\nexport KBUILD_CLIPPY\n\n# Use make M=dir or set the environment variable KBUILD_EXTMOD to specify the\n# directory of external module to build. Setting M= takes precedence.\nifeq (\"$(origin M)\", \"command line\")\n  KBUILD_EXTMOD := $(M)\nendif\n\nifeq (\"$(origin MO)\", \"command line\")\n  KBUILD_EXTMOD_OUTPUT := $(MO)\nendif\n\n$(if $(word 2, $(KBUILD_EXTMOD)), \\\n\t$(error building multiple external modules is not supported))\n\n$(foreach x, % :, $(if $(findstring $x, $(KBUILD_EXTMOD)), \\\n\t$(error module directory path cannot contain '$x')))\n\n# Remove trailing slashes\nifneq ($(filter %/, $(KBUILD_EXTMOD)),)\nKBUILD_EXTMOD := $(shell dirname $(KBUILD_EXTMOD).)\nendif\n\nexport KBUILD_EXTMOD\n\nifeq (\"$(origin W)\", \"command line\")\n  KBUILD_EXTRA_WARN := $(W)\nendif\n\nexport KBUILD_EXTRA_WARN\n\n# Kbuild will save output files in the current working directory.\n# This does not need to match to the root of the kernel source tree.\n#\n# For example, you can do this:\n#\n#  cd /dir/to/store/output/files; make -f /dir/to/kernel/source/Makefile\n#\n# If you want to save output files in a different location, there are\n# two syntaxes to specify it.\n#\n# 1) O=\n# Use \"make O=dir/to/store/output/files/\"\n#\n# 2) Set KBUILD_OUTPUT\n# Set the environment variable KBUILD_OUTPUT to point to the output directory.\n# export KBUILD_OUTPUT=dir/to/store/output/files/; make\n#\n# The O= assignment takes precedence over the KBUILD_OUTPUT environment\n# variable.\n\nifeq (\"$(origin O)\", \"command line\")\n  KBUILD_OUTPUT := $(O)\nendif\n\nifdef KBUILD_EXTMOD\n    ifdef KBUILD_OUTPUT\n        objtree := $(realpath $(KBUILD_OUTPUT))\n        $(if $(objtree),,$(error specified kernel directory \"$(KBUILD_OUTPUT)\" does not exist))\n    else\n        objtree := $(abs_srctree)\n    endif\n    # If Make is invoked from the kernel directory (either kernel\n    # source directory or kernel build directory), external modules\n    # are built in $(KBUILD_EXTMOD) for backward compatibility,\n    # otherwise, built in the current directory.\n    output := $(or $(KBUILD_EXTMOD_OUTPUT),$(if $(filter $(CURDIR),$(objtree) $(abs_srctree)),$(KBUILD_EXTMOD)))\n    # KBUILD_EXTMOD might be a relative path. Remember its absolute path before\n    # Make changes the working directory.\n    ",
+    "stderr": ""
+  },
+  "kvm_present": true,
+  "host_uname": {
+    "code": 0,
+    "stdout": "Linux DESKTOP-6LNKCJL 6.18.40.1-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Fri Jul 31 22:12:15 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n",
+    "stderr": ""
+  },
+  "relevant_cache_directories": [
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-consumer-observation-20261024",
+      "children": [
+        "blank.img",
+        "fix",
+        "fix.img",
+        "fix.tar",
+        "parent",
+        "parent.img",
+        "parent.tar"
+      ]
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-fix-watch-20261025.img",
+      "children": []
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-fix-watch-repeat-20261025.img",
+      "children": []
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-kernel-watch-20261025.img",
+      "children": []
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023",
+      "children": [
+        "fix",
+        "fix-4k",
+        "fix-4k-sector4096.img",
+        "fix-64k",
+        "fix-64k-sector4096.img",
+        "fix-64k-sector65536.img",
+        "fix.tar",
+        "parent",
+        "parent-4k",
+        "parent-4k-sector4096.img",
+        "parent-64k",
+        "parent-64k-sector4096.img",
+        "parent-64k-sector65536.img",
+        "parent.tar"
+      ]
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-step-diagnostic-default-20261025.img",
+      "children": []
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-step-diagnostic-explicit-20261025.img",
+      "children": []
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-threshold-intervention-20261023",
+      "children": [
+        "AB.img",
+        "BA.img",
+        "blank.img",
+        "initramfs.list",
+        "initrd.gz",
+        "pid1.elf"
+      ]
+    }
+  ],
+  "available_build_material": [
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-64k/.config",
+      "bytes": 40166
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-64k/arch/arm64/boot/Image",
+      "bytes": 6137864
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-64k/vmlinux",
+      "bytes": 6637968
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-64k/usr/gen_init_cpio",
+      "bytes": 26440
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-4k/.config",
+      "bytes": 40154
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-4k/arch/arm64/boot/Image",
+      "bytes": 5240840
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-4k/vmlinux",
+      "bytes": 6134416
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-4k/usr/gen_init_cpio",
+      "bytes": 26440
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-4k/.config",
+      "bytes": 40154
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-4k/arch/arm64/boot/Image",
+      "bytes": 5240840
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-4k/vmlinux",
+      "bytes": 6134416
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/fix-4k/usr/gen_init_cpio",
+      "bytes": 26440
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-64k/.config",
+      "bytes": 40166
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-64k/arch/arm64/boot/Image",
+      "bytes": 6137864
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-64k/vmlinux",
+      "bytes": 6637968
+    },
+    {
+      "path": "/root/.cache/linux-bug-analyze/btrfs-mount-resume-20261023/parent-64k/usr/gen_init_cpio",
+      "bytes": 26440
+    },
+    {
+      "path": "/root/lba-vtd-build/.config",
+      "bytes": 57303
+    },
+    {
+      "path": "/root/lba-vtd-build/vmlinux",
+      "bytes": 16063824
+    }
+  ],
+  "qemu-system-aarch64_version": {
+    "code": 0,
+    "stdout": "QEMU emulator version 8.2.2 (Debian 1:8.2.2+ds-0ubuntu1.18)\nCopyright (c) 2003-2023 Fabrice Bellard and the QEMU Project developers\n",
+    "stderr": ""
+  },
+  "aarch64-linux-gnu-gcc_version": {
+    "code": 0,
+    "stdout": "aarch64-linux-gnu-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+    "stderr": ""
+  }
+}

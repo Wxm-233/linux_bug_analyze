@@ -1,0 +1,49 @@
+{
+  "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+  "scope": "same known historical case, source-only; no fix/runtime/oracle/manual review",
+  "documents": [
+    {
+      "id": "S_core",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "start_line": 5753,
+      "end_line": 5794,
+      "text": "5753: static void sched_core_cpu_starting(unsigned int cpu)\n5754: {\n5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n5756: \tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n5757: \tunsigned long flags;\n5758: \tint t;\n5759: \n5760: \tsched_core_lock(cpu, &flags);\n5761: \n5762: \tWARN_ON_ONCE(rq->core != rq);\n5763: \n5764: \t/* if we're the first, we'll be our own leader */\n5765: \tif (cpumask_weight(smt_mask) == 1)\n5766: \t\tgoto unlock;\n5767: \n5768: \t/* find the leader */\n5769: \tfor_each_cpu(t, smt_mask) {\n5770: \t\tif (t == cpu)\n5771: \t\t\tcontinue;\n5772: \t\trq = cpu_rq(t);\n5773: \t\tif (rq->core == rq) {\n5774: \t\t\tcore_rq = rq;\n5775: \t\t\tbreak;\n5776: \t\t}\n5777: \t}\n5778: \n5779: \tif (WARN_ON_ONCE(!core_rq)) /* whoopsie */\n5780: \t\tgoto unlock;\n5781: \n5782: \t/* install and validate core_rq */\n5783: \tfor_each_cpu(t, smt_mask) {\n5784: \t\trq = cpu_rq(t);\n5785: \n5786: \t\tif (t == cpu)\n5787: \t\t\trq->core = core_rq;\n5788: \n5789: \t\tWARN_ON_ONCE(rq->core != core_rq);\n5790: \t}\n5791: \n5792: unlock:\n5793: \tsched_core_unlock(cpu, &flags);\n5794: }"
+    },
+    {
+      "id": "X_lock_functions",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 240,
+      "end_line": 261,
+      "full_original_file_sha256": "106a72f05176d464d468f85b6e95b89fe2938562f9bf8923df19b8c2e3627303",
+      "source": "local_git_object_original_uninstrumented",
+      "text": "240: static void sched_core_lock(int cpu, unsigned long *flags)\n241: {\n242: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n243: \tint t, i = 0;\n244: \n245: \tlocal_irq_save(*flags);\n246: \tfor_each_cpu(t, smt_mask)\n247: \t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n248: }\n249: \n250: static void sched_core_unlock(int cpu, unsigned long *flags)\n251: {\n252: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n253: \tint t;\n254: \n255: \tfor_each_cpu(t, smt_mask)\n256: \t\traw_spin_unlock(&cpu_rq(t)->__lock);\n257: \tlocal_irq_restore(*flags);\n258: }\n259: \n260: static void __sched_core_flip(bool enabled)\n261: {"
+    },
+    {
+      "id": "S_interface",
+      "kind": "source",
+      "path": "include/linux/topology.h",
+      "start_line": 197,
+      "end_line": 208,
+      "text": "197: #endif\n198: #ifndef topology_die_cpumask\n199: #define topology_die_cpumask(cpu)\t\tcpumask_of(cpu)\n200: #endif\n201: \n202: #if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)\n203: static inline const struct cpumask *cpu_smt_mask(int cpu)\n204: {\n205: \treturn topology_sibling_cpumask(cpu);\n206: }\n207: #endif\n208: "
+    },
+    {
+      "id": "C_x86",
+      "kind": "configuration",
+      "path": "../arch_witness_checks_20261014/generated/config/startup_x86.txt",
+      "start_line": 1,
+      "end_line": 7,
+      "text": "1: CONFIG_X86_64=y\n2: CONFIG_SMP=y\n3: CONFIG_SYSFS=y\n4: CONFIG_NR_CPUS=4\n5: CONFIG_SCHED_SMT=y\n6: CONFIG_SCHED_CORE=y\n7: CONFIG_HOTPLUG_CPU=y"
+    },
+    {
+      "id": "C_s390",
+      "kind": "configuration",
+      "path": "../arch_witness_checks_20261014/generated/config/startup_s390.txt",
+      "start_line": 1,
+      "end_line": 8,
+      "text": "1: CONFIG_S390=y\n2: CONFIG_SMP=y\n3: CONFIG_SYSFS=y\n4: CONFIG_NR_CPUS=4\n5: CONFIG_SCHED_SMT=y\n6: CONFIG_SCHED_CORE=y\n7: CONFIG_SCHED_TOPOLOGY=y\n8: CONFIG_HOTPLUG_CPU=y"
+    }
+  ]
+}

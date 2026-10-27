@@ -1,0 +1,13 @@
+# 主流程的父版事实预记录
+
+写于D主模型任务运行期间、尚未打开其增量或最终回答、未采集两条子提交说明/补丁时。它是研究者依据父版作的预期，不是程序自动提取，也不具有独立未读资格。
+
+C中，kernel/smp.c的nosmp/maxcpus早期参数调用arch_disable_smp_support，公共弱实现为空，x86实现调用disable_ioapic_support；smp_init调用公共bringup_nonboot_cpus。能看见用途差别，仍不能证明最终架构启动绑定、初始化段存活条件或某次先用后准备。按材料盘点跳过付费，不判为同用途正常。
+
+D中，drivers/base/arch_topology.c:687–690直接返回cluster_sibling；同文件cpu_coregroup_mask根据NUMA、package/core、有效LLC及SCHED_CLUSTER条件确定MC来源。公共kernel/sched/topology.c默认表的CLS位于MC前，sd_init在1556读取tl->mask内容并在1596用cpu_map求交；build_sched_domain在2188起检查子span是否包含于父span，失败会输出错误并扩大父span。**已有内核本身就在检查这个要求，不能把这个subset谓词称作本项目新发明的检测规则。**
+
+可研究的条件化关系是：在同一目标CPU、同一有效cpu_map、实际选表和对应层级都成立时，低层消费者视图应包含于相邻高层视图。原始架构分组、返回指针与求交后的实际span必须分开。不能简单要求任何原始cluster mask恒小于任意NUMA mask，更不能从“cluster”或“core”的名字认定层级。
+
+ARM64的公共拓扑映射与x86的缓存共享mask来源不同；这说明有比较架构提供者的必要，尚不证明某个x86实例必满足、ARM64实例必违约。实际配置、硬件/固件分组和全部读端尚缺。此候选偏空间范围/层级一致性，不是现有首次消费前准备机制的独立阳性。
+
+后续核对模型是否自行定位上述层级关系、是否错误宣布某架构正常/失败、是否忽略cpu_map求交和已有late fixup。修复材料只能作为后续oracle证据，不能回填进父版预测。

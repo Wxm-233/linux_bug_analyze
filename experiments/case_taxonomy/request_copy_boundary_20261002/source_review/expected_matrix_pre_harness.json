@@ -1,0 +1,628 @@
+{
+  "schema": "independent-source-oracle-pre-harness-v1",
+  "sealed_at_utc": "2026-10-02T03:50:24.839142+00:00",
+  "source_exported_at_utc": "2026-10-02T03:47:20.885457+00:00",
+  "task_day": "2026-10-02",
+  "independence_statement": "Only the two specified Git source revisions and raw source files have been read. No experimental runner, C harness, result JSON or stdout has been read before this file is sealed.",
+  "conditions_count": 4,
+  "variant_observations_count": 16,
+  "revisions": {
+    "parent": "cef456cd354ef485f12d57000c455e83e416a2b6",
+    "fixed": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227"
+  },
+  "fixed_configuration": {
+    "entry": "hci_init4_req",
+    "dev_type": "HCI_PRIMARY",
+    "features_0_4": "LMP_LE (0x40)",
+    "le_features_0": "HCI_LE_DATA_LEN_EXT (0x20)",
+    "commands": "all zero",
+    "other_features_flags_quirks": "all disabled",
+    "initial_cmd_queue": "empty",
+    "le_max_tx_len": 27,
+    "le_max_tx_time": 328,
+    "opcode": "0x2024",
+    "payload_length": 4,
+    "command_bytes_without_transport_packet_type": 7
+  },
+  "source_sequence": [
+    "init4 constructs cp (native endian in parent, cpu_to_le16 in fixed)",
+    "init4 calls real hci_req_add wrapper once for 0x2024",
+    "wrapper calls hci_req_add_ev with event=0",
+    "hci_req_add_ev returns immediately for nonzero req.err",
+    "with req.err=0, hci_prepare_cmd calls allocator for 3+4 command bytes",
+    "NULL allocation skips header/payload creation and queue; add_ev stores -ENOMEM",
+    "successful allocation creates header and invokes original skb_put_data",
+    "original skb_put_data memcpy copies four existing cp bytes without endian conversion",
+    "add_ev checks empty queue, adds START flag, sets event and calls queue_tail",
+    "init4 returns 0 independently of the stored req.err"
+  ],
+  "interpretation_limits": [
+    "A target add call attempt does not establish queue_tail reached.",
+    "Local cp construction still occurs when existing req.err prevents any allocation or payload copy.",
+    "When no payload copy occurs, format is not_evaluated, never format_normal.",
+    "Successful source path reaches queue_tail; in a harness this is a queue stub observation, not actual device transmission.",
+    "The queue observation should inspect copied SKB storage, not merely the address or bytes of the stack cp argument.",
+    "hci_init4_req returns 0; -EIO/-ENOMEM remain req.err. No hci_req_run or top-level error propagation is exercised.",
+    "HCI_PRIMARY and LMP_LE are fixed contextual capabilities. The direct init4 target branch itself is controlled by DLE alone."
+  ],
+  "source_evidence": [
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "net/bluetooth/hci_core.c",
+      "blob_sha1": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+      "sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+      "lines": {
+        "start": 789,
+        "end": 862
+      },
+      "claim": "init4 target branch only checks DLE at 842; builds cp at 845-846 and calls add at 847; returns 0 at 861"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "net/bluetooth/hci_request.c",
+      "blob_sha1": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+      "sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "lines": {
+        "start": 285,
+        "end": 309
+      },
+      "claim": "prepare allocates 3+plen at 292; NULL exits at 293-294; header built at 296-298; plen bytes copied via skb_put_data at 300-301"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "net/bluetooth/hci_request.c",
+      "blob_sha1": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+      "sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "lines": {
+        "start": 311,
+        "end": 346
+      },
+      "claim": "add_ev rejects nonzero req.err before prepare; NULL sets -ENOMEM; successful command sets flags/event then calls queue_tail; add is a real wrapper function passing event=0"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/hci.h",
+      "blob_sha1": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+      "sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "lines": {
+        "start": 1547,
+        "end": 1551
+      },
+      "claim": "target opcode is 0x2024; packed two __le16 fields have four-byte payload"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/linux/skbuff.h",
+      "blob_sha1": "0a58402a166e3835e84b0f2662aed6771878eae7",
+      "sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4",
+      "lines": {
+        "start": 2212,
+        "end": 2220
+      },
+      "claim": "original skb_put_data appends storage then memcpy(tmp,data,len); no payload endian conversion"
+    },
+    {
+      "version": "fixed",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "path": "net/bluetooth/hci_core.c",
+      "blob_sha1": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+      "sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+      "lines": {
+        "start": 789,
+        "end": 862
+      },
+      "claim": "init4 target branch only checks DLE at 842; builds cp at 845-846 and calls add at 847; returns 0 at 861"
+    },
+    {
+      "version": "fixed",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "path": "net/bluetooth/hci_request.c",
+      "blob_sha1": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+      "sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "lines": {
+        "start": 285,
+        "end": 309
+      },
+      "claim": "prepare allocates 3+plen at 292; NULL exits at 293-294; header built at 296-298; plen bytes copied via skb_put_data at 300-301"
+    },
+    {
+      "version": "fixed",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "path": "net/bluetooth/hci_request.c",
+      "blob_sha1": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+      "sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "lines": {
+        "start": 311,
+        "end": 346
+      },
+      "claim": "add_ev rejects nonzero req.err before prepare; NULL sets -ENOMEM; successful command sets flags/event then calls queue_tail; add is a real wrapper function passing event=0"
+    },
+    {
+      "version": "fixed",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "path": "include/net/bluetooth/hci.h",
+      "blob_sha1": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+      "sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "lines": {
+        "start": 1547,
+        "end": 1551
+      },
+      "claim": "target opcode is 0x2024; packed two __le16 fields have four-byte payload"
+    },
+    {
+      "version": "fixed",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "path": "include/linux/skbuff.h",
+      "blob_sha1": "0a58402a166e3835e84b0f2662aed6771878eae7",
+      "sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4",
+      "lines": {
+        "start": 2212,
+        "end": 2220
+      },
+      "claim": "original skb_put_data appends storage then memcpy(tmp,data,len); no payload endian conversion"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "net/bluetooth/hci_core.c",
+      "blob_sha1": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+      "sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+      "lines": {
+        "start": 879,
+        "end": 890
+      },
+      "claim": "normal init orchestration requires HCI_PRIMARY before calling init3 and init4; the isolated init4 function does not enforce this gate"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/hci_core.h",
+      "blob_sha1": "b689aceb636b115aff038902cb14119384949955",
+      "sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+      "lines": {
+        "start": 269,
+        "end": 274
+      },
+      "claim": "le_max_tx_len and le_max_tx_time are native __u16 fields"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/hci_core.h",
+      "blob_sha1": "b689aceb636b115aff038902cb14119384949955",
+      "sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+      "lines": {
+        "start": 1165,
+        "end": 1165
+      },
+      "claim": "LMP_LE capability is features[0][4] & LMP_LE; target init4 branch is DLE-gated, not additionally LMP_LE-gated"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/hci.h",
+      "blob_sha1": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+      "sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "lines": {
+        "start": 396,
+        "end": 396
+      },
+      "claim": "LMP_LE mask 0x40"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/hci.h",
+      "blob_sha1": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+      "sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "lines": {
+        "start": 435,
+        "end": 435
+      },
+      "claim": "DLE feature mask 0x20"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/hci.h",
+      "blob_sha1": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+      "sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "lines": {
+        "start": 2253,
+        "end": 2261
+      },
+      "claim": "packed HCI command header has little endian opcode and one byte plen; header size3"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "net/bluetooth/hci_request.h",
+      "blob_sha1": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb",
+      "sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3",
+      "lines": {
+        "start": 28,
+        "end": 36
+      },
+      "claim": "request contains hdev, command queue and stored error int"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/bluetooth.h",
+      "blob_sha1": "fabee6db0abb78ea826cc97d52c622614db900a0",
+      "sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+      "lines": {
+        "start": 306,
+        "end": 306
+      },
+      "claim": "HCI_REQ_START is BIT(0)"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/net/bluetooth/bluetooth.h",
+      "blob_sha1": "fabee6db0abb78ea826cc97d52c622614db900a0",
+      "sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+      "lines": {
+        "start": 335,
+        "end": 343
+      },
+      "claim": "real bt_skb_alloc adds reserve and allocates SKB; later harness allocator may only model outcome"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/linux/byteorder/generic.h",
+      "blob_sha1": "4b13e0a3e15b2207cf6030d2ee8b2ecc7aef785c",
+      "sha256": "db55ce926da91d032a03542543feb38d29567d9045aefc2617e7488c41a2da00",
+      "lines": {
+        "start": 90,
+        "end": 90
+      },
+      "claim": "cpu_to_le16 aliases __cpu_to_le16"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "arch/x86/include/uapi/asm/byteorder.h",
+      "blob_sha1": "149143cab9ff8ec6914fddc5fe43f6a061f29726",
+      "sha256": "e8927b5fcab215111f961510cd8db7d5e4c76c8e8e4dd17ad3d1681fae04756c",
+      "lines": {
+        "start": 5,
+        "end": 5
+      },
+      "claim": "x86 selects little endian definitions"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "arch/s390/include/uapi/asm/byteorder.h",
+      "blob_sha1": "1442b57dd91b39a0fff884869009060ca83c8caf",
+      "sha256": "51a9b5717ffc1dd2a73f250e53cbf8a93e64a41f5245d8859daa92306110cf01",
+      "lines": {
+        "start": 5,
+        "end": 5
+      },
+      "claim": "s390 selects big endian definitions"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/uapi/linux/byteorder/little_endian.h",
+      "blob_sha1": "601c904fd5cd92c860d91c01dcd4b21db963d072",
+      "sha256": "8e2eb10c9870565adc112d7d3bee4f895ac117702fa05f6f11eb233ede0e917b",
+      "lines": {
+        "start": 35,
+        "end": 35
+      },
+      "claim": "__cpu_to_le16 uses identity native16 on little endian"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/uapi/linux/byteorder/big_endian.h",
+      "blob_sha1": "2199adc6a6c20dfbde35e66da619464ef6b95782",
+      "sha256": "7f9f3f7defddfb82e9446a0bd437bcf6d70fc53caab1b44296b5dd24067549ed",
+      "lines": {
+        "start": 35,
+        "end": 35
+      },
+      "claim": "__cpu_to_le16 swaps native16 on big endian"
+    },
+    {
+      "version": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "include/uapi/asm-generic/errno-base.h",
+      "blob_sha1": "9653140bff92dd2ee5a261a66dfe6c5687c3e956",
+      "sha256": "2c148e92b8318deeb767fabd60822113e575ee664ff09a1873aed8f7a495793c",
+      "lines": {
+        "start": 9,
+        "end": 16
+      },
+      "claim": "EIO=5; ENOMEM=12"
+    }
+  ],
+  "conditions": [
+    {
+      "condition_id": "err_0_allocation_success",
+      "initial_req_err": 0,
+      "allocation_configured_outcome": "success",
+      "init4_return": 0,
+      "target_add_call_attempts": 1,
+      "hci_req_add_is_real_source_function": true,
+      "hci_req_add_ev_call_attempts": 1,
+      "hci_prepare_cmd_calls": 1,
+      "allocator_actually_called": true,
+      "allocator_call_count": 1,
+      "allocator_input_command_bytes": 7,
+      "allocator_outcome_observed": "success",
+      "final_req_err": 0,
+      "stored_error_status": "none",
+      "payload_memcpy_performed": true,
+      "skb_put_data_call_count": 1,
+      "payload_memcpy_count": 1,
+      "payload_memcpy_bytes": 4,
+      "header_storage_created": true,
+      "header_hex": "242004",
+      "skb_put_call_count": 2,
+      "queue_empty_check_count": 1,
+      "queue_tail_observation_count": 1,
+      "queue_tail_observation_is_kernel_transport_execution": false,
+      "observed_req_event": 0,
+      "observed_req_start_bit": 1,
+      "variants": [
+        {
+          "version": "parent",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": "1b004801",
+          "queued_stub_packet_hex": "2420041b004801",
+          "copied_payload_little_endian_values": [
+            27,
+            328
+          ],
+          "copied_payload_format_status": "matches_expected_little_endian"
+        },
+        {
+          "version": "parent",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "001b0148",
+          "copied_payload_hex": "001b0148",
+          "queued_stub_packet_hex": "242004001b0148",
+          "copied_payload_little_endian_values": [
+            6912,
+            18433
+          ],
+          "copied_payload_format_status": "wrong_endian"
+        },
+        {
+          "version": "fixed",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": "1b004801",
+          "queued_stub_packet_hex": "2420041b004801",
+          "copied_payload_little_endian_values": [
+            27,
+            328
+          ],
+          "copied_payload_format_status": "matches_expected_little_endian"
+        },
+        {
+          "version": "fixed",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": "1b004801",
+          "queued_stub_packet_hex": "2420041b004801",
+          "copied_payload_little_endian_values": [
+            27,
+            328
+          ],
+          "copied_payload_format_status": "matches_expected_little_endian"
+        }
+      ]
+    },
+    {
+      "condition_id": "err_0_allocation_failure",
+      "initial_req_err": 0,
+      "allocation_configured_outcome": "failure",
+      "init4_return": 0,
+      "target_add_call_attempts": 1,
+      "hci_req_add_is_real_source_function": true,
+      "hci_req_add_ev_call_attempts": 1,
+      "hci_prepare_cmd_calls": 1,
+      "allocator_actually_called": true,
+      "allocator_call_count": 1,
+      "allocator_input_command_bytes": 7,
+      "allocator_outcome_observed": "failure",
+      "final_req_err": -12,
+      "stored_error_status": "set_ENOMEM",
+      "payload_memcpy_performed": false,
+      "skb_put_data_call_count": 0,
+      "payload_memcpy_count": 0,
+      "payload_memcpy_bytes": 0,
+      "header_storage_created": false,
+      "header_hex": null,
+      "skb_put_call_count": 0,
+      "queue_empty_check_count": 0,
+      "queue_tail_observation_count": 0,
+      "queue_tail_observation_is_kernel_transport_execution": false,
+      "observed_req_event": null,
+      "observed_req_start_bit": null,
+      "variants": [
+        {
+          "version": "parent",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "parent",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "001b0148",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "fixed",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "fixed",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        }
+      ]
+    },
+    {
+      "condition_id": "err_-5_allocation_success",
+      "initial_req_err": -5,
+      "allocation_configured_outcome": "success",
+      "init4_return": 0,
+      "target_add_call_attempts": 1,
+      "hci_req_add_is_real_source_function": true,
+      "hci_req_add_ev_call_attempts": 1,
+      "hci_prepare_cmd_calls": 0,
+      "allocator_actually_called": false,
+      "allocator_call_count": 0,
+      "allocator_input_command_bytes": null,
+      "allocator_outcome_observed": "not_called",
+      "final_req_err": -5,
+      "stored_error_status": "preserved_EIO",
+      "payload_memcpy_performed": false,
+      "skb_put_data_call_count": 0,
+      "payload_memcpy_count": 0,
+      "payload_memcpy_bytes": 0,
+      "header_storage_created": false,
+      "header_hex": null,
+      "skb_put_call_count": 0,
+      "queue_empty_check_count": 0,
+      "queue_tail_observation_count": 0,
+      "queue_tail_observation_is_kernel_transport_execution": false,
+      "observed_req_event": null,
+      "observed_req_start_bit": null,
+      "variants": [
+        {
+          "version": "parent",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "parent",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "001b0148",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "fixed",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "fixed",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        }
+      ]
+    },
+    {
+      "condition_id": "err_-5_allocation_failure",
+      "initial_req_err": -5,
+      "allocation_configured_outcome": "failure",
+      "init4_return": 0,
+      "target_add_call_attempts": 1,
+      "hci_req_add_is_real_source_function": true,
+      "hci_req_add_ev_call_attempts": 1,
+      "hci_prepare_cmd_calls": 0,
+      "allocator_actually_called": false,
+      "allocator_call_count": 0,
+      "allocator_input_command_bytes": null,
+      "allocator_outcome_observed": "not_called",
+      "final_req_err": -5,
+      "stored_error_status": "preserved_EIO",
+      "payload_memcpy_performed": false,
+      "skb_put_data_call_count": 0,
+      "payload_memcpy_count": 0,
+      "payload_memcpy_bytes": 0,
+      "header_storage_created": false,
+      "header_hex": null,
+      "skb_put_call_count": 0,
+      "queue_empty_check_count": 0,
+      "queue_tail_observation_count": 0,
+      "queue_tail_observation_is_kernel_transport_execution": false,
+      "observed_req_event": null,
+      "observed_req_start_bit": null,
+      "variants": [
+        {
+          "version": "parent",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "parent",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "001b0148",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "fixed",
+          "architecture": "x86_64",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        },
+        {
+          "version": "fixed",
+          "architecture": "s390x",
+          "constructed_cp_payload_hex": "1b004801",
+          "copied_payload_hex": null,
+          "queued_stub_packet_hex": null,
+          "copied_payload_little_endian_values": null,
+          "copied_payload_format_status": "not_evaluated"
+        }
+      ]
+    }
+  ]
+}

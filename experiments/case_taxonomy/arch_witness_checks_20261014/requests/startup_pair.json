@@ -1,0 +1,180 @@
+{
+  "id": "startup_pair",
+  "unit": "startup",
+  "view": "pair",
+  "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+  "scope_note": "Manually selected old-version source regions and extracted actual config; no fix or runtime labels.",
+  "documents": [
+    {
+      "id": "S_interface",
+      "kind": "source",
+      "path": "include/linux/topology.h",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 203,
+      "end_line": 206,
+      "text": "203: static inline const struct cpumask *cpu_smt_mask(int cpu)\n204: {\n205: \treturn topology_sibling_cpumask(cpu);\n206: }"
+    },
+    {
+      "id": "S_notify",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 1251,
+      "end_line": 1271,
+      "text": "1251:  * notify_cpu_starting(cpu) - Invoke the callbacks on the starting CPU\n1252:  * @cpu: cpu that just started\n1253:  *\n1254:  * It must be called by the arch code on the new cpu, before the new cpu\n1255:  * enables interrupts and before the \"boot\" cpu returns from __cpu_up().\n1256:  */\n1257: void notify_cpu_starting(unsigned int cpu)\n1258: {\n1259: \tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n1260: \tenum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);\n1261: \tint ret;\n1262: \n1263: \trcu_cpu_starting(cpu);\t/* Enables RCU usage on this CPU. */\n1264: \tcpumask_set_cpu(cpu, &cpus_booted_once_mask);\n1265: \tret = cpuhp_invoke_callback_range(true, cpu, st, target);\n1266: \n1267: \t/*\n1268: \t * STARTING must not fail!\n1269: \t */\n1270: \tWARN_ON_ONCE(ret);\n1271: }"
+    },
+    {
+      "id": "S_range",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 646,
+      "end_line": 661,
+      "text": "646: static int cpuhp_invoke_callback_range(bool bringup,\n647: \t\t\t\t       unsigned int cpu,\n648: \t\t\t\t       struct cpuhp_cpu_state *st,\n649: \t\t\t\t       enum cpuhp_state target)\n650: {\n651: \tenum cpuhp_state state;\n652: \tint err = 0;\n653: \n654: \twhile (cpuhp_next_state(bringup, &state, st, target)) {\n655: \t\terr = cpuhp_invoke_callback(cpu, state, bringup, NULL, NULL);\n656: \t\tif (err)\n657: \t\t\tbreak;\n658: \t}\n659: \n660: \treturn err;\n661: }"
+    },
+    {
+      "id": "S_dispatch",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 155,
+      "end_line": 235,
+      "text": "155: static int cpuhp_invoke_callback(unsigned int cpu, enum cpuhp_state state,\n156: \t\t\t\t bool bringup, struct hlist_node *node,\n157: \t\t\t\t struct hlist_node **lastp)\n158: {\n159: \tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n160: \tstruct cpuhp_step *step = cpuhp_get_step(state);\n161: \tint (*cbm)(unsigned int cpu, struct hlist_node *node);\n162: \tint (*cb)(unsigned int cpu);\n163: \tint ret, cnt;\n164: \n165: \tif (st->fail == state) {\n166: \t\tst->fail = CPUHP_INVALID;\n167: \t\treturn -EAGAIN;\n168: \t}\n169: \n170: \tif (cpuhp_step_empty(bringup, step)) {\n171: \t\tWARN_ON_ONCE(1);\n172: \t\treturn 0;\n173: \t}\n174: \n175: \tif (!step->multi_instance) {\n176: \t\tWARN_ON_ONCE(lastp && *lastp);\n177: \t\tcb = bringup ? step->startup.single : step->teardown.single;\n178: \n179: \t\ttrace_cpuhp_enter(cpu, st->target, state, cb);\n180: \t\tret = cb(cpu);\n181: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n182: \t\treturn ret;\n183: \t}\n184: \tcbm = bringup ? step->startup.multi : step->teardown.multi;\n185: \n186: \t/* Single invocation for instance add/remove */\n187: \tif (node) {\n188: \t\tWARN_ON_ONCE(lastp && *lastp);\n189: \t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n190: \t\tret = cbm(cpu, node);\n191: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n192: \t\treturn ret;\n193: \t}\n194: \n195: \t/* State transition. Invoke on all instances */\n196: \tcnt = 0;\n197: \thlist_for_each(node, &step->list) {\n198: \t\tif (lastp && node == *lastp)\n199: \t\t\tbreak;\n200: \n201: \t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n202: \t\tret = cbm(cpu, node);\n203: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n204: \t\tif (ret) {\n205: \t\t\tif (!lastp)\n206: \t\t\t\tgoto err;\n207: \n208: \t\t\t*lastp = node;\n209: \t\t\treturn ret;\n210: \t\t}\n211: \t\tcnt++;\n212: \t}\n213: \tif (lastp)\n214: \t\t*lastp = NULL;\n215: \treturn 0;\n216: err:\n217: \t/* Rollback the instances if one failed */\n218: \tcbm = !bringup ? step->startup.multi : step->teardown.multi;\n219: \tif (!cbm)\n220: \t\treturn ret;\n221: \n222: \thlist_for_each(node, &step->list) {\n223: \t\tif (!cnt--)\n224: \t\t\tbreak;\n225: \n226: \t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n227: \t\tret = cbm(cpu, node);\n228: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n229: \t\t/*\n230: \t\t * Rollback must not fail,\n231: \t\t */\n232: \t\tWARN_ON_ONCE(ret);\n233: \t}\n234: \treturn ret;\n235: }"
+    },
+    {
+      "id": "S_table",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 1692,
+      "end_line": 1697,
+      "text": "1692: \t[CPUHP_AP_SCHED_STARTING] = {\n1693: \t\t.name\t\t\t= \"sched:starting\",\n1694: \t\t.startup.single\t\t= sched_cpu_starting,\n1695: \t\t.teardown.single\t= sched_cpu_dying,\n1696: \t},\n1697: \t[CPUHP_AP_RCUTREE_DYING] = {"
+    },
+    {
+      "id": "S_starting",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 8834,
+      "end_line": 8840,
+      "text": "8834: int sched_cpu_starting(unsigned int cpu)\n8835: {\n8836: \tsched_core_cpu_starting(cpu);\n8837: \tsched_rq_cpu_starting(cpu);\n8838: \tsched_tick_start(cpu);\n8839: \treturn 0;\n8840: }"
+    },
+    {
+      "id": "S_core",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 5753,
+      "end_line": 5794,
+      "text": "5753: static void sched_core_cpu_starting(unsigned int cpu)\n5754: {\n5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n5756: \tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n5757: \tunsigned long flags;\n5758: \tint t;\n5759: \n5760: \tsched_core_lock(cpu, &flags);\n5761: \n5762: \tWARN_ON_ONCE(rq->core != rq);\n5763: \n5764: \t/* if we're the first, we'll be our own leader */\n5765: \tif (cpumask_weight(smt_mask) == 1)\n5766: \t\tgoto unlock;\n5767: \n5768: \t/* find the leader */\n5769: \tfor_each_cpu(t, smt_mask) {\n5770: \t\tif (t == cpu)\n5771: \t\t\tcontinue;\n5772: \t\trq = cpu_rq(t);\n5773: \t\tif (rq->core == rq) {\n5774: \t\t\tcore_rq = rq;\n5775: \t\t\tbreak;\n5776: \t\t}\n5777: \t}\n5778: \n5779: \tif (WARN_ON_ONCE(!core_rq)) /* whoopsie */\n5780: \t\tgoto unlock;\n5781: \n5782: \t/* install and validate core_rq */\n5783: \tfor_each_cpu(t, smt_mask) {\n5784: \t\trq = cpu_rq(t);\n5785: \n5786: \t\tif (t == cpu)\n5787: \t\t\trq->core = core_rq;\n5788: \n5789: \t\tWARN_ON_ONCE(rq->core != core_rq);\n5790: \t}\n5791: \n5792: unlock:\n5793: \tsched_core_unlock(cpu, &flags);\n5794: }"
+    },
+    {
+      "id": "S_locks",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 240,
+      "end_line": 248,
+      "text": "240: static void sched_core_lock(int cpu, unsigned long *flags)\n241: {\n242: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n243: \tint t, i = 0;\n244: \n245: \tlocal_irq_save(*flags);\n246: \tfor_each_cpu(t, smt_mask)\n247: \t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n248: }"
+    },
+    {
+      "id": "S_x86_header",
+      "kind": "source",
+      "path": "arch/x86/include/asm/topology.h",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 118,
+      "end_line": 122,
+      "text": "118: #define topology_sibling_cpumask(cpu)\t\t(per_cpu(cpu_sibling_map, cpu))\n119: \n120: extern unsigned int __max_logical_packages;\n121: #define topology_max_packages()\t\t\t(__max_logical_packages)\n122: "
+    },
+    {
+      "id": "S_x86_callin",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 162,
+      "end_line": 214,
+      "text": "162: static void smp_callin(void)\n163: {\n164: \tint cpuid;\n165: \n166: \t/*\n167: \t * If waken up by an INIT in an 82489DX configuration\n168: \t * cpu_callout_mask guarantees we don't get here before\n169: \t * an INIT_deassert IPI reaches our local APIC, so it is\n170: \t * now safe to touch our local APIC.\n171: \t */\n172: \tcpuid = smp_processor_id();\n173: \n174: \t/*\n175: \t * the boot CPU has finished the init stage and is spinning\n176: \t * on callin_map until we finish. We are free to set up this\n177: \t * CPU, first the APIC. (this is probably redundant on most\n178: \t * boards)\n179: \t */\n180: \tapic_ap_setup();\n181: \n182: \t/*\n183: \t * Save our processor parameters. Note: this information\n184: \t * is needed for clock calibration.\n185: \t */\n186: \tsmp_store_cpu_info(cpuid);\n187: \n188: \t/*\n189: \t * The topology information must be up to date before\n190: \t * calibrate_delay() and notify_cpu_starting().\n191: \t */\n192: \tset_cpu_sibling_map(raw_smp_processor_id());\n193: \n194: \tinit_freq_invariance(true, false);\n195: \n196: \t/*\n197: \t * Get our bogomips.\n198: \t * Update loops_per_jiffy in cpu_data. Previous call to\n199: \t * smp_store_cpu_info() stored a value that is close but not as\n200: \t * accurate as the value just calculated.\n201: \t */\n202: \tcalibrate_delay();\n203: \tcpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;\n204: \tpr_debug(\"Stack at about %p\\n\", &cpuid);\n205: \n206: \twmb();\n207: \n208: \tnotify_cpu_starting(cpuid);\n209: \n210: \t/*\n211: \t * Allow the master to continue.\n212: \t */\n213: \tcpumask_set_cpu(cpuid, cpu_callin_mask);\n214: }"
+    },
+    {
+      "id": "S_x86_start",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 221,
+      "end_line": 271,
+      "text": "221: static void notrace start_secondary(void *unused)\n222: {\n223: \t/*\n224: \t * Don't put *anything* except direct CPU state initialization\n225: \t * before cpu_init(), SMP booting is too fragile that we want to\n226: \t * limit the things done here to the most necessary things.\n227: \t */\n228: \tcr4_init();\n229: \n230: #ifdef CONFIG_X86_32\n231: \t/* switch away from the initial page table */\n232: \tload_cr3(swapper_pg_dir);\n233: \t__flush_tlb_all();\n234: #endif\n235: \tcpu_init_secondary();\n236: \trcu_cpu_starting(raw_smp_processor_id());\n237: \tx86_cpuinit.early_percpu_clock_init();\n238: \tsmp_callin();\n239: \n240: \tenable_start_cpu0 = 0;\n241: \n242: \t/* otherwise gcc will move up smp_processor_id before the cpu_init */\n243: \tbarrier();\n244: \t/*\n245: \t * Check TSC synchronization with the boot CPU:\n246: \t */\n247: \tcheck_tsc_sync_target();\n248: \n249: \tspeculative_store_bypass_ht_init();\n250: \n251: \t/*\n252: \t * Lock vector_lock, set CPU online and bring the vector\n253: \t * allocator online. Online must be set with vector_lock held\n254: \t * to prevent a concurrent irq setup/teardown from seeing a\n255: \t * half valid vector space.\n256: \t */\n257: \tlock_vector_lock();\n258: \tset_cpu_online(smp_processor_id(), true);\n259: \tlapic_online();\n260: \tunlock_vector_lock();\n261: \tcpu_set_state_online(smp_processor_id());\n262: \tx86_platform.nmi_init();\n263: \n264: \t/* enable local interrupts */\n265: \tlocal_irq_enable();\n266: \n267: \tx86_cpuinit.setup_percpu_clockev();\n268: \n269: \twmb();\n270: \tcpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n271: }"
+    },
+    {
+      "id": "S_x86_prepare",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 574,
+      "end_line": 644,
+      "text": "574: void set_cpu_sibling_map(int cpu)\n575: {\n576: \tbool has_smt = smp_num_siblings > 1;\n577: \tbool has_mp = has_smt || boot_cpu_data.x86_max_cores > 1;\n578: \tstruct cpuinfo_x86 *c = &cpu_data(cpu);\n579: \tstruct cpuinfo_x86 *o;\n580: \tint i, threads;\n581: \n582: \tcpumask_set_cpu(cpu, cpu_sibling_setup_mask);\n583: \n584: \tif (!has_mp) {\n585: \t\tcpumask_set_cpu(cpu, topology_sibling_cpumask(cpu));\n586: \t\tcpumask_set_cpu(cpu, cpu_llc_shared_mask(cpu));\n587: \t\tcpumask_set_cpu(cpu, topology_core_cpumask(cpu));\n588: \t\tcpumask_set_cpu(cpu, topology_die_cpumask(cpu));\n589: \t\tc->booted_cores = 1;\n590: \t\treturn;\n591: \t}\n592: \n593: \tfor_each_cpu(i, cpu_sibling_setup_mask) {\n594: \t\to = &cpu_data(i);\n595: \n596: \t\tif (match_pkg(c, o) && !topology_same_node(c, o))\n597: \t\t\tx86_has_numa_in_package = true;\n598: \n599: \t\tif ((i == cpu) || (has_smt && match_smt(c, o)))\n600: \t\t\tlink_mask(topology_sibling_cpumask, cpu, i);\n601: \n602: \t\tif ((i == cpu) || (has_mp && match_llc(c, o)))\n603: \t\t\tlink_mask(cpu_llc_shared_mask, cpu, i);\n604: \n605: \t\tif ((i == cpu) || (has_mp && match_die(c, o)))\n606: \t\t\tlink_mask(topology_die_cpumask, cpu, i);\n607: \t}\n608: \n609: \tthreads = cpumask_weight(topology_sibling_cpumask(cpu));\n610: \tif (threads > __max_smt_threads)\n611: \t\t__max_smt_threads = threads;\n612: \n613: \t/*\n614: \t * This needs a separate iteration over the cpus because we rely on all\n615: \t * topology_sibling_cpumask links to be set-up.\n616: \t */\n617: \tfor_each_cpu(i, cpu_sibling_setup_mask) {\n618: \t\to = &cpu_data(i);\n619: \n620: \t\tif ((i == cpu) || (has_mp && match_pkg(c, o))) {\n621: \t\t\tlink_mask(topology_core_cpumask, cpu, i);\n622: \n623: \t\t\t/*\n624: \t\t\t *  Does this new cpu bringup a new core?\n625: \t\t\t */\n626: \t\t\tif (threads == 1) {\n627: \t\t\t\t/*\n628: \t\t\t\t * for each core in package, increment\n629: \t\t\t\t * the booted_cores for this new cpu\n630: \t\t\t\t */\n631: \t\t\t\tif (cpumask_first(\n632: \t\t\t\t    topology_sibling_cpumask(i)) == i)\n633: \t\t\t\t\tc->booted_cores++;\n634: \t\t\t\t/*\n635: \t\t\t\t * increment the core count for all\n636: \t\t\t\t * the other cpus in this package\n637: \t\t\t\t */\n638: \t\t\t\tif (i != cpu)\n639: \t\t\t\t\tcpu_data(i).booted_cores++;\n640: \t\t\t} else if (i != cpu && !c->booted_cores)\n641: \t\t\t\tc->booted_cores = cpu_data(i).booted_cores;\n642: \t\t}\n643: \t}\n644: }"
+    },
+    {
+      "id": "S_x86_link",
+      "kind": "source",
+      "path": "arch/x86/kernel/smpboot.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 427,
+      "end_line": 434,
+      "text": "427: #define link_mask(mfunc, c1, c2)\t\t\t\t\t\\\n428: do {\t\t\t\t\t\t\t\t\t\\\n429: \tcpumask_set_cpu((c1), mfunc(c2));\t\t\t\t\\\n430: \tcpumask_set_cpu((c2), mfunc(c1));\t\t\t\t\\\n431: } while (0)\n432: \n433: static bool match_smt(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)\n434: {"
+    },
+    {
+      "id": "C_x86",
+      "kind": "configuration",
+      "path": "generated/config/startup_x86.txt",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 1,
+      "end_line": 7,
+      "text": "1: CONFIG_X86_64=y\n2: CONFIG_SMP=y\n3: CONFIG_SYSFS=y\n4: CONFIG_NR_CPUS=4\n5: CONFIG_SCHED_SMT=y\n6: CONFIG_SCHED_CORE=y\n7: CONFIG_HOTPLUG_CPU=y"
+    },
+    {
+      "id": "S_s390_header",
+      "kind": "source",
+      "path": "arch/s390/include/asm/topology.h",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 31,
+      "end_line": 35,
+      "text": "31: #define topology_sibling_cpumask(cpu)\t  (&cpu_topology[cpu].thread_mask)\n32: #define topology_core_id(cpu)\t\t  (cpu_topology[cpu].core_id)\n33: #define topology_core_cpumask(cpu)\t  (&cpu_topology[cpu].core_mask)\n34: #define topology_book_id(cpu)\t\t  (cpu_topology[cpu].book_id)\n35: #define topology_book_cpumask(cpu)\t  (&cpu_topology[cpu].book_mask)"
+    },
+    {
+      "id": "S_s390_start",
+      "kind": "source",
+      "path": "arch/s390/kernel/smp.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 888,
+      "end_line": 915,
+      "text": "888: static void smp_start_secondary(void *cpuvoid)\n889: {\n890: \tint cpu = raw_smp_processor_id();\n891: \n892: \tS390_lowcore.last_update_clock = get_tod_clock();\n893: \tS390_lowcore.restart_stack = (unsigned long)restart_stack;\n894: \tS390_lowcore.restart_fn = (unsigned long)do_restart;\n895: \tS390_lowcore.restart_data = 0;\n896: \tS390_lowcore.restart_source = -1U;\n897: \tS390_lowcore.restart_flags = 0;\n898: \trestore_access_regs(S390_lowcore.access_regs_save_area);\n899: \tcpu_init();\n900: \trcu_cpu_starting(cpu);\n901: \tinit_cpu_timer();\n902: \tvtime_init();\n903: \tvdso_getcpu_init();\n904: \tpfault_init();\n905: \tnotify_cpu_starting(cpu);\n906: \tif (topology_cpu_dedicated(cpu))\n907: \t\tset_cpu_flag(CIF_DEDICATED_CPU);\n908: \telse\n909: \t\tclear_cpu_flag(CIF_DEDICATED_CPU);\n910: \tset_cpu_online(cpu, true);\n911: \tupdate_cpu_masks();\n912: \tinc_irq_stat(CPU_RST);\n913: \tlocal_irq_enable();\n914: \tcpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n915: }"
+    },
+    {
+      "id": "S_s390_map",
+      "kind": "source",
+      "path": "arch/s390/kernel/topology.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 96,
+      "end_line": 114,
+      "text": "96: static void cpu_thread_map(cpumask_t *dst, unsigned int cpu)\n97: {\n98: \tstatic cpumask_t mask;\n99: \tint i;\n100: \n101: \tcpumask_clear(&mask);\n102: \tif (!cpu_online(cpu))\n103: \t\tgoto out;\n104: \tcpumask_set_cpu(cpu, &mask);\n105: \tif (topology_mode != TOPOLOGY_MODE_HW)\n106: \t\tgoto out;\n107: \tcpu -= cpu % (smp_cpu_mtid + 1);\n108: \tfor (i = 0; i <= smp_cpu_mtid; i++)\n109: \t\tif (cpu_present(cpu + i))\n110: \t\t\tcpumask_set_cpu(cpu + i, &mask);\n111: \tcpumask_and(&mask, &mask, cpu_online_mask);\n112: out:\n113: \tcpumask_copy(dst, &mask);\n114: }"
+    },
+    {
+      "id": "S_s390_update",
+      "kind": "source",
+      "path": "arch/s390/kernel/topology.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 251,
+      "end_line": 287,
+      "text": "251: void update_cpu_masks(void)\n252: {\n253: \tstruct cpu_topology_s390 *topo, *topo_package, *topo_sibling;\n254: \tint cpu, sibling, pkg_first, smt_first, id;\n255: \n256: \tfor_each_possible_cpu(cpu) {\n257: \t\ttopo = &cpu_topology[cpu];\n258: \t\tcpu_thread_map(&topo->thread_mask, cpu);\n259: \t\tcpu_group_map(&topo->core_mask, &socket_info, cpu);\n260: \t\tcpu_group_map(&topo->book_mask, &book_info, cpu);\n261: \t\tcpu_group_map(&topo->drawer_mask, &drawer_info, cpu);\n262: \t\ttopo->booted_cores = 0;\n263: \t\tif (topology_mode != TOPOLOGY_MODE_HW) {\n264: \t\t\tid = topology_mode == TOPOLOGY_MODE_PACKAGE ? 0 : cpu;\n265: \t\t\ttopo->thread_id = cpu;\n266: \t\t\ttopo->core_id = cpu;\n267: \t\t\ttopo->socket_id = id;\n268: \t\t\ttopo->book_id = id;\n269: \t\t\ttopo->drawer_id = id;\n270: \t\t}\n271: \t}\n272: \tfor_each_online_cpu(cpu) {\n273: \t\ttopo = &cpu_topology[cpu];\n274: \t\tpkg_first = cpumask_first(&topo->core_mask);\n275: \t\ttopo_package = &cpu_topology[pkg_first];\n276: \t\tif (cpu == pkg_first) {\n277: \t\t\tfor_each_cpu(sibling, &topo->core_mask) {\n278: \t\t\t\ttopo_sibling = &cpu_topology[sibling];\n279: \t\t\t\tsmt_first = cpumask_first(&topo_sibling->thread_mask);\n280: \t\t\t\tif (sibling == smt_first)\n281: \t\t\t\t\ttopo_package->booted_cores++;\n282: \t\t\t}\n283: \t\t} else {\n284: \t\t\ttopo->booted_cores = topo_package->booted_cores;\n285: \t\t}\n286: \t}\n287: }"
+    },
+    {
+      "id": "C_s390",
+      "kind": "configuration",
+      "path": "generated/config/startup_s390.txt",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 1,
+      "end_line": 8,
+      "text": "1: CONFIG_S390=y\n2: CONFIG_SMP=y\n3: CONFIG_SYSFS=y\n4: CONFIG_NR_CPUS=4\n5: CONFIG_SCHED_SMT=y\n6: CONFIG_SCHED_CORE=y\n7: CONFIG_SCHED_TOPOLOGY=y\n8: CONFIG_HOTPLUG_CPU=y"
+    }
+  ]
+}

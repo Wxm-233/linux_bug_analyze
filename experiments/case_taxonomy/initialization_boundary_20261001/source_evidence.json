@@ -1,0 +1,953 @@
+{
+  "schema": "historical-init-entry-source-v1",
+  "variants": {
+    "parent": {
+      "variant": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "source_path": "/mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/initialization_boundary_20261001/entry_parent.c",
+      "generated_c_sha256": "2993740e55b8eec7039ef4c3e0a3d0fb092b1a93b3f0a1aff584bc64e0539b6c",
+      "excerpts": [
+        {
+          "label": "__hci_init",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "start_line": 864,
+          "end_line": 919,
+          "text": "static int __hci_init(struct hci_dev *hdev)\n{\n\tint err;\n\n\terr = __hci_req_sync(hdev, hci_init1_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\tif (hci_dev_test_flag(hdev, HCI_SETUP))\n\t\thci_debugfs_create_basic(hdev);\n\n\terr = __hci_req_sync(hdev, hci_init2_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\t/* HCI_PRIMARY covers both single-mode LE, BR/EDR and dual-mode\n\t * BR/EDR/LE type controllers. AMP controllers only need the\n\t * first two stages of init.\n\t */\n\tif (hdev->dev_type != HCI_PRIMARY)\n\t\treturn 0;\n\n\terr = __hci_req_sync(hdev, hci_init3_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\terr = __hci_req_sync(hdev, hci_init4_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\t/* This function is only called when the controller is actually in\n\t * configured state. When the controller is marked as unconfigured,\n\t * this initialization procedure is not run.\n\t *\n\t * It means that it is possible that a controller runs through its\n\t * setup phase and then discovers missing settings. If that is the\n\t * case, then this function will not be called. It then will only\n\t * be called during the config phase.\n\t *\n\t * So only when in setup phase or config phase, create the debugfs\n\t * entries and register the SMP channels.\n\t */\n\tif (!hci_dev_test_flag(hdev, HCI_SETUP) &&\n\t    !hci_dev_test_flag(hdev, HCI_CONFIG))\n\t\treturn 0;\n\n\thci_debugfs_create_common(hdev);\n\n\tif (lmp_bredr_capable(hdev))\n\t\thci_debugfs_create_bredr(hdev);\n\n\tif (lmp_le_capable(hdev))\n\t\thci_debugfs_create_le(hdev);\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "hci_init3_req",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "start_line": 584,
+          "end_line": 787,
+          "text": "static int hci_init3_req(struct hci_request *req, unsigned long opt)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\tu8 p;\n\n\thci_setup_event_mask(req);\n\n\tif (hdev->commands[6] & 0x20 &&\n\t    !test_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks)) {\n\t\tstruct hci_cp_read_stored_link_key cp;\n\n\t\tbacpy(&cp.bdaddr, BDADDR_ANY);\n\t\tcp.read_all = 0x01;\n\t\thci_req_add(req, HCI_OP_READ_STORED_LINK_KEY, sizeof(cp), &cp);\n\t}\n\n\tif (hdev->commands[5] & 0x10)\n\t\thci_setup_link_policy(req);\n\n\tif (hdev->commands[8] & 0x01)\n\t\thci_req_add(req, HCI_OP_READ_PAGE_SCAN_ACTIVITY, 0, NULL);\n\n\t/* Some older Broadcom based Bluetooth 1.2 controllers do not\n\t * support the Read Page Scan Type command. Check support for\n\t * this command in the bit mask of supported commands.\n\t */\n\tif (hdev->commands[13] & 0x01)\n\t\thci_req_add(req, HCI_OP_READ_PAGE_SCAN_TYPE, 0, NULL);\n\n\tif (lmp_le_capable(hdev)) {\n\t\tu8 events[8];\n\n\t\tmemset(events, 0, sizeof(events));\n\n\t\tif (hdev->le_features[0] & HCI_LE_ENCRYPTION)\n\t\t\tevents[0] |= 0x10;\t/* LE Long Term Key Request */\n\n\t\t/* If controller supports the Connection Parameters Request\n\t\t * Link Layer Procedure, enable the corresponding event.\n\t\t */\n\t\tif (hdev->le_features[0] & HCI_LE_CONN_PARAM_REQ_PROC)\n\t\t\tevents[0] |= 0x20;\t/* LE Remote Connection\n\t\t\t\t\t\t * Parameter Request\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the Data Length Extension\n\t\t * feature, enable the corresponding event.\n\t\t */\n\t\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT)\n\t\t\tevents[0] |= 0x40;\t/* LE Data Length Change */\n\n\t\t/* If the controller supports Extended Scanner Filter\n\t\t * Policies, enable the correspondig event.\n\t\t */\n\t\tif (hdev->le_features[0] & HCI_LE_EXT_SCAN_POLICY)\n\t\t\tevents[1] |= 0x04;\t/* LE Direct Advertising\n\t\t\t\t\t\t * Report\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports Channel Selection Algorithm #2\n\t\t * feature, enable the corresponding event.\n\t\t */\n\t\tif (hdev->le_features[1] & HCI_LE_CHAN_SEL_ALG2)\n\t\t\tevents[2] |= 0x08;\t/* LE Channel Selection\n\t\t\t\t\t\t * Algorithm\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Set Scan Enable command,\n\t\t * enable the corresponding advertising report event.\n\t\t */\n\t\tif (hdev->commands[26] & 0x08)\n\t\t\tevents[0] |= 0x02;\t/* LE Advertising Report */\n\n\t\t/* If the controller supports the LE Create Connection\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[26] & 0x10)\n\t\t\tevents[0] |= 0x01;\t/* LE Connection Complete */\n\n\t\t/* If the controller supports the LE Connection Update\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[27] & 0x04)\n\t\t\tevents[0] |= 0x04;\t/* LE Connection Update\n\t\t\t\t\t\t * Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Read Remote Used Features\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[27] & 0x20)\n\t\t\tevents[0] |= 0x08;\t/* LE Read Remote Used\n\t\t\t\t\t\t * Features Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Read Local P-256\n\t\t * Public Key command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[34] & 0x02)\n\t\t\tevents[0] |= 0x80;\t/* LE Read Local P-256\n\t\t\t\t\t\t * Public Key Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Generate DHKey\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[34] & 0x04)\n\t\t\tevents[1] |= 0x01;\t/* LE Generate DHKey Complete */\n\n\t\t/* If the controller supports the LE Set Default PHY or\n\t\t * LE Set PHY commands, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[35] & (0x20 | 0x40))\n\t\t\tevents[1] |= 0x08;        /* LE PHY Update Complete */\n\n\t\t/* If the controller supports LE Set Extended Scan Parameters\n\t\t * and LE Set Extended Scan Enable commands, enable the\n\t\t * corresponding event.\n\t\t */\n\t\tif (use_ext_scan(hdev))\n\t\t\tevents[1] |= 0x10;\t/* LE Extended Advertising\n\t\t\t\t\t\t * Report\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Extended Create Connection\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (use_ext_conn(hdev))\n\t\t\tevents[1] |= 0x02;      /* LE Enhanced Connection\n\t\t\t\t\t\t * Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Extended Advertising\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (ext_adv_capable(hdev))\n\t\t\tevents[2] |= 0x02;\t/* LE Advertising Set\n\t\t\t\t\t\t * Terminated\n\t\t\t\t\t\t */\n\n\t\thci_req_add(req, HCI_OP_LE_SET_EVENT_MASK, sizeof(events),\n\t\t\t    events);\n\n\t\t/* Read LE Advertising Channel TX Power */\n\t\tif ((hdev->commands[25] & 0x40) && !ext_adv_capable(hdev)) {\n\t\t\t/* HCI TS spec forbids mixing of legacy and extended\n\t\t\t * advertising commands wherein READ_ADV_TX_POWER is\n\t\t\t * also included. So do not call it if extended adv\n\t\t\t * is supported otherwise controller will return\n\t\t\t * COMMAND_DISALLOWED for extended commands.\n\t\t\t */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_ADV_TX_POWER, 0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[26] & 0x40) {\n\t\t\t/* Read LE White List Size */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_WHITE_LIST_SIZE,\n\t\t\t\t    0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[26] & 0x80) {\n\t\t\t/* Clear LE White List */\n\t\t\thci_req_add(req, HCI_OP_LE_CLEAR_WHITE_LIST, 0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[34] & 0x40) {\n\t\t\t/* Read LE Resolving List Size */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_RESOLV_LIST_SIZE,\n\t\t\t\t    0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[34] & 0x20) {\n\t\t\t/* Clear LE Resolving List */\n\t\t\thci_req_add(req, HCI_OP_LE_CLEAR_RESOLV_LIST, 0, NULL);\n\t\t}\n\n\t\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {\n\t\t\t/* Read LE Maximum Data Length */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_MAX_DATA_LEN, 0, NULL);\n\n\t\t\t/* Read LE Suggested Default Data Length */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_DEF_DATA_LEN, 0, NULL);\n\t\t}\n\n\t\tif (ext_adv_capable(hdev)) {\n\t\t\t/* Read LE Number of Supported Advertising Sets */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_NUM_SUPPORTED_ADV_SETS,\n\t\t\t\t    0, NULL);\n\t\t}\n\n\t\thci_set_le_support(req);\n\t}\n\n\t/* Read features beyond page 1 if available */\n\tfor (p = 2; p < HCI_MAX_PAGES && p <= hdev->max_page; p++) {\n\t\tstruct hci_cp_read_local_ext_features cp;\n\n\t\tcp.page = p;\n\t\thci_req_add(req, HCI_OP_READ_LOCAL_EXT_FEATURES,\n\t\t\t    sizeof(cp), &cp);\n\t}\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "hci_init4_req",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "start_line": 789,
+          "end_line": 862,
+          "text": "static int hci_init4_req(struct hci_request *req, unsigned long opt)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\n\t/* Some Broadcom based Bluetooth controllers do not support the\n\t * Delete Stored Link Key command. They are clearly indicating its\n\t * absence in the bit mask of supported commands.\n\t *\n\t * Check the supported commands and only if the the command is marked\n\t * as supported send it. If not supported assume that the controller\n\t * does not have actual support for stored link keys which makes this\n\t * command redundant anyway.\n\t *\n\t * Some controllers indicate that they support handling deleting\n\t * stored link keys, but they don't. The quirk lets a driver\n\t * just disable this command.\n\t */\n\tif (hdev->commands[6] & 0x80 &&\n\t    !test_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks)) {\n\t\tstruct hci_cp_delete_stored_link_key cp;\n\n\t\tbacpy(&cp.bdaddr, BDADDR_ANY);\n\t\tcp.delete_all = 0x01;\n\t\thci_req_add(req, HCI_OP_DELETE_STORED_LINK_KEY,\n\t\t\t    sizeof(cp), &cp);\n\t}\n\n\t/* Set event mask page 2 if the HCI command for it is supported */\n\tif (hdev->commands[22] & 0x04)\n\t\thci_set_event_mask_page_2(req);\n\n\t/* Read local codec list if the HCI command is supported */\n\tif (hdev->commands[29] & 0x20)\n\t\thci_req_add(req, HCI_OP_READ_LOCAL_CODECS, 0, NULL);\n\n\t/* Get MWS transport configuration if the HCI command is supported */\n\tif (hdev->commands[30] & 0x08)\n\t\thci_req_add(req, HCI_OP_GET_MWS_TRANSPORT_CONFIG, 0, NULL);\n\n\t/* Check for Synchronization Train support */\n\tif (lmp_sync_train_capable(hdev))\n\t\thci_req_add(req, HCI_OP_READ_SYNC_TRAIN_PARAMS, 0, NULL);\n\n\t/* Enable Secure Connections if supported and configured */\n\tif (hci_dev_test_flag(hdev, HCI_SSP_ENABLED) &&\n\t    bredr_sc_enabled(hdev)) {\n\t\tu8 support = 0x01;\n\n\t\thci_req_add(req, HCI_OP_WRITE_SC_SUPPORT,\n\t\t\t    sizeof(support), &support);\n\t}\n\n\t/* Set Suggested Default Data Length to maximum if supported */\n\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {\n\t\tstruct hci_cp_le_write_def_data_len cp;\n\n\t\tcp.tx_len = hdev->le_max_tx_len;\n\t\tcp.tx_time = hdev->le_max_tx_time;\n\t\thci_req_add(req, HCI_OP_LE_WRITE_DEF_DATA_LEN, sizeof(cp), &cp);\n\t}\n\n\t/* Set Default PHY parameters if command is supported */\n\tif (hdev->commands[35] & 0x20) {\n\t\tstruct hci_cp_le_set_default_phy cp;\n\n\t\tcp.all_phys = 0x00;\n\t\tcp.tx_phys = hdev->le_tx_def_phys;\n\t\tcp.rx_phys = hdev->le_rx_def_phys;\n\n\t\thci_req_add(req, HCI_OP_LE_SET_DEFAULT_PHY, sizeof(cp), &cp);\n\t}\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "actual_local_completion_reader",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_event.c",
+          "blob": "c1d3a303d97fbda890e546755535199af0420d2e",
+          "source_sha256": "30d26b41adaa835943def0239ed74ba03ae6e5152692a8ac10c8f141e64bf48f",
+          "start_line": 1483,
+          "end_line": 1500,
+          "text": "static void hci_cc_le_write_def_data_len(struct hci_dev *hdev,\n\t\t\t\t\t struct sk_buff *skb)\n{\n\tstruct hci_cp_le_write_def_data_len *sent;\n\t__u8 status = *((__u8 *) skb->data);\n\n\tBT_DBG(\"%s status 0x%2.2x\", hdev->name, status);\n\n\tif (status)\n\t\treturn;\n\n\tsent = hci_sent_cmd_data(hdev, HCI_OP_LE_WRITE_DEF_DATA_LEN);\n\tif (!sent)\n\t\treturn;\n\n\thdev->le_def_tx_len = le16_to_cpu(sent->tx_len);\n\thdev->le_def_tx_time = le16_to_cpu(sent->tx_time);\n}"
+        },
+        {
+          "label": "HCI_AMP",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 70,
+          "end_line": 70,
+          "text": "#define HCI_AMP\t\t0x01"
+        },
+        {
+          "label": "HCI_INIT_TIMEOUT",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 293,
+          "end_line": 293,
+          "text": "#define HCI_INIT_TIMEOUT\tmsecs_to_jiffies(10000)\t/* 10 seconds */"
+        },
+        {
+          "label": "HCI_LE_CHAN_SEL_ALG2",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 442,
+          "end_line": 442,
+          "text": "#define HCI_LE_CHAN_SEL_ALG2\t\t0x40"
+        },
+        {
+          "label": "HCI_LE_CONN_PARAM_REQ_PROC",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 432,
+          "end_line": 432,
+          "text": "#define HCI_LE_CONN_PARAM_REQ_PROC\t0x02"
+        },
+        {
+          "label": "HCI_LE_DATA_LEN_EXT",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 435,
+          "end_line": 435,
+          "text": "#define HCI_LE_DATA_LEN_EXT\t\t0x20"
+        },
+        {
+          "label": "HCI_LE_ENCRYPTION",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 431,
+          "end_line": 431,
+          "text": "#define HCI_LE_ENCRYPTION\t\t0x01"
+        },
+        {
+          "label": "HCI_LE_EXT_SCAN_POLICY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 439,
+          "end_line": 439,
+          "text": "#define HCI_LE_EXT_SCAN_POLICY\t\t0x80"
+        },
+        {
+          "label": "HCI_MAX_PAGES",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 213,
+          "end_line": 213,
+          "text": "#define HCI_MAX_PAGES\t3"
+        },
+        {
+          "label": "HCI_OP_DELETE_STORED_LINK_KEY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 952,
+          "end_line": 952,
+          "text": "#define HCI_OP_DELETE_STORED_LINK_KEY\t0x0c12"
+        },
+        {
+          "label": "HCI_OP_GET_MWS_TRANSPORT_CONFIG",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1339,
+          "end_line": 1339,
+          "text": "#define HCI_OP_GET_MWS_TRANSPORT_CONFIG\t0x140c"
+        },
+        {
+          "label": "HCI_OP_LE_CLEAR_RESOLV_LIST",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1567,
+          "end_line": 1567,
+          "text": "#define HCI_OP_LE_CLEAR_RESOLV_LIST\t0x2029"
+        },
+        {
+          "label": "HCI_OP_LE_CLEAR_WHITE_LIST",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1449,
+          "end_line": 1449,
+          "text": "#define HCI_OP_LE_CLEAR_WHITE_LIST\t0x2010"
+        },
+        {
+          "label": "HCI_OP_LE_READ_ADV_TX_POWER",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1377,
+          "end_line": 1377,
+          "text": "#define HCI_OP_LE_READ_ADV_TX_POWER\t0x2007"
+        },
+        {
+          "label": "HCI_OP_LE_READ_DEF_DATA_LEN",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1540,
+          "end_line": 1540,
+          "text": "#define HCI_OP_LE_READ_DEF_DATA_LEN\t0x2023"
+        },
+        {
+          "label": "HCI_OP_LE_READ_MAX_DATA_LEN",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1577,
+          "end_line": 1577,
+          "text": "#define HCI_OP_LE_READ_MAX_DATA_LEN\t0x202f"
+        },
+        {
+          "label": "HCI_OP_LE_READ_NUM_SUPPORTED_ADV_SETS",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1644,
+          "end_line": 1644,
+          "text": "#define HCI_OP_LE_READ_NUM_SUPPORTED_ADV_SETS\t0x203b"
+        },
+        {
+          "label": "HCI_OP_LE_READ_RESOLV_LIST_SIZE",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1569,
+          "end_line": 1569,
+          "text": "#define HCI_OP_LE_READ_RESOLV_LIST_SIZE\t0x202a"
+        },
+        {
+          "label": "HCI_OP_LE_READ_WHITE_LIST_SIZE",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1443,
+          "end_line": 1443,
+          "text": "#define HCI_OP_LE_READ_WHITE_LIST_SIZE\t0x200f"
+        },
+        {
+          "label": "HCI_OP_LE_SET_DEFAULT_PHY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1586,
+          "end_line": 1586,
+          "text": "#define HCI_OP_LE_SET_DEFAULT_PHY\t0x2031"
+        },
+        {
+          "label": "HCI_OP_LE_SET_EVENT_MASK",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1345,
+          "end_line": 1345,
+          "text": "#define HCI_OP_LE_SET_EVENT_MASK\t0x2001"
+        },
+        {
+          "label": "HCI_OP_LE_WRITE_DEF_DATA_LEN",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1547,
+          "end_line": 1547,
+          "text": "#define HCI_OP_LE_WRITE_DEF_DATA_LEN\t0x2024"
+        },
+        {
+          "label": "HCI_OP_READ_LOCAL_CODECS",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1231,
+          "end_line": 1231,
+          "text": "#define HCI_OP_READ_LOCAL_CODECS\t0x100b"
+        },
+        {
+          "label": "HCI_OP_READ_LOCAL_EXT_FEATURES",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1197,
+          "end_line": 1197,
+          "text": "#define HCI_OP_READ_LOCAL_EXT_FEATURES\t0x1004"
+        },
+        {
+          "label": "HCI_OP_READ_PAGE_SCAN_ACTIVITY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1233,
+          "end_line": 1233,
+          "text": "#define HCI_OP_READ_PAGE_SCAN_ACTIVITY\t0x0c1b"
+        },
+        {
+          "label": "HCI_OP_READ_PAGE_SCAN_TYPE",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1257,
+          "end_line": 1257,
+          "text": "#define HCI_OP_READ_PAGE_SCAN_TYPE\t0x0c46"
+        },
+        {
+          "label": "HCI_OP_READ_STORED_LINK_KEY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 941,
+          "end_line": 941,
+          "text": "#define HCI_OP_READ_STORED_LINK_KEY\t0x0c0d"
+        },
+        {
+          "label": "HCI_OP_READ_SYNC_TRAIN_PARAMS",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1121,
+          "end_line": 1121,
+          "text": "#define HCI_OP_READ_SYNC_TRAIN_PARAMS\t0x0c77"
+        },
+        {
+          "label": "HCI_OP_WRITE_SC_SUPPORT",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1141,
+          "end_line": 1141,
+          "text": "#define HCI_OP_WRITE_SC_SUPPORT\t\t0x0c7a"
+        },
+        {
+          "label": "HCI_PRIMARY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 69,
+          "end_line": 69,
+          "text": "#define HCI_PRIMARY\t0x00"
+        },
+        {
+          "label": "LMP_LE",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 396,
+          "end_line": 396,
+          "text": "#define LMP_LE\t\t0x40"
+        },
+        {
+          "label": "LMP_NO_BREDR",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 395,
+          "end_line": 395,
+          "text": "#define LMP_NO_BREDR\t0x20"
+        },
+        {
+          "label": "LMP_SYNC_TRAIN",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 418,
+          "end_line": 418,
+          "text": "#define LMP_SYNC_TRAIN\t0x04"
+        },
+        {
+          "label": "lmp_le_capable",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 1165,
+          "end_line": 1165,
+          "text": "#define lmp_le_capable(dev)        ((dev)->features[0][4] & LMP_LE)"
+        },
+        {
+          "label": "lmp_sync_train_capable",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 1184,
+          "end_line": 1184,
+          "text": "#define lmp_sync_train_capable(dev) ((dev)->features[2][0] & LMP_SYNC_TRAIN)"
+        },
+        {
+          "label": "lmp_bredr_capable",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 1164,
+          "end_line": 1164,
+          "text": "#define lmp_bredr_capable(dev)     (!((dev)->features[0][4] & LMP_NO_BREDR))"
+        },
+        {
+          "label": "hci_cp_read_stored_link_key",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 942,
+          "end_line": 945,
+          "text": "struct hci_cp_read_stored_link_key {\n\tbdaddr_t bdaddr;\n\t__u8     read_all;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_read_local_ext_features",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1198,
+          "end_line": 1200,
+          "text": "struct hci_cp_read_local_ext_features {\n\t__u8     page;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_delete_stored_link_key",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 953,
+          "end_line": 956,
+          "text": "struct hci_cp_delete_stored_link_key {\n\tbdaddr_t bdaddr;\n\t__u8     delete_all;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_write_def_data_len",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1548,
+          "end_line": 1551,
+          "text": "struct hci_cp_le_write_def_data_len {\n\t__le16\ttx_len;\n\t__le16\ttx_time;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_set_default_phy",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1587,
+          "end_line": 1591,
+          "text": "struct hci_cp_le_set_default_phy {\n\t__u8    all_phys;\n\t__u8    tx_phys;\n\t__u8    rx_phys;\n} __packed;"
+        },
+        {
+          "label": "historical_default_le_max_tx_len",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "start_line": 3190,
+          "end_line": 3190,
+          "text": "\thdev->le_max_tx_len = 0x001b;"
+        },
+        {
+          "label": "historical_default_le_max_tx_time",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "start_line": 3191,
+          "end_line": 3191,
+          "text": "\thdev->le_max_tx_time = 0x0148;"
+        }
+      ],
+      "synthetic_flag_ids": [
+        "HCI_CONFIG",
+        "HCI_QUIRK_BROKEN_STORED_LINK_KEY",
+        "HCI_SETUP",
+        "HCI_SSP_ENABLED"
+      ]
+    },
+    "fix": {
+      "variant": "fix",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "source_path": "/mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/initialization_boundary_20261001/entry_fix.c",
+      "generated_c_sha256": "a3d011466e25dc0b5f51ac3164bf5784ac0cb2df5ce06bb70961ccf4bee1771c",
+      "excerpts": [
+        {
+          "label": "__hci_init",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "start_line": 864,
+          "end_line": 919,
+          "text": "static int __hci_init(struct hci_dev *hdev)\n{\n\tint err;\n\n\terr = __hci_req_sync(hdev, hci_init1_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\tif (hci_dev_test_flag(hdev, HCI_SETUP))\n\t\thci_debugfs_create_basic(hdev);\n\n\terr = __hci_req_sync(hdev, hci_init2_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\t/* HCI_PRIMARY covers both single-mode LE, BR/EDR and dual-mode\n\t * BR/EDR/LE type controllers. AMP controllers only need the\n\t * first two stages of init.\n\t */\n\tif (hdev->dev_type != HCI_PRIMARY)\n\t\treturn 0;\n\n\terr = __hci_req_sync(hdev, hci_init3_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\terr = __hci_req_sync(hdev, hci_init4_req, 0, HCI_INIT_TIMEOUT, NULL);\n\tif (err < 0)\n\t\treturn err;\n\n\t/* This function is only called when the controller is actually in\n\t * configured state. When the controller is marked as unconfigured,\n\t * this initialization procedure is not run.\n\t *\n\t * It means that it is possible that a controller runs through its\n\t * setup phase and then discovers missing settings. If that is the\n\t * case, then this function will not be called. It then will only\n\t * be called during the config phase.\n\t *\n\t * So only when in setup phase or config phase, create the debugfs\n\t * entries and register the SMP channels.\n\t */\n\tif (!hci_dev_test_flag(hdev, HCI_SETUP) &&\n\t    !hci_dev_test_flag(hdev, HCI_CONFIG))\n\t\treturn 0;\n\n\thci_debugfs_create_common(hdev);\n\n\tif (lmp_bredr_capable(hdev))\n\t\thci_debugfs_create_bredr(hdev);\n\n\tif (lmp_le_capable(hdev))\n\t\thci_debugfs_create_le(hdev);\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "hci_init3_req",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "start_line": 584,
+          "end_line": 787,
+          "text": "static int hci_init3_req(struct hci_request *req, unsigned long opt)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\tu8 p;\n\n\thci_setup_event_mask(req);\n\n\tif (hdev->commands[6] & 0x20 &&\n\t    !test_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks)) {\n\t\tstruct hci_cp_read_stored_link_key cp;\n\n\t\tbacpy(&cp.bdaddr, BDADDR_ANY);\n\t\tcp.read_all = 0x01;\n\t\thci_req_add(req, HCI_OP_READ_STORED_LINK_KEY, sizeof(cp), &cp);\n\t}\n\n\tif (hdev->commands[5] & 0x10)\n\t\thci_setup_link_policy(req);\n\n\tif (hdev->commands[8] & 0x01)\n\t\thci_req_add(req, HCI_OP_READ_PAGE_SCAN_ACTIVITY, 0, NULL);\n\n\t/* Some older Broadcom based Bluetooth 1.2 controllers do not\n\t * support the Read Page Scan Type command. Check support for\n\t * this command in the bit mask of supported commands.\n\t */\n\tif (hdev->commands[13] & 0x01)\n\t\thci_req_add(req, HCI_OP_READ_PAGE_SCAN_TYPE, 0, NULL);\n\n\tif (lmp_le_capable(hdev)) {\n\t\tu8 events[8];\n\n\t\tmemset(events, 0, sizeof(events));\n\n\t\tif (hdev->le_features[0] & HCI_LE_ENCRYPTION)\n\t\t\tevents[0] |= 0x10;\t/* LE Long Term Key Request */\n\n\t\t/* If controller supports the Connection Parameters Request\n\t\t * Link Layer Procedure, enable the corresponding event.\n\t\t */\n\t\tif (hdev->le_features[0] & HCI_LE_CONN_PARAM_REQ_PROC)\n\t\t\tevents[0] |= 0x20;\t/* LE Remote Connection\n\t\t\t\t\t\t * Parameter Request\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the Data Length Extension\n\t\t * feature, enable the corresponding event.\n\t\t */\n\t\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT)\n\t\t\tevents[0] |= 0x40;\t/* LE Data Length Change */\n\n\t\t/* If the controller supports Extended Scanner Filter\n\t\t * Policies, enable the correspondig event.\n\t\t */\n\t\tif (hdev->le_features[0] & HCI_LE_EXT_SCAN_POLICY)\n\t\t\tevents[1] |= 0x04;\t/* LE Direct Advertising\n\t\t\t\t\t\t * Report\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports Channel Selection Algorithm #2\n\t\t * feature, enable the corresponding event.\n\t\t */\n\t\tif (hdev->le_features[1] & HCI_LE_CHAN_SEL_ALG2)\n\t\t\tevents[2] |= 0x08;\t/* LE Channel Selection\n\t\t\t\t\t\t * Algorithm\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Set Scan Enable command,\n\t\t * enable the corresponding advertising report event.\n\t\t */\n\t\tif (hdev->commands[26] & 0x08)\n\t\t\tevents[0] |= 0x02;\t/* LE Advertising Report */\n\n\t\t/* If the controller supports the LE Create Connection\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[26] & 0x10)\n\t\t\tevents[0] |= 0x01;\t/* LE Connection Complete */\n\n\t\t/* If the controller supports the LE Connection Update\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[27] & 0x04)\n\t\t\tevents[0] |= 0x04;\t/* LE Connection Update\n\t\t\t\t\t\t * Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Read Remote Used Features\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[27] & 0x20)\n\t\t\tevents[0] |= 0x08;\t/* LE Read Remote Used\n\t\t\t\t\t\t * Features Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Read Local P-256\n\t\t * Public Key command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[34] & 0x02)\n\t\t\tevents[0] |= 0x80;\t/* LE Read Local P-256\n\t\t\t\t\t\t * Public Key Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Generate DHKey\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[34] & 0x04)\n\t\t\tevents[1] |= 0x01;\t/* LE Generate DHKey Complete */\n\n\t\t/* If the controller supports the LE Set Default PHY or\n\t\t * LE Set PHY commands, enable the corresponding event.\n\t\t */\n\t\tif (hdev->commands[35] & (0x20 | 0x40))\n\t\t\tevents[1] |= 0x08;        /* LE PHY Update Complete */\n\n\t\t/* If the controller supports LE Set Extended Scan Parameters\n\t\t * and LE Set Extended Scan Enable commands, enable the\n\t\t * corresponding event.\n\t\t */\n\t\tif (use_ext_scan(hdev))\n\t\t\tevents[1] |= 0x10;\t/* LE Extended Advertising\n\t\t\t\t\t\t * Report\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Extended Create Connection\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (use_ext_conn(hdev))\n\t\t\tevents[1] |= 0x02;      /* LE Enhanced Connection\n\t\t\t\t\t\t * Complete\n\t\t\t\t\t\t */\n\n\t\t/* If the controller supports the LE Extended Advertising\n\t\t * command, enable the corresponding event.\n\t\t */\n\t\tif (ext_adv_capable(hdev))\n\t\t\tevents[2] |= 0x02;\t/* LE Advertising Set\n\t\t\t\t\t\t * Terminated\n\t\t\t\t\t\t */\n\n\t\thci_req_add(req, HCI_OP_LE_SET_EVENT_MASK, sizeof(events),\n\t\t\t    events);\n\n\t\t/* Read LE Advertising Channel TX Power */\n\t\tif ((hdev->commands[25] & 0x40) && !ext_adv_capable(hdev)) {\n\t\t\t/* HCI TS spec forbids mixing of legacy and extended\n\t\t\t * advertising commands wherein READ_ADV_TX_POWER is\n\t\t\t * also included. So do not call it if extended adv\n\t\t\t * is supported otherwise controller will return\n\t\t\t * COMMAND_DISALLOWED for extended commands.\n\t\t\t */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_ADV_TX_POWER, 0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[26] & 0x40) {\n\t\t\t/* Read LE White List Size */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_WHITE_LIST_SIZE,\n\t\t\t\t    0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[26] & 0x80) {\n\t\t\t/* Clear LE White List */\n\t\t\thci_req_add(req, HCI_OP_LE_CLEAR_WHITE_LIST, 0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[34] & 0x40) {\n\t\t\t/* Read LE Resolving List Size */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_RESOLV_LIST_SIZE,\n\t\t\t\t    0, NULL);\n\t\t}\n\n\t\tif (hdev->commands[34] & 0x20) {\n\t\t\t/* Clear LE Resolving List */\n\t\t\thci_req_add(req, HCI_OP_LE_CLEAR_RESOLV_LIST, 0, NULL);\n\t\t}\n\n\t\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {\n\t\t\t/* Read LE Maximum Data Length */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_MAX_DATA_LEN, 0, NULL);\n\n\t\t\t/* Read LE Suggested Default Data Length */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_DEF_DATA_LEN, 0, NULL);\n\t\t}\n\n\t\tif (ext_adv_capable(hdev)) {\n\t\t\t/* Read LE Number of Supported Advertising Sets */\n\t\t\thci_req_add(req, HCI_OP_LE_READ_NUM_SUPPORTED_ADV_SETS,\n\t\t\t\t    0, NULL);\n\t\t}\n\n\t\thci_set_le_support(req);\n\t}\n\n\t/* Read features beyond page 1 if available */\n\tfor (p = 2; p < HCI_MAX_PAGES && p <= hdev->max_page; p++) {\n\t\tstruct hci_cp_read_local_ext_features cp;\n\n\t\tcp.page = p;\n\t\thci_req_add(req, HCI_OP_READ_LOCAL_EXT_FEATURES,\n\t\t\t    sizeof(cp), &cp);\n\t}\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "hci_init4_req",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "start_line": 789,
+          "end_line": 862,
+          "text": "static int hci_init4_req(struct hci_request *req, unsigned long opt)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\n\t/* Some Broadcom based Bluetooth controllers do not support the\n\t * Delete Stored Link Key command. They are clearly indicating its\n\t * absence in the bit mask of supported commands.\n\t *\n\t * Check the supported commands and only if the the command is marked\n\t * as supported send it. If not supported assume that the controller\n\t * does not have actual support for stored link keys which makes this\n\t * command redundant anyway.\n\t *\n\t * Some controllers indicate that they support handling deleting\n\t * stored link keys, but they don't. The quirk lets a driver\n\t * just disable this command.\n\t */\n\tif (hdev->commands[6] & 0x80 &&\n\t    !test_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks)) {\n\t\tstruct hci_cp_delete_stored_link_key cp;\n\n\t\tbacpy(&cp.bdaddr, BDADDR_ANY);\n\t\tcp.delete_all = 0x01;\n\t\thci_req_add(req, HCI_OP_DELETE_STORED_LINK_KEY,\n\t\t\t    sizeof(cp), &cp);\n\t}\n\n\t/* Set event mask page 2 if the HCI command for it is supported */\n\tif (hdev->commands[22] & 0x04)\n\t\thci_set_event_mask_page_2(req);\n\n\t/* Read local codec list if the HCI command is supported */\n\tif (hdev->commands[29] & 0x20)\n\t\thci_req_add(req, HCI_OP_READ_LOCAL_CODECS, 0, NULL);\n\n\t/* Get MWS transport configuration if the HCI command is supported */\n\tif (hdev->commands[30] & 0x08)\n\t\thci_req_add(req, HCI_OP_GET_MWS_TRANSPORT_CONFIG, 0, NULL);\n\n\t/* Check for Synchronization Train support */\n\tif (lmp_sync_train_capable(hdev))\n\t\thci_req_add(req, HCI_OP_READ_SYNC_TRAIN_PARAMS, 0, NULL);\n\n\t/* Enable Secure Connections if supported and configured */\n\tif (hci_dev_test_flag(hdev, HCI_SSP_ENABLED) &&\n\t    bredr_sc_enabled(hdev)) {\n\t\tu8 support = 0x01;\n\n\t\thci_req_add(req, HCI_OP_WRITE_SC_SUPPORT,\n\t\t\t    sizeof(support), &support);\n\t}\n\n\t/* Set Suggested Default Data Length to maximum if supported */\n\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {\n\t\tstruct hci_cp_le_write_def_data_len cp;\n\n\t\tcp.tx_len = cpu_to_le16(hdev->le_max_tx_len);\n\t\tcp.tx_time = cpu_to_le16(hdev->le_max_tx_time);\n\t\thci_req_add(req, HCI_OP_LE_WRITE_DEF_DATA_LEN, sizeof(cp), &cp);\n\t}\n\n\t/* Set Default PHY parameters if command is supported */\n\tif (hdev->commands[35] & 0x20) {\n\t\tstruct hci_cp_le_set_default_phy cp;\n\n\t\tcp.all_phys = 0x00;\n\t\tcp.tx_phys = hdev->le_tx_def_phys;\n\t\tcp.rx_phys = hdev->le_rx_def_phys;\n\n\t\thci_req_add(req, HCI_OP_LE_SET_DEFAULT_PHY, sizeof(cp), &cp);\n\t}\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "actual_local_completion_reader",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_event.c",
+          "blob": "c1d3a303d97fbda890e546755535199af0420d2e",
+          "source_sha256": "30d26b41adaa835943def0239ed74ba03ae6e5152692a8ac10c8f141e64bf48f",
+          "start_line": 1483,
+          "end_line": 1500,
+          "text": "static void hci_cc_le_write_def_data_len(struct hci_dev *hdev,\n\t\t\t\t\t struct sk_buff *skb)\n{\n\tstruct hci_cp_le_write_def_data_len *sent;\n\t__u8 status = *((__u8 *) skb->data);\n\n\tBT_DBG(\"%s status 0x%2.2x\", hdev->name, status);\n\n\tif (status)\n\t\treturn;\n\n\tsent = hci_sent_cmd_data(hdev, HCI_OP_LE_WRITE_DEF_DATA_LEN);\n\tif (!sent)\n\t\treturn;\n\n\thdev->le_def_tx_len = le16_to_cpu(sent->tx_len);\n\thdev->le_def_tx_time = le16_to_cpu(sent->tx_time);\n}"
+        },
+        {
+          "label": "HCI_AMP",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 70,
+          "end_line": 70,
+          "text": "#define HCI_AMP\t\t0x01"
+        },
+        {
+          "label": "HCI_INIT_TIMEOUT",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 293,
+          "end_line": 293,
+          "text": "#define HCI_INIT_TIMEOUT\tmsecs_to_jiffies(10000)\t/* 10 seconds */"
+        },
+        {
+          "label": "HCI_LE_CHAN_SEL_ALG2",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 442,
+          "end_line": 442,
+          "text": "#define HCI_LE_CHAN_SEL_ALG2\t\t0x40"
+        },
+        {
+          "label": "HCI_LE_CONN_PARAM_REQ_PROC",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 432,
+          "end_line": 432,
+          "text": "#define HCI_LE_CONN_PARAM_REQ_PROC\t0x02"
+        },
+        {
+          "label": "HCI_LE_DATA_LEN_EXT",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 435,
+          "end_line": 435,
+          "text": "#define HCI_LE_DATA_LEN_EXT\t\t0x20"
+        },
+        {
+          "label": "HCI_LE_ENCRYPTION",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 431,
+          "end_line": 431,
+          "text": "#define HCI_LE_ENCRYPTION\t\t0x01"
+        },
+        {
+          "label": "HCI_LE_EXT_SCAN_POLICY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 439,
+          "end_line": 439,
+          "text": "#define HCI_LE_EXT_SCAN_POLICY\t\t0x80"
+        },
+        {
+          "label": "HCI_MAX_PAGES",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 213,
+          "end_line": 213,
+          "text": "#define HCI_MAX_PAGES\t3"
+        },
+        {
+          "label": "HCI_OP_DELETE_STORED_LINK_KEY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 952,
+          "end_line": 952,
+          "text": "#define HCI_OP_DELETE_STORED_LINK_KEY\t0x0c12"
+        },
+        {
+          "label": "HCI_OP_GET_MWS_TRANSPORT_CONFIG",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1339,
+          "end_line": 1339,
+          "text": "#define HCI_OP_GET_MWS_TRANSPORT_CONFIG\t0x140c"
+        },
+        {
+          "label": "HCI_OP_LE_CLEAR_RESOLV_LIST",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1567,
+          "end_line": 1567,
+          "text": "#define HCI_OP_LE_CLEAR_RESOLV_LIST\t0x2029"
+        },
+        {
+          "label": "HCI_OP_LE_CLEAR_WHITE_LIST",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1449,
+          "end_line": 1449,
+          "text": "#define HCI_OP_LE_CLEAR_WHITE_LIST\t0x2010"
+        },
+        {
+          "label": "HCI_OP_LE_READ_ADV_TX_POWER",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1377,
+          "end_line": 1377,
+          "text": "#define HCI_OP_LE_READ_ADV_TX_POWER\t0x2007"
+        },
+        {
+          "label": "HCI_OP_LE_READ_DEF_DATA_LEN",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1540,
+          "end_line": 1540,
+          "text": "#define HCI_OP_LE_READ_DEF_DATA_LEN\t0x2023"
+        },
+        {
+          "label": "HCI_OP_LE_READ_MAX_DATA_LEN",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1577,
+          "end_line": 1577,
+          "text": "#define HCI_OP_LE_READ_MAX_DATA_LEN\t0x202f"
+        },
+        {
+          "label": "HCI_OP_LE_READ_NUM_SUPPORTED_ADV_SETS",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1644,
+          "end_line": 1644,
+          "text": "#define HCI_OP_LE_READ_NUM_SUPPORTED_ADV_SETS\t0x203b"
+        },
+        {
+          "label": "HCI_OP_LE_READ_RESOLV_LIST_SIZE",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1569,
+          "end_line": 1569,
+          "text": "#define HCI_OP_LE_READ_RESOLV_LIST_SIZE\t0x202a"
+        },
+        {
+          "label": "HCI_OP_LE_READ_WHITE_LIST_SIZE",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1443,
+          "end_line": 1443,
+          "text": "#define HCI_OP_LE_READ_WHITE_LIST_SIZE\t0x200f"
+        },
+        {
+          "label": "HCI_OP_LE_SET_DEFAULT_PHY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1586,
+          "end_line": 1586,
+          "text": "#define HCI_OP_LE_SET_DEFAULT_PHY\t0x2031"
+        },
+        {
+          "label": "HCI_OP_LE_SET_EVENT_MASK",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1345,
+          "end_line": 1345,
+          "text": "#define HCI_OP_LE_SET_EVENT_MASK\t0x2001"
+        },
+        {
+          "label": "HCI_OP_LE_WRITE_DEF_DATA_LEN",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1547,
+          "end_line": 1547,
+          "text": "#define HCI_OP_LE_WRITE_DEF_DATA_LEN\t0x2024"
+        },
+        {
+          "label": "HCI_OP_READ_LOCAL_CODECS",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1231,
+          "end_line": 1231,
+          "text": "#define HCI_OP_READ_LOCAL_CODECS\t0x100b"
+        },
+        {
+          "label": "HCI_OP_READ_LOCAL_EXT_FEATURES",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1197,
+          "end_line": 1197,
+          "text": "#define HCI_OP_READ_LOCAL_EXT_FEATURES\t0x1004"
+        },
+        {
+          "label": "HCI_OP_READ_PAGE_SCAN_ACTIVITY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1233,
+          "end_line": 1233,
+          "text": "#define HCI_OP_READ_PAGE_SCAN_ACTIVITY\t0x0c1b"
+        },
+        {
+          "label": "HCI_OP_READ_PAGE_SCAN_TYPE",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1257,
+          "end_line": 1257,
+          "text": "#define HCI_OP_READ_PAGE_SCAN_TYPE\t0x0c46"
+        },
+        {
+          "label": "HCI_OP_READ_STORED_LINK_KEY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 941,
+          "end_line": 941,
+          "text": "#define HCI_OP_READ_STORED_LINK_KEY\t0x0c0d"
+        },
+        {
+          "label": "HCI_OP_READ_SYNC_TRAIN_PARAMS",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1121,
+          "end_line": 1121,
+          "text": "#define HCI_OP_READ_SYNC_TRAIN_PARAMS\t0x0c77"
+        },
+        {
+          "label": "HCI_OP_WRITE_SC_SUPPORT",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1141,
+          "end_line": 1141,
+          "text": "#define HCI_OP_WRITE_SC_SUPPORT\t\t0x0c7a"
+        },
+        {
+          "label": "HCI_PRIMARY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 69,
+          "end_line": 69,
+          "text": "#define HCI_PRIMARY\t0x00"
+        },
+        {
+          "label": "LMP_LE",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 396,
+          "end_line": 396,
+          "text": "#define LMP_LE\t\t0x40"
+        },
+        {
+          "label": "LMP_NO_BREDR",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 395,
+          "end_line": 395,
+          "text": "#define LMP_NO_BREDR\t0x20"
+        },
+        {
+          "label": "LMP_SYNC_TRAIN",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 418,
+          "end_line": 418,
+          "text": "#define LMP_SYNC_TRAIN\t0x04"
+        },
+        {
+          "label": "lmp_le_capable",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 1165,
+          "end_line": 1165,
+          "text": "#define lmp_le_capable(dev)        ((dev)->features[0][4] & LMP_LE)"
+        },
+        {
+          "label": "lmp_sync_train_capable",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 1184,
+          "end_line": 1184,
+          "text": "#define lmp_sync_train_capable(dev) ((dev)->features[2][0] & LMP_SYNC_TRAIN)"
+        },
+        {
+          "label": "lmp_bredr_capable",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci_core.h",
+          "blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "start_line": 1164,
+          "end_line": 1164,
+          "text": "#define lmp_bredr_capable(dev)     (!((dev)->features[0][4] & LMP_NO_BREDR))"
+        },
+        {
+          "label": "hci_cp_read_stored_link_key",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 942,
+          "end_line": 945,
+          "text": "struct hci_cp_read_stored_link_key {\n\tbdaddr_t bdaddr;\n\t__u8     read_all;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_read_local_ext_features",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1198,
+          "end_line": 1200,
+          "text": "struct hci_cp_read_local_ext_features {\n\t__u8     page;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_delete_stored_link_key",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 953,
+          "end_line": 956,
+          "text": "struct hci_cp_delete_stored_link_key {\n\tbdaddr_t bdaddr;\n\t__u8     delete_all;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_write_def_data_len",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1548,
+          "end_line": 1551,
+          "text": "struct hci_cp_le_write_def_data_len {\n\t__le16\ttx_len;\n\t__le16\ttx_time;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_set_default_phy",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "start_line": 1587,
+          "end_line": 1591,
+          "text": "struct hci_cp_le_set_default_phy {\n\t__u8    all_phys;\n\t__u8    tx_phys;\n\t__u8    rx_phys;\n} __packed;"
+        },
+        {
+          "label": "historical_default_le_max_tx_len",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "start_line": 3190,
+          "end_line": 3190,
+          "text": "\thdev->le_max_tx_len = 0x001b;"
+        },
+        {
+          "label": "historical_default_le_max_tx_time",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "start_line": 3191,
+          "end_line": 3191,
+          "text": "\thdev->le_max_tx_time = 0x0148;"
+        }
+      ],
+      "synthetic_flag_ids": [
+        "HCI_CONFIG",
+        "HCI_QUIRK_BROKEN_STORED_LINK_KEY",
+        "HCI_SETUP",
+        "HCI_SSP_ENABLED"
+      ]
+    }
+  }
+}

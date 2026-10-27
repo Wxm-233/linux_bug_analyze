@@ -1,0 +1,37 @@
+{
+  "scope": "read-only review of two preselected held-out commits after parent outputs were frozen; no rule changes or hardware validation",
+  "cases": [
+    {
+      "fix": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "parent": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "title": "Bluetooth: missed cpu_to_le16 conversion in hci_init4_req",
+      "source_evidence": [
+        {"ref": "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_core.c:841-848", "blob": "04bc79359a1736b28e83f0eb88828ceefd430f25", "observation": "hdev->le_max_tx_len/time assigned directly into cp.tx_len/time; hci_req_add sends sizeof(cp), &cp"},
+        {"ref": "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/hci.h:1547-1551", "blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0", "observation": "LE Write Default Data Length opcode 0x2024; packed cp.tx_len and cp.tx_time are __le16"},
+        {"ref": "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/hci_core.h:271-272", "blob": "b689aceb636b115aff038902cb14119384949955", "observation": "source hdev fields are __u16"},
+        {"ref": "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_request.c:285-301,342-346", "blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2", "observation": "hci_req_add forwards payload, and hci_prepare_cmd uses skb_put_data(skb,param,plen)"},
+        {"ref": "cef456cd354ef485f12d57000c455e83e416a2b6:include/linux/skbuff.h:2212-2219", "blob": "0a58402a166e3835e84b0f2662aed6771878eae7", "observation": "skb_put_data performs memcpy without byte-order conversion"}
+      ],
+      "normal_counterexample": "On little-endian, original and repaired bytes agree; with parent defaults 0x001b and 0x0148, big-endian direct-copy bytes would be 00 1b and 01 48, versus required little-endian 1b 00 and 48 01.",
+      "repair": "The fix wraps both assignments in cpu_to_le16.",
+      "preliminary_five_dimensions": {"trigger_architecture": "big-endian CPU conditional; no hardware observation", "subsystem": "Bluetooth LE HCI initialization", "horizontal_or_vertical": "vertical host-to-controller representation boundary; horizontal regression not shown", "origin_side": "common net/bluetooth/hci_core.c producer", "time": "introducing line blamed to 122048752e3d, committed 2017-05-18; fix committed 2019-10-16; discovery date unknown"},
+      "frozen_tool_result": "outbound scalar: 20 insufficient; representation producer v5: 0 sites. These are scope misses, not clean verdicts.",
+      "inclusion": "conditional_vertical_source_candidate; not added to confirmed defect count"
+    },
+    {
+      "fix": "0ab905c3be8c2be368821dd2bd1f8d126064d993",
+      "parent": "25c150ac103a4ebeed0319994c742a90634ddf18",
+      "title": "Bluetooth: Devcoredump: Fix storing u32 without specifying byte order issue",
+      "source_evidence": [
+        {"ref": "25c150ac103a4ebeed0319994c742a90634ddf18:net/bluetooth/coredump.c:432-447", "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1", "observation": "hci_devcd_init writes host u32 dump_size via skb_put_data, marks INIT, and enqueues on hdev->dump.dump_q"},
+        {"ref": "25c150ac103a4ebeed0319994c742a90634ddf18:net/bluetooth/coredump.c:312-333", "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1", "observation": "same-host workqueue dequeues and dispatches INIT to hci_devcd_handle_pkt_init"},
+        {"ref": "25c150ac103a4ebeed0319994c742a90634ddf18:net/bluetooth/coredump.c:181-209", "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1", "observation": "consumer casts pulled bytes to u32*, reads numeric value, then calls hci_devcd_prepare"}
+      ],
+      "normal_counterexample": "The old host-byte producer and host-u32 consumer run in one host kernel, so a big-endian producer/consumer pair reads back the same numeric dump_size, subject to alignment behavior not proved here.",
+      "repair": "Fix changes the pair to put_unaligned_le32/get_unaligned_le32, specifying little-endian bytes and unaligned-safe access.",
+      "preliminary_five_dimensions": {"trigger_architecture": "none established from same-host round trip", "subsystem": "Bluetooth devcoredump", "horizontal_or_vertical": "project-scope cross-architecture relation not established; internal format clarification", "origin_side": "common net/bluetooth/coredump.c producer and consumer", "time": "introductory line blamed to 9695ef876fd1, committed 2023-04-23 21:57:59 -07; fix committed 2023-04-23 22:05:53 -07; discovery date unknown; integration gap is not exposure duration"},
+      "frozen_tool_result": "outbound scalar: 0 findings; representation producer v5: 0 sites. No clean verdict follows.",
+      "inclusion": "out of confirmed core set pending evidence of external byte-order contract or observed failure"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "checkpoint_sha256": "4353ce289543411473de8c24abb8472d0d054a6db6d43c1c20395ae0288d1867",
+  "cases": [
+    {
+      "case": "G",
+      "hash": "98937707fea8375e8acea0aaa0b68a956dd52719",
+      "parent": "95706e717c4f55ca62025c151451ccc28863d085",
+      "evidence": [
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "show",
+            "-s",
+            "--format=fuller",
+            "98937707fea8375e8acea0aaa0b68a956dd52719"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "ac04bf45f07af929558a0efb9c5424a547939aac5472ca4da8fc0245e34050f1",
+          "text": "commit 98937707fea8375e8acea0aaa0b68a956dd52719\nAuthor:     Sam Ravnborg <sam@ravnborg.org>\nAuthorDate: Sat Mar 30 10:57:45 2024 +0100\nCommit:     Andreas Larsson <andreas@gaisler.com>\nCommitDate: Mon Apr 22 15:33:07 2024 +0200\n\n    sparc64: Fix number of online CPUs\n    \n    Nick Bowler reported:\n        When using newer kernels on my Ultra 60 with dual 450MHz UltraSPARC-II\n        CPUs, I noticed that only CPU 0 comes up, while older kernels (including\n        4.7) are working fine with both CPUs.\n    \n          I bisected the failure to this commit:\n    \n          9b2f753ec23710aa32c0d837d2499db92fe9115b is the first bad commit\n          commit 9b2f753ec23710aa32c0d837d2499db92fe9115b\n          Author: Atish Patra <atish.patra@oracle.com>\n          Date:   Thu Sep 15 14:54:40 2016 -0600\n    \n          sparc64: Fix cpu_possible_mask if nr_cpus is set\n    \n        This is a small change that reverts very easily on top of 5.18: there is\n        just one trivial conflict.  Once reverted, both CPUs work again.\n    \n        Maybe this is related to the fact that the CPUs on this system are\n        numbered CPU0 and CPU2 (there is no CPU1)?\n    \n    The current code that adjust cpu_possible based on nr_cpu_ids do not\n    take into account that CPU's may not come one after each other.\n    Move the chech to the function that setup the cpu_possible mask\n    so there is no need to adjust it later.\n    \n    Signed-off-by: Sam Ravnborg <sam@ravnborg.org>\n    Fixes: 9b2f753ec237 (\"sparc64: Fix cpu_possible_mask if nr_cpus is set\")\n    Reported-by: Nick Bowler <nbowler@draconx.ca>\n    Tested-by: Nick Bowler <nbowler@draconx.ca>\n    Link: https://lore.kernel.org/sparclinux/20201009161924.c8f031c079dd852941307870@gmx.de/\n    Link: https://lore.kernel.org/all/CADyTPEwt=ZNams+1bpMB1F9w_vUdPsGCt92DBQxxq_VtaLoTdw@mail.gmail.com/\n    Cc: stable@vger.kernel.org # v4.8+\n    Cc: Andreas Larsson <andreas@gaisler.com>\n    Cc: David S. Miller <davem@davemloft.net>\n    Cc: Atish Patra <atish.patra@oracle.com>\n    Cc: Bob Picco <bob.picco@oracle.com>\n    Cc: Vijay Kumar <vijay.ac.kumar@oracle.com>\n    Cc: David S. Miller <davem@davemloft.net>\n    Reviewed-by: Andreas Larsson <andreas@gaisler.com>\n    Acked-by: Arnd Bergmann <arnd@arndb.de>\n    Link: https://lore.kernel.org/r/20240330-sparc64-warnings-v1-9-37201023ee2f@ravnborg.org\n    Signed-off-by: Andreas Larsson <andreas@gaisler.com>\n"
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "95706e717c4f55ca62025c151451ccc28863d085",
+            "98937707fea8375e8acea0aaa0b68a956dd52719",
+            "--",
+            "arch/sparc/include/asm/smp_64.h",
+            "arch/sparc/kernel/prom_64.c",
+            "arch/sparc/kernel/setup_64.c",
+            "arch/sparc/kernel/smp_64.c"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "728799a2bcd668770e7466e0608d3fcc1e779bb2d309deaf4cbf2244976250c5",
+          "text": "diff --git a/arch/sparc/include/asm/smp_64.h b/arch/sparc/include/asm/smp_64.h\nindex 505b6700805d..0964fede0b2c 100644\n--- a/arch/sparc/include/asm/smp_64.h\n+++ b/arch/sparc/include/asm/smp_64.h\n@@ -47,7 +47,6 @@ void arch_send_call_function_ipi_mask(const struct cpumask *mask);\n int hard_smp_processor_id(void);\n #define raw_smp_processor_id() (current_thread_info()->cpu)\n \n-void smp_fill_in_cpu_possible_map(void);\n void smp_fill_in_sib_core_maps(void);\n void __noreturn cpu_play_dead(void);\n \n@@ -77,7 +76,6 @@ void __cpu_die(unsigned int cpu);\n #define smp_fill_in_sib_core_maps() do { } while (0)\n #define smp_fetch_global_regs() do { } while (0)\n #define smp_fetch_global_pmu() do { } while (0)\n-#define smp_fill_in_cpu_possible_map() do { } while (0)\n #define smp_init_cpu_poke() do { } while (0)\n #define scheduler_poke() do { } while (0)\n \ndiff --git a/arch/sparc/kernel/prom_64.c b/arch/sparc/kernel/prom_64.c\nindex 998aa693d491..ba82884cb92a 100644\n--- a/arch/sparc/kernel/prom_64.c\n+++ b/arch/sparc/kernel/prom_64.c\n@@ -483,7 +483,9 @@ static void *record_one_cpu(struct device_node *dp, int cpuid, int arg)\n \tncpus_probed++;\n #ifdef CONFIG_SMP\n \tset_cpu_present(cpuid, true);\n-\tset_cpu_possible(cpuid, true);\n+\n+\tif (num_possible_cpus() < nr_cpu_ids)\n+\t\tset_cpu_possible(cpuid, true);\n #endif\n \treturn NULL;\n }\ndiff --git a/arch/sparc/kernel/setup_64.c b/arch/sparc/kernel/setup_64.c\nindex 1d519f18d2b2..63615f5c99b4 100644\n--- a/arch/sparc/kernel/setup_64.c\n+++ b/arch/sparc/kernel/setup_64.c\n@@ -671,7 +671,6 @@ void __init setup_arch(char **cmdline_p)\n \n \tpaging_init();\n \tinit_sparc64_elf_hwcap();\n-\tsmp_fill_in_cpu_possible_map();\n \t/*\n \t * Once the OF device tree and MDESC have been setup and nr_cpus has\n \t * been parsed, we know the list of possible cpus.  Therefore we can\ndiff --git a/arch/sparc/kernel/smp_64.c b/arch/sparc/kernel/smp_64.c\nindex a0cc9bb41a92..e40c395db202 100644\n--- a/arch/sparc/kernel/smp_64.c\n+++ b/arch/sparc/kernel/smp_64.c\n@@ -1216,20 +1216,6 @@ void __init smp_setup_processor_id(void)\n \t\txcall_deliver_impl = hypervisor_xcall_deliver;\n }\n \n-void __init smp_fill_in_cpu_possible_map(void)\n-{\n-\tint possible_cpus = num_possible_cpus();\n-\tint i;\n-\n-\tif (possible_cpus > nr_cpu_ids)\n-\t\tpossible_cpus = nr_cpu_ids;\n-\n-\tfor (i = 0; i < possible_cpus; i++)\n-\t\tset_cpu_possible(i, true);\n-\tfor (; i < NR_CPUS; i++)\n-\t\tset_cpu_possible(i, false);\n-}\n-\n void smp_fill_in_sib_core_maps(void)\n {\n \tunsigned int i;\n"
+        }
+      ]
+    },
+    {
+      "case": "H",
+      "hash": "cabdc3a8475b918e55744f43719b26a82dc8fa6b",
+      "parent": "0fcfb00b28c0b7884635dacf38e46d60bf3d4eb1",
+      "evidence": [
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "show",
+            "-s",
+            "--format=fuller",
+            "cabdc3a8475b918e55744f43719b26a82dc8fa6b"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "04bf873103194513ab0c67a65b8dd37b8a8792c4fdc248f0558c22f3781f2d43",
+          "text": "commit cabdc3a8475b918e55744f43719b26a82dc8fa6b\nAuthor:     Peter Zijlstra <peterz@infradead.org>\nAuthorDate: Sat Dec 4 10:14:02 2021 +0100\nCommit:     Peter Zijlstra <peterz@infradead.org>\nCommitDate: Wed Dec 8 22:15:37 2021 +0100\n\n    sched,x86: Don't use cluster topology for x86 hybrid CPUs\n    \n    For x86 hybrid CPUs like Alder Lake, the order of CPU selection should\n    be based strictly on CPU priority.  Don't include cluster topology for\n    hybrid CPUs to avoid interference with such CPU selection order.\n    \n    On Alder Lake, the Atom CPU cluster has more capacity (4 Atom CPUs) vs\n    Big core cluster (2 hyperthread CPUs). This could potentially bias CPU\n    selection towards Atom over Big Core, when Big core CPU has higher\n    priority.\n    \n    Fixes: 66558b730f25 (\"sched: Add cluster scheduler level for x86\")\n    Suggested-by: Tim Chen <tim.c.chen@linux.intel.com>\n    Signed-off-by: Peter Zijlstra (Intel) <peterz@infradead.org>\n    Acked-by: Tim Chen <tim.c.chen@linux.intel.com>\n    Tested-by: Ricardo Neri <ricardo.neri-calderon@linux.intel.com>\n    Link: https://lkml.kernel.org/r/20211204091402.GM16608@worktop.programming.kicks-ass.net\n"
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "0fcfb00b28c0b7884635dacf38e46d60bf3d4eb1",
+            "cabdc3a8475b918e55744f43719b26a82dc8fa6b",
+            "--",
+            "arch/x86/kernel/smpboot.c"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "06af75011e3d00cec682aec126cff52b1d3da64265c52ac79016c53670ef9154",
+          "text": "diff --git a/arch/x86/kernel/smpboot.c b/arch/x86/kernel/smpboot.c\nindex ac2909f0cab3..617012f4619f 100644\n--- a/arch/x86/kernel/smpboot.c\n+++ b/arch/x86/kernel/smpboot.c\n@@ -579,6 +579,17 @@ static struct sched_domain_topology_level x86_numa_in_package_topology[] = {\n \t{ NULL, },\n };\n \n+static struct sched_domain_topology_level x86_hybrid_topology[] = {\n+#ifdef CONFIG_SCHED_SMT\n+\t{ cpu_smt_mask, x86_smt_flags, SD_INIT_NAME(SMT) },\n+#endif\n+#ifdef CONFIG_SCHED_MC\n+\t{ cpu_coregroup_mask, x86_core_flags, SD_INIT_NAME(MC) },\n+#endif\n+\t{ cpu_cpu_mask, SD_INIT_NAME(DIE) },\n+\t{ NULL, },\n+};\n+\n static struct sched_domain_topology_level x86_topology[] = {\n #ifdef CONFIG_SCHED_SMT\n \t{ cpu_smt_mask, x86_smt_flags, SD_INIT_NAME(SMT) },\n@@ -1469,8 +1480,11 @@ void __init native_smp_cpus_done(unsigned int max_cpus)\n \n \tcalculate_max_logical_packages();\n \n+\t/* XXX for now assume numa-in-package and hybrid don't overlap */\n \tif (x86_has_numa_in_package)\n \t\tset_sched_topology(x86_numa_in_package_topology);\n+\tif (cpu_feature_enabled(X86_FEATURE_HYBRID_CPU))\n+\t\tset_sched_topology(x86_hybrid_topology);\n \n \tnmi_selftest();\n \timpress_friends();\n"
+        }
+      ]
+    }
+  ],
+  "scope": "selected historical repairs only; no fetch, new parent sources or model retries"
+}

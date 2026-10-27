@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-27",
+  "frozen_before_execution": true,
+  "purpose": "SPARC64 firmware cpuid -> possible construction -> IRQ-stack/per-CPU/bringup consumption chain; legal cpumask width precondition and stage; real-boot/tool feasibility",
+  "development_scope": true,
+  "case": {
+    "parent": "95706e717c4f55ca62025c151451ccc28863d085",
+    "fixed": "98937707fea8375e8acea0aaa0b68a956dd52719",
+    "mainline_checked": "df2908090cda368b01ff43709f51890076c56157 (v7.3-rc2); record_one_cpu and setup_arch ordering unchanged relative to fixed"
+  },
+  "prior_material": "cpu_identity_contract_20261021 used NR_CPUS=8 (NR_CPUS<=BITS_PER_LONG branch, small_cpumask_bits=NR_CPUS) and stopped at public re-bounding; it explicitly left multi-word/dynamic bitmap branches uncovered",
+  "new_question": "sparc64 Kconfig default NR_CPUS=4096 selects the branch where small_cpumask_bits=nr_cpu_ids; weight and for_each_cpu then depend on the current runtime nr_cpu_ids. Does the same original code produce different possible sets and consumer coverage under that branch?",
+  "feasibility_findings_before_execution": {
+    "qemu_upstream_v8_2_2_sun4u": "hw/sparc64/sun4u.c lines 813 and 841: mc->max_cpus = 1 (XXX for now)",
+    "qemu_upstream_v8_2_2_niagara": "loads 1up-md.bin / 1up-hv.bin single-CPU images; no max_cpus override",
+    "consequence": "no multi-CPU sparse-cpuid SPARC64 guest is available through QEMU 8.2.2; a single-CPU boot cannot exercise the relation; qemu-system-sparc and gcc-sparc64-linux-gnu are not installed (apt candidates exist)",
+    "fetch_note": "raw upstream files fetched by curl into WSL /tmp only for reading; Ubuntu binary not installed, not identity-checked"
+  },
+  "method": "host C projection that #includes original function bodies extracted verbatim from the pinned Git blobs; explicit stand-ins for cpumask/bitmap/memblock/printk with two compile-time width branches",
+  "branches": {
+    "S64": "NR_CPUS=64 (<=BITS_PER_LONG): small_cpumask_bits=NR_CPUS",
+    "L4096": "NR_CPUS=4096 (>4*BITS_PER_LONG, sparc64 Kconfig default): small_cpumask_bits=nr_cpu_ids"
+  },
+  "inputs": {
+    "dense_01": [0, 1],
+    "reported_02": [0, 2],
+    "boundary_024": [0, 2, 4]
+  },
+  "limits_L": ["none", 2],
+  "records_planned": 24,
+  "builds_planned": 4,
+  "stages_observed": [
+    "after boot_cpu_init + early nr_cpus",
+    "after OF enumeration (record_one_cpu)",
+    "after parent smp_fill_in_cpu_possible_map (parent only)",
+    "IRQ stack allocation set (alloc_irqstack_bootmem, inside setup_arch, before setup_nr_cpu_ids)",
+    "after setup_nr_cpu_ids",
+    "per-CPU offset set (for_each_possible_cpu in setup_per_cpu_areas)",
+    "bringup over present mask (cpuhp_bringup_mask) and cpu_up possible check"
+  ],
+  "researcher_relations": {
+    "R1_no_invented_identity": "possible is a subset of provided cpuids",
+    "R2_count_limit": "when nr_cpus=L is given, |possible| <= L (kernel-parameters.txt nr_cpus text)",
+    "R3_preserve_without_truncation": "when |provided| <= L (or no L), possible equals provided",
+    "R4_irqstack_before_online": "every CPU brought online has hardirq/softirq stacks allocated (set_hardirq_stack dereferences hardirq_stack[smp_processor_id()])",
+    "R5_percpu_before_online": "every CPU brought online has a per-CPU offset assigned"
+  },
+  "not_claimed": [
+    "no real SPARC boot, firmware, or hardware",
+    "no claim that every input/limit combination is a legal machine configuration",
+    "bringup stand-in only models the cpu_up possible check and online marking; no secondary CPU execution, IPIs, idle threads, or interrupt delivery",
+    "any fixed-version violation is a source-projection candidate requiring real-platform or maintainer confirmation, not a confirmed Linux defect",
+    "case was already read; this is not independent detection"
+  ],
+  "model_calls_planned": 0,
+  "stop_rule": "first-run compile or execution failures are recorded, not silently fixed; any corrected rerun is recorded as a separate attempt"
+}

@@ -1,0 +1,40 @@
+{
+  "stage": "numeric_compare_development_20261008",
+  "kind": "independent_synthetic_boundary_design_before_execution",
+  "max_inputs": 20,
+  "execution_started": false,
+  "no_git_or_model_access": true,
+  "root_code_modified": false,
+  "function": "consume",
+  "default_declaration": "struct packet { __le32 value; __le32 other; };",
+  "default_header": "int consume(struct packet *p, u32 parameter)",
+  "target_member": "value",
+  "status_scope": "Rows containing value as an evaluated scalar field occurrence; other atoms may separately be insufficient or normal. Parser rejection is accepted only where insufficient is expected.",
+  "probes": [
+    {"id": "01_raw_host_candidate", "body": "u32 n = 7; if (p->value == n) return 1; return 0;", "expected": "candidate", "basis": "Explicit local host literal source compared directly to encoded field; only a portability candidate."},
+    {"id": "02_reversed_candidate", "body": "u32 n = 7; if (n == p->value) return 1; return 0;", "expected": "candidate", "basis": "Swapping the sides of equality preserves the representation mismatch."},
+    {"id": "03_matching_decode_normal", "body": "u32 n = 7; if (le32_to_cpu(p->value) == n) return 1; return 0;", "expected": "normal", "basis": "Exact width and direction decoding of this field occurrence."},
+    {"id": "04_encoded_variable_equality_normal", "body": "u32 n = cpu_to_le32(7); if (p->value == n) return 1; return 0;", "expected": "normal", "basis": "u32 is a C carrier; explicit initializer carries encoded-LE32 representation."},
+    {"id": "05_encoded_variable_order_insufficient", "body": "u32 n = cpu_to_le32(7); if (p->value < n) return 1; return 0;", "expected": "insufficient", "basis": "Same encoded representation does not preserve numeric ordering on a different endian host."},
+    {"id": "06_zero_equality_normal", "body": "if (p->value == 0) return 1; return 0;", "expected": "normal", "basis": "Zero equality is representation invariant for the supported scalar field."},
+    {"id": "07_zero_order_insufficient", "body": "if (p->value > 0) return 1; return 0;", "expected": "insufficient", "basis": "Protocol conservatively excludes ordered zero comparisons."},
+    {"id": "08_wrong_width_insufficient", "body": "u32 n = 7; if (le64_to_cpu(p->value) == n) return 1; return 0;", "expected": "insufficient", "basis": "A conversion bearing the wrong field width cannot certify this read."},
+    {"id": "09_wrong_endian_insufficient", "body": "u32 n = 7; if (be32_to_cpu(p->value) == n) return 1; return 0;", "expected": "insufficient", "basis": "BE32 decoding does not certify an LE32 field."},
+    {"id": "10_parameter_type_not_domain", "body": "if (p->value == parameter) return 1; return 0;", "expected": "insufficient", "basis": "A u32 parameter's declaration alone gives no caller representation source."},
+    {"id": "11_unknown_initializer_insufficient", "body": "u32 n = helper(); if (p->value == n) return 1; return 0;", "expected": "insufficient", "basis": "Unknown function result must not become host merely from u32 storage."},
+    {"id": "12_address_escape_insufficient", "body": "u32 n = 7; mutate(&n); if (p->value == n) return 1; return 0;", "expected": "insufficient", "basis": "Address escape permits unmodeled updates to the apparent host value."},
+    {"id": "13_shadow_insufficient", "body": "u32 n = 7; { u32 n = 8; if (p->value == n) return 1; } return 0;", "expected": "insufficient", "basis": "The limited rule must not choose a last or first same-name declaration."},
+    {"id": "14_conditional_initialization_insufficient", "body": "u32 n; if (parameter) n = 7; if (p->value == n) return 1; return 0;", "expected": "insufficient", "basis": "Only conditional initialization does not establish a definite local source."},
+    {"id": "15_macro_override_insufficient", "prefix": "#define le32_to_cpu(x) (x)\n", "body": "u32 n = 7; if (le32_to_cpu(p->value) == n) return 1; return 0;", "expected": "insufficient", "basis": "A locally redefined helper spelling is not conversion evidence."},
+    {"id": "16_nested_logic_no_unrelated_conversion", "body": "u32 n = 7; if ((parameter && (p->value == n || le32_to_cpu(p->other) == n))) return 1; return 0;", "expected": "candidate", "basis": "Depth-aware logical atoms; the other atom's matching conversion must not normalize value."},
+    {"id": "17_multiple_target_occurrences_insufficient", "body": "u32 n = 7; if (p->value == n + le32_to_cpu(p->value)) return 1; return 0;", "expected": "insufficient", "basis": "Complex repeated use of the target inside one atom exceeds the supported grammar."},
+    {"id": "18_array_member_insufficient", "declaration": "struct packet { __le32 value[2]; __le32 other; };", "body": "u32 n = 7; if (p->value[0] == n) return 1; return 0;", "expected": "insufficient", "basis": "Array members are outside direct scalar field binding."},
+    {"id": "19_whole_encoded_mask_normal", "body": "if (p->value & cpu_to_le32(7)) return 1; return 0;", "expected": "normal", "basis": "The complete mask operand has the matching encoded representation."},
+    {"id": "20_partial_conversion_mask_insufficient", "body": "if (p->value & (cpu_to_le32(1) | MASK_UNKNOWN)) return 1; return 0;", "expected": "insufficient", "basis": "One converted suboperand cannot certify the unknown whole mask."}
+  ],
+  "limitations": [
+    "These are development boundary probes and never independent defect examples.",
+    "Expected normal means only the protocol's supported local shape, never runtime correctness.",
+    "No code execution, source querying, or root implementation inspection happened while writing this specification."
+  ]
+}

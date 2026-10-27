@@ -1,0 +1,51 @@
+{
+  "scope": "sync/add error and actual queue boundary only",
+  "records": [
+    {
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "path": "net/bluetooth/hci_request.c",
+      "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+      "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "snippets": [
+        {
+          "start_line": 192,
+          "end_line": 230,
+          "text": "192: int __hci_req_sync(struct hci_dev *hdev, int (*func)(struct hci_request *req,\n193: \t\t\t\t\t\t     unsigned long opt),\n194: \t\t   unsigned long opt, u32 timeout, u8 *hci_status)\n195: {\n196: \tstruct hci_request req;\n197: \tint err = 0;\n198: \n199: \tBT_DBG(\"%s start\", hdev->name);\n200: \n201: \thci_req_init(&req, hdev);\n202: \n203: \thdev->req_status = HCI_REQ_PEND;\n204: \n205: \terr = func(&req, opt);\n206: \tif (err) {\n207: \t\tif (hci_status)\n208: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n209: \t\treturn err;\n210: \t}\n211: \n212: \terr = hci_req_run_skb(&req, hci_req_sync_complete);\n213: \tif (err < 0) {\n214: \t\thdev->req_status = 0;\n215: \n216: \t\t/* ENODATA means the HCI request command queue is empty.\n217: \t\t * This can happen when a request with conditionals doesn't\n218: \t\t * trigger any commands to be sent. This is normal behavior\n219: \t\t * and should not trigger an error return.\n220: \t\t */\n221: \t\tif (err == -ENODATA) {\n222: \t\t\tif (hci_status)\n223: \t\t\t\t*hci_status = 0;\n224: \t\t\treturn 0;\n225: \t\t}\n226: \n227: \t\tif (hci_status)\n228: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n229: \n230: \t\treturn err;"
+        },
+        {
+          "start_line": 239,
+          "end_line": 266,
+          "text": "239: \tswitch (hdev->req_status) {\n240: \tcase HCI_REQ_DONE:\n241: \t\terr = -bt_to_errno(hdev->req_result);\n242: \t\tif (hci_status)\n243: \t\t\t*hci_status = hdev->req_result;\n244: \t\tbreak;\n245: \n246: \tcase HCI_REQ_CANCELED:\n247: \t\terr = -hdev->req_result;\n248: \t\tif (hci_status)\n249: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n250: \t\tbreak;\n251: \n252: \tdefault:\n253: \t\terr = -ETIMEDOUT;\n254: \t\tif (hci_status)\n255: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n256: \t\tbreak;\n257: \t}\n258: \n259: \tkfree_skb(hdev->req_skb);\n260: \thdev->req_skb = NULL;\n261: \thdev->req_status = hdev->req_result = 0;\n262: \n263: \tBT_DBG(\"%s end: err %d\", hdev->name, err);\n264: \n265: \treturn err;\n266: }"
+        },
+        {
+          "start_line": 312,
+          "end_line": 346,
+          "text": "312: void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,\n313: \t\t    const void *param, u8 event)\n314: {\n315: \tstruct hci_dev *hdev = req->hdev;\n316: \tstruct sk_buff *skb;\n317: \n318: \tBT_DBG(\"%s opcode 0x%4.4x plen %d\", hdev->name, opcode, plen);\n319: \n320: \t/* If an error occurred during request building, there is no point in\n321: \t * queueing the HCI command. We can simply return.\n322: \t */\n323: \tif (req->err)\n324: \t\treturn;\n325: \n326: \tskb = hci_prepare_cmd(hdev, opcode, plen, param);\n327: \tif (!skb) {\n328: \t\tbt_dev_err(hdev, \"no memory for command (opcode 0x%4.4x)\",\n329: \t\t\t   opcode);\n330: \t\treq->err = -ENOMEM;\n331: \t\treturn;\n332: \t}\n333: \n334: \tif (skb_queue_empty(&req->cmd_q))\n335: \t\tbt_cb(skb)->hci.req_flags |= HCI_REQ_START;\n336: \n337: \tbt_cb(skb)->hci.req_event = event;\n338: \n339: \tskb_queue_tail(&req->cmd_q, skb);\n340: }\n341: \n342: void hci_req_add(struct hci_request *req, u16 opcode, u32 plen,\n343: \t\t const void *param)\n344: {\n345: \thci_req_add_ev(req, opcode, plen, param, 0);\n346: }"
+        }
+      ]
+    },
+    {
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "path": "net/bluetooth/hci_request.c",
+      "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+      "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "snippets": [
+        {
+          "start_line": 192,
+          "end_line": 230,
+          "text": "192: int __hci_req_sync(struct hci_dev *hdev, int (*func)(struct hci_request *req,\n193: \t\t\t\t\t\t     unsigned long opt),\n194: \t\t   unsigned long opt, u32 timeout, u8 *hci_status)\n195: {\n196: \tstruct hci_request req;\n197: \tint err = 0;\n198: \n199: \tBT_DBG(\"%s start\", hdev->name);\n200: \n201: \thci_req_init(&req, hdev);\n202: \n203: \thdev->req_status = HCI_REQ_PEND;\n204: \n205: \terr = func(&req, opt);\n206: \tif (err) {\n207: \t\tif (hci_status)\n208: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n209: \t\treturn err;\n210: \t}\n211: \n212: \terr = hci_req_run_skb(&req, hci_req_sync_complete);\n213: \tif (err < 0) {\n214: \t\thdev->req_status = 0;\n215: \n216: \t\t/* ENODATA means the HCI request command queue is empty.\n217: \t\t * This can happen when a request with conditionals doesn't\n218: \t\t * trigger any commands to be sent. This is normal behavior\n219: \t\t * and should not trigger an error return.\n220: \t\t */\n221: \t\tif (err == -ENODATA) {\n222: \t\t\tif (hci_status)\n223: \t\t\t\t*hci_status = 0;\n224: \t\t\treturn 0;\n225: \t\t}\n226: \n227: \t\tif (hci_status)\n228: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n229: \n230: \t\treturn err;"
+        },
+        {
+          "start_line": 239,
+          "end_line": 266,
+          "text": "239: \tswitch (hdev->req_status) {\n240: \tcase HCI_REQ_DONE:\n241: \t\terr = -bt_to_errno(hdev->req_result);\n242: \t\tif (hci_status)\n243: \t\t\t*hci_status = hdev->req_result;\n244: \t\tbreak;\n245: \n246: \tcase HCI_REQ_CANCELED:\n247: \t\terr = -hdev->req_result;\n248: \t\tif (hci_status)\n249: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n250: \t\tbreak;\n251: \n252: \tdefault:\n253: \t\terr = -ETIMEDOUT;\n254: \t\tif (hci_status)\n255: \t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;\n256: \t\tbreak;\n257: \t}\n258: \n259: \tkfree_skb(hdev->req_skb);\n260: \thdev->req_skb = NULL;\n261: \thdev->req_status = hdev->req_result = 0;\n262: \n263: \tBT_DBG(\"%s end: err %d\", hdev->name, err);\n264: \n265: \treturn err;\n266: }"
+        },
+        {
+          "start_line": 312,
+          "end_line": 346,
+          "text": "312: void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,\n313: \t\t    const void *param, u8 event)\n314: {\n315: \tstruct hci_dev *hdev = req->hdev;\n316: \tstruct sk_buff *skb;\n317: \n318: \tBT_DBG(\"%s opcode 0x%4.4x plen %d\", hdev->name, opcode, plen);\n319: \n320: \t/* If an error occurred during request building, there is no point in\n321: \t * queueing the HCI command. We can simply return.\n322: \t */\n323: \tif (req->err)\n324: \t\treturn;\n325: \n326: \tskb = hci_prepare_cmd(hdev, opcode, plen, param);\n327: \tif (!skb) {\n328: \t\tbt_dev_err(hdev, \"no memory for command (opcode 0x%4.4x)\",\n329: \t\t\t   opcode);\n330: \t\treq->err = -ENOMEM;\n331: \t\treturn;\n332: \t}\n333: \n334: \tif (skb_queue_empty(&req->cmd_q))\n335: \t\tbt_cb(skb)->hci.req_flags |= HCI_REQ_START;\n336: \n337: \tbt_cb(skb)->hci.req_event = event;\n338: \n339: \tskb_queue_tail(&req->cmd_q, skb);\n340: }\n341: \n342: void hci_req_add(struct hci_request *req, u16 opcode, u32 plen,\n343: \t\t const void *param)\n344: {\n345: \thci_req_add_ev(req, opcode, plen, param, 0);\n346: }"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1110 @@
+{
+  "schema": "original-hci-request-copy-source-v1",
+  "source_repository": "/root/repos/linux",
+  "variants": {
+    "parent": {
+      "variant": "parent",
+      "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+      "generated_c": "request_copy_parent.c",
+      "generated_c_sha256": "9599a9dcf626eaf07ffde175974c9b8de134b76590c3b4cf596e460cc3007a10",
+      "excerpts": [
+        {
+          "label": "hci_init4_req",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "excerpt_sha256": "a1890b54b2d2024ffe554e8900c866319af38f18b1c9e460caf67e9cc9654c1b",
+          "start_line": 789,
+          "end_line": 862,
+          "text": "static int hci_init4_req(struct hci_request *req, unsigned long opt)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\n\t/* Some Broadcom based Bluetooth controllers do not support the\n\t * Delete Stored Link Key command. They are clearly indicating its\n\t * absence in the bit mask of supported commands.\n\t *\n\t * Check the supported commands and only if the the command is marked\n\t * as supported send it. If not supported assume that the controller\n\t * does not have actual support for stored link keys which makes this\n\t * command redundant anyway.\n\t *\n\t * Some controllers indicate that they support handling deleting\n\t * stored link keys, but they don't. The quirk lets a driver\n\t * just disable this command.\n\t */\n\tif (hdev->commands[6] & 0x80 &&\n\t    !test_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks)) {\n\t\tstruct hci_cp_delete_stored_link_key cp;\n\n\t\tbacpy(&cp.bdaddr, BDADDR_ANY);\n\t\tcp.delete_all = 0x01;\n\t\thci_req_add(req, HCI_OP_DELETE_STORED_LINK_KEY,\n\t\t\t    sizeof(cp), &cp);\n\t}\n\n\t/* Set event mask page 2 if the HCI command for it is supported */\n\tif (hdev->commands[22] & 0x04)\n\t\thci_set_event_mask_page_2(req);\n\n\t/* Read local codec list if the HCI command is supported */\n\tif (hdev->commands[29] & 0x20)\n\t\thci_req_add(req, HCI_OP_READ_LOCAL_CODECS, 0, NULL);\n\n\t/* Get MWS transport configuration if the HCI command is supported */\n\tif (hdev->commands[30] & 0x08)\n\t\thci_req_add(req, HCI_OP_GET_MWS_TRANSPORT_CONFIG, 0, NULL);\n\n\t/* Check for Synchronization Train support */\n\tif (lmp_sync_train_capable(hdev))\n\t\thci_req_add(req, HCI_OP_READ_SYNC_TRAIN_PARAMS, 0, NULL);\n\n\t/* Enable Secure Connections if supported and configured */\n\tif (hci_dev_test_flag(hdev, HCI_SSP_ENABLED) &&\n\t    bredr_sc_enabled(hdev)) {\n\t\tu8 support = 0x01;\n\n\t\thci_req_add(req, HCI_OP_WRITE_SC_SUPPORT,\n\t\t\t    sizeof(support), &support);\n\t}\n\n\t/* Set Suggested Default Data Length to maximum if supported */\n\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {\n\t\tstruct hci_cp_le_write_def_data_len cp;\n\n\t\tcp.tx_len = hdev->le_max_tx_len;\n\t\tcp.tx_time = hdev->le_max_tx_time;\n\t\thci_req_add(req, HCI_OP_LE_WRITE_DEF_DATA_LEN, sizeof(cp), &cp);\n\t}\n\n\t/* Set Default PHY parameters if command is supported */\n\tif (hdev->commands[35] & 0x20) {\n\t\tstruct hci_cp_le_set_default_phy cp;\n\n\t\tcp.all_phys = 0x00;\n\t\tcp.tx_phys = hdev->le_tx_def_phys;\n\t\tcp.rx_phys = hdev->le_rx_def_phys;\n\n\t\thci_req_add(req, HCI_OP_LE_SET_DEFAULT_PHY, sizeof(cp), &cp);\n\t}\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "hci_req_add",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+          "excerpt_sha256": "8ae64e25321471ef54d9f6aaecbb636e4dbbfc23b1819994c1967bffa59f3398",
+          "start_line": 342,
+          "end_line": 346,
+          "text": "void hci_req_add(struct hci_request *req, u16 opcode, u32 plen,\n\t\t const void *param)\n{\n\thci_req_add_ev(req, opcode, plen, param, 0);\n}"
+        },
+        {
+          "label": "hci_req_add_ev",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+          "excerpt_sha256": "60240e15f6c3ad4b065b49561fb5428f4e77ca40ebb200ea557a28c1b8cba789",
+          "start_line": 312,
+          "end_line": 340,
+          "text": "void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,\n\t\t    const void *param, u8 event)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\tstruct sk_buff *skb;\n\n\tBT_DBG(\"%s opcode 0x%4.4x plen %d\", hdev->name, opcode, plen);\n\n\t/* If an error occurred during request building, there is no point in\n\t * queueing the HCI command. We can simply return.\n\t */\n\tif (req->err)\n\t\treturn;\n\n\tskb = hci_prepare_cmd(hdev, opcode, plen, param);\n\tif (!skb) {\n\t\tbt_dev_err(hdev, \"no memory for command (opcode 0x%4.4x)\",\n\t\t\t   opcode);\n\t\treq->err = -ENOMEM;\n\t\treturn;\n\t}\n\n\tif (skb_queue_empty(&req->cmd_q))\n\t\tbt_cb(skb)->hci.req_flags |= HCI_REQ_START;\n\n\tbt_cb(skb)->hci.req_event = event;\n\n\tskb_queue_tail(&req->cmd_q, skb);\n}"
+        },
+        {
+          "label": "hci_prepare_cmd",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+          "excerpt_sha256": "3d0d0488cd0a286173bf156d084a28b58662b64ed077f89105f3b75e9454a867",
+          "start_line": 285,
+          "end_line": 309,
+          "text": "struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,\n\t\t\t\tconst void *param)\n{\n\tint len = HCI_COMMAND_HDR_SIZE + plen;\n\tstruct hci_command_hdr *hdr;\n\tstruct sk_buff *skb;\n\n\tskb = bt_skb_alloc(len, GFP_ATOMIC);\n\tif (!skb)\n\t\treturn NULL;\n\n\thdr = skb_put(skb, HCI_COMMAND_HDR_SIZE);\n\thdr->opcode = cpu_to_le16(opcode);\n\thdr->plen   = plen;\n\n\tif (plen)\n\t\tskb_put_data(skb, param, plen);\n\n\tBT_DBG(\"skb len %d\", skb->len);\n\n\thci_skb_pkt_type(skb) = HCI_COMMAND_PKT;\n\thci_skb_opcode(skb) = opcode;\n\n\treturn skb;\n}"
+        },
+        {
+          "label": "skb_put_data",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/linux/skbuff.h",
+          "git_blob": "0a58402a166e3835e84b0f2662aed6771878eae7",
+          "source_sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4",
+          "excerpt_sha256": "01be7a294920839fd6fe7852d02f931c86c3329412a0e85c3cb4d068a6f1b9ad",
+          "start_line": 2212,
+          "end_line": 2220,
+          "text": "static inline void *skb_put_data(struct sk_buff *skb, const void *data,\n\t\t\t\t unsigned int len)\n{\n\tvoid *tmp = skb_put(skb, len);\n\n\tmemcpy(tmp, data, len);\n\n\treturn tmp;\n}"
+        },
+        {
+          "label": "HCI_COMMAND_HDR_SIZE",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "d184dbab8912dbf8489db0a114d08ea427703a491425444e55cc5df59e986599",
+          "start_line": 2253,
+          "end_line": 2253,
+          "text": "#define HCI_COMMAND_HDR_SIZE 3"
+        },
+        {
+          "label": "HCI_COMMAND_PKT",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "b69fac72ce85ddad131828dc77fb91d6eff4091f2f103972d16464d971dc550a",
+          "start_line": 302,
+          "end_line": 302,
+          "text": "#define HCI_COMMAND_PKT\t\t0x01"
+        },
+        {
+          "label": "HCI_LE_DATA_LEN_EXT",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "10efb8d41ed2fdaadde2d5873fad7d6d627fe333377bfc9f4494137cdee95490",
+          "start_line": 435,
+          "end_line": 435,
+          "text": "#define HCI_LE_DATA_LEN_EXT\t\t0x20"
+        },
+        {
+          "label": "HCI_OP_DELETE_STORED_LINK_KEY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "fce15b914ad29ed7ce5f3e6403b80fba1113a1e8110b6a71e3f82aa5fb948db8",
+          "start_line": 952,
+          "end_line": 952,
+          "text": "#define HCI_OP_DELETE_STORED_LINK_KEY\t0x0c12"
+        },
+        {
+          "label": "HCI_OP_GET_MWS_TRANSPORT_CONFIG",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "c891565a7bc1b079457aacba761b2c6a8c1a78a934c87be02228fd18243380e9",
+          "start_line": 1339,
+          "end_line": 1339,
+          "text": "#define HCI_OP_GET_MWS_TRANSPORT_CONFIG\t0x140c"
+        },
+        {
+          "label": "HCI_OP_LE_SET_DEFAULT_PHY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "b3358522ef3d8e610d4475213cc471173dc95aa5f643306f1b5bfd9d4997694e",
+          "start_line": 1586,
+          "end_line": 1586,
+          "text": "#define HCI_OP_LE_SET_DEFAULT_PHY\t0x2031"
+        },
+        {
+          "label": "HCI_OP_LE_WRITE_DEF_DATA_LEN",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "fb6db1fad4a72ccf088f29b9f4d47111d59f1cd04199a9d3bedd6e43b15396f6",
+          "start_line": 1547,
+          "end_line": 1547,
+          "text": "#define HCI_OP_LE_WRITE_DEF_DATA_LEN\t0x2024"
+        },
+        {
+          "label": "HCI_OP_READ_LOCAL_CODECS",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "191c7775eb606eba79defe4cc19e0ae1419bbaae29fcd093ff87c1e6689308f7",
+          "start_line": 1231,
+          "end_line": 1231,
+          "text": "#define HCI_OP_READ_LOCAL_CODECS\t0x100b"
+        },
+        {
+          "label": "HCI_OP_READ_SYNC_TRAIN_PARAMS",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "35bfb3363e0c02f693541f9a62c620a9321529bf39182a8fcfa98a48120fbd3f",
+          "start_line": 1121,
+          "end_line": 1121,
+          "text": "#define HCI_OP_READ_SYNC_TRAIN_PARAMS\t0x0c77"
+        },
+        {
+          "label": "HCI_OP_WRITE_SC_SUPPORT",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "81ca2862e7f00b8d87f4da018b9e8787cfd1ddebdb6f70b4eedb7353606b6faa",
+          "start_line": 1141,
+          "end_line": 1141,
+          "text": "#define HCI_OP_WRITE_SC_SUPPORT\t\t0x0c7a"
+        },
+        {
+          "label": "HCI_PRIMARY",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "62852249563a8a1d8e33e75013e2b619d46a30eae5db52918aa80bf6114bc63a",
+          "start_line": 69,
+          "end_line": 69,
+          "text": "#define HCI_PRIMARY\t0x00"
+        },
+        {
+          "label": "HCI_REQ_START",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "d4263210ebf21efcddc8ca27271bfaead57dfd644c53e430e8008eb0e04ed948",
+          "start_line": 306,
+          "end_line": 306,
+          "text": "#define HCI_REQ_START\tBIT(0)"
+        },
+        {
+          "label": "LMP_LE",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "8c7bd64d78d6a62363f44b244d801b955cafb4232171d3126a9d1e69a1f49066",
+          "start_line": 396,
+          "end_line": 396,
+          "text": "#define LMP_LE\t\t0x40"
+        },
+        {
+          "label": "LMP_SYNC_TRAIN",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "f61bb47367abd6b730a2f6e37cca8a3d7ed3afa2cb1cad0b8fd63d3cac86dd07",
+          "start_line": 418,
+          "end_line": 418,
+          "text": "#define LMP_SYNC_TRAIN\t0x04"
+        },
+        {
+          "label": "bt_cb",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "1e4940cb4929ca697334f5c015b8540e7ddcd0002beb53d020d2a9e06a309153",
+          "start_line": 329,
+          "end_line": 329,
+          "text": "#define bt_cb(skb) ((struct bt_skb_cb *)((skb)->cb))"
+        },
+        {
+          "label": "hci_skb_opcode",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "f263b79cb4db6cf2688cbeb1221acdb54ca982e24d3f0755bd9ec734b89000f2",
+          "start_line": 333,
+          "end_line": 333,
+          "text": "#define hci_skb_opcode(skb) bt_cb((skb))->hci.opcode"
+        },
+        {
+          "label": "hci_skb_pkt_type",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "88a2eb2f40b0f2b130acc634d2db37f9fb66d318c3b32244e90a78b7a1ea3798",
+          "start_line": 331,
+          "end_line": 331,
+          "text": "#define hci_skb_pkt_type(skb) bt_cb((skb))->pkt_type"
+        },
+        {
+          "label": "lmp_sync_train_capable",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci_core.h",
+          "git_blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "excerpt_sha256": "9ff294c9bc204ab6bf1ea3f7627740009a6ae6af8a6c1e4889158fc7bcbacee2",
+          "start_line": 1184,
+          "end_line": 1184,
+          "text": "#define lmp_sync_train_capable(dev) ((dev)->features[2][0] & LMP_SYNC_TRAIN)"
+        },
+        {
+          "label": "hci_command_hdr",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "b3a4b78d60487f9c4f34a2406ba0e168de87231561848a4f96590b36791131dc",
+          "start_line": 2258,
+          "end_line": 2261,
+          "text": "struct hci_command_hdr {\n\t__le16\topcode;\t\t/* OCF & OGF */\n\t__u8\tplen;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_delete_stored_link_key",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "149fd015e488665c2d0056b8702ef2b5cefa4476ee4c46291c953949dd268809",
+          "start_line": 953,
+          "end_line": 956,
+          "text": "struct hci_cp_delete_stored_link_key {\n\tbdaddr_t bdaddr;\n\t__u8     delete_all;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_write_def_data_len",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "0ce7ff001a6c9bb52d551e835ce265e139d94a50282ff5d3a39160bdcebcaa8d",
+          "start_line": 1548,
+          "end_line": 1551,
+          "text": "struct hci_cp_le_write_def_data_len {\n\t__le16\ttx_len;\n\t__le16\ttx_time;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_set_default_phy",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "f3eb2966bbae87641c729111f73af4e301ff4320a63477f812b68bddddb7ff9a",
+          "start_line": 1587,
+          "end_line": 1591,
+          "text": "struct hci_cp_le_set_default_phy {\n\t__u8    all_phys;\n\t__u8    tx_phys;\n\t__u8    rx_phys;\n} __packed;"
+        },
+        {
+          "label": "hci_request",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_request.h",
+          "git_blob": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb",
+          "source_sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3",
+          "excerpt_sha256": "5c6c25c26f771992c5152972e8ef1adfa8b9150d85ba45fda0ec3a7dd28e227b",
+          "start_line": 28,
+          "end_line": 36,
+          "text": "struct hci_request {\n\tstruct hci_dev\t\t*hdev;\n\tstruct sk_buff_head\tcmd_q;\n\n\t/* If something goes wrong when building the HCI request, the error\n\t * value is stored in this field.\n\t */\n\tint\t\t\terr;\n};"
+        },
+        {
+          "label": "historical_default_le_max_tx_len",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "excerpt_sha256": "c822493dd68890f832758b3c562f4246324477c05b52a724ff3f330a61d4a800",
+          "start_line": 3190,
+          "end_line": 3190,
+          "text": "\thdev->le_max_tx_len = 0x001b;"
+        },
+        {
+          "label": "historical_default_le_max_tx_time",
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+          "excerpt_sha256": "c43ac3138be5b60be56f9374ecea2f3dd3b09cadf7e9f39621bad546a1a90fd5",
+          "start_line": 3191,
+          "end_line": 3191,
+          "text": "\thdev->le_max_tx_time = 0x0148;"
+        }
+      ],
+      "source_files": [
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "04bc79359a1736b28e83f0eb88828ceefd430f25",
+          "source_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8"
+        },
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b"
+        },
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "net/bluetooth/hci_request.h",
+          "git_blob": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb",
+          "source_sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3"
+        },
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca"
+        },
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/hci_core.h",
+          "git_blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a"
+        },
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0"
+        },
+        {
+          "revision": "cef456cd354ef485f12d57000c455e83e416a2b6",
+          "path": "include/linux/skbuff.h",
+          "git_blob": "0a58402a166e3835e84b0f2662aed6771878eae7",
+          "source_sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4"
+        }
+      ],
+      "original_functions_preserved": [
+        "hci_init4_req",
+        "hci_req_add",
+        "hci_req_add_ev",
+        "hci_prepare_cmd",
+        "skb_put_data"
+      ],
+      "synthetic_flag_ids": [
+        "HCI_QUIRK_BROKEN_STORED_LINK_KEY",
+        "HCI_SSP_ENABLED"
+      ]
+    },
+    "fix": {
+      "variant": "fix",
+      "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+      "generated_c": "request_copy_fix.c",
+      "generated_c_sha256": "b0ffd66deace80b4c8b911aed3f0476d5d5218b0f4742b014a68346ee16492a3",
+      "excerpts": [
+        {
+          "label": "hci_init4_req",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "excerpt_sha256": "731f30616470b5b2dbcc4032ef439ac6fa6bdeeaae89646dbb3ffff4941f405b",
+          "start_line": 789,
+          "end_line": 862,
+          "text": "static int hci_init4_req(struct hci_request *req, unsigned long opt)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\n\t/* Some Broadcom based Bluetooth controllers do not support the\n\t * Delete Stored Link Key command. They are clearly indicating its\n\t * absence in the bit mask of supported commands.\n\t *\n\t * Check the supported commands and only if the the command is marked\n\t * as supported send it. If not supported assume that the controller\n\t * does not have actual support for stored link keys which makes this\n\t * command redundant anyway.\n\t *\n\t * Some controllers indicate that they support handling deleting\n\t * stored link keys, but they don't. The quirk lets a driver\n\t * just disable this command.\n\t */\n\tif (hdev->commands[6] & 0x80 &&\n\t    !test_bit(HCI_QUIRK_BROKEN_STORED_LINK_KEY, &hdev->quirks)) {\n\t\tstruct hci_cp_delete_stored_link_key cp;\n\n\t\tbacpy(&cp.bdaddr, BDADDR_ANY);\n\t\tcp.delete_all = 0x01;\n\t\thci_req_add(req, HCI_OP_DELETE_STORED_LINK_KEY,\n\t\t\t    sizeof(cp), &cp);\n\t}\n\n\t/* Set event mask page 2 if the HCI command for it is supported */\n\tif (hdev->commands[22] & 0x04)\n\t\thci_set_event_mask_page_2(req);\n\n\t/* Read local codec list if the HCI command is supported */\n\tif (hdev->commands[29] & 0x20)\n\t\thci_req_add(req, HCI_OP_READ_LOCAL_CODECS, 0, NULL);\n\n\t/* Get MWS transport configuration if the HCI command is supported */\n\tif (hdev->commands[30] & 0x08)\n\t\thci_req_add(req, HCI_OP_GET_MWS_TRANSPORT_CONFIG, 0, NULL);\n\n\t/* Check for Synchronization Train support */\n\tif (lmp_sync_train_capable(hdev))\n\t\thci_req_add(req, HCI_OP_READ_SYNC_TRAIN_PARAMS, 0, NULL);\n\n\t/* Enable Secure Connections if supported and configured */\n\tif (hci_dev_test_flag(hdev, HCI_SSP_ENABLED) &&\n\t    bredr_sc_enabled(hdev)) {\n\t\tu8 support = 0x01;\n\n\t\thci_req_add(req, HCI_OP_WRITE_SC_SUPPORT,\n\t\t\t    sizeof(support), &support);\n\t}\n\n\t/* Set Suggested Default Data Length to maximum if supported */\n\tif (hdev->le_features[0] & HCI_LE_DATA_LEN_EXT) {\n\t\tstruct hci_cp_le_write_def_data_len cp;\n\n\t\tcp.tx_len = cpu_to_le16(hdev->le_max_tx_len);\n\t\tcp.tx_time = cpu_to_le16(hdev->le_max_tx_time);\n\t\thci_req_add(req, HCI_OP_LE_WRITE_DEF_DATA_LEN, sizeof(cp), &cp);\n\t}\n\n\t/* Set Default PHY parameters if command is supported */\n\tif (hdev->commands[35] & 0x20) {\n\t\tstruct hci_cp_le_set_default_phy cp;\n\n\t\tcp.all_phys = 0x00;\n\t\tcp.tx_phys = hdev->le_tx_def_phys;\n\t\tcp.rx_phys = hdev->le_rx_def_phys;\n\n\t\thci_req_add(req, HCI_OP_LE_SET_DEFAULT_PHY, sizeof(cp), &cp);\n\t}\n\n\treturn 0;\n}"
+        },
+        {
+          "label": "hci_req_add",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+          "excerpt_sha256": "8ae64e25321471ef54d9f6aaecbb636e4dbbfc23b1819994c1967bffa59f3398",
+          "start_line": 342,
+          "end_line": 346,
+          "text": "void hci_req_add(struct hci_request *req, u16 opcode, u32 plen,\n\t\t const void *param)\n{\n\thci_req_add_ev(req, opcode, plen, param, 0);\n}"
+        },
+        {
+          "label": "hci_req_add_ev",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+          "excerpt_sha256": "60240e15f6c3ad4b065b49561fb5428f4e77ca40ebb200ea557a28c1b8cba789",
+          "start_line": 312,
+          "end_line": 340,
+          "text": "void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,\n\t\t    const void *param, u8 event)\n{\n\tstruct hci_dev *hdev = req->hdev;\n\tstruct sk_buff *skb;\n\n\tBT_DBG(\"%s opcode 0x%4.4x plen %d\", hdev->name, opcode, plen);\n\n\t/* If an error occurred during request building, there is no point in\n\t * queueing the HCI command. We can simply return.\n\t */\n\tif (req->err)\n\t\treturn;\n\n\tskb = hci_prepare_cmd(hdev, opcode, plen, param);\n\tif (!skb) {\n\t\tbt_dev_err(hdev, \"no memory for command (opcode 0x%4.4x)\",\n\t\t\t   opcode);\n\t\treq->err = -ENOMEM;\n\t\treturn;\n\t}\n\n\tif (skb_queue_empty(&req->cmd_q))\n\t\tbt_cb(skb)->hci.req_flags |= HCI_REQ_START;\n\n\tbt_cb(skb)->hci.req_event = event;\n\n\tskb_queue_tail(&req->cmd_q, skb);\n}"
+        },
+        {
+          "label": "hci_prepare_cmd",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+          "excerpt_sha256": "3d0d0488cd0a286173bf156d084a28b58662b64ed077f89105f3b75e9454a867",
+          "start_line": 285,
+          "end_line": 309,
+          "text": "struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,\n\t\t\t\tconst void *param)\n{\n\tint len = HCI_COMMAND_HDR_SIZE + plen;\n\tstruct hci_command_hdr *hdr;\n\tstruct sk_buff *skb;\n\n\tskb = bt_skb_alloc(len, GFP_ATOMIC);\n\tif (!skb)\n\t\treturn NULL;\n\n\thdr = skb_put(skb, HCI_COMMAND_HDR_SIZE);\n\thdr->opcode = cpu_to_le16(opcode);\n\thdr->plen   = plen;\n\n\tif (plen)\n\t\tskb_put_data(skb, param, plen);\n\n\tBT_DBG(\"skb len %d\", skb->len);\n\n\thci_skb_pkt_type(skb) = HCI_COMMAND_PKT;\n\thci_skb_opcode(skb) = opcode;\n\n\treturn skb;\n}"
+        },
+        {
+          "label": "skb_put_data",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/linux/skbuff.h",
+          "git_blob": "0a58402a166e3835e84b0f2662aed6771878eae7",
+          "source_sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4",
+          "excerpt_sha256": "01be7a294920839fd6fe7852d02f931c86c3329412a0e85c3cb4d068a6f1b9ad",
+          "start_line": 2212,
+          "end_line": 2220,
+          "text": "static inline void *skb_put_data(struct sk_buff *skb, const void *data,\n\t\t\t\t unsigned int len)\n{\n\tvoid *tmp = skb_put(skb, len);\n\n\tmemcpy(tmp, data, len);\n\n\treturn tmp;\n}"
+        },
+        {
+          "label": "HCI_COMMAND_HDR_SIZE",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "d184dbab8912dbf8489db0a114d08ea427703a491425444e55cc5df59e986599",
+          "start_line": 2253,
+          "end_line": 2253,
+          "text": "#define HCI_COMMAND_HDR_SIZE 3"
+        },
+        {
+          "label": "HCI_COMMAND_PKT",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "b69fac72ce85ddad131828dc77fb91d6eff4091f2f103972d16464d971dc550a",
+          "start_line": 302,
+          "end_line": 302,
+          "text": "#define HCI_COMMAND_PKT\t\t0x01"
+        },
+        {
+          "label": "HCI_LE_DATA_LEN_EXT",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "10efb8d41ed2fdaadde2d5873fad7d6d627fe333377bfc9f4494137cdee95490",
+          "start_line": 435,
+          "end_line": 435,
+          "text": "#define HCI_LE_DATA_LEN_EXT\t\t0x20"
+        },
+        {
+          "label": "HCI_OP_DELETE_STORED_LINK_KEY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "fce15b914ad29ed7ce5f3e6403b80fba1113a1e8110b6a71e3f82aa5fb948db8",
+          "start_line": 952,
+          "end_line": 952,
+          "text": "#define HCI_OP_DELETE_STORED_LINK_KEY\t0x0c12"
+        },
+        {
+          "label": "HCI_OP_GET_MWS_TRANSPORT_CONFIG",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "c891565a7bc1b079457aacba761b2c6a8c1a78a934c87be02228fd18243380e9",
+          "start_line": 1339,
+          "end_line": 1339,
+          "text": "#define HCI_OP_GET_MWS_TRANSPORT_CONFIG\t0x140c"
+        },
+        {
+          "label": "HCI_OP_LE_SET_DEFAULT_PHY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "b3358522ef3d8e610d4475213cc471173dc95aa5f643306f1b5bfd9d4997694e",
+          "start_line": 1586,
+          "end_line": 1586,
+          "text": "#define HCI_OP_LE_SET_DEFAULT_PHY\t0x2031"
+        },
+        {
+          "label": "HCI_OP_LE_WRITE_DEF_DATA_LEN",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "fb6db1fad4a72ccf088f29b9f4d47111d59f1cd04199a9d3bedd6e43b15396f6",
+          "start_line": 1547,
+          "end_line": 1547,
+          "text": "#define HCI_OP_LE_WRITE_DEF_DATA_LEN\t0x2024"
+        },
+        {
+          "label": "HCI_OP_READ_LOCAL_CODECS",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "191c7775eb606eba79defe4cc19e0ae1419bbaae29fcd093ff87c1e6689308f7",
+          "start_line": 1231,
+          "end_line": 1231,
+          "text": "#define HCI_OP_READ_LOCAL_CODECS\t0x100b"
+        },
+        {
+          "label": "HCI_OP_READ_SYNC_TRAIN_PARAMS",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "35bfb3363e0c02f693541f9a62c620a9321529bf39182a8fcfa98a48120fbd3f",
+          "start_line": 1121,
+          "end_line": 1121,
+          "text": "#define HCI_OP_READ_SYNC_TRAIN_PARAMS\t0x0c77"
+        },
+        {
+          "label": "HCI_OP_WRITE_SC_SUPPORT",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "81ca2862e7f00b8d87f4da018b9e8787cfd1ddebdb6f70b4eedb7353606b6faa",
+          "start_line": 1141,
+          "end_line": 1141,
+          "text": "#define HCI_OP_WRITE_SC_SUPPORT\t\t0x0c7a"
+        },
+        {
+          "label": "HCI_PRIMARY",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "62852249563a8a1d8e33e75013e2b619d46a30eae5db52918aa80bf6114bc63a",
+          "start_line": 69,
+          "end_line": 69,
+          "text": "#define HCI_PRIMARY\t0x00"
+        },
+        {
+          "label": "HCI_REQ_START",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "d4263210ebf21efcddc8ca27271bfaead57dfd644c53e430e8008eb0e04ed948",
+          "start_line": 306,
+          "end_line": 306,
+          "text": "#define HCI_REQ_START\tBIT(0)"
+        },
+        {
+          "label": "LMP_LE",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "8c7bd64d78d6a62363f44b244d801b955cafb4232171d3126a9d1e69a1f49066",
+          "start_line": 396,
+          "end_line": 396,
+          "text": "#define LMP_LE\t\t0x40"
+        },
+        {
+          "label": "LMP_SYNC_TRAIN",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "f61bb47367abd6b730a2f6e37cca8a3d7ed3afa2cb1cad0b8fd63d3cac86dd07",
+          "start_line": 418,
+          "end_line": 418,
+          "text": "#define LMP_SYNC_TRAIN\t0x04"
+        },
+        {
+          "label": "bt_cb",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "1e4940cb4929ca697334f5c015b8540e7ddcd0002beb53d020d2a9e06a309153",
+          "start_line": 329,
+          "end_line": 329,
+          "text": "#define bt_cb(skb) ((struct bt_skb_cb *)((skb)->cb))"
+        },
+        {
+          "label": "hci_skb_opcode",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "f263b79cb4db6cf2688cbeb1221acdb54ca982e24d3f0755bd9ec734b89000f2",
+          "start_line": 333,
+          "end_line": 333,
+          "text": "#define hci_skb_opcode(skb) bt_cb((skb))->hci.opcode"
+        },
+        {
+          "label": "hci_skb_pkt_type",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+          "excerpt_sha256": "88a2eb2f40b0f2b130acc634d2db37f9fb66d318c3b32244e90a78b7a1ea3798",
+          "start_line": 331,
+          "end_line": 331,
+          "text": "#define hci_skb_pkt_type(skb) bt_cb((skb))->pkt_type"
+        },
+        {
+          "label": "lmp_sync_train_capable",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci_core.h",
+          "git_blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+          "excerpt_sha256": "9ff294c9bc204ab6bf1ea3f7627740009a6ae6af8a6c1e4889158fc7bcbacee2",
+          "start_line": 1184,
+          "end_line": 1184,
+          "text": "#define lmp_sync_train_capable(dev) ((dev)->features[2][0] & LMP_SYNC_TRAIN)"
+        },
+        {
+          "label": "hci_command_hdr",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "b3a4b78d60487f9c4f34a2406ba0e168de87231561848a4f96590b36791131dc",
+          "start_line": 2258,
+          "end_line": 2261,
+          "text": "struct hci_command_hdr {\n\t__le16\topcode;\t\t/* OCF & OGF */\n\t__u8\tplen;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_delete_stored_link_key",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "149fd015e488665c2d0056b8702ef2b5cefa4476ee4c46291c953949dd268809",
+          "start_line": 953,
+          "end_line": 956,
+          "text": "struct hci_cp_delete_stored_link_key {\n\tbdaddr_t bdaddr;\n\t__u8     delete_all;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_write_def_data_len",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "0ce7ff001a6c9bb52d551e835ce265e139d94a50282ff5d3a39160bdcebcaa8d",
+          "start_line": 1548,
+          "end_line": 1551,
+          "text": "struct hci_cp_le_write_def_data_len {\n\t__le16\ttx_len;\n\t__le16\ttx_time;\n} __packed;"
+        },
+        {
+          "label": "hci_cp_le_set_default_phy",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+          "excerpt_sha256": "f3eb2966bbae87641c729111f73af4e301ff4320a63477f812b68bddddb7ff9a",
+          "start_line": 1587,
+          "end_line": 1591,
+          "text": "struct hci_cp_le_set_default_phy {\n\t__u8    all_phys;\n\t__u8    tx_phys;\n\t__u8    rx_phys;\n} __packed;"
+        },
+        {
+          "label": "hci_request",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_request.h",
+          "git_blob": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb",
+          "source_sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3",
+          "excerpt_sha256": "5c6c25c26f771992c5152972e8ef1adfa8b9150d85ba45fda0ec3a7dd28e227b",
+          "start_line": 28,
+          "end_line": 36,
+          "text": "struct hci_request {\n\tstruct hci_dev\t\t*hdev;\n\tstruct sk_buff_head\tcmd_q;\n\n\t/* If something goes wrong when building the HCI request, the error\n\t * value is stored in this field.\n\t */\n\tint\t\t\terr;\n};"
+        },
+        {
+          "label": "historical_default_le_max_tx_len",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "excerpt_sha256": "c822493dd68890f832758b3c562f4246324477c05b52a724ff3f330a61d4a800",
+          "start_line": 3190,
+          "end_line": 3190,
+          "text": "\thdev->le_max_tx_len = 0x001b;"
+        },
+        {
+          "label": "historical_default_le_max_tx_time",
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+          "excerpt_sha256": "c43ac3138be5b60be56f9374ecea2f3dd3b09cadf7e9f39621bad546a1a90fd5",
+          "start_line": 3191,
+          "end_line": 3191,
+          "text": "\thdev->le_max_tx_time = 0x0148;"
+        }
+      ],
+      "source_files": [
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_core.c",
+          "git_blob": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2",
+          "source_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff"
+        },
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_request.c",
+          "git_blob": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2",
+          "source_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b"
+        },
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "net/bluetooth/hci_request.h",
+          "git_blob": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb",
+          "source_sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3"
+        },
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci.h",
+          "git_blob": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0",
+          "source_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca"
+        },
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/hci_core.h",
+          "git_blob": "b689aceb636b115aff038902cb14119384949955",
+          "source_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a"
+        },
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/net/bluetooth/bluetooth.h",
+          "git_blob": "fabee6db0abb78ea826cc97d52c622614db900a0",
+          "source_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0"
+        },
+        {
+          "revision": "727ea61a5028f8ac96f75ab34cb1b56e63fd9227",
+          "path": "include/linux/skbuff.h",
+          "git_blob": "0a58402a166e3835e84b0f2662aed6771878eae7",
+          "source_sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4"
+        }
+      ],
+      "original_functions_preserved": [
+        "hci_init4_req",
+        "hci_req_add",
+        "hci_req_add_ev",
+        "hci_prepare_cmd",
+        "skb_put_data"
+      ],
+      "synthetic_flag_ids": [
+        "HCI_QUIRK_BROKEN_STORED_LINK_KEY",
+        "HCI_SSP_ENABLED"
+      ]
+    }
+  },
+  "preparation_commands": [
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_core.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "e7c81f622a419496feabd45ff7a998899efb263ccd76e59927d8831d95f4dae8",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_core.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "04bc79359a1736b28e83f0eb88828ceefd430f25\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_request.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_request.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_request.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:net/bluetooth/hci_request.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/hci.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/hci.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/hci_core.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/hci_core.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "b689aceb636b115aff038902cb14119384949955\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/bluetooth.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/net/bluetooth/bluetooth.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "fabee6db0abb78ea826cc97d52c622614db900a0\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/linux/skbuff.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "cef456cd354ef485f12d57000c455e83e416a2b6:include/linux/skbuff.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "0a58402a166e3835e84b0f2662aed6771878eae7\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:net/bluetooth/hci_core.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "e6fc1f94278db00d9d86ee067c7cccdb79eb348260da0bdbec0e9e8197d327ff",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:net/bluetooth/hci_core.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "b2559d4bed815d60fcb30b1984f0fa031a7c46b2\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:net/bluetooth/hci_request.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:net/bluetooth/hci_request.c"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "7f6a581b5b7e14fa7b72db8449afc85a8d9327e2\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:net/bluetooth/hci_request.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "1cd99045768189867f4a650a1496a33af9dd3728a77b91963d24dab4e343bff3",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:net/bluetooth/hci_request.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "a7019fbeadd30c5382c9c7e7247f89d43ab2d4eb\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/net/bluetooth/hci.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "345d250c03103d741937329a41e950a34d24ee9c33323c942f8642de3fee8aca",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/net/bluetooth/hci.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "5bc1e30dedde5b18df908abfbfdb15c705c99ab0\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/net/bluetooth/hci_core.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "246253515d025520446d8ba735bebb20cafa3b5d8d125ae2efd1647da727c31a",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/net/bluetooth/hci_core.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "b689aceb636b115aff038902cb14119384949955\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/net/bluetooth/bluetooth.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "60d1fff94e04f38df59af7e49e0b0c3f63a3099bb2e99e5b87b5aff6a8c02da0",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/net/bluetooth/bluetooth.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "fabee6db0abb78ea826cc97d52c622614db900a0\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "show",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/linux/skbuff.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout_sha256": "d3bb8ce1ceb0f44d93f7c3677eed0fd1cdfc74c0ecf97c235e78fcc79ae4a0e4",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "727ea61a5028f8ac96f75ab34cb1b56e63fd9227:include/linux/skbuff.h"
+      ],
+      "cwd": "/root/repos/linux",
+      "returncode": 0,
+      "stdout": "0a58402a166e3835e84b0f2662aed6771878eae7\n",
+      "stderr": ""
+    }
+  ],
+  "runner_sha256": "63c763767103b6f7859f3a448d5b255552643f81406fc0e5230779197704d3de",
+  "saved_authority_crosscheck": {
+    "path": "../contract_authority_20261001/source_authority/raw/net/bluetooth/hci_request.c",
+    "sha256": "2d1848dcfebbf9cb852bd4ee4df8d0a296649d9327c50b5d5b5ae568c9c27d3b",
+    "same_as_parent_git_source": true
+  },
+  "preservation": "Each of five complete function texts appears verbatim once in generated C, including original skb_put_data memcpy.",
+  "stub_boundary": "BT_DBG instrumentation; deterministic bt_skb_alloc; bounded skb_put/storage/cb; queue helpers; minimal hci_dev; false/no-op non-target helpers; no kernel execution."
+}

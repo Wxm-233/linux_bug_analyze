@@ -1,0 +1,96 @@
+{
+  "classification": "same_version_static_source_quotes_not_runtime_proof",
+  "quotes": [
+    {
+      "source": "raw/01_qemu_config.py",
+      "sha256": "a7a4ecdee3ab39aa1db97cb480948e7b2c895e28dc824bf99449b86b79c0304d",
+      "line_start": 12,
+      "line_end": 20,
+      "quote": "@dataclass(frozen=True)\nclass QemuArchParams:\n  linux_arch: str\n  kconfig: str\n  qemu_arch: str\n  kernel_path: str\n  kernel_command_line: str\n  extra_qemu_params: List[str]\n  serial: str = 'stdio'"
+    },
+    {
+      "source": "raw/02_kunit_kernel.py",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "line_start": 103,
+      "line_end": 118,
+      "quote": "\tdef __init__(self, qemu_arch_params: qemu_config.QemuArchParams, cross_compile: Optional[str]):\n\t\tsuper().__init__(linux_arch=qemu_arch_params.linux_arch,\n\t\t\t\t cross_compile=cross_compile)\n\t\tself._kconfig = qemu_arch_params.kconfig\n\t\tself._qemu_arch = qemu_arch_params.qemu_arch\n\t\tself._kernel_path = qemu_arch_params.kernel_path\n\t\tself._kernel_command_line = qemu_arch_params.kernel_command_line\n\t\tif 'kunit_shutdown=' not in self._kernel_command_line:\n\t\t\tself._kernel_command_line += ' kunit_shutdown=reboot'\n\t\tself._extra_qemu_params = qemu_arch_params.extra_qemu_params\n\t\tself._serial = qemu_arch_params.serial\n\n\tdef make_arch_config(self, base_kunitconfig: kunit_config.Kconfig) -> kunit_config.Kconfig:\n\t\tkconfig = kunit_config.parse_from_string(self._kconfig)\n\t\tkconfig.merge_in_entries(base_kunitconfig)\n\t\treturn kconfig"
+    },
+    {
+      "source": "raw/02_kunit_kernel.py",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "line_start": 174,
+      "line_end": 194,
+      "quote": "\tif not kunitconfig_paths:\n\t\tpath = get_kunitconfig_path(build_dir)\n\t\tif not os.path.exists(path):\n\t\t\tshutil.copyfile(DEFAULT_KUNITCONFIG_PATH, path)\n\t\treturn kunit_config.parse_file(path)\n\n\tmerged = kunit_config.Kconfig()\n\n\tfor path in kunitconfig_paths:\n\t\tif os.path.isdir(path):\n\t\t\tpath = os.path.join(path, KUNITCONFIG_PATH)\n\t\tif not os.path.exists(path):\n\t\t\traise ConfigError(f'Specified kunitconfig ({path}) does not exist')\n\n\t\tpartial = kunit_config.parse_file(path)\n\t\tdiff = merged.conflicting_options(partial)\n\t\tif diff:\n\t\t\tdiff_str = '\\n\\n'.join(f'{a}\\n  vs from {path}\\n{b}' for a, b in diff)\n\t\t\traise ConfigError(f'Multiple values specified for {len(diff)} options in kunitconfig:\\n{diff_str}')\n\t\tmerged.merge_in_entries(partial)\n\treturn merged"
+    },
+    {
+      "source": "raw/02_kunit_kernel.py",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "line_start": 264,
+      "line_end": 267,
+      "quote": "\t\tself._kconfig = get_parsed_kunitconfig(build_dir, kunitconfig_paths)\n\t\tif kconfig_add:\n\t\t\tkconfig = kunit_config.parse_from_string('\\n'.join(kconfig_add))\n\t\t\tself._kconfig.merge_in_entries(kconfig)"
+    },
+    {
+      "source": "raw/02_kunit_kernel.py",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "line_start": 280,
+      "line_end": 293,
+      "quote": "\tdef validate_config(self, build_dir: str) -> bool:\n\t\tkconfig_path = get_kconfig_path(build_dir)\n\t\tvalidated_kconfig = kunit_config.parse_file(kconfig_path)\n\t\tif self._kconfig.is_subset_of(validated_kconfig):\n\t\t\treturn True\n\t\tmissing = set(self._kconfig.as_entries()) - set(validated_kconfig.as_entries())\n\t\tmessage = 'Not all Kconfig options selected in kunitconfig were in the generated .config.\\n' \\\n\t\t\t  'This is probably due to unsatisfied dependencies.\\n' \\\n\t\t\t  'Missing: ' + ', '.join(str(e) for e in missing)\n\t\tif self._arch == 'um':\n\t\t\tmessage += '\\nNote: many Kconfig options aren\\'t available on UML. You can try running ' \\\n\t\t\t\t   'on a different architecture with something like \"--arch=x86_64\".'\n\t\tlogging.error(message)\n\t\treturn False"
+    },
+    {
+      "source": "raw/02_kunit_kernel.py",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "line_start": 295,
+      "line_end": 313,
+      "quote": "\tdef build_config(self, build_dir: str, make_options: Optional[List[str]]) -> bool:\n\t\tkconfig_path = get_kconfig_path(build_dir)\n\t\tif build_dir and not os.path.exists(build_dir):\n\t\t\tos.mkdir(build_dir)\n\t\ttry:\n\t\t\tself._kconfig = self._ops.make_arch_config(self._kconfig)\n\t\t\tself._kconfig.write_to_file(kconfig_path)\n\t\t\tself._ops.make_olddefconfig(build_dir, make_options)\n\t\texcept ConfigError as e:\n\t\t\tlogging.error(e)\n\t\t\treturn False\n\t\tif not self.validate_config(build_dir):\n\t\t\treturn False\n\n\t\told_path = get_old_kunitconfig_path(build_dir)\n\t\tif os.path.exists(old_path):\n\t\t\tos.remove(old_path)  # write_to_file appends to the file\n\t\tself._kconfig.write_to_file(old_path)\n\t\treturn True"
+    },
+    {
+      "source": "raw/02_kunit_kernel.py",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "line_start": 323,
+      "line_end": 346,
+      "quote": "\tdef build_reconfig(self, build_dir: str, make_options: Optional[List[str]]) -> bool:\n\t\t\"\"\"Creates a new .config if it is not a subset of the .kunitconfig.\"\"\"\n\t\tkconfig_path = get_kconfig_path(build_dir)\n\t\tif not os.path.exists(kconfig_path):\n\t\t\tprint('Generating .config ...')\n\t\t\treturn self.build_config(build_dir, make_options)\n\n\t\texisting_kconfig = kunit_config.parse_file(kconfig_path)\n\t\tself._kconfig = self._ops.make_arch_config(self._kconfig)\n\n\t\tif self._kconfig.is_subset_of(existing_kconfig) and not self._kunitconfig_changed(build_dir):\n\t\t\treturn True\n\t\tprint('Regenerating .config ...')\n\t\tos.remove(kconfig_path)\n\t\treturn self.build_config(build_dir, make_options)\n\n\tdef build_kernel(self, jobs: int, build_dir: str, make_options: Optional[List[str]]) -> bool:\n\t\ttry:\n\t\t\tself._ops.make_olddefconfig(build_dir, make_options)\n\t\t\tself._ops.make(jobs, build_dir, make_options)\n\t\texcept (ConfigError, BuildError) as e:\n\t\t\tlogging.error(e)\n\t\t\treturn False\n\t\treturn self.validate_config(build_dir)"
+    },
+    {
+      "source": "raw/03_kunit_config.py",
+      "sha256": "853bcd4fe51c29e57c15707800bd801ca0092f31af7e4c8c1c35b5eaa0c23c53",
+      "line_start": 47,
+      "line_end": 57,
+      "quote": "\t\t\tyield KconfigEntry(name, value)\n\n\tdef add_entry(self, name: str, value: str) -> None:\n\t\tself._entries[name] = value\n\n\tdef is_subset_of(self, other: 'Kconfig') -> bool:\n\t\tfor name, value in self._entries.items():\n\t\t\tb = other._entries.get(name)\n\t\t\tif b is None:\n\t\t\t\tif value == 'n':\n\t\t\t\t\tcontinue"
+    },
+    {
+      "source": "raw/03_kunit_config.py",
+      "sha256": "853bcd4fe51c29e57c15707800bd801ca0092f31af7e4c8c1c35b5eaa0c23c53",
+      "line_start": 70,
+      "line_end": 72,
+      "quote": "\t\treturn diff\n\n\tdef merge_in_entries(self, other: 'Kconfig') -> None:"
+    },
+    {
+      "source": "raw/03_kunit_config.py",
+      "sha256": "853bcd4fe51c29e57c15707800bd801ca0092f31af7e4c8c1c35b5eaa0c23c53",
+      "line_start": 80,
+      "line_end": 108,
+      "quote": "\ndef parse_file(path: str) -> Kconfig:\n\twith open(path, 'r') as f:\n\t\treturn parse_from_string(f.read())\n\ndef parse_from_string(blob: str) -> Kconfig:\n\t\"\"\"Parses a string containing Kconfig entries.\"\"\"\n\tkconfig = Kconfig()\n\tis_not_set_matcher = re.compile(CONFIG_IS_NOT_SET_PATTERN)\n\tconfig_matcher = re.compile(CONFIG_PATTERN)\n\tfor line in blob.split('\\n'):\n\t\tline = line.strip()\n\t\tif not line:\n\t\t\tcontinue\n\n\t\tmatch = config_matcher.match(line)\n\t\tif match:\n\t\t\tkconfig.add_entry(match.group(1), match.group(2))\n\t\t\tcontinue\n\n\t\tempty_match = is_not_set_matcher.match(line)\n\t\tif empty_match:\n\t\t\tkconfig.add_entry(empty_match.group(1), 'n')\n\t\t\tcontinue\n\n\t\tif line[0] == '#':\n\t\t\tcontinue\n\t\traise KconfigParseError('Failed to parse: ' + line)\n\treturn kconfig"
+    },
+    {
+      "source": "raw/04_kunit.py",
+      "sha256": "75bf71e8668a238e6525a32369906071e2cd93404b0c491288295b7f6c5d91a9",
+      "line_start": 79,
+      "line_end": 107,
+      "quote": "def config_tests(linux: kunit_kernel.LinuxSourceTree,\n\t\t request: KunitConfigRequest) -> KunitResult:\n\tstdout.print_with_timestamp('Configuring KUnit Kernel ...')\n\n\tconfig_start = time.time()\n\tsuccess = linux.build_reconfig(request.build_dir, request.make_options)\n\tconfig_end = time.time()\n\tstatus = KunitStatus.SUCCESS if success else KunitStatus.CONFIG_FAILURE\n\treturn KunitResult(status, config_end - config_start)\n\ndef build_tests(linux: kunit_kernel.LinuxSourceTree,\n\t\trequest: KunitBuildRequest) -> KunitResult:\n\tstdout.print_with_timestamp('Building KUnit Kernel ...')\n\n\tbuild_start = time.time()\n\tsuccess = linux.build_kernel(request.jobs,\n\t\t\t\t     request.build_dir,\n\t\t\t\t     request.make_options)\n\tbuild_end = time.time()\n\tstatus = KunitStatus.SUCCESS if success else KunitStatus.BUILD_FAILURE\n\treturn KunitResult(status, build_end - build_start)\n\ndef config_and_build_tests(linux: kunit_kernel.LinuxSourceTree,\n\t\t\t   request: KunitBuildRequest) -> KunitResult:\n\tconfig_result = config_tests(linux, request)\n\tif config_result.status != KunitStatus.SUCCESS:\n\t\treturn config_result\n\n\treturn build_tests(linux, request)"
+    },
+    {
+      "source": "raw/04_kunit.py",
+      "sha256": "75bf71e8668a238e6525a32369906071e2cd93404b0c491288295b7f6c5d91a9",
+      "line_start": 269,
+      "line_end": 281,
+      "quote": "def run_tests(linux: kunit_kernel.LinuxSourceTree,\n\t      request: KunitRequest) -> KunitResult:\n\trun_start = time.time()\n\n\tconfig_result = config_tests(linux, request)\n\tif config_result.status != KunitStatus.SUCCESS:\n\t\treturn config_result\n\n\tbuild_result = build_tests(linux, request)\n\tif build_result.status != KunitStatus.SUCCESS:\n\t\treturn build_result\n\n\texec_result = exec_tests(linux, request)"
+    },
+    {
+      "source": "raw/04_kunit.py",
+      "sha256": "75bf71e8668a238e6525a32369906071e2cd93404b0c491288295b7f6c5d91a9",
+      "line_start": 520,
+      "line_end": 536,
+      "quote": "\ndef exec_handler(cli_args: argparse.Namespace) -> None:\n\tlinux = tree_from_args(cli_args)\n\texec_request = KunitExecRequest(raw_output=cli_args.raw_output,\n\t\t\t\t\tbuild_dir=cli_args.build_dir,\n\t\t\t\t\tjson=cli_args.json,\n\t\t\t\t\tsummary=cli_args.summary,\n\t\t\t\t\tfailed=cli_args.failed,\n\t\t\t\t\ttimeout=cli_args.timeout,\n\t\t\t\t\tfilter_glob=cli_args.filter_glob,\n\t\t\t\t\tfilter=cli_args.filter,\n\t\t\t\t\tfilter_action=cli_args.filter_action,\n\t\t\t\t\tkernel_args=cli_args.kernel_args,\n\t\t\t\t\trun_isolated=cli_args.run_isolated,\n\t\t\t\t\tlist_tests=cli_args.list_tests,\n\t\t\t\t\tlist_tests_attr=cli_args.list_tests_attr)\n\tresult = exec_tests(linux, exec_request)"
+    }
+  ]
+}

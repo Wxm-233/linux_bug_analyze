@@ -1,0 +1,7 @@
+# 原始length结束原因与更充分输出额度
+
+2026-10-15，原始HTTP/SSE复核后更正：focused loops并非stop空答，实际finish_reason=length；completion4096等于请求上限、prompt3826、total7922，最终content为空。runner的outcome先检查空文本，stdout未显示finish_reason，root一度误称stop，现明确纠正，旧原始HTTP/账本不改。旧17,960请求则确为stop且completion1，两种结果不能混称。
+
+本版本仅扩充同一个单问题的完成额度并流式接收，不提供本地反例运行结果、修复或人工评语。max_tokens65536，SDK/HTTP读等待240秒、零自动重试，使用同平台同模型同材料；当前任务用户已明确要求更充足Claude分析并授权累计1M。9旧账carry282074＝131462已知＋150612未知，新可用717926；不会为了花满预算追加任意任务。原length、240秒超时和早期异常均保留。
+
+新独立extended账／ID，不重发原started ID，前序必须有效final才接下一项；可用输出仍需独立源码复核。4096的完成用量不能自动解释为最终答案内容，非最终推理不读取；仅以finish/usage元数据确认该次达到上限截断且未取得最终正文；metadata中虽记reasoning785／text3311，但content为空，不能保证提高上限一定解决内容交付问题。局部问题的完整函数、反例及条件审查继续，不更换术语以规避过滤，也不更换目的地。

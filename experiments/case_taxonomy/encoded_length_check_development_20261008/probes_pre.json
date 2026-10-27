@@ -1,0 +1,128 @@
+{
+  "protocol": "12 fixed boundary inputs, no C execution; standalone semantics expected before detector execution",
+  "synthetic_source_provenance": "raw UTF-8 source/declaration text in this JSON; not Git or real saved C files",
+  "cases": [
+    {
+      "id": "raw_be16_plus_macro",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = item->len + HDR_BYTES;\n if (skb_tailroom(skb) < count)\n  return;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "candidate",
+      "length_contract_certified": false,
+      "runtime_values_unknown": "zero and byte-symmetric values can numerically agree; type-domain source candidate remains conditional"
+    },
+    {
+      "id": "matching_decode_plus_header",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = be16_to_cpu(item->len) + 4;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "normal",
+      "length_contract_certified": false
+    },
+    {
+      "id": "matching_decode_without_header",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = be16_to_cpu(item->len);\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "normal",
+      "length_contract_certified": false,
+      "manual_completeness_expectation": "missing header under previous manual contract; machine must NOT certify complete length or pretend to infer missing4"
+    },
+    {
+      "id": "raw_le32_plus_literal",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n u64 count;\n count = item->len + 8;\n skb_put(skb, count);\n}\n",
+      "declaration_text": "struct packet { __le32 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "candidate",
+      "length_contract_certified": false
+    },
+    {
+      "id": "wrong_decode_width",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = be32_to_cpu(item->len) + 4;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    },
+    {
+      "id": "helper_macro_override",
+      "source_text": "#define be16_to_cpu(x) (x)\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = be16_to_cpu(item->len) + 4;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    },
+    {
+      "id": "declaration_wrong_revision",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = item->len + 4;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-other",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    },
+    {
+      "id": "local_multiple_assignments",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = item->len + 4;\n count = 1;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    },
+    {
+      "id": "conditional_assignment",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n if (dst) {\n  count = item->len + 4;\n }\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    },
+    {
+      "id": "consumer_macro_override",
+      "source_text": "#define memcpy(d,s,n) opaque(d,s,n)\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n count = item->len + 4;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    },
+    {
+      "id": "encoded_bytes_copied_unchanged",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n memcpy(dst, &item->len, 2);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "no_assignment",
+      "length_contract_certified": false
+    },
+    {
+      "id": "object_pointer_rebinding",
+      "source_text": "#define HDR_BYTES 4\nstatic void check(struct packet *item, void *skb, char *dst)\n{\n int count;\n item = get_packet();\n count = item->len + 4;\n memcpy(dst, item, count);\n}\n",
+      "declaration_text": "struct packet { __be16 len; };\n",
+      "source_revision": "synthetic-v1",
+      "declaration_revision": "synthetic-v1",
+      "function_name": "check",
+      "expected_status": "insufficient",
+      "length_contract_certified": false
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+20314bacd2f9b1b8fc10895417e6db0dc85f8248
+3123109284176b1532874591f7c81f3837bbdc17
+2022-04-04T06:43:38-07:00
+2022-04-04T16:35:20+02:00
+staging: r8188eu: Fix PPPoE tag insertion on little endian systems
+
+In __nat25_add_pppoe_tag(), the tag length is read from the tag data
+structure. The value is kept in network format, but read as raw value.
+With -Warray-bounds, this results in the following gcc error/warning
+when building the driver on alpha.
+
+In function '__nat25_add_pppoe_tag',
+    inlined from 'nat25_db_handle' at
+	drivers/staging/r8188eu/core/rtw_br_ext.c:479:11:
+arch/alpha/include/asm/string.h:22:16: error:
+	'__builtin_memcpy' forming offset [40, 2051] is out of the bounds
+	[0, 40] of object 'tag_buf' with type 'unsigned char[40]'
+
+Add the missing be16_to_cpu() to fix the compile error. It should be
+noted, however, that this fix means that the code did probably not work
+on any little endian systems and/or that the driver has other endiannes
+related issues. A build with C=1 suggests that this is indeed the case.
+This patch does not attempt to fix any of those other issues.
+
+Fixes: 15865124feed ("staging: r8188eu: introduce new core dir for RTL8188eu driver")
+Cc: Phillip Potter <phil@philpotter.co.uk>
+Signed-off-by: Guenter Roeck <linux@roeck-us.net>
+Link: https://lore.kernel.org/r/20220404134338.3276991-1-linux@roeck-us.net
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+

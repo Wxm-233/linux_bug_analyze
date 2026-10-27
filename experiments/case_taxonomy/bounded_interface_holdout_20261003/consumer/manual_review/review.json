@@ -1,0 +1,554 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-03",
+  "role": "consumer",
+  "scope": "Post-unseal manual review of the preselected SMB input; no rule/CLI rerun, sample/file replacement, compile or model execution",
+  "case_identity": {
+    "commit": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+    "parent": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+    "selected_source": "fs/smb/client/reparse.c",
+    "selection_exposure": "title-informed metadata selection; no match in defined local prior-record roots, not proof of unseen by any human",
+    "new_confirmed_case_count": 0
+  },
+  "target": {
+    "function": "parse_reparse_wsl_symlink",
+    "line": 679,
+    "expression_role": "fourth argument output-buffer pointer to utf8s_to_utf16s",
+    "parent_expression": "symname_utf16",
+    "fixed_expression": "(wchar_t *) symname_utf16",
+    "local_variable_type": "__le16 *",
+    "api_parameter_type": "wchar_t *",
+    "api_wchar_t": "typedef u16 wchar_t",
+    "patch_change": "explicit pointer cast; endian selector, input, lengths, allocation and consumers unchanged in the patch",
+    "commit_stated_purpose": "remove compiler warning; diagnostic tool/options not reproduced",
+    "format_change_supported": false,
+    "behavioral_endian_defect_supported": false,
+    "quotes": [
+      "target_parent",
+      "target_fixed",
+      "nls_declaration"
+    ]
+  },
+  "machine_result": {
+    "parent_raw": "consumer/raw/parent.json",
+    "parent_raw_sha256": "4721cd516d626dee74786868fabe9df89278f57719ece6dec6f8e7a6848ecc0a",
+    "fixed_raw": "consumer/raw/fixed.json",
+    "fixed_raw_sha256": "7bc44c694a8bf4ff222e6cb2e725de003d74c88f82c8b0263079706468bcf4ee",
+    "counts_each": {
+      "candidate": 0,
+      "normal": 1,
+      "insufficient": 2
+    },
+    "candidate_count": 0,
+    "target_emitted": false,
+    "target_status": "outside_direct_if_struct_field_read_grammar",
+    "target_is_machine_normal": false,
+    "reported_normal_relation_to_target": "different function and different expression; cannot serve as a target diagnosis",
+    "automatic_fact_scope": [
+      "syntactic field declaration",
+      "if-condition textual reference",
+      "restricted classification",
+      "files/SHA"
+    ],
+    "not_automatic_facts": [
+      "wchar_t prototype contract",
+      "UTF16 endian-selector semantic meaning",
+      "API output implementation",
+      "buffer input/consumer chain",
+      "sizeof operand is unevaluated",
+      "compile diagnostic or runtime correctness"
+    ]
+  },
+  "reported_sites_manual_review": [
+    {
+      "function": "parse_reparse_posix",
+      "line": 485,
+      "field": "InodeType",
+      "original_status": "insufficient",
+      "expression": "len < sizeof(buf->InodeType)",
+      "actual_value_read": false,
+      "interpretation": "Fixed-size scalar sizeof operand is unevaluated; a type/size reference, not an endian-sensitive scalar consumption. The nearby actual InodeType value is explicitly converted in a switch, outside the original if-only grammar.",
+      "quotes": [
+        "reported_sizeof_posix"
+      ]
+    },
+    {
+      "function": "parse_reparse_wsl_symlink",
+      "line": 659,
+      "field": "Flags",
+      "original_status": "insufficient",
+      "expression": "len <= sizeof(buf->Flags)",
+      "actual_value_read": false,
+      "interpretation": "Fixed-size __le32 member in sizeof is unevaluated. This emitted position belongs to the target function but does not read Flags or diagnose the output-buffer argument at line 679.",
+      "quotes": [
+        "reported_sizeof_wsl"
+      ]
+    },
+    {
+      "function": "parse_reparse_point",
+      "line": 722,
+      "field": "ReparseDataLength",
+      "original_status": "normal",
+      "expression": "le16_to_cpu(buf->ReparseDataLength) != 0",
+      "actual_value_read": true,
+      "interpretation": "One actual field access explicitly converts the length, so a local expression normal is source-supported; these non-symlink dispatch cases and this length check do not prove target or whole-function correctness.",
+      "manual_access_occurrence_count": 1,
+      "quotes": [
+        "reported_normal"
+      ]
+    }
+  ],
+  "reviewed_format_and_consumption": {
+    "type_diagnostic_layer": "Source signature supports why the explicit cast aligns the argument type; commit reports a warning. Specific compiler/checker diagnostic is unknown without a build.",
+    "api_format_authority": "Same-revision nls implementation is the local API semantic authority: explicit UTF16_LITTLE_ENDIAN selects __cpu_to_le16 writes via put_utf16; the buffer pointer spelling does not choose byte order.",
+    "api_format_supported_for_both_versions": true,
+    "input_value_source": "WSL PathBuffer is declared __u8 UTF-8 with no nul terminator. Local smb2_parse_reparse_point derives buf from the supplied SMB IOCTL rsp_iov OutputOffset/OutputCount; parse_reparse_point dispatches LX_SYMLINK to the target.",
+    "input_validation_and_flow": "Target converts ReparseDataLength, subtracts fixed Flags size, rejects embedded nul, allocates local output, passes explicit LE selector, handles conversion errors, doubles returned u16 count to bytes, then feeds unicode=true to cifs_strndup_from_utf16.",
+    "direct_consumer": "cifs_strndup_from_utf16 treats unicode input as __le16, computes output size and calls cifs_from_utf16; that local conversion reads with get_unaligned_le16.",
+    "representation_relation": "Explicit little-endian producer selection and little-endian consumer interpretation are source-supported before and after the cast. The patch does not establish a data-format change or a prior endian-failure chain.",
+    "local_entry_binding": "smb2ops contains .parse_reparse_point = smb2_parse_reparse_point bindings; full upstream invocation, network bytes and deployment were not traced.",
+    "external_protocol_authority_reviewed": false,
+    "real_runtime_or_build_observed": false,
+    "quotes": [
+      "nls_format_implementation",
+      "wsl_input_declaration",
+      "local_input_and_dispatch",
+      "ops_binding",
+      "utf16_consumer"
+    ]
+  },
+  "five_dimension_initial_codes": {
+    "dates": {
+      "fix_committer_date_from_unsealed_patch": "2024-12-09",
+      "discovery_date": "unknown",
+      "fault_introduction_date": "unknown",
+      "fixes_metadata": "06a7adf318a3 (cifs: Add support for parsing WSL-style symlinks), not independently reviewed",
+      "introduction_to_discovery_or_discovery_to_fix_intervals": "unknown; no date chasing in this bounded review"
+    },
+    "architecture_platform": {
+      "code": "no_specific_CPU_architecture_trigger_supported",
+      "context": "SMB WSL-style symlink parser; WSL-style refers to reparse format, not proof of executing Linux under WSL",
+      "build_diagnostic_environment": "unknown"
+    },
+    "subsystem_interface": {
+      "code": "fs/smb/client -> NLS UTF-8/UTF-16 API",
+      "boundary": "typed output pointer plus explicit format selector and local UTF16 consumer"
+    },
+    "vertical_horizontal_relation": {
+      "code": "no_confirmed_cross_architecture_vertical_or_horizontal_fault",
+      "source_layers": "filesystem calls shared NLS; software call layering alone does not confirm architecture mismatch"
+    },
+    "introduction_side": {
+      "code": "SMB callsite type annotation; behavioral fault introduction unknown",
+      "reported_history": "Fixes metadata attributes parsing support; no prior source/history expansion",
+      "confirmed_defect_case": false
+    }
+  },
+  "classification": {
+    "protocol_bucket": "target_outside_rule_coverage_and_not_this_behavioral_endian_mechanism",
+    "scope_result": "zero_candidate_positions_for_fixed_input; cannot claim target machine normal, true negative, accuracy, or whole-file safety",
+    "human_result": "compiler/type-warning cast repair with unchanged explicit UTF16 representation selector and supported local producer/consumer relation",
+    "added_confirmed_cases": 0
+  },
+  "support_flags": {
+    "patch_target_located_in_selected_file": true,
+    "original_rule_emits_target": false,
+    "nls_prototype_and_endian_implementation_reviewed": true,
+    "local_utf8_input_and_utf16_consumer_relation_supported": true,
+    "type_warning_purpose_supported_by_commit": true,
+    "specific_warning_reproduced": false,
+    "data_format_change_supported": false,
+    "behavioral_endian_bug_chain_supported": false,
+    "actual_architecture_config_or_network_io_established": false,
+    "external_SMB_specification_reviewed": false
+  },
+  "unknown_flags": [
+    "compiler_checker_and_warning_options",
+    "generated_config_build_and_real_architecture",
+    "actual_server_payload_values",
+    "full_network_entry_to_dispatch_reachability",
+    "external_SMB_format_specification",
+    "discovery_date_and_fault_introduction_date",
+    "whole_function_correctness"
+  ],
+  "quotes": {
+    "target_parent": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/parent/fs/smb/client/reparse.c",
+        "start_line": 650,
+        "end_line": 688,
+        "text": "static int parse_reparse_wsl_symlink(struct reparse_wsl_symlink_data_buffer *buf,\n\t\t\t\t     struct cifs_sb_info *cifs_sb,\n\t\t\t\t     struct cifs_open_info_data *data)\n{\n\tint len = le16_to_cpu(buf->ReparseDataLength);\n\tint symname_utf8_len;\n\t__le16 *symname_utf16;\n\tint symname_utf16_len;\n\n\tif (len <= sizeof(buf->Flags)) {\n\t\tcifs_dbg(VFS, \"srv returned malformed wsl symlink buffer\\n\");\n\t\treturn -EIO;\n\t}\n\n\t/* PathBuffer is in UTF-8 but without trailing null-term byte */\n\tsymname_utf8_len = len - sizeof(buf->Flags);\n\t/*\n\t * Check that buffer does not contain null byte\n\t * because Linux cannot process symlink with null byte.\n\t */\n\tif (strnlen(buf->PathBuffer, symname_utf8_len) != symname_utf8_len) {\n\t\tcifs_dbg(VFS, \"srv returned null byte in wsl symlink target location\\n\");\n\t\treturn -EIO;\n\t}\n\tsymname_utf16 = kzalloc(symname_utf8_len * 2, GFP_KERNEL);\n\tif (!symname_utf16)\n\t\treturn -ENOMEM;\n\tsymname_utf16_len = utf8s_to_utf16s(buf->PathBuffer, symname_utf8_len,\n\t\t\t\t\t    UTF16_LITTLE_ENDIAN,\n\t\t\t\t\t    symname_utf16, symname_utf8_len * 2);\n\tif (symname_utf16_len < 0) {\n\t\tkfree(symname_utf16);\n\t\treturn symname_utf16_len;\n\t}\n\tsymname_utf16_len *= 2; /* utf8s_to_utf16s() returns number of u16 items, not byte length */\n\n\tdata->symlink_target = cifs_strndup_from_utf16((u8 *)symname_utf16,\n\t\t\t\t\t\t       symname_utf16_len, true,\n\t\t\t\t\t\t       cifs_sb->local_nls);",
+        "sha256": "a3bba776e02271364e0541342b0032dda6dfefdfe86182ba9ea5230b6239f522",
+        "blob_sha1": "50b1aba2000899ebf830425330465abea1ecab79"
+      }
+    ],
+    "target_fixed": [
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/reparse.c",
+        "start_line": 650,
+        "end_line": 688,
+        "text": "static int parse_reparse_wsl_symlink(struct reparse_wsl_symlink_data_buffer *buf,\n\t\t\t\t     struct cifs_sb_info *cifs_sb,\n\t\t\t\t     struct cifs_open_info_data *data)\n{\n\tint len = le16_to_cpu(buf->ReparseDataLength);\n\tint symname_utf8_len;\n\t__le16 *symname_utf16;\n\tint symname_utf16_len;\n\n\tif (len <= sizeof(buf->Flags)) {\n\t\tcifs_dbg(VFS, \"srv returned malformed wsl symlink buffer\\n\");\n\t\treturn -EIO;\n\t}\n\n\t/* PathBuffer is in UTF-8 but without trailing null-term byte */\n\tsymname_utf8_len = len - sizeof(buf->Flags);\n\t/*\n\t * Check that buffer does not contain null byte\n\t * because Linux cannot process symlink with null byte.\n\t */\n\tif (strnlen(buf->PathBuffer, symname_utf8_len) != symname_utf8_len) {\n\t\tcifs_dbg(VFS, \"srv returned null byte in wsl symlink target location\\n\");\n\t\treturn -EIO;\n\t}\n\tsymname_utf16 = kzalloc(symname_utf8_len * 2, GFP_KERNEL);\n\tif (!symname_utf16)\n\t\treturn -ENOMEM;\n\tsymname_utf16_len = utf8s_to_utf16s(buf->PathBuffer, symname_utf8_len,\n\t\t\t\t\t    UTF16_LITTLE_ENDIAN,\n\t\t\t\t\t    (wchar_t *) symname_utf16, symname_utf8_len * 2);\n\tif (symname_utf16_len < 0) {\n\t\tkfree(symname_utf16);\n\t\treturn symname_utf16_len;\n\t}\n\tsymname_utf16_len *= 2; /* utf8s_to_utf16s() returns number of u16 items, not byte length */\n\n\tdata->symlink_target = cifs_strndup_from_utf16((u8 *)symname_utf16,\n\t\t\t\t\t\t       symname_utf16_len, true,\n\t\t\t\t\t\t       cifs_sb->local_nls);",
+        "sha256": "4131c61598aaa9f3e2d478c89f56ab8117be7da9a31cc7de0204b953ea0ec929",
+        "blob_sha1": "d88b41133e00c6cabfeeeea068c3e166f25df581"
+      }
+    ],
+    "nls_declaration": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "include/linux/nls.h",
+        "saved_path": "consumer/manual_review/sources/parent/include/linux/nls.h",
+        "start_line": 18,
+        "end_line": 19,
+        "text": "/* Plane-0 Unicode character */\ntypedef u16 wchar_t;",
+        "sha256": "4b2d38eced38722fbc52eedbe177af65aeb39adab5d271fe8c732b76fe65b980",
+        "blob_sha1": "e0bf8367b274a3d754f77e6864fc87ba274b838e"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "include/linux/nls.h",
+        "saved_path": "consumer/manual_review/sources/fixed/include/linux/nls.h",
+        "start_line": 18,
+        "end_line": 19,
+        "text": "/* Plane-0 Unicode character */\ntypedef u16 wchar_t;",
+        "sha256": "4b2d38eced38722fbc52eedbe177af65aeb39adab5d271fe8c732b76fe65b980",
+        "blob_sha1": "e0bf8367b274a3d754f77e6864fc87ba274b838e"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "include/linux/nls.h",
+        "saved_path": "consumer/manual_review/sources/parent/include/linux/nls.h",
+        "start_line": 40,
+        "end_line": 58,
+        "text": "/* Byte order for UTF-16 strings */\nenum utf16_endian {\n\tUTF16_HOST_ENDIAN,\n\tUTF16_LITTLE_ENDIAN,\n\tUTF16_BIG_ENDIAN\n};\n\n/* nls_base.c */\nextern int __register_nls(struct nls_table *, struct module *);\nextern int unregister_nls(struct nls_table *);\nextern struct nls_table *load_nls(const char *charset);\nextern void unload_nls(struct nls_table *);\nextern struct nls_table *load_nls_default(void);\n#define register_nls(nls) __register_nls((nls), THIS_MODULE)\n\nextern int utf8_to_utf32(const u8 *s, int len, unicode_t *pu);\nextern int utf32_to_utf8(unicode_t u, u8 *s, int maxlen);\nextern int utf8s_to_utf16s(const u8 *s, int len,\n\t\tenum utf16_endian endian, wchar_t *pwcs, int maxlen);",
+        "sha256": "4b2d38eced38722fbc52eedbe177af65aeb39adab5d271fe8c732b76fe65b980",
+        "blob_sha1": "e0bf8367b274a3d754f77e6864fc87ba274b838e"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "include/linux/nls.h",
+        "saved_path": "consumer/manual_review/sources/fixed/include/linux/nls.h",
+        "start_line": 40,
+        "end_line": 58,
+        "text": "/* Byte order for UTF-16 strings */\nenum utf16_endian {\n\tUTF16_HOST_ENDIAN,\n\tUTF16_LITTLE_ENDIAN,\n\tUTF16_BIG_ENDIAN\n};\n\n/* nls_base.c */\nextern int __register_nls(struct nls_table *, struct module *);\nextern int unregister_nls(struct nls_table *);\nextern struct nls_table *load_nls(const char *charset);\nextern void unload_nls(struct nls_table *);\nextern struct nls_table *load_nls_default(void);\n#define register_nls(nls) __register_nls((nls), THIS_MODULE)\n\nextern int utf8_to_utf32(const u8 *s, int len, unicode_t *pu);\nextern int utf32_to_utf8(unicode_t u, u8 *s, int maxlen);\nextern int utf8s_to_utf16s(const u8 *s, int len,\n\t\tenum utf16_endian endian, wchar_t *pwcs, int maxlen);",
+        "sha256": "4b2d38eced38722fbc52eedbe177af65aeb39adab5d271fe8c732b76fe65b980",
+        "blob_sha1": "e0bf8367b274a3d754f77e6864fc87ba274b838e"
+      }
+    ],
+    "nls_format_implementation": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/nls/nls_base.c",
+        "saved_path": "consumer/manual_review/sources/parent/fs/nls/nls_base.c",
+        "start_line": 117,
+        "end_line": 133,
+        "text": "static inline void put_utf16(wchar_t *s, unsigned c, enum utf16_endian endian)\n{\n\tswitch (endian) {\n\tdefault:\n\t\t*s = (wchar_t) c;\n\t\tbreak;\n\tcase UTF16_LITTLE_ENDIAN:\n\t\t*s = __cpu_to_le16(c);\n\t\tbreak;\n\tcase UTF16_BIG_ENDIAN:\n\t\t*s = __cpu_to_be16(c);\n\t\tbreak;\n\t}\n}\n\nint utf8s_to_utf16s(const u8 *s, int inlen, enum utf16_endian endian,\n\t\twchar_t *pwcs, int maxout)",
+        "sha256": "73e834c194f5883e7960ab0f7f57a7a7017454a5426cf04f21105c7b5b1bd84e",
+        "blob_sha1": "18d597e49a194e45d93db76f0af598df99a237b7"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/nls/nls_base.c",
+        "saved_path": "consumer/manual_review/sources/fixed/fs/nls/nls_base.c",
+        "start_line": 117,
+        "end_line": 133,
+        "text": "static inline void put_utf16(wchar_t *s, unsigned c, enum utf16_endian endian)\n{\n\tswitch (endian) {\n\tdefault:\n\t\t*s = (wchar_t) c;\n\t\tbreak;\n\tcase UTF16_LITTLE_ENDIAN:\n\t\t*s = __cpu_to_le16(c);\n\t\tbreak;\n\tcase UTF16_BIG_ENDIAN:\n\t\t*s = __cpu_to_be16(c);\n\t\tbreak;\n\t}\n}\n\nint utf8s_to_utf16s(const u8 *s, int inlen, enum utf16_endian endian,\n\t\twchar_t *pwcs, int maxout)",
+        "sha256": "73e834c194f5883e7960ab0f7f57a7a7017454a5426cf04f21105c7b5b1bd84e",
+        "blob_sha1": "18d597e49a194e45d93db76f0af598df99a237b7"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/nls/nls_base.c",
+        "saved_path": "consumer/manual_review/sources/parent/fs/nls/nls_base.c",
+        "start_line": 139,
+        "end_line": 170,
+        "text": "\top = pwcs;\n\twhile (inlen > 0 && maxout > 0 && *s) {\n\t\tif (*s & 0x80) {\n\t\t\tsize = utf8_to_utf32(s, inlen, &u);\n\t\t\tif (size < 0)\n\t\t\t\treturn -EINVAL;\n\t\t\ts += size;\n\t\t\tinlen -= size;\n\n\t\t\tif (u >= PLANE_SIZE) {\n\t\t\t\tif (maxout < 2)\n\t\t\t\t\tbreak;\n\t\t\t\tu -= PLANE_SIZE;\n\t\t\t\tput_utf16(op++, SURROGATE_PAIR |\n\t\t\t\t\t\t((u >> 10) & SURROGATE_BITS),\n\t\t\t\t\t\tendian);\n\t\t\t\tput_utf16(op++, SURROGATE_PAIR |\n\t\t\t\t\t\tSURROGATE_LOW |\n\t\t\t\t\t\t(u & SURROGATE_BITS),\n\t\t\t\t\t\tendian);\n\t\t\t\tmaxout -= 2;\n\t\t\t} else {\n\t\t\t\tput_utf16(op++, u, endian);\n\t\t\t\tmaxout--;\n\t\t\t}\n\t\t} else {\n\t\t\tput_utf16(op++, *s++, endian);\n\t\t\tinlen--;\n\t\t\tmaxout--;\n\t\t}\n\t}\n\treturn op - pwcs;",
+        "sha256": "73e834c194f5883e7960ab0f7f57a7a7017454a5426cf04f21105c7b5b1bd84e",
+        "blob_sha1": "18d597e49a194e45d93db76f0af598df99a237b7"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/nls/nls_base.c",
+        "saved_path": "consumer/manual_review/sources/fixed/fs/nls/nls_base.c",
+        "start_line": 139,
+        "end_line": 170,
+        "text": "\top = pwcs;\n\twhile (inlen > 0 && maxout > 0 && *s) {\n\t\tif (*s & 0x80) {\n\t\t\tsize = utf8_to_utf32(s, inlen, &u);\n\t\t\tif (size < 0)\n\t\t\t\treturn -EINVAL;\n\t\t\ts += size;\n\t\t\tinlen -= size;\n\n\t\t\tif (u >= PLANE_SIZE) {\n\t\t\t\tif (maxout < 2)\n\t\t\t\t\tbreak;\n\t\t\t\tu -= PLANE_SIZE;\n\t\t\t\tput_utf16(op++, SURROGATE_PAIR |\n\t\t\t\t\t\t((u >> 10) & SURROGATE_BITS),\n\t\t\t\t\t\tendian);\n\t\t\t\tput_utf16(op++, SURROGATE_PAIR |\n\t\t\t\t\t\tSURROGATE_LOW |\n\t\t\t\t\t\t(u & SURROGATE_BITS),\n\t\t\t\t\t\tendian);\n\t\t\t\tmaxout -= 2;\n\t\t\t} else {\n\t\t\t\tput_utf16(op++, u, endian);\n\t\t\t\tmaxout--;\n\t\t\t}\n\t\t} else {\n\t\t\tput_utf16(op++, *s++, endian);\n\t\t\tinlen--;\n\t\t\tmaxout--;\n\t\t}\n\t}\n\treturn op - pwcs;",
+        "sha256": "73e834c194f5883e7960ab0f7f57a7a7017454a5426cf04f21105c7b5b1bd84e",
+        "blob_sha1": "18d597e49a194e45d93db76f0af598df99a237b7"
+      }
+    ],
+    "wsl_input_declaration": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/common/smb2pdu.h",
+        "saved_path": "consumer/sources/parent/fs/smb/common/smb2pdu.h",
+        "start_line": 1555,
+        "end_line": 1562,
+        "text": "/* For IO_REPARSE_TAG_LX_SYMLINK */\nstruct reparse_wsl_symlink_data_buffer {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__le32\tFlags;\n\t__u8\tPathBuffer[]; /* Variable Length UTF-8 string without nul-term */\n} __packed;",
+        "sha256": "64051eedab8ba7cdaf0edfea1719630cfdb9fcd4e900f1756c6be30a64ad3610",
+        "blob_sha1": "3c7c706c797d2aa3cb67c789fe722013d5fb9af9"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/common/smb2pdu.h",
+        "saved_path": "consumer/sources/fixed/fs/smb/common/smb2pdu.h",
+        "start_line": 1555,
+        "end_line": 1562,
+        "text": "/* For IO_REPARSE_TAG_LX_SYMLINK */\nstruct reparse_wsl_symlink_data_buffer {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__le32\tFlags;\n\t__u8\tPathBuffer[]; /* Variable Length UTF-8 string without nul-term */\n} __packed;",
+        "sha256": "64051eedab8ba7cdaf0edfea1719630cfdb9fcd4e900f1756c6be30a64ad3610",
+        "blob_sha1": "3c7c706c797d2aa3cb67c789fe722013d5fb9af9"
+      }
+    ],
+    "local_input_and_dispatch": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/parent/fs/smb/client/reparse.c",
+        "start_line": 699,
+        "end_line": 717,
+        "text": "\t\t\tbool unicode, struct cifs_open_info_data *data)\n{\n\tstruct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);\n\n\tdata->reparse.buf = buf;\n\n\t/* See MS-FSCC 2.1.2 */\n\tswitch (le32_to_cpu(buf->ReparseTag)) {\n\tcase IO_REPARSE_TAG_NFS:\n\t\treturn parse_reparse_posix((struct reparse_posix_data *)buf,\n\t\t\t\t\t   cifs_sb, data);\n\tcase IO_REPARSE_TAG_SYMLINK:\n\t\treturn parse_reparse_symlink(\n\t\t\t(struct reparse_symlink_data_buffer *)buf,\n\t\t\tplen, unicode, cifs_sb, full_path, data);\n\tcase IO_REPARSE_TAG_LX_SYMLINK:\n\t\treturn parse_reparse_wsl_symlink(\n\t\t\t(struct reparse_wsl_symlink_data_buffer *)buf,\n\t\t\tcifs_sb, data);",
+        "sha256": "a3bba776e02271364e0541342b0032dda6dfefdfe86182ba9ea5230b6239f522",
+        "blob_sha1": "50b1aba2000899ebf830425330465abea1ecab79"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/reparse.c",
+        "start_line": 699,
+        "end_line": 717,
+        "text": "\t\t\tbool unicode, struct cifs_open_info_data *data)\n{\n\tstruct cifs_tcon *tcon = cifs_sb_master_tcon(cifs_sb);\n\n\tdata->reparse.buf = buf;\n\n\t/* See MS-FSCC 2.1.2 */\n\tswitch (le32_to_cpu(buf->ReparseTag)) {\n\tcase IO_REPARSE_TAG_NFS:\n\t\treturn parse_reparse_posix((struct reparse_posix_data *)buf,\n\t\t\t\t\t   cifs_sb, data);\n\tcase IO_REPARSE_TAG_SYMLINK:\n\t\treturn parse_reparse_symlink(\n\t\t\t(struct reparse_symlink_data_buffer *)buf,\n\t\t\tplen, unicode, cifs_sb, full_path, data);\n\tcase IO_REPARSE_TAG_LX_SYMLINK:\n\t\treturn parse_reparse_wsl_symlink(\n\t\t\t(struct reparse_wsl_symlink_data_buffer *)buf,\n\t\t\tcifs_sb, data);",
+        "sha256": "4131c61598aaa9f3e2d478c89f56ab8117be7da9a31cc7de0204b953ea0ec929",
+        "blob_sha1": "d88b41133e00c6cabfeeeea068c3e166f25df581"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/parent/fs/smb/client/reparse.c",
+        "start_line": 736,
+        "end_line": 748,
+        "text": "int smb2_parse_reparse_point(struct cifs_sb_info *cifs_sb,\n\t\t\t     const char *full_path,\n\t\t\t     struct kvec *rsp_iov,\n\t\t\t     struct cifs_open_info_data *data)\n{\n\tstruct reparse_data_buffer *buf;\n\tstruct smb2_ioctl_rsp *io = rsp_iov->iov_base;\n\tu32 plen = le32_to_cpu(io->OutputCount);\n\n\tbuf = (struct reparse_data_buffer *)((u8 *)io +\n\t\t\t\t\t     le32_to_cpu(io->OutputOffset));\n\treturn parse_reparse_point(buf, plen, cifs_sb, full_path, true, data);\n}",
+        "sha256": "a3bba776e02271364e0541342b0032dda6dfefdfe86182ba9ea5230b6239f522",
+        "blob_sha1": "50b1aba2000899ebf830425330465abea1ecab79"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/reparse.c",
+        "start_line": 736,
+        "end_line": 748,
+        "text": "int smb2_parse_reparse_point(struct cifs_sb_info *cifs_sb,\n\t\t\t     const char *full_path,\n\t\t\t     struct kvec *rsp_iov,\n\t\t\t     struct cifs_open_info_data *data)\n{\n\tstruct reparse_data_buffer *buf;\n\tstruct smb2_ioctl_rsp *io = rsp_iov->iov_base;\n\tu32 plen = le32_to_cpu(io->OutputCount);\n\n\tbuf = (struct reparse_data_buffer *)((u8 *)io +\n\t\t\t\t\t     le32_to_cpu(io->OutputOffset));\n\treturn parse_reparse_point(buf, plen, cifs_sb, full_path, true, data);\n}",
+        "sha256": "4131c61598aaa9f3e2d478c89f56ab8117be7da9a31cc7de0204b953ea0ec929",
+        "blob_sha1": "d88b41133e00c6cabfeeeea068c3e166f25df581"
+      }
+    ],
+    "ops_binding": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/smb2ops.c",
+        "saved_path": "consumer/manual_review/sources/parent/fs/smb/client/smb2ops.c",
+        "start_line": 5273,
+        "end_line": 5273,
+        "text": "\t.parse_reparse_point = smb2_parse_reparse_point,",
+        "sha256": "6ecada31a9e1169711682d41c1dd7fa7a6be60ef61e8d3c0bef0248dd29fa828",
+        "blob_sha1": "87cb1872db28b038cae94e082ae2ad9833bf3b15"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/smb2ops.c",
+        "saved_path": "consumer/manual_review/sources/fixed/fs/smb/client/smb2ops.c",
+        "start_line": 5273,
+        "end_line": 5273,
+        "text": "\t.parse_reparse_point = smb2_parse_reparse_point,",
+        "sha256": "6ecada31a9e1169711682d41c1dd7fa7a6be60ef61e8d3c0bef0248dd29fa828",
+        "blob_sha1": "87cb1872db28b038cae94e082ae2ad9833bf3b15"
+      }
+    ],
+    "utf16_consumer": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/cifs_unicode.c",
+        "saved_path": "consumer/manual_review/sources/parent/fs/smb/client/cifs_unicode.c",
+        "start_line": 334,
+        "end_line": 364,
+        "text": " * cifs_strndup_from_utf16 - copy a string from wire format to the local\n * codepage\n * @src - source string\n * @maxlen - don't walk past this many bytes in the source string\n * @is_unicode - is this a unicode string?\n * @codepage - destination codepage\n *\n * Take a string given by the server, convert it to the local codepage and\n * put it in a new buffer. Returns a pointer to the new string or NULL on\n * error.\n */\nchar *\ncifs_strndup_from_utf16(const char *src, const int maxlen,\n\t\t\tconst bool is_unicode, const struct nls_table *codepage)\n{\n\tint len;\n\tchar *dst;\n\n\tif (is_unicode) {\n\t\tlen = cifs_utf16_bytes((__le16 *) src, maxlen, codepage);\n\t\tlen += nls_nullsize(codepage);\n\t\tdst = kmalloc(len, GFP_KERNEL);\n\t\tif (!dst)\n\t\t\treturn NULL;\n\t\tcifs_from_utf16(dst, (__le16 *) src, len, maxlen, codepage,\n\t\t\t\tNO_MAP_UNI_RSVD);\n\t} else {\n\t\tdst = kstrndup(src, maxlen, GFP_KERNEL);\n\t}\n\n\treturn dst;",
+        "sha256": "63c941bc0cb6db36d7b74b214957d2eed97ff9f139ff42501500ac671db4738f",
+        "blob_sha1": "4cc6e0896fad37c3a50ee7bca838f5dfbf4ea848"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/cifs_unicode.c",
+        "saved_path": "consumer/manual_review/sources/fixed/fs/smb/client/cifs_unicode.c",
+        "start_line": 334,
+        "end_line": 364,
+        "text": " * cifs_strndup_from_utf16 - copy a string from wire format to the local\n * codepage\n * @src - source string\n * @maxlen - don't walk past this many bytes in the source string\n * @is_unicode - is this a unicode string?\n * @codepage - destination codepage\n *\n * Take a string given by the server, convert it to the local codepage and\n * put it in a new buffer. Returns a pointer to the new string or NULL on\n * error.\n */\nchar *\ncifs_strndup_from_utf16(const char *src, const int maxlen,\n\t\t\tconst bool is_unicode, const struct nls_table *codepage)\n{\n\tint len;\n\tchar *dst;\n\n\tif (is_unicode) {\n\t\tlen = cifs_utf16_bytes((__le16 *) src, maxlen, codepage);\n\t\tlen += nls_nullsize(codepage);\n\t\tdst = kmalloc(len, GFP_KERNEL);\n\t\tif (!dst)\n\t\t\treturn NULL;\n\t\tcifs_from_utf16(dst, (__le16 *) src, len, maxlen, codepage,\n\t\t\t\tNO_MAP_UNI_RSVD);\n\t} else {\n\t\tdst = kstrndup(src, maxlen, GFP_KERNEL);\n\t}\n\n\treturn dst;",
+        "sha256": "63c941bc0cb6db36d7b74b214957d2eed97ff9f139ff42501500ac671db4738f",
+        "blob_sha1": "4cc6e0896fad37c3a50ee7bca838f5dfbf4ea848"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/cifs_unicode.c",
+        "saved_path": "consumer/manual_review/sources/parent/fs/smb/client/cifs_unicode.c",
+        "start_line": 155,
+        "end_line": 204,
+        "text": " * cifs_from_utf16 - convert utf16le string to local charset\n * @to - destination buffer\n * @from - source buffer\n * @tolen - destination buffer size (in bytes)\n * @fromlen - source buffer size (in bytes)\n * @codepage - codepage to which characters should be converted\n * @mapchar - should characters be remapped according to the mapchars option?\n *\n * Convert a little-endian utf16le string (as sent by the server) to a string\n * in the provided codepage. The tolen and fromlen parameters are to ensure\n * that the code doesn't walk off of the end of the buffer (which is always\n * a danger if the alignment of the source buffer is off). The destination\n * string is always properly null terminated and fits in the destination\n * buffer. Returns the length of the destination string in bytes (including\n * null terminator).\n *\n * Note that some windows versions actually send multiword UTF-16 characters\n * instead of straight UTF16-2. The linux nls routines however aren't able to\n * deal with those characters properly. In the event that we get some of\n * those characters, they won't be translated properly.\n */\nint\ncifs_from_utf16(char *to, const __le16 *from, int tolen, int fromlen,\n\t\tconst struct nls_table *codepage, int map_type)\n{\n\tint i, charlen, safelen;\n\tint outlen = 0;\n\tint nullsize = nls_nullsize(codepage);\n\tint fromwords = fromlen / 2;\n\tchar tmp[NLS_MAX_CHARSET_SIZE];\n\t__u16 ftmp[3];\t\t/* ftmp[3] = 3array x 2bytes = 6bytes UTF-16 */\n\n\t/*\n\t * because the chars can be of varying widths, we need to take care\n\t * not to overflow the destination buffer when we get close to the\n\t * end of it. Until we get to this offset, we don't need to check\n\t * for overflow however.\n\t */\n\tsafelen = tolen - (NLS_MAX_CHARSET_SIZE + nullsize);\n\n\tfor (i = 0; i < fromwords; i++) {\n\t\tftmp[0] = get_unaligned_le16(&from[i]);\n\t\tif (ftmp[0] == 0)\n\t\t\tbreak;\n\t\tif (i + 1 < fromwords)\n\t\t\tftmp[1] = get_unaligned_le16(&from[i + 1]);\n\t\telse\n\t\t\tftmp[1] = 0;\n\t\tif (i + 2 < fromwords)\n\t\t\tftmp[2] = get_unaligned_le16(&from[i + 2]);",
+        "sha256": "63c941bc0cb6db36d7b74b214957d2eed97ff9f139ff42501500ac671db4738f",
+        "blob_sha1": "4cc6e0896fad37c3a50ee7bca838f5dfbf4ea848"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/cifs_unicode.c",
+        "saved_path": "consumer/manual_review/sources/fixed/fs/smb/client/cifs_unicode.c",
+        "start_line": 155,
+        "end_line": 204,
+        "text": " * cifs_from_utf16 - convert utf16le string to local charset\n * @to - destination buffer\n * @from - source buffer\n * @tolen - destination buffer size (in bytes)\n * @fromlen - source buffer size (in bytes)\n * @codepage - codepage to which characters should be converted\n * @mapchar - should characters be remapped according to the mapchars option?\n *\n * Convert a little-endian utf16le string (as sent by the server) to a string\n * in the provided codepage. The tolen and fromlen parameters are to ensure\n * that the code doesn't walk off of the end of the buffer (which is always\n * a danger if the alignment of the source buffer is off). The destination\n * string is always properly null terminated and fits in the destination\n * buffer. Returns the length of the destination string in bytes (including\n * null terminator).\n *\n * Note that some windows versions actually send multiword UTF-16 characters\n * instead of straight UTF16-2. The linux nls routines however aren't able to\n * deal with those characters properly. In the event that we get some of\n * those characters, they won't be translated properly.\n */\nint\ncifs_from_utf16(char *to, const __le16 *from, int tolen, int fromlen,\n\t\tconst struct nls_table *codepage, int map_type)\n{\n\tint i, charlen, safelen;\n\tint outlen = 0;\n\tint nullsize = nls_nullsize(codepage);\n\tint fromwords = fromlen / 2;\n\tchar tmp[NLS_MAX_CHARSET_SIZE];\n\t__u16 ftmp[3];\t\t/* ftmp[3] = 3array x 2bytes = 6bytes UTF-16 */\n\n\t/*\n\t * because the chars can be of varying widths, we need to take care\n\t * not to overflow the destination buffer when we get close to the\n\t * end of it. Until we get to this offset, we don't need to check\n\t * for overflow however.\n\t */\n\tsafelen = tolen - (NLS_MAX_CHARSET_SIZE + nullsize);\n\n\tfor (i = 0; i < fromwords; i++) {\n\t\tftmp[0] = get_unaligned_le16(&from[i]);\n\t\tif (ftmp[0] == 0)\n\t\t\tbreak;\n\t\tif (i + 1 < fromwords)\n\t\t\tftmp[1] = get_unaligned_le16(&from[i + 1]);\n\t\telse\n\t\t\tftmp[1] = 0;\n\t\tif (i + 2 < fromwords)\n\t\t\tftmp[2] = get_unaligned_le16(&from[i + 2]);",
+        "sha256": "63c941bc0cb6db36d7b74b214957d2eed97ff9f139ff42501500ac671db4738f",
+        "blob_sha1": "4cc6e0896fad37c3a50ee7bca838f5dfbf4ea848"
+      }
+    ],
+    "reported_sizeof_posix": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/parent/fs/smb/client/reparse.c",
+        "start_line": 483,
+        "end_line": 493,
+        "text": "\n\tlen = le16_to_cpu(buf->ReparseDataLength);\n\tif (len < sizeof(buf->InodeType)) {\n\t\tcifs_dbg(VFS, \"srv returned malformed nfs buffer\\n\");\n\t\treturn -EIO;\n\t}\n\n\tlen -= sizeof(buf->InodeType);\n\n\tswitch ((type = le64_to_cpu(buf->InodeType))) {\n\tcase NFS_SPECFILE_LNK:",
+        "sha256": "a3bba776e02271364e0541342b0032dda6dfefdfe86182ba9ea5230b6239f522",
+        "blob_sha1": "50b1aba2000899ebf830425330465abea1ecab79"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/reparse.c",
+        "start_line": 483,
+        "end_line": 493,
+        "text": "\n\tlen = le16_to_cpu(buf->ReparseDataLength);\n\tif (len < sizeof(buf->InodeType)) {\n\t\tcifs_dbg(VFS, \"srv returned malformed nfs buffer\\n\");\n\t\treturn -EIO;\n\t}\n\n\tlen -= sizeof(buf->InodeType);\n\n\tswitch ((type = le64_to_cpu(buf->InodeType))) {\n\tcase NFS_SPECFILE_LNK:",
+        "sha256": "4131c61598aaa9f3e2d478c89f56ab8117be7da9a31cc7de0204b953ea0ec929",
+        "blob_sha1": "d88b41133e00c6cabfeeeea068c3e166f25df581"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/cifspdu.h",
+        "saved_path": "consumer/sources/parent/fs/smb/client/cifspdu.h",
+        "start_line": 1508,
+        "end_line": 1515,
+        "text": "#define NFS_SPECFILE_SOCK\t0x000000004B434F53\nstruct reparse_posix_data {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__le64\tInodeType; /* LNK, FIFO, CHR etc. */\n\t__u8\tDataBuffer[];\n} __attribute__((packed));",
+        "sha256": "ba9592e5a8e1d33aabd48e783933376f5784d5bb8dfa4d39a81bc2d47a09ff20",
+        "blob_sha1": "ee78bb6741d62ff66a87dcece79d960399fbf539"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/cifspdu.h",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/cifspdu.h",
+        "start_line": 1508,
+        "end_line": 1515,
+        "text": "#define NFS_SPECFILE_SOCK\t0x000000004B434F53\nstruct reparse_posix_data {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__le64\tInodeType; /* LNK, FIFO, CHR etc. */\n\t__u8\tDataBuffer[];\n} __attribute__((packed));",
+        "sha256": "ba9592e5a8e1d33aabd48e783933376f5784d5bb8dfa4d39a81bc2d47a09ff20",
+        "blob_sha1": "ee78bb6741d62ff66a87dcece79d960399fbf539"
+      }
+    ],
+    "reported_sizeof_wsl": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/parent/fs/smb/client/reparse.c",
+        "start_line": 654,
+        "end_line": 665,
+        "text": "\tint len = le16_to_cpu(buf->ReparseDataLength);\n\tint symname_utf8_len;\n\t__le16 *symname_utf16;\n\tint symname_utf16_len;\n\n\tif (len <= sizeof(buf->Flags)) {\n\t\tcifs_dbg(VFS, \"srv returned malformed wsl symlink buffer\\n\");\n\t\treturn -EIO;\n\t}\n\n\t/* PathBuffer is in UTF-8 but without trailing null-term byte */\n\tsymname_utf8_len = len - sizeof(buf->Flags);",
+        "sha256": "a3bba776e02271364e0541342b0032dda6dfefdfe86182ba9ea5230b6239f522",
+        "blob_sha1": "50b1aba2000899ebf830425330465abea1ecab79"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/reparse.c",
+        "start_line": 654,
+        "end_line": 665,
+        "text": "\tint len = le16_to_cpu(buf->ReparseDataLength);\n\tint symname_utf8_len;\n\t__le16 *symname_utf16;\n\tint symname_utf16_len;\n\n\tif (len <= sizeof(buf->Flags)) {\n\t\tcifs_dbg(VFS, \"srv returned malformed wsl symlink buffer\\n\");\n\t\treturn -EIO;\n\t}\n\n\t/* PathBuffer is in UTF-8 but without trailing null-term byte */\n\tsymname_utf8_len = len - sizeof(buf->Flags);",
+        "sha256": "4131c61598aaa9f3e2d478c89f56ab8117be7da9a31cc7de0204b953ea0ec929",
+        "blob_sha1": "d88b41133e00c6cabfeeeea068c3e166f25df581"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/common/smb2pdu.h",
+        "saved_path": "consumer/sources/parent/fs/smb/common/smb2pdu.h",
+        "start_line": 1555,
+        "end_line": 1562,
+        "text": "/* For IO_REPARSE_TAG_LX_SYMLINK */\nstruct reparse_wsl_symlink_data_buffer {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__le32\tFlags;\n\t__u8\tPathBuffer[]; /* Variable Length UTF-8 string without nul-term */\n} __packed;",
+        "sha256": "64051eedab8ba7cdaf0edfea1719630cfdb9fcd4e900f1756c6be30a64ad3610",
+        "blob_sha1": "3c7c706c797d2aa3cb67c789fe722013d5fb9af9"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/common/smb2pdu.h",
+        "saved_path": "consumer/sources/fixed/fs/smb/common/smb2pdu.h",
+        "start_line": 1555,
+        "end_line": 1562,
+        "text": "/* For IO_REPARSE_TAG_LX_SYMLINK */\nstruct reparse_wsl_symlink_data_buffer {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__le32\tFlags;\n\t__u8\tPathBuffer[]; /* Variable Length UTF-8 string without nul-term */\n} __packed;",
+        "sha256": "64051eedab8ba7cdaf0edfea1719630cfdb9fcd4e900f1756c6be30a64ad3610",
+        "blob_sha1": "3c7c706c797d2aa3cb67c789fe722013d5fb9af9"
+      }
+    ],
+    "reported_normal": [
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/parent/fs/smb/client/reparse.c",
+        "start_line": 718,
+        "end_line": 726,
+        "text": "\tcase IO_REPARSE_TAG_AF_UNIX:\n\tcase IO_REPARSE_TAG_LX_FIFO:\n\tcase IO_REPARSE_TAG_LX_CHR:\n\tcase IO_REPARSE_TAG_LX_BLK:\n\t\tif (le16_to_cpu(buf->ReparseDataLength) != 0) {\n\t\t\tcifs_dbg(VFS, \"srv returned malformed buffer for reparse point: 0x%08x\\n\",\n\t\t\t\t le32_to_cpu(buf->ReparseTag));\n\t\t\treturn -EIO;\n\t\t}",
+        "sha256": "a3bba776e02271364e0541342b0032dda6dfefdfe86182ba9ea5230b6239f522",
+        "blob_sha1": "50b1aba2000899ebf830425330465abea1ecab79"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/client/reparse.c",
+        "saved_path": "consumer/sources/fixed/fs/smb/client/reparse.c",
+        "start_line": 718,
+        "end_line": 726,
+        "text": "\tcase IO_REPARSE_TAG_AF_UNIX:\n\tcase IO_REPARSE_TAG_LX_FIFO:\n\tcase IO_REPARSE_TAG_LX_CHR:\n\tcase IO_REPARSE_TAG_LX_BLK:\n\t\tif (le16_to_cpu(buf->ReparseDataLength) != 0) {\n\t\t\tcifs_dbg(VFS, \"srv returned malformed buffer for reparse point: 0x%08x\\n\",\n\t\t\t\t le32_to_cpu(buf->ReparseTag));\n\t\t\treturn -EIO;\n\t\t}",
+        "sha256": "4131c61598aaa9f3e2d478c89f56ab8117be7da9a31cc7de0204b953ea0ec929",
+        "blob_sha1": "d88b41133e00c6cabfeeeea068c3e166f25df581"
+      },
+      {
+        "revision": "fac04efc5c793dccbd07e2d59af9f90b7fc0dca4",
+        "source_path": "fs/smb/common/smb2pdu.h",
+        "saved_path": "consumer/sources/parent/fs/smb/common/smb2pdu.h",
+        "start_line": 1513,
+        "end_line": 1517,
+        "text": "struct reparse_data_buffer {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__u8\tDataBuffer[]; /* Variable Length */",
+        "sha256": "64051eedab8ba7cdaf0edfea1719630cfdb9fcd4e900f1756c6be30a64ad3610",
+        "blob_sha1": "3c7c706c797d2aa3cb67c789fe722013d5fb9af9"
+      },
+      {
+        "revision": "6d44a780635b9b3fb6e20f366ee7750a9adfa884",
+        "source_path": "fs/smb/common/smb2pdu.h",
+        "saved_path": "consumer/sources/fixed/fs/smb/common/smb2pdu.h",
+        "start_line": 1513,
+        "end_line": 1517,
+        "text": "struct reparse_data_buffer {\n\t__le32\tReparseTag;\n\t__le16\tReparseDataLength;\n\t__u16\tReserved;\n\t__u8\tDataBuffer[]; /* Variable Length */",
+        "sha256": "64051eedab8ba7cdaf0edfea1719630cfdb9fcd4e900f1756c6be30a64ad3610",
+        "blob_sha1": "3c7c706c797d2aa3cb67c789fe722013d5fb9af9"
+      }
+    ]
+  },
+  "integrity": {
+    "parents_lock_sha256": "bfb394334206e7a555e1a0bb154b70f6d893a3dc953923e33e4836bdd1e07ae0",
+    "pre_freeze_sha256": "3d7c32d7e7f9a5dca6e0682296fae94ace75557d60f03c0c5c81b31f2e1b4bba",
+    "unseal_manifest_sha256": "d8f7ecf49ce3faaa795f63706a8e0cfebb2c563babfcd2378799027fe4ef2723",
+    "patch_unsealed_sha256": "c470a713a7e58710a598a6badf5ccb9000979152edd4c77ab7f9afc8b317294a",
+    "protocol_sha256": "75829a86783d16940faa1252f0ccc4031cb88aec069ea43a33b9336985b5b2c3",
+    "source_manifest_sha256": "edad150f1e16d545d3e12a86fef5f0756f65f46ba85e9944256ea6c775c985d6",
+    "source_manifest_extra_sha256": "6233a685874efae82238bf9c2d769c5491b3e6661f3c79a9793f561ff9176711",
+    "new_support_sources_per_revision": 4,
+    "new_support_source_total": 8,
+    "source_quote_schema": "revision/source_path/saved_path(stage-relative)/start_line/end_line/text/sha256/blob_sha1",
+    "capture_commands": "consumer/manual_review/commands_extra.json",
+    "review_builder_sha256": "d5e52bf71866320f7acb77b14fac8954fa8817b10be820204eb7265c0b91b9a6",
+    "old_sources_raw_protocol_rules_untouched": true,
+    "no_analyzer_rerun_compile_model_or_sample_expansion": true
+  }
+}

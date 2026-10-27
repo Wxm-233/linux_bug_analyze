@@ -1,0 +1,27 @@
+{
+  "task": "N2.4 bounded runtime-build source alignment",
+  "date": "2026-10-17",
+  "registered_after": "N2.3 found different configuration digests; read-only inspection of five existing .o.cmd files, compiler token shapes and file existence. No new preprocessing results have been read.",
+  "purpose": "Remove the known source/configuration mismatch for the selected old s390/x86 pair, without treating helper calls as completed preparation.",
+  "profiles": ["old_s390", "old_x86"],
+  "translation_units": {
+    "old_s390": ["arch/s390/kernel/topology.c", "arch/s390/kernel/smp.c", "kernel/sched/core.c"],
+    "old_x86": ["arch/x86/kernel/smpboot.c", "kernel/sched/core.c"]
+  },
+  "selectors": {
+    "arch/s390/kernel/topology.c": ["cpu_thread_map", "update_cpu_masks"],
+    "arch/s390/kernel/smp.c": ["smp_start_secondary"],
+    "arch/x86/kernel/smpboot.c": ["start_secondary", "set_cpu_sibling_map"],
+    "kernel/sched/core.c": ["sched_core_lock", "sched_core_cpu_starting", "cpu_smt_mask"]
+  },
+  "execution": "Read the original single gcc command from each .o.cmd, reject shell operators/substitution and unsupported tails. Use shlex tokens with shell=False in the same build cwd. Remove the one -Wp,-MMD dependency token and replace only the exact -c -o object source tail by -E -o new-cache-output source. Preserve all other tokens. No make, configuration regeneration, object compilation, linking, kernel boot or model request.",
+  "checks": "Before preprocessing verify archived configuration, image, initramfs and instrumented source digests. Hash the selected five .o.cmd files, all ten retained objects, two configurations, generated config/release headers, two images/initramfs and six recorded observer source files plus selected getter header before and after. Record compiler identities and exact original/new argv; remove compiler output/include override environment variables. cpu_smt_mask selector is include/linux/topology.h, other selectors bind the named translation unit source. Abort if commands are ambiguous or protected bytes change. A check failure is not repaired in place.",
+  "outputs": "Full preprocessing only in a new WSL cache directory; executable collector, command results, exact selected lexical regions and provenance in this new experiment directory. Preserve all historical data.",
+  "analysis_limits": "Existing known case and instrumented source, not an independent sample. Region extraction is lexical, not path/effect/coverage proof. Current header files and compiler are not all cryptographically recorded at original build time; even matched config/source/image cannot certify an exact historical compiler replay. Do not overwrite raw N1 CFG or N2.1-3 selection/profile outputs. No new helper expansion or defect claim.",
+  "maximum_preprocessor_invocations": 5,
+  "new_object_compilations": 0,
+  "new_kernel_runs": 0,
+  "external_model_requests": 0,
+  "r3_resumed": false,
+  "exit": "Save actual extraction success or insufficiency, independently review a bounded provider/consumer source relationship, and update the current checkpoint. Any subsequent semantic feature upgrade needs separate evidence."
+}

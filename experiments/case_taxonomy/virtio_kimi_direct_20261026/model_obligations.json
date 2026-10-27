@@ -1,0 +1,197 @@
+[
+  {
+    "id": "VIN-01",
+    "requirement": "实测事件缓冲几何与合法性：struct virtio_input 内 offsetof(evts)、单事件 sizeof==8、kmalloc 桶与 ARCH_KMALLOC_MINALIGN 对齐；证明 sg_init_one 目标非 vmalloc、页内连续、单段 len==8。权威：驱动结构与分配路径 + slab 对齐保证 + DMA 可用内存规则。",
+    "conditions": "以 64 位指针、常规 spinlock_t 布局为待证前提；目标 ARCH_KMALLOC_MINALIGN/PAGE_SIZE 决定对齐结论。",
+    "anchors": [
+      "drivers/virtio/virtio_input.c:12-22",
+      "drivers/virtio/virtio_input.c:24-31",
+      "drivers/virtio/virtio_input.c:229",
+      "include/linux/slab.h:540-551",
+      "include/linux/slab.h:898-904",
+      "Documentation/core-api/dma-api-howto.rst:111-148"
+    ],
+    "test": "在 probe/virtinput_fill_evt 加只读测量打印（不改原函数行为）：offsetof(evts/lock/ready)、地址 mod 64/128、sg->length 与 sg offset；或对 sg_init_one 结果做 KUnit 断言。",
+    "missing": [
+      "include/uapi/linux/virtio_input.h",
+      "目标架构 ARCH_KMALLOC_MINALIGN 与 PAGE_SIZE 定义"
+    ]
+  },
+  {
+    "id": "VIN-02",
+    "requirement": "证明本驱动仅发出 virtqueue_add_inbuf（premapped=false、attr=0、ctx=NULL、total_sg==1），从而 indirect/premapped/cache_clean 三条路径对本驱动均不可达。权威：调用点与 use_indirect 判定。",
+    "conditions": "对所有事件与状态缓冲的 add 调用点成立；与协商出的 layout 无关。",
+    "anchors": [
+      "drivers/virtio/virtio_input.c:24-31",
+      "drivers/virtio/virtio_input.c:90-94",
+      "drivers/virtio/virtio_ring.c:2899-2906",
+      "drivers/virtio/virtio_ring.c:2926-2934",
+      "drivers/virtio/virtio_ring.c:2975-2983",
+      "drivers/virtio/virtio_ring.c:297-305"
+    ],
+    "test": "事件风暴期间 ftrace/kprobe 计数 alloc_indirect_split 与 virtqueue_add_indirect_packed 命中应为 0；采样 vring_map_one_sg 的 premapped 实参恒为 false。",
+    "missing": []
+  },
+  {
+    "id": "VIN-03",
+    "requirement": "实测 use_map_api：无 VIRTIO_F_ACCESS_PLATFORM 且非 Xen 时为 false（物理地址直通、无 DMA API 缓存维护），否则为 true；据此分流后续一切缓存/一致性结论。权威：vring_use_map_api 与 quirk 反极性定义。",
+    "conditions": "取决于设备/传输层是否协商 ACCESS_PLATFORM 及 xen_domain() 运行值；不得默认。",
+    "anchors": [
+      "drivers/virtio/virtio_ring.c:333-351",
+      "drivers/virtio/virtio_ring.c:458-467",
+      "drivers/virtio/virtio_ring.c:376-408",
+      "include/linux/virtio_config.h:283-290"
+    ],
+    "test": "ftrace 记录 vring_use_map_api 返回值、xen_domain() 及 negotiated features；两种场景各跑一次。",
+    "missing": [
+      "xen_domain() 定义所在头文件",
+      "传输层提供 ACCESS_PLATFORM 的规则（virtio_pci 源码）"
+    ]
+  },
+  {
+    "id": "VIN-04",
+    "requirement": "实测协商布局：驱动 feature 表为空，PACKED/IN_ORDER/INDIRECT/EVENT_IDX 由传输层保留协商，因此四种 layout 均可能命中；必须读取实际协商位以确定 add/get 具体实现。权威：layout 赋值点与 transport_features。",
+    "conditions": "依赖传输层与后端供给的特性位；probe 已强制 VERSION_1。",
+    "anchors": [
+      "drivers/virtio/virtio_input.c:226",
+      "drivers/virtio/virtio_input.c:392-394",
+      "drivers/virtio/virtio_ring.c:1331-1335",
+      "drivers/virtio/virtio_ring.c:2552-2556",
+      "drivers/virtio/virtio_ring.c:3275-3282",
+      "drivers/virtio/virtio_ring.c:3506-3534"
+    ],
+    "test": "读取该 virtio-input 设备 negotiated features（debugfs/sysfs 或对 __vring_new_virtqueue_{split,packed} 打 ftrace 记录 vq->layout）。",
+    "missing": [
+      "drivers/virtio/virtio_pci_*.c（特性供给与 find_vqs 实现）"
+    ]
+  },
+  {
+    "id": "VIN-05",
+    "requirement": "实测实际映射目标：vdev->map==NULL 时 DMA 操作作用于 vdev->dev.parent，掩码/一致性/IOMMU 域均为父设备属性；采集父设备 dma_coherent、dma_mask、bus_dma_limit、use_dma_iommu 运行值。权威：vring_dma_dev、map 初始化与 dma_map_phys 分支。",
+    "conditions": "仅当 VIN-03 为 true 且 VIN-09 证明 vdev->map==NULL 时适用。",
+    "anchors": [
+      "drivers/virtio/virtio_ring.c:426-429",
+      "drivers/virtio/virtio_ring.c:3273",
+      "drivers/virtio/virtio_ring.c:3730-3748",
+      "kernel/dma/mapping.c:120-153",
+      "kernel/dma/mapping.c:184-199"
+    ],
+    "test": "probe 期只读打印父设备上述属性（不改行为）；与 dma_map_phys 实际命中分支（direct/iommu/ops）对照。",
+    "missing": [
+      "kernel/dma/iommu.c",
+      "include/linux/dma-direct.h",
+      "include/linux/dma-map-ops.h"
+    ]
+  },
+  {
+    "id": "VIN-06",
+    "requirement": "判定每次 8 字节 FROM_DEVICE 映射落入 direct / swiotlb bounce / iommu_dma 哪一类；bounce 下设备不直接触达 evts 原页（CPU memcpy 往返），iommu_dma 一致性处理依赖外部源码。该分类是任何缓存行共享结论的前置门。权威：dma_map_phys 分支、dma_direct_map_phys 的 bounce 判定、swiotlb 拷贝实现。",
+    "conditions": "取决于父设备掩码/bus_dma_limit、swiotlb 激活与 force、以及 dma_kmalloc_needs_bounce 定义（缺失）。",
+    "anchors": [
+      "kernel/dma/mapping.c:155-199",
+      "kernel/dma/direct.h:83-122",
+      "kernel/dma/direct.h:124-139",
+      "kernel/dma/swiotlb.c:1367-1439",
+      "kernel/dma/swiotlb.c:1533-1568",
+      "kernel/dma/swiotlb.c:1574-1601",
+      "kernel/dma/direct.c:615-628"
+    ],
+    "test": "按父设备过滤 ftrace：swiotlb_map / iommu_dma_map_phys / dma_direct_map_phys 命中计数；用 dma_capable 语义对 evts 物理地址做预判比对。",
+    "missing": [
+      "include/linux/dma-direct.h（dma_kmalloc_needs_bounce、dma_capable）",
+      "kernel/dma/iommu.c"
+    ]
+  },
+  {
+    "id": "VIN-07",
+    "requirement": "相邻 CPU 元数据与事件内部共享的判别门：evts 内部互共享为良性（同向映射且 CPU 不脏写）；仅 evts 尾部与 lock/ready 同行（128B 行且对象 128B 对齐时成立，64B 行恰落边界）构成候选窗口，且须同时满足非一致 + use_map_api + direct 无 bounce 才为潜在危险；此前宿主替身布局实验不足以断言真实平台腐蚀。权威：DMA 文档缓存行共享与组标注条款、ARCH_DMA_MINALIGN 职责、arm64 CWG 警告点。",
+    "conditions": "须先完成 VIN-01/03/05/06 的实测；结构偏移为布局推算，需运行时地址确认。",
+    "anchors": [
+      "drivers/virtio/virtio_input.c:12-22",
+      "drivers/virtio/virtio_input.c:40-53",
+      "drivers/virtio/virtio_input.c:319",
+      "Documentation/core-api/dma-api-howto.rst:131-141",
+      "Documentation/core-api/dma-api-howto.rst:149-199",
+      "Documentation/core-api/dma-api-howto.rst:956-964",
+      "arch/arm64/mm/dma-mapping.c:41-53"
+    ],
+    "test": "(a) 实测缓存行粒度（arm64 CTR_EL0.CWG 或等价物）；(b) 实测 &vi->evts[i]/&vi->lock 地址的行对齐；(c) 仅当全部前置条件成立时做锁流量×事件风暴压力测试并观察锁完整性，否则记录“条件不成立，不断言腐蚀”。",
+    "missing": [
+      "arch/arm64/include/asm/cache.h",
+      "平台固件一致性描述（_CCA/dma-coherent）",
+      "dev_is_dma_coherent(父设备) 运行值"
+    ]
+  },
+  {
+    "id": "VIN-08",
+    "requirement": "核验 CPU/设备所有权窗口与接口要求：设备所有权自 add 成功（非一致平台 map 时 clean）至 get_buf 内部 unmap（invalidate）；virtio_input.c:44-47 读取严格在 unmap 之后；CPU 从不写 evts 内容，驱动忽略 len，故“设备必须完整写入 8 字节”是对后端的强制接口要求而非可选行为。权威：调用顺序、detach/unmap 位置、方向推导、arm64 sync 实现。",
+    "conditions": "所有 layout 下 detach 均先于 token 返回；len 忽略行为与 layout 无关。",
+    "anchors": [
+      "drivers/virtio/virtio_input.c:29-30",
+      "drivers/virtio/virtio_input.c:42-51",
+      "drivers/virtio/virtio_ring.c:700-702",
+      "drivers/virtio/virtio_ring.c:533-538",
+      "drivers/virtio/virtio_ring.c:870-875",
+      "drivers/virtio/virtio_ring.c:917-972",
+      "arch/arm64/mm/dma-mapping.c:15-32"
+    ],
+    "test": "对 evts 区间设写 watchpoint 或做静态核查：映射期间 CPU 写应为零；在可控后端构造 len<8 短写以实证驱动无校验（依赖后端可控性，注明为外部依赖）。",
+    "missing": [
+      "virtio 规范 5.8 节事件写完整性条款",
+      "可控后端/主机侧配合"
+    ]
+  },
+  {
+    "id": "VIN-09",
+    "requirement": "判定 vdev->map 是否非空：非空时映射语义由传输自定义 virtio_map_ops（如 VDUSE IOVA 域）而非 DMA API，一致性/失败语义不得套用 DMA API 保证。权威：virtio_map_ops 契约、map 分派点、virtqueue_dma_dev 的 NULL 语义。",
+    "conditions": "与后端类型绑定（virtio-pci vs vduse 等）；未获传输源码前不得假设。",
+    "anchors": [
+      "include/linux/virtio_config.h:142-212",
+      "include/linux/virtio.h:48-53",
+      "include/linux/virtio.h:180",
+      "include/linux/virtio.h:184",
+      "drivers/virtio/virtio_ring.c:3684-3774",
+      "drivers/virtio/virtio_ring.c:2991-3000"
+    ],
+    "test": "检查目标设备 vdev->map/vmap 指针；若为 vduse 后端则 ftrace vdev->map->map_page 命中并记录返回地址域。",
+    "missing": [
+      "drivers/vdpa/vduse.c（或相应传输的 map ops 实现）"
+    ]
+  },
+  {
+    "id": "VIN-10",
+    "requirement": "界定映射失败行为：split add 返回 -ENOMEM、packed direct 返回 -EIO（二者不一致），virtinput 在 fill 与 requeue 均忽略返回值 → 静默丢缓冲、事件队列单调萎缩、全失败时设备已注册但零缓冲且无驱动日志。权威：错误返回点与被忽略的调用点。",
+    "conditions": "需在 use_map_api==true 且映射可失败的场景（IOMMU/bounce 资源受限）下触发；bypass 下不可达。",
+    "anchors": [
+      "drivers/virtio/virtio_ring.c:478-482",
+      "drivers/virtio/virtio_ring.c:657-669",
+      "drivers/virtio/virtio_ring.c:772-792",
+      "drivers/virtio/virtio_ring.c:1647-1659",
+      "drivers/virtio/virtio_ring.c:1752-1771",
+      "drivers/virtio/virtio_input.c:30",
+      "drivers/virtio/virtio_input.c:204-217",
+      "drivers/virtio/virtio_input.c:320-325"
+    ],
+    "test": "对 dma_map_page_attrs（或自定义 map）做受控故障注入（fill 期 / requeue 期两档），统计 vq->num_free 与事件通断，确认驱动自身不产生错误日志。",
+    "missing": [
+      "故障注入接口可用性（fail_function / dma-debug 配置）"
+    ]
+  },
+  {
+    "id": "VIN-11",
+    "requirement": "核验映射/解映射配对与方向：每个非 premapped 成功映射在 desc_extra 记录并于 get_buf/detach_unused_buf 恰好解映射一次，方向由 VRING_DESC_F_WRITE 推导；premapped 以 DMA_MAPPING_ERROR 哨兵跳过（本驱动不涉及）。权威：记录点、解映射条件、detach 路径、回收路径。",
+    "conditions": "覆盖正常流量与 remove/freeze/restore 回收两条出队途径。",
+    "anchors": [
+      "drivers/virtio/virtio_ring.c:353-357",
+      "drivers/virtio/virtio_ring.c:520-542",
+      "drivers/virtio/virtio_ring.c:588-590",
+      "drivers/virtio/virtio_ring.c:824-852",
+      "drivers/virtio/virtio_ring.c:1125-1152",
+      "drivers/virtio/virtio_ring.c:1977-2034",
+      "drivers/virtio/virtio_input.c:340-356",
+      "drivers/virtio/virtio_input.c:358-389"
+    ],
+    "test": "CONFIG_DMA_API_DEBUG 下跑事件流量 + remove/reprobe 与 freeze/restore 循环，检查 dma-api debugfs 无 leak/double-unmap 记录。",
+    "missing": []
+  }
+]

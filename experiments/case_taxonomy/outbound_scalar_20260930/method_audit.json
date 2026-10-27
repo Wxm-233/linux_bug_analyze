@@ -1,0 +1,61 @@
+{
+  "status": "pass",
+  "freeze_ready": true,
+  "reviewed_utc": "2026-09-30T11:38:02Z",
+  "scope": "Read-only audit of the final bounded outbound scalar and producer v5 implementations and synthetic/development tests. No new candidate metadata, source, or patch was examined.",
+  "implementations": [
+    {
+      "path": "experiments/case_taxonomy/outbound_scalar_single_revision.py",
+      "sha256": "7175c2bbe734c2d00af61c300a9c70399b1e4bf9dbb0ef74f29fbd8a6fa6e712"
+    },
+    {
+      "path": "experiments/case_taxonomy/representation_producer_v5.py",
+      "sha256": "966b73ef299a6f9e5a1b4a01bc538a36b57d2be9f6f527b51674a174b7e99ef5"
+    }
+  ],
+  "tests": [
+    {
+      "command": "python -m unittest experiments.case_taxonomy.outbound_scalar_single_revision_test -v",
+      "passed": 46,
+      "failed": 0,
+      "test_file_sha256": "b5b383b7f4d0f04ac64dc7719aeb68ad857b768ae73f3c94ff5f0099777cf671"
+    },
+    {
+      "command": "python -m unittest experiments.case_taxonomy.representation_producer_v5_test -v",
+      "passed": 16,
+      "failed": 0,
+      "test_file_sha256": "6f126400ca611c992663ef97296a73f72c820746167ba5d88a18c2ed46078f18"
+    }
+  ],
+  "specified_boundary_checks": [
+    {
+      "boundary": "u32 storage initialized with cpu_to_le32 is not reported as raw unencoded host bytes",
+      "observed": "insufficient",
+      "basis": "test_host_storage_with_explicit_encoding_is_not_raw_host; host_source_proof refuses conversion or unknown-call provenance"
+    },
+    {
+      "boundary": "__le32 source passed through cpu_to_le32 again is not reported as matched normal encoding",
+      "observed": "insufficient",
+      "basis": "test_double_encoding_not_matched_normal; conversion source proof requires one unique u32 host declaration"
+    },
+    {
+      "boundary": "consumer mutates payload through an alias or cast before forwarding",
+      "observed": "insufficient; no proven_byte_copy_chain",
+      "basis": "test_consumer_alias_cast_content_write_refuses and test_consumer_direct_cast_content_write_refuses; consumer proof requires a unique direct pointer use"
+    },
+    {
+      "boundary": "conditional endian pointer member must not be silently filtered as a proven pointer-object assignment",
+      "observed": "insufficient; filtered_pointer_count=0",
+      "basis": "test_single_conditional_member_is_not_filtered_as_proven and test_outer_conditional_struct_is_not_a_proven_shape; v5 filters only when shape.status=proven"
+    }
+  ],
+  "limits": [
+    "This pass covers the specified synthetic boundaries and the two modules' existing development suites; it is not a general C parser soundness proof.",
+    "The outbound consumer proof assumes standard Linux memcpy/conversion semantics, cannot resolve arbitrary macros, aliases, casts, complete preprocessing, or all control-flow paths.",
+    "In the reviewed hci historical source, unknown CONFIG_SERIAL_DEV_BUS keeps the overall finding insufficient even where local scalar and byte-copy evidence are available.",
+    "Producer v5 treats a canonical outer header guard as an inventory assumption, not a proof of actual include order or active configuration."
+  ],
+  "dependency_sha256": {
+    "endian_consumer_single_revision.py": "71e50604221ff0b68ac44039ca64606253e32e6b0a136206aea768e329bd467c"
+  }
+}

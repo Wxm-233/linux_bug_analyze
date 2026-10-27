@@ -1,0 +1,62 @@
+gdb) target remote /tmp/gdb-socket
+
+
+Note that to use a unix socket for the connection you will need
+gdb version 9.0 or newer.
+
+
+Advanced debugging options
+
+Changing single-stepping behaviour
+The default single stepping behavior is step with the IRQs and timer
+service routines off. It is set this way because when gdb executes a
+single step it expects to advance beyond the current instruction. With
+the IRQs and timer service routines on, a single step might jump into
+the one of the interrupt or exception vectors instead of executing the
+current instruction. This means you may hit the same breakpoint a number
+of times before executing the instruction gdb wants to have executed.
+Because there are rare circumstances where you want to single step into
+an interrupt vector the behavior can be controlled from GDB. There are
+three commands you can query and set the single step behavior:
+
+maintenance packet qqemu.sstepbitsThis will display the MASK bits used to control the single stepping
+IE:
+(gdb) maintenance packet qqemu.sstepbits
+sending: &quot;qqemu.sstepbits&quot;
+received: &quot;ENABLE=1,NOIRQ=2,NOTIMER=4&quot;
+
+
+
+maintenance packet qqemu.sstepThis will display the current value of the mask used when single
+stepping IE:
+(gdb) maintenance packet qqemu.sstep
+sending: &quot;qqemu.sstep&quot;
+received: &quot;0x7&quot;
+
+
+
+maintenance packet Qqemu.sstep=HEX_VALUEThis will change the single step mask, so if wanted to enable IRQs on
+the single step, but not timers, you would use:
+(gdb) maintenance packet Qqemu.sstep=0x5
+sending: &quot;qemu.sstep=0x5&quot;
+received: &quot;OK&quot;
+
+
+
+
+
+
+Examining physical memory
+Another feature that QEMU gdbstub provides is to toggle the memory GDB
+works with, by default GDB will show the current process memory respecting
+the virtual address translation.
+If you want to examine/change the physical memory you can set the gdbstub
+to work with the physical memory rather with the virtual one.
+The memory mode can be checked by sending the following command:
+
+maintenance packet qqemu.PhyMemModeThis will return either 0 or 1, 1 indicates you are currently in the
+physical memory mode.
+
+maintenance packet Qqemu.PhyMemMode:1This will change the memory mode to physical memory.
+
+<code class="docutils liter

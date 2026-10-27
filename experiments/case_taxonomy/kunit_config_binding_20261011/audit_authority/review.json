@@ -1,0 +1,215 @@
+{
+  "reviewer": "config_authority_review",
+  "date": "2026-10-11",
+  "verdict": "pass_static_chain_with_request_coverage_boundary",
+  "scope": "same-version source reading and exact quote/hash audit only",
+  "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+  "source_checks": [
+    {
+      "path": "tools/testing/kunit/qemu_config.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "sha256": "a7a4ecdee3ab39aa1db97cb480948e7b2c895e28dc824bf99449b86b79c0304d",
+      "blob": "b1fba9016eed00d010c853f2910c9624e01d4af5",
+      "bytes": 464,
+      "verification": "pass"
+    },
+    {
+      "path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "blob": "260d8d9aa1db4ac3c04fa755fb738dd834b976db",
+      "bytes": 14514,
+      "verification": "pass"
+    },
+    {
+      "path": "tools/testing/kunit/kunit_config.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "sha256": "853bcd4fe51c29e57c15707800bd801ca0092f31af7e4c8c1c35b5eaa0c23c53",
+      "blob": "eb5dd01210b1b41b805779b0733134e6de31cd99",
+      "bytes": 2937,
+      "verification": "pass"
+    },
+    {
+      "path": "tools/testing/kunit/kunit.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "sha256": "75bf71e8668a238e6525a32369906071e2cd93404b0c491288295b7f6c5d91a9",
+      "blob": "7f9ae55fd6d55c6c1f40418fbb999418db23662b",
+      "bytes": 21540,
+      "verification": "pass"
+    }
+  ],
+  "batch_and_receipt": "pass",
+  "quotes": [
+    {
+      "source_path": "tools/testing/kunit/qemu_config.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "a7a4ecdee3ab39aa1db97cb480948e7b2c895e28dc824bf99449b86b79c0304d",
+      "start_line": 12,
+      "end_line": 20,
+      "text": "@dataclass(frozen=True)\nclass QemuArchParams:\n  linux_arch: str\n  kconfig: str\n  qemu_arch: str\n  kernel_path: str\n  kernel_command_line: str\n  extra_qemu_params: List[str]\n  serial: str = 'stdio'",
+      "role": "typed config-string carrier",
+      "text_sha256": "8ad1c31b9ee8b554e8e4c7155c204d649ba91927294580ca5e9dc5732388a15a"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 103,
+      "end_line": 118,
+      "text": "\tdef __init__(self, qemu_arch_params: qemu_config.QemuArchParams, cross_compile: Optional[str]):\n\t\tsuper().__init__(linux_arch=qemu_arch_params.linux_arch,\n\t\t\t\t cross_compile=cross_compile)\n\t\tself._kconfig = qemu_arch_params.kconfig\n\t\tself._qemu_arch = qemu_arch_params.qemu_arch\n\t\tself._kernel_path = qemu_arch_params.kernel_path\n\t\tself._kernel_command_line = qemu_arch_params.kernel_command_line\n\t\tif 'kunit_shutdown=' not in self._kernel_command_line:\n\t\t\tself._kernel_command_line += ' kunit_shutdown=reboot'\n\t\tself._extra_qemu_params = qemu_arch_params.extra_qemu_params\n\t\tself._serial = qemu_arch_params.serial\n\n\tdef make_arch_config(self, base_kunitconfig: kunit_config.Kconfig) -> kunit_config.Kconfig:\n\t\tkconfig = kunit_config.parse_from_string(self._kconfig)\n\t\tkconfig.merge_in_entries(base_kunitconfig)\n\t\treturn kconfig",
+      "role": "QemuArchParams.kconfig consumption and architecture/base request merge",
+      "text_sha256": "bcceca8da401d2c6a83b37a67e8e0f6c061ba7e3ac6552736176c6b5c87c73c5"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 214,
+      "end_line": 239,
+      "text": "def _get_qemu_ops(config_path: str,\n\t\t  extra_qemu_args: Optional[List[str]],\n\t\t  cross_compile: Optional[str]) -> Tuple[str, LinuxSourceTreeOperations]:\n\t# The module name/path has very little to do with where the actual file\n\t# exists (I learned this through experimentation and could not find it\n\t# anywhere in the Python documentation).\n\t#\n\t# Bascially, we completely ignore the actual file location of the config\n\t# we are loading and just tell Python that the module lives in the\n\t# QEMU_CONFIGS_DIR for import purposes regardless of where it actually\n\t# exists as a file.\n\tmodule_path = '.' + os.path.join(os.path.basename(QEMU_CONFIGS_DIR), os.path.basename(config_path))\n\tspec = importlib.util.spec_from_file_location(module_path, config_path)\n\tassert spec is not None\n\tconfig = importlib.util.module_from_spec(spec)\n\t# See https://github.com/python/typeshed/pull/2626 for context.\n\tassert isinstance(spec.loader, importlib.abc.Loader)\n\tspec.loader.exec_module(config)\n\n\tif not hasattr(config, 'QEMU_ARCH'):\n\t\traise ValueError('qemu_config module missing \"QEMU_ARCH\": ' + config_path)\n\tparams: qemu_config.QemuArchParams = config.QEMU_ARCH\n\tif extra_qemu_args:\n\t\tparams.extra_qemu_params.extend(extra_qemu_args)\n\treturn params.linux_arch, LinuxSourceTreeOperationsQemu(\n\t\t\tparams, cross_compile=cross_compile)",
+      "role": "config module loading and Qemu operations construction",
+      "text_sha256": "92bcc07a379f5f4a205ee99e046129a35dac11d7fb6d3e31903dd0f26db0f3f0"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 264,
+      "end_line": 267,
+      "text": "\t\tself._kconfig = get_parsed_kunitconfig(build_dir, kunitconfig_paths)\n\t\tif kconfig_add:\n\t\t\tkconfig = kunit_config.parse_from_string('\\n'.join(kconfig_add))\n\t\t\tself._kconfig.merge_in_entries(kconfig)",
+      "role": "base config loading and optional command-line additions",
+      "text_sha256": "c632d5087dd6ac3015f3daa1d63f21a00057346b303d981a386caec8b46a1646"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 182,
+      "end_line": 194,
+      "text": "\tfor path in kunitconfig_paths:\n\t\tif os.path.isdir(path):\n\t\t\tpath = os.path.join(path, KUNITCONFIG_PATH)\n\t\tif not os.path.exists(path):\n\t\t\traise ConfigError(f'Specified kunitconfig ({path}) does not exist')\n\n\t\tpartial = kunit_config.parse_file(path)\n\t\tdiff = merged.conflicting_options(partial)\n\t\tif diff:\n\t\t\tdiff_str = '\\n\\n'.join(f'{a}\\n  vs from {path}\\n{b}' for a, b in diff)\n\t\t\traise ConfigError(f'Multiple values specified for {len(diff)} options in kunitconfig:\\n{diff_str}')\n\t\tmerged.merge_in_entries(partial)\n\treturn merged",
+      "role": "conflicting values in multiple base fragments rejected before merge",
+      "text_sha256": "3c484aff75af3a53918ba966558be4184d84e3bbcaeb30f51755dae3ab9d647f"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_config.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "853bcd4fe51c29e57c15707800bd801ca0092f31af7e4c8c1c35b5eaa0c23c53",
+      "start_line": 49,
+      "end_line": 74,
+      "text": "\tdef add_entry(self, name: str, value: str) -> None:\n\t\tself._entries[name] = value\n\n\tdef is_subset_of(self, other: 'Kconfig') -> bool:\n\t\tfor name, value in self._entries.items():\n\t\t\tb = other._entries.get(name)\n\t\t\tif b is None:\n\t\t\t\tif value == 'n':\n\t\t\t\t\tcontinue\n\t\t\t\treturn False\n\t\t\tif value != b:\n\t\t\t\treturn False\n\t\treturn True\n\n\tdef conflicting_options(self, other: 'Kconfig') -> List[Tuple[KconfigEntry, KconfigEntry]]:\n\t\tdiff = []  # type: List[Tuple[KconfigEntry, KconfigEntry]]\n\t\tfor name, value in self._entries.items():\n\t\t\tb = other._entries.get(name)\n\t\t\tif b and value != b:\n\t\t\t\tpair = (KconfigEntry(name, value), KconfigEntry(name, b))\n\t\t\t\tdiff.append(pair)\n\t\treturn diff\n\n\tdef merge_in_entries(self, other: 'Kconfig') -> None:\n\t\tfor name, value in other._entries.items():\n\t\t\tself._entries[name] = value",
+      "role": "dictionary insertion, requested-entry matching, conflicts and overwriting merge",
+      "text_sha256": "84f8ce8ed6826a70ec38eb362872f5d9971b1a1a8761069238cd9bd14f314be4"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_config.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "853bcd4fe51c29e57c15707800bd801ca0092f31af7e4c8c1c35b5eaa0c23c53",
+      "start_line": 81,
+      "end_line": 108,
+      "text": "def parse_file(path: str) -> Kconfig:\n\twith open(path, 'r') as f:\n\t\treturn parse_from_string(f.read())\n\ndef parse_from_string(blob: str) -> Kconfig:\n\t\"\"\"Parses a string containing Kconfig entries.\"\"\"\n\tkconfig = Kconfig()\n\tis_not_set_matcher = re.compile(CONFIG_IS_NOT_SET_PATTERN)\n\tconfig_matcher = re.compile(CONFIG_PATTERN)\n\tfor line in blob.split('\\n'):\n\t\tline = line.strip()\n\t\tif not line:\n\t\t\tcontinue\n\n\t\tmatch = config_matcher.match(line)\n\t\tif match:\n\t\t\tkconfig.add_entry(match.group(1), match.group(2))\n\t\t\tcontinue\n\n\t\tempty_match = is_not_set_matcher.match(line)\n\t\tif empty_match:\n\t\t\tkconfig.add_entry(empty_match.group(1), 'n')\n\t\t\tcontinue\n\n\t\tif line[0] == '#':\n\t\t\tcontinue\n\t\traise KconfigParseError('Failed to parse: ' + line)\n\treturn kconfig",
+      "role": "parse_file invokes parse_from_string; CONFIG assignment and unset parser",
+      "text_sha256": "2d2e8414e688f6f9b254771d3cff49f51be757aee1a4ae830d8cec7f2c736d8b"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 25,
+      "end_line": 27,
+      "text": "KCONFIG_PATH = '.config'\nKUNITCONFIG_PATH = '.kunitconfig'\nOLD_KUNITCONFIG_PATH = 'last_used_kunitconfig'",
+      "role": "config file name constant",
+      "text_sha256": "bb74342817fc40e3c5414f1d9f035191d423666acfb8d69ac787ad1730b38ca6"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 163,
+      "end_line": 164,
+      "text": "def get_kconfig_path(build_dir: str) -> str:\n\treturn os.path.join(build_dir, KCONFIG_PATH)",
+      "role": "build-directory .config path",
+      "text_sha256": "5671f0ad313e06ed703488132ad0672bfdbca25ba191117dc1d8b7e0b9eccf17"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 280,
+      "end_line": 293,
+      "text": "\tdef validate_config(self, build_dir: str) -> bool:\n\t\tkconfig_path = get_kconfig_path(build_dir)\n\t\tvalidated_kconfig = kunit_config.parse_file(kconfig_path)\n\t\tif self._kconfig.is_subset_of(validated_kconfig):\n\t\t\treturn True\n\t\tmissing = set(self._kconfig.as_entries()) - set(validated_kconfig.as_entries())\n\t\tmessage = 'Not all Kconfig options selected in kunitconfig were in the generated .config.\\n' \\\n\t\t\t  'This is probably due to unsatisfied dependencies.\\n' \\\n\t\t\t  'Missing: ' + ', '.join(str(e) for e in missing)\n\t\tif self._arch == 'um':\n\t\t\tmessage += '\\nNote: many Kconfig options aren\\'t available on UML. You can try running ' \\\n\t\t\t\t   'on a different architecture with something like \"--arch=x86_64\".'\n\t\tlogging.error(message)\n\t\treturn False",
+      "role": "generated .config is actually parsed and checked against merged request",
+      "text_sha256": "a5cc999cdb69aa817ed1857d426a8c8f991a8d6e69008a735b3fb78b2ff1bebe"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 295,
+      "end_line": 313,
+      "text": "\tdef build_config(self, build_dir: str, make_options: Optional[List[str]]) -> bool:\n\t\tkconfig_path = get_kconfig_path(build_dir)\n\t\tif build_dir and not os.path.exists(build_dir):\n\t\t\tos.mkdir(build_dir)\n\t\ttry:\n\t\t\tself._kconfig = self._ops.make_arch_config(self._kconfig)\n\t\t\tself._kconfig.write_to_file(kconfig_path)\n\t\t\tself._ops.make_olddefconfig(build_dir, make_options)\n\t\texcept ConfigError as e:\n\t\t\tlogging.error(e)\n\t\t\treturn False\n\t\tif not self.validate_config(build_dir):\n\t\t\treturn False\n\n\t\told_path = get_old_kunitconfig_path(build_dir)\n\t\tif os.path.exists(old_path):\n\t\t\tos.remove(old_path)  # write_to_file appends to the file\n\t\tself._kconfig.write_to_file(old_path)\n\t\treturn True",
+      "role": "write request, olddefconfig, validate, then record last request",
+      "text_sha256": "0844590d7e3db2f4cad043b5267d906ce7f76b18317e676fa1b8a1bed53a7c89"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit_kernel.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "9b10c4d87bbb455506a2727bcca0d843eb6921040fb4f6a8072fd7be5a1e56f8",
+      "start_line": 323,
+      "end_line": 346,
+      "text": "\tdef build_reconfig(self, build_dir: str, make_options: Optional[List[str]]) -> bool:\n\t\t\"\"\"Creates a new .config if it is not a subset of the .kunitconfig.\"\"\"\n\t\tkconfig_path = get_kconfig_path(build_dir)\n\t\tif not os.path.exists(kconfig_path):\n\t\t\tprint('Generating .config ...')\n\t\t\treturn self.build_config(build_dir, make_options)\n\n\t\texisting_kconfig = kunit_config.parse_file(kconfig_path)\n\t\tself._kconfig = self._ops.make_arch_config(self._kconfig)\n\n\t\tif self._kconfig.is_subset_of(existing_kconfig) and not self._kunitconfig_changed(build_dir):\n\t\t\treturn True\n\t\tprint('Regenerating .config ...')\n\t\tos.remove(kconfig_path)\n\t\treturn self.build_config(build_dir, make_options)\n\n\tdef build_kernel(self, jobs: int, build_dir: str, make_options: Optional[List[str]]) -> bool:\n\t\ttry:\n\t\t\tself._ops.make_olddefconfig(build_dir, make_options)\n\t\t\tself._ops.make(jobs, build_dir, make_options)\n\t\texcept (ConfigError, BuildError) as e:\n\t\t\tlogging.error(e)\n\t\t\treturn False\n\t\treturn self.validate_config(build_dir)",
+      "role": "existing config reuse condition, regeneration, build and post-build validation",
+      "text_sha256": "a6788be9815a058d62533c185937d94e3bd34f6ba9caae0ebe6e9c685ccaf11a"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "75bf71e8668a238e6525a32369906071e2cd93404b0c491288295b7f6c5d91a9",
+      "start_line": 79,
+      "end_line": 107,
+      "text": "def config_tests(linux: kunit_kernel.LinuxSourceTree,\n\t\t request: KunitConfigRequest) -> KunitResult:\n\tstdout.print_with_timestamp('Configuring KUnit Kernel ...')\n\n\tconfig_start = time.time()\n\tsuccess = linux.build_reconfig(request.build_dir, request.make_options)\n\tconfig_end = time.time()\n\tstatus = KunitStatus.SUCCESS if success else KunitStatus.CONFIG_FAILURE\n\treturn KunitResult(status, config_end - config_start)\n\ndef build_tests(linux: kunit_kernel.LinuxSourceTree,\n\t\trequest: KunitBuildRequest) -> KunitResult:\n\tstdout.print_with_timestamp('Building KUnit Kernel ...')\n\n\tbuild_start = time.time()\n\tsuccess = linux.build_kernel(request.jobs,\n\t\t\t\t     request.build_dir,\n\t\t\t\t     request.make_options)\n\tbuild_end = time.time()\n\tstatus = KunitStatus.SUCCESS if success else KunitStatus.BUILD_FAILURE\n\treturn KunitResult(status, build_end - build_start)\n\ndef config_and_build_tests(linux: kunit_kernel.LinuxSourceTree,\n\t\t\t   request: KunitBuildRequest) -> KunitResult:\n\tconfig_result = config_tests(linux, request)\n\tif config_result.status != KunitStatus.SUCCESS:\n\t\treturn config_result\n\n\treturn build_tests(linux, request)",
+      "role": "config success gates config-and-build path",
+      "text_sha256": "43dfc9fed731b88fcaa215f957be2a3f5414927cb67df902d5d068781d68e630"
+    },
+    {
+      "source_path": "tools/testing/kunit/kunit.py",
+      "revision": "09ea90e5988df98ef58d61ae5af4834e64596d9e",
+      "source_sha256": "75bf71e8668a238e6525a32369906071e2cd93404b0c491288295b7f6c5d91a9",
+      "start_line": 269,
+      "end_line": 281,
+      "text": "def run_tests(linux: kunit_kernel.LinuxSourceTree,\n\t      request: KunitRequest) -> KunitResult:\n\trun_start = time.time()\n\n\tconfig_result = config_tests(linux, request)\n\tif config_result.status != KunitStatus.SUCCESS:\n\t\treturn config_result\n\n\tbuild_result = build_tests(linux, request)\n\tif build_result.status != KunitStatus.SUCCESS:\n\t\treturn build_result\n\n\texec_result = exec_tests(linux, request)",
+      "role": "run flow config then build then exec with failure returns",
+      "text_sha256": "3a0590fbeb3cd45dd59eabaf8e005de76d433f3d2520234dcec44a872e5da21f"
+    }
+  ],
+  "static_chain": {
+    "provider": "Previously read powerpc.py QEMU_ARCH/QemuArchParams.kconfig request string; revised source asks CPU_BIG_ENDIAN=y.",
+    "carrier": "QemuArchParams.kconfig is a string; Qemu operations store and parse it.",
+    "merged_request": "Architecture fragment is parsed, then base_kunitconfig entries overwrite matching keys; kconfig_add can feed the base request.",
+    "generator_boundary": "build_config writes merged request to build_dir/.config then invokes make_olddefconfig. No such invocation was performed in this audit.",
+    "actual_output_check": "validate_config actually calls parse_file(build_dir/.config) and self._kconfig.is_subset_of(validated_kconfig); missing/mismatching requested entries return False.",
+    "reuse_path": "Existing .config reused only if merged request subset matches and last-request comparison unchanged; otherwise regenerate.",
+    "build_order": "Configuration-generation path validates before returning config success; build_kernel runs olddefconfig and make, then validates again. Main run flow returns on config or build failure before exec."
+  },
+  "coverage_and_conflict_limits": {
+    "unrequested_option": "is_subset_of iterates only entries in self request; an absent request makes no assertion about CPU_BIG_ENDIAN.",
+    "requested_n_absent_output": "Missing output entry is accepted only for explicitly requested value n; this is an intentional rule in the saved matcher.",
+    "actual_parent_endian": "unknown: parent provider omits explicit CPU_BIG_ENDIAN, but defaults/base fragments/command-line additions could still choose it.",
+    "six_synthetic_comparisons": "If they use provider strings alone, they must state that no base/CLI request overrides CPU; synthetic LE/missing output is not a Kconfig-valid or actually generated historical configuration.",
+    "architecture_override": "make_arch_config merges base into architecture request without a conflicting_options check at that point; base can overwrite revised CPU_BIG_ENDIAN=y.",
+    "multiple_fragment_conflict": "get_parsed_kunitconfig explicitly rejects conflicts across selected base fragments; this is a different call path, not blanket conflict protection for all merges.",
+    "semantic_error_assignment": "A match of incomplete request says nothing about external environment requirements; it is not generator failure. A required-BE premise still needs independent reviewed target/interface evidence."
+  },
+  "unknowns": [
+    "actual build .config and all effective request fragments",
+    "PowerPC Kconfig dependencies/defaults and resolved output",
+    "actual make/QEMU/kernel execution",
+    "QEMU target data-endian requirements and consumer behavior",
+    "proof that omitted provider condition alone caused a fault"
+  ],
+  "reviewer_Git_commands": 0,
+  "reviewer_historical_source_imports_or_execution": 0,
+  "reviewer_main_flow_imports": 0,
+  "new_confirmed_cases": 0,
+  "independent_positive_cases": 0,
+  "first_discovery": "unknown"
+}

@@ -1,0 +1,56 @@
+commit bfcc4397435dc0407099b9a805391abc05c2313b
+Author:     Ionela Voinescu <ionela.voinescu@arm.com>
+AuthorDate: Mon Jul 4 11:16:01 2022 +0100
+Commit:     Sudeep Holla <sudeep.holla@kernel.org>
+CommitDate: Mon Jul 4 16:23:16 2022 +0100
+
+    arch_topology: Limit span of cpu_clustergroup_mask()
+    
+    Currently the cluster identifier is not set on DT based platforms.
+    The reset or default value is -1 for all the CPUs. Once we assign the
+    cluster identifier values correctly, the cluster_sibling mask will be
+    populated and returned by cpu_clustergroup_mask() to contribute in the
+    creation of the CLS scheduling domain level, if SCHED_CLUSTER is
+    enabled.
+    
+    To avoid topologies that will result in questionable or incorrect
+    scheduling domains, impose restrictions regarding the span of clusters,
+    as presented to scheduling domains building code: cluster_sibling should
+    not span more or the same CPUs as cpu_coregroup_mask().
+    
+    This is needed in order to obtain a strict separation between the MC and
+    CLS levels, and maintain the same domains for existing platforms in
+    the presence of CONFIG_SCHED_CLUSTER, where the new cluster information
+    is redundant and irrelevant for the scheduler.
+    
+    While previously the scheduling domain builder code would have removed MC
+    as redundant and kept CLS if SCHED_CLUSTER was enabled and the
+    cpu_coregroup_mask() and cpu_clustergroup_mask() spanned the same CPUs,
+    now CLS will be removed and MC kept.
+    
+    Link: https://lore.kernel.org/r/20220704101605.1318280-18-sudeep.holla@arm.com
+    Cc: Darren Hart <darren@os.amperecomputing.com>
+    Tested-by: Conor Dooley <conor.dooley@microchip.com>
+    Acked-by: Vincent Guittot <vincent.guittot@linaro.org>
+    Signed-off-by: Ionela Voinescu <ionela.voinescu@arm.com>
+    Signed-off-by: Sudeep Holla <sudeep.holla@arm.com>
+
+diff --git a/drivers/base/arch_topology.c b/drivers/base/arch_topology.c
+index e384afb6cac7..591c1f8e15e2 100644
+--- a/drivers/base/arch_topology.c
++++ b/drivers/base/arch_topology.c
+@@ -686,6 +686,14 @@ const struct cpumask *cpu_coregroup_mask(int cpu)
+ 
+ const struct cpumask *cpu_clustergroup_mask(int cpu)
+ {
++	/*
++	 * Forbid cpu_clustergroup_mask() to span more or the same CPUs as
++	 * cpu_coregroup_mask().
++	 */
++	if (cpumask_subset(cpu_coregroup_mask(cpu),
++			   &cpu_topology[cpu].cluster_sibling))
++		return get_cpu_mask(cpu);
++
+ 	return &cpu_topology[cpu].cluster_sibling;
+ }
+ 

@@ -1,0 +1,115 @@
+{
+  "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+  "scope": "same known historical case, source-only; no fix/runtime/oracle/manual review",
+  "documents": [
+    {
+      "id": "S_core",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "start_line": 5753,
+      "end_line": 5794,
+      "text": "5753: static void sched_core_cpu_starting(unsigned int cpu)\n5754: {\n5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n5756: \tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n5757: \tunsigned long flags;\n5758: \tint t;\n5759: \n5760: \tsched_core_lock(cpu, &flags);\n5761: \n5762: \tWARN_ON_ONCE(rq->core != rq);\n5763: \n5764: \t/* if we're the first, we'll be our own leader */\n5765: \tif (cpumask_weight(smt_mask) == 1)\n5766: \t\tgoto unlock;\n5767: \n5768: \t/* find the leader */\n5769: \tfor_each_cpu(t, smt_mask) {\n5770: \t\tif (t == cpu)\n5771: \t\t\tcontinue;\n5772: \t\trq = cpu_rq(t);\n5773: \t\tif (rq->core == rq) {\n5774: \t\t\tcore_rq = rq;\n5775: \t\t\tbreak;\n5776: \t\t}\n5777: \t}\n5778: \n5779: \tif (WARN_ON_ONCE(!core_rq)) /* whoopsie */\n5780: \t\tgoto unlock;\n5781: \n5782: \t/* install and validate core_rq */\n5783: \tfor_each_cpu(t, smt_mask) {\n5784: \t\trq = cpu_rq(t);\n5785: \n5786: \t\tif (t == cpu)\n5787: \t\t\trq->core = core_rq;\n5788: \n5789: \t\tWARN_ON_ONCE(rq->core != core_rq);\n5790: \t}\n5791: \n5792: unlock:\n5793: \tsched_core_unlock(cpu, &flags);\n5794: }"
+    },
+    {
+      "id": "X_lock_functions",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 240,
+      "end_line": 261,
+      "full_original_file_sha256": "106a72f05176d464d468f85b6e95b89fe2938562f9bf8923df19b8c2e3627303",
+      "source": "local_git_object_original_uninstrumented",
+      "text": "240: static void sched_core_lock(int cpu, unsigned long *flags)\n241: {\n242: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n243: \tint t, i = 0;\n244: \n245: \tlocal_irq_save(*flags);\n246: \tfor_each_cpu(t, smt_mask)\n247: \t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n248: }\n249: \n250: static void sched_core_unlock(int cpu, unsigned long *flags)\n251: {\n252: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n253: \tint t;\n254: \n255: \tfor_each_cpu(t, smt_mask)\n256: \t\traw_spin_unlock(&cpu_rq(t)->__lock);\n257: \tlocal_irq_restore(*flags);\n258: }\n259: \n260: static void __sched_core_flip(bool enabled)\n261: {"
+    },
+    {
+      "id": "X_core_stubs",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 5838,
+      "end_line": 5865,
+      "full_original_file_sha256": "106a72f05176d464d468f85b6e95b89fe2938562f9bf8923df19b8c2e3627303",
+      "source": "local_git_object_original_uninstrumented",
+      "text": "5838: \n5839: unlock:\n5840: \tsched_core_unlock(cpu, &flags);\n5841: }\n5842: \n5843: static inline void sched_core_cpu_dying(unsigned int cpu)\n5844: {\n5845: \tstruct rq *rq = cpu_rq(cpu);\n5846: \n5847: \tif (rq->core != rq)\n5848: \t\trq->core = rq;\n5849: }\n5850: \n5851: #else /* !CONFIG_SCHED_CORE */\n5852: \n5853: static inline void sched_core_cpu_starting(unsigned int cpu) {}\n5854: static inline void sched_core_cpu_deactivate(unsigned int cpu) {}\n5855: static inline void sched_core_cpu_dying(unsigned int cpu) {}\n5856: \n5857: static struct task_struct *\n5858: pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)\n5859: {\n5860: \treturn __pick_next_task(rq, prev, rf);\n5861: }\n5862: \n5863: #endif /* CONFIG_SCHED_CORE */\n5864: \n5865: /*"
+    },
+    {
+      "id": "X_core_kconfig",
+      "kind": "source",
+      "path": "kernel/Kconfig.preempt",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 103,
+      "end_line": 121,
+      "full_original_file_sha256": "e4f7d1ffe64d9bcc850017d38d104f82ecc58dc977bcd14fd22ae3338b3f94ec",
+      "source": "local_git_object_original_uninstrumented",
+      "text": "103: config SCHED_CORE\n104: \tbool \"Core Scheduling for SMT\"\n105: \tdepends on SCHED_SMT\n106: \thelp\n107: \t  This option permits Core Scheduling, a means of coordinated task\n108: \t  selection across SMT siblings. When enabled -- see\n109: \t  prctl(PR_SCHED_CORE) -- task selection ensures that all SMT siblings\n110: \t  will execute a task from the same 'core group', forcing idle when no\n111: \t  matching task is found.\n112: \n113: \t  Use of this feature includes:\n114: \t   - mitigation of some (not all) SMT side channels;\n115: \t   - limiting SMT interference to improve determinism and/or performance.\n116: \n117: \t  SCHED_CORE is default disabled. When it is enabled and unused,\n118: \t  which is the likely usage by Linux distributions, there should\n119: \t  be no measurable impact on performance.\n120: \n121: "
+    }
+  ],
+  "old_candidates_to_audit": [
+    {
+      "origin": "pair",
+      "original_predicate": {
+        "op": "contains",
+        "args": [
+          {
+            "symbol": "cpu_smt_mask(cpu)"
+          },
+          {
+            "symbol": "cpu"
+          }
+        ]
+      },
+      "original_consumer": {
+        "function": "sched_core_cpu_starting",
+        "event": "first_read",
+        "anchor": "cpu_smt_mask(cpu)",
+        "evidence": [
+          {
+            "document": "S_core",
+            "start_line": 5755,
+            "end_line": 5755
+          },
+          {
+            "document": "S_starting",
+            "start_line": 8836,
+            "end_line": 8836
+          },
+          {
+            "document": "S_table",
+            "start_line": 1694,
+            "end_line": 1694
+          }
+        ]
+      },
+      "basis_to_audit": "sched_core_cpu_starting第5765行检查cpumask_weight假定掩码非空，第5769行for_each_cpu迭代要求掩码至少含cpu自身以找到core leader，x86通过set_cpu_sibling_map显式满足",
+      "note": "old model claim, not a correct-answer label"
+    },
+    {
+      "origin": "ablated",
+      "original_predicate": {
+        "op": "contains",
+        "args": [
+          {
+            "symbol": "smt_mask"
+          },
+          {
+            "symbol": "cpu"
+          }
+        ]
+      },
+      "original_consumer": {
+        "function": "sched_core_cpu_starting",
+        "event": "first_read",
+        "anchor": "const struct cpumask *smt_mask = cpu_smt_mask(cpu);",
+        "evidence": [
+          {
+            "document": "S_core",
+            "start_line": 5755,
+            "end_line": 5755
+          }
+        ]
+      },
+      "basis_to_audit": "sched_core_cpu_starting随后以for_each_cpu(t, smt_mask)遍历并多次使用t==cpu分支（如5770-5771、5786-5787行）为cpu自身赋值core_rq，若cpu不在smt_mask中，该特判逻辑永不触发，leader查找与core_rq安装将出现逻辑缺口；这要求smt_mask在被读取使用时已含cpu自身，但该填充时机的证据不在本材料范围内",
+      "note": "old model claim, not a correct-answer label"
+    }
+  ]
+}

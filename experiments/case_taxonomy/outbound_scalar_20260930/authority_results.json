@@ -1,0 +1,950 @@
+{
+  "schema": "outbound-scalar-authority-v1",
+  "created_utc": "2026-09-30T11:32:41.196277+00:00",
+  "scope": "Reduced C expressions only; no real kernel, controller or PCIe device",
+  "independent_causal_chains": 2,
+  "contracts": {
+    "hci_ll": {
+      "A": "BT_HCIUART_LL with SERDEV; WiLink 8 compatible; successful setup and nonzero speed enters opcode 0xff36 branch",
+      "A_source_refs": [
+        "hci_old_config:supported_config",
+        "hci_old_driver:compatible",
+        "hci_old_driver:host_speed"
+      ],
+      "P": "host u32 speed must be encoded as four least-significant-byte-first command-parameter bytes; serial API retains host numeric speed",
+      "P_source_refs": [
+        "hci_old_driver:opcode",
+        "hci_old_driver:host_speed",
+        "hci_fix_driver:fixed_command"
+      ],
+      "P_external_authority": "TI SWRU442B (revised October 2017), pp. 6 and 13; WiLink 8 scope",
+      "C": "old &speed or fixed &speed_le passes __hci_cmd_sync and reaches skb_put_data, which memcpy-copies the four payload bytes",
+      "C_source_refs": [
+        "hci_old_driver:old_command",
+        "hci_old_request:sync_to_request",
+        "hci_old_request:payload_copy",
+        "hci_old_skb_copy:raw_copy"
+      ],
+      "normal_controls": [
+        "positive speeds on little-endian CPU have identical old/fixed payloads",
+        "speed=0 has identical bytes but does not enter actual if(speed) send branch"
+      ],
+      "limit": "TI guide covers WiLink 8, not every older compatible; no firmware or hardware execution"
+    },
+    "mpt3sas": {
+      "A": "SCSI_MPT3SAS depends on PCI and SCSI; PCIe SGL selection path after scsi_dma_map succeeds",
+      "A_source_refs": [
+        "mpt_old_config:supported_config",
+        "mpt_old_driver:consumer"
+      ],
+      "P": "scsi_bufflen returns host numeric sdb.length; NVME_PRP_PAGE_SIZE=4096; threshold=16384 host bytes",
+      "P_source_refs": [
+        "mpt_old_length_provider:length_provider",
+        "mpt_old_constant:page_constant"
+      ],
+      "C": "base_is_prp_possible compares data_length<=16384 and sge_count<=2; caller selects IEEE or PRP",
+      "C_source_refs": [
+        "mpt_old_driver:old_condition",
+        "mpt_fix_driver:fixed_condition",
+        "mpt_old_driver:consumer"
+      ],
+      "normal_controls": [
+        "all selected lengths on little-endian CPU give old=fixed",
+        "sge_count=3 masks length condition on both CPUs",
+        "16385 bytes with two SGEs selects PRP in both versions"
+      ],
+      "limit": "s390x runs a reduced scalar function only; real adapter reachability and IO effects untested"
+    }
+  },
+  "external_authority": {
+    "title": "WiLink 8.0 Bluetooth Vendor-Specific HCI Commands",
+    "document": "SWRU442B",
+    "revision": "October 2017",
+    "url": "https://www.ti.com/lit/ug/swru442b/swru442b.pdf",
+    "pages": [
+      6,
+      13
+    ],
+    "scope": "WiLink 8 family including WL183xMOD; does not establish every older hci_ll compatible"
+  },
+  "probe_source_sha256": "d3f1e2917e3a74156ee4c4d421ccfabb2aed827a44f35bba076eda9d7962645d",
+  "historical_sources": [
+    {
+      "label": "hci_old_driver",
+      "revision": "c30b93eade2ad1d77695669f25ddeb3833588d3b^",
+      "path": "drivers/bluetooth/hci_ll.c",
+      "sha256": "fe9ed2334601d130592ed44d4abcf51df711ce1edea97cd4de5f0d229712c07d",
+      "anchors": {
+        "opcode": [
+          {
+            "line": 60,
+            "text": "#define HCI_VS_UPDATE_UART_HCI_BAUDRATE\t\t0xff36"
+          }
+        ],
+        "host_speed": [
+          {
+            "line": 670,
+            "text": "\tu32 speed;"
+          },
+          {
+            "line": 702,
+            "text": "\tif (hu->oper_speed)"
+          },
+          {
+            "line": 703,
+            "text": "\t\tspeed = hu->oper_speed;"
+          },
+          {
+            "line": 704,
+            "text": "\telse if (hu->proto->oper_speed)"
+          },
+          {
+            "line": 705,
+            "text": "\t\tspeed = hu->proto->oper_speed;"
+          },
+          {
+            "line": 706,
+            "text": "\telse"
+          },
+          {
+            "line": 707,
+            "text": "\t\tspeed = 0;"
+          }
+        ],
+        "old_command": [
+          {
+            "line": 712,
+            "text": "\t\tskb = __hci_cmd_sync(hu->hdev, HCI_VS_UPDATE_UART_HCI_BAUDRATE,"
+          },
+          {
+            "line": 713,
+            "text": "\t\t\t\t     sizeof(speed), &speed, HCI_INIT_TIMEOUT);"
+          },
+          {
+            "line": 714,
+            "text": "\t\tif (!IS_ERR(skb)) {"
+          },
+          {
+            "line": 716,
+            "text": "\t\t\tserdev_device_set_baudrate(serdev, speed);"
+          }
+        ],
+        "compatible": [
+          {
+            "line": 760,
+            "text": "static const struct of_device_id hci_ti_of_match[] = {"
+          },
+          {
+            "line": 761,
+            "text": "\t{ .compatible = \"ti,wl1271-st\" },"
+          },
+          {
+            "line": 762,
+            "text": "\t{ .compatible = \"ti,wl1273-st\" },"
+          },
+          {
+            "line": 763,
+            "text": "\t{ .compatible = \"ti,wl1281-st\" },"
+          },
+          {
+            "line": 764,
+            "text": "\t{ .compatible = \"ti,wl1283-st\" },"
+          },
+          {
+            "line": 765,
+            "text": "\t{ .compatible = \"ti,wl1285-st\" },"
+          },
+          {
+            "line": 766,
+            "text": "\t{ .compatible = \"ti,wl1801-st\" },"
+          },
+          {
+            "line": 767,
+            "text": "\t{ .compatible = \"ti,wl1805-st\" },"
+          },
+          {
+            "line": 768,
+            "text": "\t{ .compatible = \"ti,wl1807-st\" },"
+          },
+          {
+            "line": 769,
+            "text": "\t{ .compatible = \"ti,wl1831-st\" },"
+          },
+          {
+            "line": 770,
+            "text": "\t{ .compatible = \"ti,wl1835-st\" },"
+          },
+          {
+            "line": 771,
+            "text": "\t{ .compatible = \"ti,wl1837-st\" },"
+          }
+        ]
+      }
+    },
+    {
+      "label": "hci_fix_driver",
+      "revision": "c30b93eade2ad1d77695669f25ddeb3833588d3b",
+      "path": "drivers/bluetooth/hci_ll.c",
+      "sha256": "6fe657a8f8d44b435303d7e84a3b5a0657f5859c88aba1fccdeb7832129ad398",
+      "anchors": {
+        "fixed_command": [
+          {
+            "line": 709,
+            "text": "\tif (speed) {"
+          },
+          {
+            "line": 710,
+            "text": "\t\t__le32 speed_le = cpu_to_le32(speed);"
+          },
+          {
+            "line": 711,
+            "text": "\t\tstruct sk_buff *skb;"
+          },
+          {
+            "line": 712,
+            "text": ""
+          },
+          {
+            "line": 713,
+            "text": "\t\tskb = __hci_cmd_sync(hu->hdev, HCI_VS_UPDATE_UART_HCI_BAUDRATE,"
+          },
+          {
+            "line": 714,
+            "text": "\t\t\t\t     sizeof(speed_le), &speed_le,"
+          },
+          {
+            "line": 715,
+            "text": "\t\t\t\t     HCI_INIT_TIMEOUT);"
+          },
+          {
+            "line": 716,
+            "text": "\t\tif (!IS_ERR(skb)) {"
+          },
+          {
+            "line": 717,
+            "text": "\t\t\tkfree_skb(skb);"
+          },
+          {
+            "line": 718,
+            "text": "\t\t\tserdev_device_set_baudrate(serdev, speed);"
+          }
+        ]
+      }
+    },
+    {
+      "label": "hci_old_request",
+      "revision": "c30b93eade2ad1d77695669f25ddeb3833588d3b^",
+      "path": "net/bluetooth/hci_request.c",
+      "sha256": "d60f411a6a7f9c3d06e79be07dc9d64f4d1742c1274df1ef3adcf479e5b30345",
+      "anchors": {
+        "sync_to_request": [
+          {
+            "line": 122,
+            "text": "struct sk_buff *__hci_cmd_sync_ev(struct hci_dev *hdev, u16 opcode, u32 plen,"
+          },
+          {
+            "line": 123,
+            "text": "\t\t\t\t  const void *param, u8 event, u32 timeout)"
+          },
+          {
+            "line": 134,
+            "text": "\thci_req_add_ev(&req, opcode, plen, param, event);"
+          },
+          {
+            "line": 187,
+            "text": "struct sk_buff *__hci_cmd_sync(struct hci_dev *hdev, u16 opcode, u32 plen,"
+          },
+          {
+            "line": 188,
+            "text": "\t\t\t       const void *param, u32 timeout)"
+          },
+          {
+            "line": 190,
+            "text": "\treturn __hci_cmd_sync_ev(hdev, opcode, plen, param, 0, timeout);"
+          },
+          {
+            "line": 323,
+            "text": "void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,"
+          },
+          {
+            "line": 324,
+            "text": "\t\t    const void *param, u8 event)"
+          },
+          {
+            "line": 337,
+            "text": "\tskb = hci_prepare_cmd(hdev, opcode, plen, param);"
+          }
+        ],
+        "payload_copy": [
+          {
+            "line": 296,
+            "text": "struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,"
+          },
+          {
+            "line": 297,
+            "text": "\t\t\t\tconst void *param)"
+          },
+          {
+            "line": 298,
+            "text": "{"
+          },
+          {
+            "line": 299,
+            "text": "\tint len = HCI_COMMAND_HDR_SIZE + plen;"
+          },
+          {
+            "line": 300,
+            "text": "\tstruct hci_command_hdr *hdr;"
+          },
+          {
+            "line": 301,
+            "text": "\tstruct sk_buff *skb;"
+          },
+          {
+            "line": 302,
+            "text": ""
+          },
+          {
+            "line": 303,
+            "text": "\tskb = bt_skb_alloc(len, GFP_ATOMIC);"
+          },
+          {
+            "line": 304,
+            "text": "\tif (!skb)"
+          },
+          {
+            "line": 305,
+            "text": "\t\treturn NULL;"
+          },
+          {
+            "line": 306,
+            "text": ""
+          },
+          {
+            "line": 307,
+            "text": "\thdr = skb_put(skb, HCI_COMMAND_HDR_SIZE);"
+          },
+          {
+            "line": 308,
+            "text": "\thdr->opcode = cpu_to_le16(opcode);"
+          },
+          {
+            "line": 309,
+            "text": "\thdr->plen   = plen;"
+          },
+          {
+            "line": 310,
+            "text": ""
+          },
+          {
+            "line": 311,
+            "text": "\tif (plen)"
+          },
+          {
+            "line": 312,
+            "text": "\t\tskb_put_data(skb, param, plen);"
+          }
+        ]
+      }
+    },
+    {
+      "label": "hci_old_skb_copy",
+      "revision": "c30b93eade2ad1d77695669f25ddeb3833588d3b^",
+      "path": "include/linux/skbuff.h",
+      "sha256": "54a58157c5244b63af6233f8407806c049c57d588a543579ca4e67ac344e70ff",
+      "anchors": {
+        "raw_copy": [
+          {
+            "line": 2046,
+            "text": "static inline void *skb_put_data(struct sk_buff *skb, const void *data,"
+          },
+          {
+            "line": 2047,
+            "text": "\t\t\t\t unsigned int len)"
+          },
+          {
+            "line": 2048,
+            "text": "{"
+          },
+          {
+            "line": 2049,
+            "text": "\tvoid *tmp = skb_put(skb, len);"
+          },
+          {
+            "line": 2050,
+            "text": ""
+          },
+          {
+            "line": 2051,
+            "text": "\tmemcpy(tmp, data, len);"
+          },
+          {
+            "line": 2052,
+            "text": ""
+          },
+          {
+            "line": 2053,
+            "text": "\treturn tmp;"
+          }
+        ]
+      }
+    },
+    {
+      "label": "hci_old_config",
+      "revision": "c30b93eade2ad1d77695669f25ddeb3833588d3b^",
+      "path": "drivers/bluetooth/Kconfig",
+      "sha256": "2966b8678217bb39a259ad080d57a6ab94f1621ea23876c3933dceafbb66765a",
+      "anchors": {
+        "supported_config": [
+          {
+            "line": 145,
+            "text": "config BT_HCIUART_LL"
+          },
+          {
+            "line": 146,
+            "text": "\tbool \"HCILL protocol support\""
+          },
+          {
+            "line": 147,
+            "text": "\tdepends on BT_HCIUART_SERDEV"
+          },
+          {
+            "line": 148,
+            "text": "\thelp"
+          },
+          {
+            "line": 149,
+            "text": "\t  HCILL (HCI Low Level) is a serial protocol for communication"
+          },
+          {
+            "line": 150,
+            "text": "\t  between Bluetooth device and host. This protocol is required for"
+          },
+          {
+            "line": 151,
+            "text": "\t  serial Bluetooth devices that are based on Texas Instruments'"
+          },
+          {
+            "line": 152,
+            "text": "\t  BRF chips."
+          }
+        ]
+      }
+    },
+    {
+      "label": "mpt_old_driver",
+      "revision": "494f401bcd07d6b39f49f114e4eaa788842f16fe^",
+      "path": "drivers/scsi/mpt3sas/mpt3sas_base.c",
+      "sha256": "b7ff0fe78abb3d12ac27b9292a2337e93debec8f430dc16d2c5aa18c9539c293",
+      "anchors": {
+        "old_condition": [
+          {
+            "line": 1735,
+            "text": "static bool"
+          },
+          {
+            "line": 1736,
+            "text": "base_is_prp_possible(struct MPT3SAS_ADAPTER *ioc,"
+          },
+          {
+            "line": 1737,
+            "text": "\tstruct _pcie_device *pcie_device, struct scsi_cmnd *scmd, int sge_count)"
+          },
+          {
+            "line": 1738,
+            "text": "{"
+          },
+          {
+            "line": 1739,
+            "text": "\tu32 data_length = 0;"
+          },
+          {
+            "line": 1740,
+            "text": "\tstruct scatterlist *sg_scmd;"
+          },
+          {
+            "line": 1741,
+            "text": "\tbool build_prp = true;"
+          },
+          {
+            "line": 1742,
+            "text": ""
+          },
+          {
+            "line": 1743,
+            "text": "\tdata_length = cpu_to_le32(scsi_bufflen(scmd));"
+          },
+          {
+            "line": 1744,
+            "text": "\tsg_scmd = scsi_sglist(scmd);"
+          },
+          {
+            "line": 1745,
+            "text": ""
+          },
+          {
+            "line": 1746,
+            "text": "\t/* If Datalenth is <= 16K and number of SGE’s entries are <= 2"
+          },
+          {
+            "line": 1747,
+            "text": "\t * we built IEEE SGL"
+          },
+          {
+            "line": 1748,
+            "text": "\t */"
+          },
+          {
+            "line": 1749,
+            "text": "\tif ((data_length <= NVME_PRP_PAGE_SIZE*4) && (sge_count <= 2))"
+          },
+          {
+            "line": 1750,
+            "text": "\t\tbuild_prp = false;"
+          },
+          {
+            "line": 1751,
+            "text": ""
+          },
+          {
+            "line": 1752,
+            "text": "\treturn build_prp;"
+          }
+        ],
+        "consumer": [
+          {
+            "line": 1788,
+            "text": "\t/* Check if we need to build a native SG list. */"
+          },
+          {
+            "line": 1789,
+            "text": "\tif (base_is_prp_possible(ioc, pcie_device,"
+          },
+          {
+            "line": 1790,
+            "text": "\t\t\t\tscmd, sges_left) == 0) {"
+          },
+          {
+            "line": 1791,
+            "text": "\t\t/* We built a native SG list, just return. */"
+          },
+          {
+            "line": 1792,
+            "text": "\t\tgoto out;"
+          },
+          {
+            "line": 1793,
+            "text": "\t}"
+          },
+          {
+            "line": 1794,
+            "text": ""
+          },
+          {
+            "line": 1795,
+            "text": "\t/*"
+          },
+          {
+            "line": 1796,
+            "text": "\t * Build native NVMe PRP."
+          },
+          {
+            "line": 1797,
+            "text": "\t */"
+          },
+          {
+            "line": 1798,
+            "text": "\tbase_make_prp_nvme(ioc, scmd, mpi_request,"
+          },
+          {
+            "line": 1799,
+            "text": "\t\t\tsmid, sges_left);"
+          },
+          {
+            "line": 1800,
+            "text": ""
+          },
+          {
+            "line": 1801,
+            "text": "\treturn 0;"
+          }
+        ]
+      }
+    },
+    {
+      "label": "mpt_fix_driver",
+      "revision": "494f401bcd07d6b39f49f114e4eaa788842f16fe",
+      "path": "drivers/scsi/mpt3sas/mpt3sas_base.c",
+      "sha256": "eca8d249a610732e433a62d096337b24136a84181a4b8de06a889817b8c34de5",
+      "anchors": {
+        "fixed_condition": [
+          {
+            "line": 1735,
+            "text": "static bool"
+          },
+          {
+            "line": 1736,
+            "text": "base_is_prp_possible(struct MPT3SAS_ADAPTER *ioc,"
+          },
+          {
+            "line": 1737,
+            "text": "\tstruct _pcie_device *pcie_device, struct scsi_cmnd *scmd, int sge_count)"
+          },
+          {
+            "line": 1738,
+            "text": "{"
+          },
+          {
+            "line": 1739,
+            "text": "\tu32 data_length = 0;"
+          },
+          {
+            "line": 1740,
+            "text": "\tstruct scatterlist *sg_scmd;"
+          },
+          {
+            "line": 1741,
+            "text": "\tbool build_prp = true;"
+          },
+          {
+            "line": 1742,
+            "text": ""
+          },
+          {
+            "line": 1743,
+            "text": "\tdata_length = scsi_bufflen(scmd);"
+          },
+          {
+            "line": 1744,
+            "text": "\tsg_scmd = scsi_sglist(scmd);"
+          },
+          {
+            "line": 1745,
+            "text": ""
+          },
+          {
+            "line": 1746,
+            "text": "\t/* If Datalenth is <= 16K and number of SGE’s entries are <= 2"
+          },
+          {
+            "line": 1747,
+            "text": "\t * we built IEEE SGL"
+          },
+          {
+            "line": 1748,
+            "text": "\t */"
+          },
+          {
+            "line": 1749,
+            "text": "\tif ((data_length <= NVME_PRP_PAGE_SIZE*4) && (sge_count <= 2))"
+          },
+          {
+            "line": 1750,
+            "text": "\t\tbuild_prp = false;"
+          },
+          {
+            "line": 1751,
+            "text": ""
+          },
+          {
+            "line": 1752,
+            "text": "\treturn build_prp;"
+          }
+        ]
+      }
+    },
+    {
+      "label": "mpt_old_constant",
+      "revision": "494f401bcd07d6b39f49f114e4eaa788842f16fe^",
+      "path": "drivers/scsi/mpt3sas/mpt3sas_base.h",
+      "sha256": "694948d4283a6999b9d6b2ece79034fe71d1f5a479fb5a9250e9c60c13dba7e7",
+      "anchors": {
+        "page_constant": [
+          {
+            "line": 144,
+            "text": "#define\tNVME_PRP_PAGE_SIZE\t\t4096\t/* Page size */"
+          }
+        ]
+      }
+    },
+    {
+      "label": "mpt_old_length_provider",
+      "revision": "494f401bcd07d6b39f49f114e4eaa788842f16fe^",
+      "path": "include/scsi/scsi_cmnd.h",
+      "sha256": "0915f63c1205ab35afcb9075d4fdd2f0c993dd944d29e482fb402d9747a1662c",
+      "anchors": {
+        "length_provider": [
+          {
+            "line": 188,
+            "text": "static inline unsigned scsi_bufflen(struct scsi_cmnd *cmd)"
+          },
+          {
+            "line": 189,
+            "text": "{"
+          },
+          {
+            "line": 190,
+            "text": "\treturn cmd->sdb.length;"
+          }
+        ]
+      }
+    },
+    {
+      "label": "mpt_old_config",
+      "revision": "494f401bcd07d6b39f49f114e4eaa788842f16fe^",
+      "path": "drivers/scsi/mpt3sas/Kconfig",
+      "sha256": "7fded39385ef9c777e0b56e782447a987bf5d410054c36185812e9b8c1587869",
+      "anchors": {
+        "supported_config": [
+          {
+            "line": 43,
+            "text": "config SCSI_MPT3SAS"
+          },
+          {
+            "line": 44,
+            "text": "\ttristate \"LSI MPT Fusion SAS 3.0 & SAS 2.0 Device Driver\""
+          },
+          {
+            "line": 45,
+            "text": "\tdepends on PCI && SCSI"
+          },
+          {
+            "line": 46,
+            "text": "\tselect SCSI_SAS_ATTRS"
+          },
+          {
+            "line": 47,
+            "text": "\tselect RAID_ATTRS"
+          },
+          {
+            "line": 48,
+            "text": "\t---help---"
+          },
+          {
+            "line": 49,
+            "text": "\tThis driver supports PCI-Express SAS 12Gb/s Host Adapters."
+          }
+        ]
+      }
+    }
+  ],
+  "runs": {
+    "x86_64": {
+      "host_endian": "little",
+      "u32_bytes": 4,
+      "hci": [
+        {
+          "speed": 0,
+          "old_payload_hex": "00000000",
+          "fixed_payload_hex": "00000000",
+          "contract_payload_hex": "00000000",
+          "host_speed_for_serial_api": 0
+        },
+        {
+          "speed": 115200,
+          "old_payload_hex": "00c20100",
+          "fixed_payload_hex": "00c20100",
+          "contract_payload_hex": "00c20100",
+          "host_speed_for_serial_api": 115200
+        },
+        {
+          "speed": 3000000,
+          "old_payload_hex": "c0c62d00",
+          "fixed_payload_hex": "c0c62d00",
+          "contract_payload_hex": "c0c62d00",
+          "host_speed_for_serial_api": 3000000
+        }
+      ],
+      "mpt": [
+        {
+          "host_length_bytes": 0,
+          "sge_count": 2,
+          "old_compared_numeric_value": 0,
+          "old_build_prp": false,
+          "fixed_build_prp": false
+        },
+        {
+          "host_length_bytes": 0,
+          "sge_count": 3,
+          "old_compared_numeric_value": 0,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 4096,
+          "sge_count": 2,
+          "old_compared_numeric_value": 4096,
+          "old_build_prp": false,
+          "fixed_build_prp": false
+        },
+        {
+          "host_length_bytes": 4096,
+          "sge_count": 3,
+          "old_compared_numeric_value": 4096,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 16384,
+          "sge_count": 2,
+          "old_compared_numeric_value": 16384,
+          "old_build_prp": false,
+          "fixed_build_prp": false
+        },
+        {
+          "host_length_bytes": 16384,
+          "sge_count": 3,
+          "old_compared_numeric_value": 16384,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 16385,
+          "sge_count": 2,
+          "old_compared_numeric_value": 16385,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 16385,
+          "sge_count": 3,
+          "old_compared_numeric_value": 16385,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 65536,
+          "sge_count": 2,
+          "old_compared_numeric_value": 65536,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 65536,
+          "sge_count": 3,
+          "old_compared_numeric_value": 65536,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        }
+      ],
+      "raw_stdout": "META,little,4\nHCI,0,00000000,00000000,00000000,0\nHCI,115200,00c20100,00c20100,00c20100,115200\nHCI,3000000,c0c62d00,c0c62d00,c0c62d00,3000000\nMPT,0,2,0,0,0\nMPT,0,3,0,1,1\nMPT,4096,2,4096,0,0\nMPT,4096,3,4096,1,1\nMPT,16384,2,16384,0,0\nMPT,16384,3,16384,1,1\nMPT,16385,2,16385,1,1\nMPT,16385,3,16385,1,1\nMPT,65536,2,65536,1,1\nMPT,65536,3,65536,1,1\n",
+      "compiler": "gcc",
+      "compiler_version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "launcher": [
+        "native"
+      ]
+    },
+    "s390x": {
+      "host_endian": "big",
+      "u32_bytes": 4,
+      "hci": [
+        {
+          "speed": 0,
+          "old_payload_hex": "00000000",
+          "fixed_payload_hex": "00000000",
+          "contract_payload_hex": "00000000",
+          "host_speed_for_serial_api": 0
+        },
+        {
+          "speed": 115200,
+          "old_payload_hex": "0001c200",
+          "fixed_payload_hex": "00c20100",
+          "contract_payload_hex": "00c20100",
+          "host_speed_for_serial_api": 115200
+        },
+        {
+          "speed": 3000000,
+          "old_payload_hex": "002dc6c0",
+          "fixed_payload_hex": "c0c62d00",
+          "contract_payload_hex": "c0c62d00",
+          "host_speed_for_serial_api": 3000000
+        }
+      ],
+      "mpt": [
+        {
+          "host_length_bytes": 0,
+          "sge_count": 2,
+          "old_compared_numeric_value": 0,
+          "old_build_prp": false,
+          "fixed_build_prp": false
+        },
+        {
+          "host_length_bytes": 0,
+          "sge_count": 3,
+          "old_compared_numeric_value": 0,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 4096,
+          "sge_count": 2,
+          "old_compared_numeric_value": 1048576,
+          "old_build_prp": true,
+          "fixed_build_prp": false
+        },
+        {
+          "host_length_bytes": 4096,
+          "sge_count": 3,
+          "old_compared_numeric_value": 1048576,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 16384,
+          "sge_count": 2,
+          "old_compared_numeric_value": 4194304,
+          "old_build_prp": true,
+          "fixed_build_prp": false
+        },
+        {
+          "host_length_bytes": 16384,
+          "sge_count": 3,
+          "old_compared_numeric_value": 4194304,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 16385,
+          "sge_count": 2,
+          "old_compared_numeric_value": 20971520,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 16385,
+          "sge_count": 3,
+          "old_compared_numeric_value": 20971520,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 65536,
+          "sge_count": 2,
+          "old_compared_numeric_value": 256,
+          "old_build_prp": false,
+          "fixed_build_prp": true
+        },
+        {
+          "host_length_bytes": 65536,
+          "sge_count": 3,
+          "old_compared_numeric_value": 256,
+          "old_build_prp": true,
+          "fixed_build_prp": true
+        }
+      ],
+      "raw_stdout": "META,big,4\nHCI,0,00000000,00000000,00000000,0\nHCI,115200,0001c200,00c20100,00c20100,115200\nHCI,3000000,002dc6c0,c0c62d00,c0c62d00,3000000\nMPT,0,2,0,0,0\nMPT,0,3,0,1,1\nMPT,4096,2,1048576,1,0\nMPT,4096,3,1048576,1,1\nMPT,16384,2,4194304,1,0\nMPT,16384,3,4194304,1,1\nMPT,16385,2,20971520,1,1\nMPT,16385,3,20971520,1,1\nMPT,65536,2,256,0,1\nMPT,65536,3,256,1,1\n",
+      "compiler": "s390x-linux-gnu-gcc",
+      "compiler_version": "s390x-linux-gnu-gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "launcher": [
+        "qemu-s390x"
+      ]
+    }
+  },
+  "assertions": [
+    "x86_64: fixed HCI bytes and host-length threshold conform",
+    "s390x: fixed HCI bytes and host-length threshold conform",
+    "little-endian old and fixed are equal for all selected inputs",
+    "big-endian nonzero HCI values differ; zero is a normal counterexample",
+    "big-endian threshold reversals and sge_count=3 normal branch"
+  ]
+}

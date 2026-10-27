@@ -1,0 +1,1258 @@
+{
+  "date": "2026-09-30",
+  "phase": "bounded_metadata_only_search_for_next_state_holdout",
+  "research_contract": "Under applicable SMP and PMU configuration/hardware, cross-CPU PMU initialization consuming the online-CPU set should follow SMP online readiness; unrelated hotplug, preemptibility, failure cleanup and run-time event setup are not interchangeable.",
+  "repository": {
+    "path": "/root/repos/linux",
+    "head_at_query": "df2908090cda368b01ff43709f51890076c56157",
+    "access": "WSL Ubuntu read-only local Git"
+  },
+  "applicable_agency_files": {
+    "checked": [
+      "/AGENTS.md",
+      "/root/AGENTS.md",
+      "/root/repos/AGENTS.md",
+      "/root/repos/linux/AGENTS.md"
+    ],
+    "found": [],
+    "windows_write_workspace": "D:/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy"
+  },
+  "query": {
+    "args": [
+      "git",
+      "-C",
+      "/root/repos/linux",
+      "log",
+      "--all",
+      "-n",
+      "100",
+      "--no-renames",
+      "--format=%H%x09%cs%x09%s",
+      "--name-only",
+      "--",
+      "arch/loongarch/kernel/perf_event.c",
+      "arch/riscv/kernel/perf_event.c",
+      "arch/arm64/kernel/perf_event.c",
+      "arch/arm/kernel/perf_event.c",
+      "arch/s390/kernel/perf_event.c",
+      "arch/x86/events/core.c"
+    ],
+    "commit_limit": 100,
+    "commits_returned": 100,
+    "body_or_diff_or_source_read": false,
+    "title_filter_only": true,
+    "git_grep_body_filter_used": false,
+    "paths_note": "Git path-limited --name-only returned matching queried paths only, not each commit's complete changed-file set. Merge entries can have no names in this mode.",
+    "parser_note": "Removed NUL bytes from WSL warning; parsed only SHA40/TAB/date/TAB/subject headers, so the first commit was retained.",
+    "matched_path_counts": {
+      "arch/x86/events/core.c": 63,
+      "arch/loongarch/kernel/perf_event.c": 7,
+      "arch/s390/kernel/perf_event.c": 7,
+      "arch/arm64/kernel/perf_event.c": 1
+    },
+    "merge_title_count": 23
+  },
+  "pollution_check": {
+    "scope": "existing experiments/case_taxonomy *.md, *.json and *.tsv references to all 100 twelve-character SHA prefixes",
+    "found_prior_source_exposed_shas": [
+      "f3334ebb8a2a",
+      "4c8a7c982772"
+    ],
+    "known_evidence": [
+      "state_pmu_phase_validation.md",
+      "state_pmu_protocol_pre.md",
+      "state_pmu_v2_control_selection_pre.json",
+      "state_pmu_v2_control_raw_manifest_pre_review.json"
+    ],
+    "limitation": "Absence of a SHA reference is not proof that the code has never been read elsewhere. File and mechanism overlap must also be audited before any future freeze."
+  },
+  "decision": {
+    "status": "stop_no_unread_same_mechanism_positive_identified_within_bound",
+    "selected_positive": null,
+    "selected_new_normal_control": null,
+    "reason": "唯一标题明确指向 SMP online 后 PMU 初始化的修订 f3334ebb8a2a 已参与开发；其余近邻标题并未提供同一启动阶段消费机制。已知同接口正常对照 4c8a7c982772 已读；无新阳性时不增加正常回放充当泛化验证。",
+    "detector_executions": 0,
+    "paid_model_calls": 0,
+    "new_defect_count": 0,
+    "next_action": "若下一轮扩大元数据池，先独立冻结新的跨架构 PMU/SMP 初始阶段候选范围，并记录完整池和阅读污染；确认可合理预期同机制新阳性后再冻结提取器和正常对照。"
+  },
+  "coverage_limitations": [
+    "本轮六个路径历史由 x86 高频修改占多数；未覆盖 drivers/perf 中 ARM PMUv3 搬迁后的全部历史，也未覆盖 PowerPC 等架构。",
+    "最多 100 条包含合并提交，不代表所有历史 PMU 修订已检查。",
+    "未找到候选是有界元数据筛选结果，不是 Linux 中不存在同类问题，也不构成规则假阴性、阴性正常或召回率。"
+  ],
+  "shortlist_review": [
+    {
+      "sha": "278a3731c9d08bc6ea489c1987c6b7a7020f5d2b",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Guard intel_pmu_cpu_dead() against invalid hybrid PMU casts",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为 CPU dead/hybrid PMU 类型检查，不能据此推断启动前 SMP online 消费顺序。"
+    },
+    {
+      "sha": "96746e731e1626545e343974ca4673739dceb31b",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Free hybrid state on PMU init failure",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为 PMU 初始化失败时的状态释放，不是在线 CPU 集合准备完成前的跨 CPU 消费。"
+    },
+    {
+      "sha": "91787047b1dc52b1fee68b07f79af70aae5fce47",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Unregister PMI handler on PMU init failure",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为 PMU 初始化失败时卸载处理程序，不是 SMP online 的阶段修订。"
+    },
+    {
+      "sha": "8d5fae6011260de209aaf231120e8146b14bc8e0",
+      "date": "2026-03-12",
+      "subject": "perf/x86: Move event pointer setup earlier in x86_pmu_enable()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题在 x86_pmu_enable() 中提前事件指针设置，可能是运行期首次使用顺序，但不能替代启动阶段在线 CPU 契约。"
+    },
+    {
+      "sha": "a91f86e27087f250a5d9c89bb4a427b9c30fd815",
+      "date": "2026-01-17",
+      "subject": "LoongArch: Fix PMU counter allocation for mixed-type event groups",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "修复混合事件组计数器分配，同 PMU 文件路径可作以后正常对照候选；未证明相同初始化接口，也未解封。"
+    },
+    {
+      "sha": "4c8a7c9827726f6e987b7a04af8ef58f1c7fe8d3",
+      "date": "2025-11-10",
+      "subject": "LoongArch: Refine the init_hw_perf_events() function",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "decision": "exclude_prior_exposed",
+      "reason": "标题指向已知同接口正常对照，但 9/28 已运行且解封，不能计新增独立对照。"
+    },
+    {
+      "sha": "d243d0bb64af1e90ec18ac2fa6e7cadfe8895913",
+      "date": "2025-11-07",
+      "subject": "perf/x86/intel: Initialize architectural PEBS",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为新增/初始化 PEBS 支持，未指明 SMP online 之前的消费或阶段修复。"
+    },
+    {
+      "sha": "f73cefa3b72eaa90abfc43bf6d68137ba059d4b1",
+      "date": "2024-07-31",
+      "subject": "perf/x86: Fix smp_processor_id()-in-preemptible warnings",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为可抢占上下文中的 smp_processor_id() 警告，未指明 online CPU 集合的启动阶段要求。"
+    },
+    {
+      "sha": "316863cb62fe7aaea30e7ef8e6481f1ba414b044",
+      "date": "2024-05-06",
+      "subject": "LoongArch/smp: Refine some ipi functions on LoongArch platform",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为 IPI 函数整理，与 CPU 相关但没有初始化阶段修订证据。"
+    },
+    {
+      "sha": "f3334ebb8a2a1841c2824594dd992e66de19deb2",
+      "date": "2024-04-25",
+      "subject": "LoongArch: Lately init pmu after smp is online",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "decision": "exclude_prior_exposed",
+      "reason": "标题直接符合所需机制，但 9/28 已读源码、补丁并参与开发，不能复用为独立阳性。"
+    },
+    {
+      "sha": "9e36fa42995a7c7fa8d84a429ca647736c4f1c66",
+      "date": "2023-05-01",
+      "subject": "LoongArch: Clean up the architectural interrupt definitions",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "decision": "metadata_only_near_miss",
+      "reason": "标题为中断定义整理，没有 SMP online 首次消费线索。"
+    }
+  ],
+  "candidate_pool": [
+    {
+      "sha": "917d558b151cad5b05991e5eaee22efab33525ca",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Optimize ACR handling in match_prev_assignment()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "3ba87c5bf11bea80e56abe17730085bc962ecfbe",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Remove stale fixed counter helper and fix hybrid PMU access",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "278a3731c9d08bc6ea489c1987c6b7a7020f5d2b",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Guard intel_pmu_cpu_dead() against invalid hybrid PMU casts",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "96746e731e1626545e343974ca4673739dceb31b",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Free hybrid state on PMU init failure",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "91787047b1dc52b1fee68b07f79af70aae5fce47",
+      "date": "2026-08-10",
+      "subject": "perf/x86: Unregister PMI handler on PMU init failure",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "3c4ec9b2a5db56b60127bfaf933ecdeea7a1f10a",
+      "date": "2026-06-30",
+      "subject": "perf/x86/intel: Keep cap_user_rdpmc in sync with RDPMC user-disable state",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "13e1a6d6a17eb4bca350e5bf59a89a3056c834ca",
+      "date": "2026-06-15",
+      "subject": "Merge tag 'irq-core-2026-06-13' of gitolite.kernel.org:pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "2b57c69917eeba3ee657f252257e37f31916ba2a",
+      "date": "2026-05-26",
+      "subject": "x86/irq: Make irqstats array based",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "8ba0b706a485b1e607594cf4210786d517ad1611",
+      "date": "2026-05-05",
+      "subject": "perf/x86/intel: Always reprogram ACR events to prevent stale masks",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "f1cac6ac62d28a9a57b17f51ac5795bf250c12d3",
+      "date": "2026-03-12",
+      "subject": "x86/perf: Make sure to program the counter value for stopped events on migration",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "8d5fae6011260de209aaf231120e8146b14bc8e0",
+      "date": "2026-03-12",
+      "subject": "perf/x86: Move event pointer setup earlier in x86_pmu_enable()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "bf4afc53b77aeaa48b5409da5c8da6bb4eff7f43",
+      "date": "2026-02-21",
+      "subject": "Convert 'alloc_obj' family to use the new default GFP_KERNEL argument",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "69050f8d6d075dc01af7a5f2f550a8067510366f",
+      "date": "2026-02-21",
+      "subject": "treewide: Replace kmalloc with kmalloc_obj for non-scalar types",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "4d84667627c4ff70826b349c449bbaf63b9af4e5",
+      "date": "2026-02-10",
+      "subject": "Merge tag 'perf-core-2026-02-09' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "a91f86e27087f250a5d9c89bb4a427b9c30fd815",
+      "date": "2026-01-17",
+      "subject": "LoongArch: Fix PMU counter allocation for mixed-type event groups",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "59af95e028d4114991b9bd96a39ad855b399cc07",
+      "date": "2026-01-15",
+      "subject": "perf/x86/intel: Add support for rdpmc user disable feature",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "8c74e4e3e0596950554962229582260f1501d899",
+      "date": "2026-01-15",
+      "subject": "perf/x86: Use macros to replace magic numbers in attr_rdpmc",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "2e4b28c48f88ce9e263957b1d944cf5349952f88",
+      "date": "2026-01-11",
+      "subject": "treewide: Update email address",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "01122b89361e565b3c88b9fbebe92dc5c7420cb7",
+      "date": "2025-12-19",
+      "subject": "perf: Use EXPORT_SYMBOL_FOR_KVM() for the mediated APIs",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "c8824a95d9673763a0a9d642f8c79b2162296923",
+      "date": "2025-12-17",
+      "subject": "perf/x86/core: Plumb mediated PMU capability from x86_pmu to x86_pmu_cap",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "b456a6ba5756b6fb7e651775343e713bd08418e7",
+      "date": "2025-12-17",
+      "subject": "perf/x86/core: Do not set bit width for unavailable counters",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "560ac136f25da2da44a8b68d581adfdc8230b7e2",
+      "date": "2025-12-17",
+      "subject": "perf/x86/core: Add APIs to switch to/from mediated PMI vector (for KVM)",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "2547f79b0b0cd969ae6f736890af4ebd9368cda5",
+      "date": "2025-12-02",
+      "subject": "Merge tag 's390-6.19-1' of git://git.kernel.org/pub/scm/linux/kernel/git/s390/linux",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "e2aa39b368bb147afe8f6bd63d962494354f6498",
+      "date": "2025-12-02",
+      "subject": "Merge tag 'x86_misc_for_6.19-rc1' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "6c26fbe8c9d3e932dce6afe2505b19b4b261cae9",
+      "date": "2025-12-01",
+      "subject": "Merge tag 'perf-core-2025-12-01' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "c3d17464f0262c9e3c156d4c6306e32cf530fa47",
+      "date": "2025-11-24",
+      "subject": "s390: Remove KMSG_COMPONENT macro",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "8e0b986c59c67e08ada646249f834655a9e6da16",
+      "date": "2025-11-17",
+      "subject": "s390: Remove compat support",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "cbba5d1b53fb82209feacb459edecb1ef8427119",
+      "date": "2025-11-14",
+      "subject": "Merge tag 'bpf-fixes' of git://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "6276c67f2bc4aeaf350a7cf889c33c38b3330ea9",
+      "date": "2025-11-12",
+      "subject": "x86: Restrict KVM-induced symbol exports to KVM modules where obvious/possible",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "4c8a7c9827726f6e987b7a04af8ef58f1c7fe8d3",
+      "date": "2025-11-10",
+      "subject": "LoongArch: Refine the init_hw_perf_events() function",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "prior_independent_normal_control_source_read",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "exclude_prior_exposed"
+    },
+    {
+      "sha": "d243d0bb64af1e90ec18ac2fa6e7cadfe8895913",
+      "date": "2025-11-07",
+      "subject": "perf/x86/intel: Initialize architectural PEBS",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "7e772a93eb61cb6265bdd1c5bde17d0f2718b452",
+      "date": "2025-11-07",
+      "subject": "perf/x86: Fix NULL event access and potential PEBS record loss",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "6d08340d1e354787d6c65a8c3cdd4d41ffb8a5ed",
+      "date": "2025-11-05",
+      "subject": "Revert \"perf/x86: Always store regs->ip in perf_callchain_kernel()\"",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "ae25884ad749e7f6e0c3565513bdc8aa2554a425",
+      "date": "2025-10-29",
+      "subject": "unwind_user/x86: Teach FP unwind about start of function",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "f49e1be19542487921e82b29004908966cb99d7c",
+      "date": "2025-08-21",
+      "subject": "perf/x86: Print PMU counters bitmap in x86_pmu_show_pmu_cap()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "0f3760d43da56736dcfc91c04c05fdf2936a158e",
+      "date": "2025-06-17",
+      "subject": "s390: Remove unnecessary include <linux/export.h>",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "785cdec46e9227f9433884ed3b436471e944007c",
+      "date": "2025-05-26",
+      "subject": "Merge tag 'x86-core-2025-05-25' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "b82f8885d1fd46d88c554877a0d87e9a1c3d7165",
+      "date": "2025-05-21",
+      "subject": "loongarch/perf: Remove driver-specific throttle support",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "b8328f67206c672a7140fd3a259892e17d96bbe6",
+      "date": "2025-05-21",
+      "subject": "perf/x86/intel: Remove driver-specific throttle support",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1f82e8e1ca18aa0b020538a3f227f5d56382638e",
+      "date": "2025-05-13",
+      "subject": "Merge branch 'x86/msr' into x86/core, to resolve conflicts",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "11d8f542d9137027440001b075da60a59c7871cb",
+      "date": "2025-05-13",
+      "subject": "Merge branch 'x86/alternatives' into x86/core, to merge dependent commits",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "570d58b12fbf7bae0ba72d929ccf914a4df5ca7c",
+      "date": "2025-05-06",
+      "subject": "Merge tag 'v6.15-rc5' into x86/msr, to pick up fixes and to resolve conflicts",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "795ada52875fe61469f635f226d19a4cd733d1e8",
+      "date": "2025-05-02",
+      "subject": "x86/msr: Convert the rdpmc() macro to an __always_inline function",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "7d9ccde56bc023f9a968db537963a029aa41d902",
+      "date": "2025-05-02",
+      "subject": "x86/msr: Rename rdpmcl() to rdpmc()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "efef7f184f2eaf29a1ca676712d0e6e851cd0191",
+      "date": "2025-05-02",
+      "subject": "x86/msr: Add explicit includes of <asm/msr.h>",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "0c7b20b852c75836c15487752e29d8706bb571b2",
+      "date": "2025-05-02",
+      "subject": "Merge tag 'v6.15-rc4' into x86/msr, to pick up fixes and resolve conflicts",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "3e830f657f69ab6a4822d72ec2f364c6d51beef8",
+      "date": "2025-04-25",
+      "subject": "perf/x86: Optimize the is_x86_event",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1caafd919e2a5c483f7a27449f8497fa4b15a44f",
+      "date": "2025-04-25",
+      "subject": "Merge branch 'perf/urgent'",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "75aea4b0656ead0facd13d2aae4cb77326e53d2f",
+      "date": "2025-04-25",
+      "subject": "perf/x86/intel: Only check the group flag for X86 leader",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1a97fea9db9e9b9c4839d4232dde9f505ff5b4cc",
+      "date": "2025-04-24",
+      "subject": "perf/x86: Fix non-sampling (counting) events on certain x86 platforms",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "4a3fd13054a98c43dfcfcbdb93deb43c7b1b9c34",
+      "date": "2025-04-17",
+      "subject": "perf/x86/intel: Introduce pairs of PEBS static calls",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "81e3cbdef230fd9adfa8569044b07290afd66708",
+      "date": "2025-04-12",
+      "subject": "x86/events, x86/insn-eval: Remove incorrect current->active_mm references",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "6fa17efe45440f43fa4e059d7a487179bbba053e",
+      "date": "2025-04-10",
+      "subject": "x86/msr: Rename 'wrmsrl_safe()' to 'wrmsrq_safe()'",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "6fe22abacd40e259fffec744a02d5ca3febccd68",
+      "date": "2025-04-10",
+      "subject": "x86/msr: Rename 'rdmsrl_safe()' to 'rdmsrq_safe()'",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "78255eb23973323633432d9ec40b65c15e41888a",
+      "date": "2025-04-10",
+      "subject": "x86/msr: Rename 'wrmsrl()' to 'wrmsrq()'",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "c435e608cf59ffab815aa2571182dc8c50fe4112",
+      "date": "2025-04-10",
+      "subject": "x86/msr: Rename 'rdmsrl()' to 'rdmsrq()'",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1734d98fbcce343eafba16e18e3a3001b3e94ab5",
+      "date": "2025-04-09",
+      "subject": "perf/arch: Record sample last_period before updating on the x86 and PowerPC platforms",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "ec980e4facef8110f6fce27e5b6344660117f01f",
+      "date": "2025-04-08",
+      "subject": "perf/x86/intel: Support auto counter reload",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "4dfe3232cc04325a09e96f6c7f9546ba6c0b132b",
+      "date": "2025-04-08",
+      "subject": "perf/x86: Add dynamic constraint",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "e34c38057a131d14e47b4acb461564d9f351b9f7",
+      "date": "2025-03-24",
+      "subject": "Merge tag 'x86-core-2025-03-22' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1fbc6c8e5289c252867c33bf12d54c11c8cfeac4",
+      "date": "2025-03-17",
+      "subject": "perf/x86: Remove swap_task_ctx()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "d57e94f5b891925e4f2796266eba31edd5a01903",
+      "date": "2025-03-17",
+      "subject": "perf: Supply task information to sched_task()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1fff9f8730b00c39ec5055656e45ef69acd9409a",
+      "date": "2025-03-03",
+      "subject": "Merge tag 'v6.14-rc5' into x86/core, to pick up fixes",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "ef2f798600313291c3726522d5c66abf89361e94",
+      "date": "2025-03-01",
+      "subject": "Merge branch 'perf/urgent' into perf/core, to pick up dependent patches and fixes",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "88ec7eedbbd21cad38707620ad6c48a4e9a87c18",
+      "date": "2025-02-25",
+      "subject": "perf/x86: Fix low freqency setting issue",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "72e213a7ccf9dc78a85eecee8dc8170762ed876c",
+      "date": "2025-02-14",
+      "subject": "x86/ibt: Clean up is_endbr()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "e02e9b0374c378aab016ae8ace60d9d98ab8caa6",
+      "date": "2025-02-05",
+      "subject": "perf/x86/intel: Support PEBS counters snapshotting",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "bcfd5f644c5b933cfb3c488220e40a03e011e8a4",
+      "date": "2024-12-02",
+      "subject": "Merge tag 'v6.13-rc1' into perf/core, to refresh the branch",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "f41dac3efb7582cd3f518fadf7764d424f453788",
+      "date": "2024-11-19",
+      "subject": "Merge tag 'perf-core-2024-11-18' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "faac6f105ef169e2e5678c14e1ffebf2a7d780b6",
+      "date": "2024-11-19",
+      "subject": "perf/core: Check sample_type in perf_sample_save_brstack",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "2c47e7a74f445426d156278e339b7abb259e50de",
+      "date": "2024-11-14",
+      "subject": "perf/core: Correct perf sampling with guest VMs",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "baff01f3d75ff3948a0465853dcaa71c394c5c46",
+      "date": "2024-11-14",
+      "subject": "perf/x86: Refactor misc flag assignments",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "04782e63917dbcb60932fe93df52c4a4e3859d07",
+      "date": "2024-11-14",
+      "subject": "perf/core: Hoist perf_instruction_pointer() and perf_misc_flags()",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c",
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "d151f8f788a136a14e74ddd8654011d75f5b23b2",
+      "date": "2024-10-25",
+      "subject": "s390/perf_event: Switch over to sysfs_emit()",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "95c13662b65c562d4902ad9f810378261347a749",
+      "date": "2024-09-05",
+      "subject": "Merge branch 'perf/urgent' into perf/core, to pick up fixes",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "cfa7f3d2c526c224a6271cc78a4a27a0de06f4f0",
+      "date": "2024-08-02",
+      "subject": "perf,x86: avoid missing caller address in stack traces captured in uprobe",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "f73cefa3b72eaa90abfc43bf6d68137ba059d4b1",
+      "date": "2024-07-31",
+      "subject": "perf/x86: Fix smp_processor_id()-in-preemptible warnings",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "576a997c6315ee482519e7cc080f341b07638808",
+      "date": "2024-07-16",
+      "subject": "Merge tag 'perf-core-2024-07-16' of git://git.kernel.org/pub/scm/linux/kernel/git/tip/tip",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "149fd4712bcd492a031945f92e5ce19879f62311",
+      "date": "2024-07-04",
+      "subject": "perf/x86/intel: Support Perfmon MSRs aliasing",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "e8fb5d6e765838e913253ef7c9b6fd8ec76c8d53",
+      "date": "2024-07-04",
+      "subject": "perf/x86: Add config_mask to represent EVENTSEL bitmask",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "722e42e45c2f1c6d1adec7813651dba5139f52f4",
+      "date": "2024-07-04",
+      "subject": "perf/x86: Support counter mask",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "bb9bb45f746b0f9457de9c3fc4da143a6351bdc9",
+      "date": "2024-06-11",
+      "subject": "perf/x86: Serialize set_attr_rdpmc()",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "2a8120d7b4827380f30b57788ff92ec5594e2194",
+      "date": "2024-05-21",
+      "subject": "Merge tag 's390-6.10-2' of git://git.kernel.org/pub/scm/linux/kernel/git/s390/linux",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "ebd912ff9919a10609511383d94942362234c077",
+      "date": "2024-05-14",
+      "subject": "s390/stacktrace: Merge perf_callchain_user() and arch_stack_walk_user()",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "316863cb62fe7aaea30e7ef8e6481f1ba414b044",
+      "date": "2024-05-06",
+      "subject": "LoongArch/smp: Refine some ipi functions on LoongArch platform",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "f3334ebb8a2a1841c2824594dd992e66de19deb2",
+      "date": "2024-04-25",
+      "subject": "LoongArch: Lately init pmu after smp is online",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "prior_positive_source_read_and_v2_development",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "exclude_prior_exposed"
+    },
+    {
+      "sha": "dec8ced871e17eea46f097542dd074d022be4bd1",
+      "date": "2024-04-10",
+      "subject": "perf/x86: Fix out of range data",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "5d2d4a9f603a47403395408f64b1261ca61f6d50",
+      "date": "2023-11-15",
+      "subject": "Merge branch 'tip/perf/urgent'",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "504b73d00a55a68c0d1bb0e7c12e56e5f908e906",
+      "date": "2023-11-05",
+      "subject": "s390/perf: implement perf_callchain_user()",
+      "query_matched_paths": [
+        "arch/s390/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "1f2376cd03dd3b965d130ed46a7c92769d614ba1",
+      "date": "2023-10-27",
+      "subject": "perf: Add branch_sample_call_stack",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "571d91dcadfa3cef499010b4eddb9b58b0da4d24",
+      "date": "2023-10-27",
+      "subject": "perf: Add branch stack counters",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "b0560bfd4b70277a4936c82e50e940aa253c95bf",
+      "date": "2023-08-29",
+      "subject": "perf/x86/intel: Clean up the hybrid CPU type handling code",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "4b36873b4a3455590f686903c354c4716e149c74",
+      "date": "2023-07-26",
+      "subject": "perf/x86: Remove unused PERF_PMU_CAP_HETEROGENEOUS_CPUS capability",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "4c1c9dea2089374cb58505a0df6136969ff3c8b9",
+      "date": "2023-07-10",
+      "subject": "perf/x86: Use local64_try_cmpxchg",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "962369120d750cbc9c4dc492f32b4304669ff6aa",
+      "date": "2023-06-15",
+      "subject": "LoongArch: Fix perf event id calculation",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "90befef5a9e820ccccc33181ec14c015980300cc",
+      "date": "2023-05-08",
+      "subject": "perf/x86: Fix missing sample size update on AMD BRS",
+      "query_matched_paths": [
+        "arch/x86/events/core.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "611c9d88302cb9ac3b0f58f4a06c0ffb98345bd2",
+      "date": "2023-05-04",
+      "subject": "Merge tag 'loongarch-6.4' of git://git.kernel.org/pub/scm/linux/kernel/git/chenhuacai/linux-loongson",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "9e36fa42995a7c7fa8d84a429ca647736c4f1c66",
+      "date": "2023-05-01",
+      "subject": "LoongArch: Clean up the architectural interrupt definitions",
+      "query_matched_paths": [
+        "arch/loongarch/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "metadata_only_near_miss"
+    },
+    {
+      "sha": "7755cec63adeecea3cbbf4032047812c37cf7cc3",
+      "date": "2023-03-27",
+      "subject": "arm64: perf: Move PMUv3 driver to drivers/perf",
+      "query_matched_paths": [
+        "arch/arm64/kernel/perf_event.c"
+      ],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    },
+    {
+      "sha": "5e725d112e1a54c2611d5dffd124a79415d0f0de",
+      "date": "2023-02-18",
+      "subject": "Merge tag 'for-linus' of git://git.kernel.org/pub/scm/virt/kvm/kvm",
+      "query_matched_paths": [],
+      "prior_exposure_status": "no_sha_reference_found_in_existing_case_taxonomy_artifacts; global_exposure_not_proven",
+      "source_or_patch_read_in_this_selection": false,
+      "title_qualification": "title_does_not_identify_required_boot_smp_online_mechanism"
+    }
+  ],
+  "prior_results_unchanged": [
+    "state_pmu_probe 首轮 3/3 insufficient",
+    "state_pmu_probe_v2 已读旧/修复开发回放 hit/normal",
+    "4c8a7c982772 独立正常对照父/修订版均 normal"
+  ]
+}

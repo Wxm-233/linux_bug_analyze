@@ -1,0 +1,3133 @@
+{
+  "purpose": "independent manual source review, after frozen parent-only result manifest",
+  "sections": [
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "file": "drivers/scsi/mpt3sas/mpt3sas_base.c",
+      "lines": [
+        {
+          "line": 1434,
+          "text": "_base_build_nvme_prp(struct MPT3SAS_ADAPTER *ioc, u16 smid,"
+        },
+        {
+          "line": 1435,
+          "text": "\tMpi26NVMeEncapsulatedRequest_t *nvme_encap_request,"
+        },
+        {
+          "line": 1436,
+          "text": "\tdma_addr_t data_out_dma, size_t data_out_sz, dma_addr_t data_in_dma,"
+        },
+        {
+          "line": 1437,
+          "text": "\tsize_t data_in_sz)"
+        },
+        {
+          "line": 1438,
+          "text": "{"
+        },
+        {
+          "line": 1439,
+          "text": "\tint\t\tprp_size = NVME_PRP_SIZE;"
+        },
+        {
+          "line": 1440,
+          "text": "\tu64\t\t*prp_entry, *prp1_entry, *prp2_entry, *prp_entry_phys;"
+        },
+        {
+          "line": 1441,
+          "text": "\tu64\t\t*prp_page, *prp_page_phys;"
+        },
+        {
+          "line": 1442,
+          "text": "\tu32\t\toffset, entry_len;"
+        },
+        {
+          "line": 1443,
+          "text": "\tu32\t\tpage_mask_result, page_mask;"
+        },
+        {
+          "line": 1444,
+          "text": "\tdma_addr_t\tpaddr;"
+        },
+        {
+          "line": 1445,
+          "text": "\tsize_t\t\tlength;"
+        },
+        {
+          "line": 1446,
+          "text": ""
+        },
+        {
+          "line": 1447,
+          "text": "\t/*"
+        },
+        {
+          "line": 1448,
+          "text": "\t * Not all commands require a data transfer. If no data, just return"
+        },
+        {
+          "line": 1449,
+          "text": "\t * without constructing any PRP."
+        },
+        {
+          "line": 1450,
+          "text": "\t */"
+        },
+        {
+          "line": 1451,
+          "text": "\tif (!data_in_sz && !data_out_sz)"
+        },
+        {
+          "line": 1452,
+          "text": "\t\treturn;"
+        },
+        {
+          "line": 1453,
+          "text": "\t/*"
+        },
+        {
+          "line": 1454,
+          "text": "\t * Set pointers to PRP1 and PRP2, which are in the NVMe command."
+        },
+        {
+          "line": 1455,
+          "text": "\t * PRP1 is located at a 24 byte offset from the start of the NVMe"
+        },
+        {
+          "line": 1456,
+          "text": "\t * command.  Then set the current PRP entry pointer to PRP1."
+        },
+        {
+          "line": 1457,
+          "text": "\t */"
+        },
+        {
+          "line": 1458,
+          "text": "\tprp1_entry = (u64 *)(nvme_encap_request->NVMe_Command +"
+        },
+        {
+          "line": 1459,
+          "text": "\t    NVME_CMD_PRP1_OFFSET);"
+        },
+        {
+          "line": 1460,
+          "text": "\tprp2_entry = (u64 *)(nvme_encap_request->NVMe_Command +"
+        },
+        {
+          "line": 1461,
+          "text": "\t    NVME_CMD_PRP2_OFFSET);"
+        },
+        {
+          "line": 1462,
+          "text": "\tprp_entry = prp1_entry;"
+        },
+        {
+          "line": 1463,
+          "text": "\t/*"
+        },
+        {
+          "line": 1464,
+          "text": "\t * For the PRP entries, use the specially allocated buffer of"
+        },
+        {
+          "line": 1465,
+          "text": "\t * contiguous memory."
+        },
+        {
+          "line": 1466,
+          "text": "\t */"
+        },
+        {
+          "line": 1467,
+          "text": "\tprp_page = (u64 *)mpt3sas_base_get_pcie_sgl(ioc, smid);"
+        },
+        {
+          "line": 1468,
+          "text": "\tprp_page_phys = (u64 *)mpt3sas_base_get_pcie_sgl_dma(ioc, smid);"
+        },
+        {
+          "line": 1469,
+          "text": ""
+        },
+        {
+          "line": 1470,
+          "text": "\t/*"
+        },
+        {
+          "line": 1471,
+          "text": "\t * Check if we are within 1 entry of a page boundary we don't"
+        },
+        {
+          "line": 1472,
+          "text": "\t * want our first entry to be a PRP List entry."
+        },
+        {
+          "line": 1473,
+          "text": "\t */"
+        },
+        {
+          "line": 1474,
+          "text": "\tpage_mask = ioc->page_size - 1;"
+        },
+        {
+          "line": 1475,
+          "text": "\tpage_mask_result = (uintptr_t)((u8 *)prp_page + prp_size) & page_mask;"
+        },
+        {
+          "line": 1476,
+          "text": "\tif (!page_mask_result) {"
+        },
+        {
+          "line": 1477,
+          "text": "\t\t/* Bump up to next page boundary. */"
+        },
+        {
+          "line": 1478,
+          "text": "\t\tprp_page = (u64 *)((u8 *)prp_page + prp_size);"
+        },
+        {
+          "line": 1479,
+          "text": "\t\tprp_page_phys = (u64 *)((u8 *)prp_page_phys + prp_size);"
+        },
+        {
+          "line": 1480,
+          "text": "\t}"
+        },
+        {
+          "line": 1481,
+          "text": ""
+        },
+        {
+          "line": 1482,
+          "text": "\t/*"
+        },
+        {
+          "line": 1483,
+          "text": "\t * Set PRP physical pointer, which initially points to the current PRP"
+        },
+        {
+          "line": 1484,
+          "text": "\t * DMA memory page."
+        },
+        {
+          "line": 1485,
+          "text": "\t */"
+        },
+        {
+          "line": 1486,
+          "text": "\tprp_entry_phys = prp_page_phys;"
+        },
+        {
+          "line": 1487,
+          "text": ""
+        },
+        {
+          "line": 1488,
+          "text": "\t/* Get physical address and length of the data buffer. */"
+        },
+        {
+          "line": 1489,
+          "text": "\tif (data_in_sz) {"
+        },
+        {
+          "line": 1490,
+          "text": "\t\tpaddr = data_in_dma;"
+        },
+        {
+          "line": 1491,
+          "text": "\t\tlength = data_in_sz;"
+        },
+        {
+          "line": 1492,
+          "text": "\t} else {"
+        },
+        {
+          "line": 1493,
+          "text": "\t\tpaddr = data_out_dma;"
+        },
+        {
+          "line": 1494,
+          "text": "\t\tlength = data_out_sz;"
+        },
+        {
+          "line": 1495,
+          "text": "\t}"
+        },
+        {
+          "line": 1496,
+          "text": ""
+        },
+        {
+          "line": 1497,
+          "text": "\t/* Loop while the length is not zero. */"
+        },
+        {
+          "line": 1498,
+          "text": "\twhile (length) {"
+        },
+        {
+          "line": 1499,
+          "text": "\t\t/*"
+        },
+        {
+          "line": 1500,
+          "text": "\t\t * Check if we need to put a list pointer here if we are at"
+        },
+        {
+          "line": 1501,
+          "text": "\t\t * page boundary - prp_size (8 bytes)."
+        },
+        {
+          "line": 1502,
+          "text": "\t\t */"
+        },
+        {
+          "line": 1503,
+          "text": "\t\tpage_mask_result ="
+        },
+        {
+          "line": 1504,
+          "text": "\t\t    (uintptr_t)((u8 *)prp_entry_phys + prp_size) & page_mask;"
+        },
+        {
+          "line": 1505,
+          "text": "\t\tif (!page_mask_result) {"
+        },
+        {
+          "line": 1506,
+          "text": "\t\t\t/*"
+        },
+        {
+          "line": 1507,
+          "text": "\t\t\t * This is the last entry in a PRP List, so we need to"
+        },
+        {
+          "line": 1508,
+          "text": "\t\t\t * put a PRP list pointer here.  What this does is:"
+        },
+        {
+          "line": 1509,
+          "text": "\t\t\t *   - bump the current memory pointer to the next"
+        },
+        {
+          "line": 1510,
+          "text": "\t\t\t *     address, which will be the next full page."
+        },
+        {
+          "line": 1511,
+          "text": "\t\t\t *   - set the PRP Entry to point to that page.  This"
+        },
+        {
+          "line": 1512,
+          "text": "\t\t\t *     is now the PRP List pointer."
+        },
+        {
+          "line": 1513,
+          "text": "\t\t\t *   - bump the PRP Entry pointer the start of the"
+        },
+        {
+          "line": 1514,
+          "text": "\t\t\t *     next page.  Since all of this PRP memory is"
+        },
+        {
+          "line": 1515,
+          "text": "\t\t\t *     contiguous, no need to get a new page - it's"
+        },
+        {
+          "line": 1516,
+          "text": "\t\t\t *     just the next address."
+        },
+        {
+          "line": 1517,
+          "text": "\t\t\t */"
+        },
+        {
+          "line": 1518,
+          "text": "\t\t\tprp_entry_phys++;"
+        },
+        {
+          "line": 1519,
+          "text": "\t\t\t*prp_entry = cpu_to_le64((uintptr_t)prp_entry_phys);"
+        },
+        {
+          "line": 1520,
+          "text": "\t\t\tprp_entry++;"
+        },
+        {
+          "line": 1521,
+          "text": "\t\t}"
+        },
+        {
+          "line": 1522,
+          "text": ""
+        },
+        {
+          "line": 1523,
+          "text": "\t\t/* Need to handle if entry will be part of a page. */"
+        },
+        {
+          "line": 1524,
+          "text": "\t\toffset = (u32)paddr & page_mask;"
+        },
+        {
+          "line": 1525,
+          "text": "\t\tentry_len = ioc->page_size - offset;"
+        },
+        {
+          "line": 1526,
+          "text": ""
+        },
+        {
+          "line": 1527,
+          "text": "\t\tif (prp_entry == prp1_entry) {"
+        },
+        {
+          "line": 1528,
+          "text": "\t\t\t/*"
+        },
+        {
+          "line": 1529,
+          "text": "\t\t\t * Must fill in the first PRP pointer (PRP1) before"
+        },
+        {
+          "line": 1530,
+          "text": "\t\t\t * moving on."
+        },
+        {
+          "line": 1531,
+          "text": "\t\t\t */"
+        },
+        {
+          "line": 1532,
+          "text": "\t\t\t*prp1_entry = cpu_to_le64((u64)paddr);"
+        },
+        {
+          "line": 1533,
+          "text": ""
+        },
+        {
+          "line": 1534,
+          "text": "\t\t\t/*"
+        },
+        {
+          "line": 1535,
+          "text": "\t\t\t * Now point to the second PRP entry within the"
+        },
+        {
+          "line": 1536,
+          "text": "\t\t\t * command (PRP2)."
+        },
+        {
+          "line": 1537,
+          "text": "\t\t\t */"
+        },
+        {
+          "line": 1538,
+          "text": "\t\t\tprp_entry = prp2_entry;"
+        },
+        {
+          "line": 1539,
+          "text": "\t\t} else if (prp_entry == prp2_entry) {"
+        },
+        {
+          "line": 1540,
+          "text": "\t\t\t/*"
+        },
+        {
+          "line": 1541,
+          "text": "\t\t\t * Should the PRP2 entry be a PRP List pointer or just"
+        },
+        {
+          "line": 1542,
+          "text": "\t\t\t * a regular PRP pointer?  If there is more than one"
+        },
+        {
+          "line": 1543,
+          "text": "\t\t\t * more page of data, must use a PRP List pointer."
+        },
+        {
+          "line": 1544,
+          "text": "\t\t\t */"
+        },
+        {
+          "line": 1545,
+          "text": "\t\t\tif (length > ioc->page_size) {"
+        },
+        {
+          "line": 1546,
+          "text": "\t\t\t\t/*"
+        },
+        {
+          "line": 1547,
+          "text": "\t\t\t\t * PRP2 will contain a PRP List pointer because"
+        },
+        {
+          "line": 1548,
+          "text": "\t\t\t\t * more PRP's are needed with this command. The"
+        },
+        {
+          "line": 1549,
+          "text": "\t\t\t\t * list will start at the beginning of the"
+        },
+        {
+          "line": 1550,
+          "text": "\t\t\t\t * contiguous buffer."
+        },
+        {
+          "line": 1551,
+          "text": "\t\t\t\t */"
+        },
+        {
+          "line": 1552,
+          "text": "\t\t\t\t*prp2_entry ="
+        },
+        {
+          "line": 1553,
+          "text": "\t\t\t\t    cpu_to_le64((uintptr_t)prp_entry_phys);"
+        },
+        {
+          "line": 1554,
+          "text": ""
+        },
+        {
+          "line": 1555,
+          "text": "\t\t\t\t/*"
+        },
+        {
+          "line": 1556,
+          "text": "\t\t\t\t * The next PRP Entry will be the start of the"
+        },
+        {
+          "line": 1557,
+          "text": "\t\t\t\t * first PRP List."
+        },
+        {
+          "line": 1558,
+          "text": "\t\t\t\t */"
+        },
+        {
+          "line": 1559,
+          "text": "\t\t\t\tprp_entry = prp_page;"
+        },
+        {
+          "line": 1560,
+          "text": "\t\t\t} else {"
+        },
+        {
+          "line": 1561,
+          "text": "\t\t\t\t/*"
+        },
+        {
+          "line": 1562,
+          "text": "\t\t\t\t * After this, the PRP Entries are complete."
+        },
+        {
+          "line": 1563,
+          "text": "\t\t\t\t * This command uses 2 PRP's and no PRP list."
+        },
+        {
+          "line": 1564,
+          "text": "\t\t\t\t */"
+        },
+        {
+          "line": 1565,
+          "text": "\t\t\t\t*prp2_entry = cpu_to_le64((u64)paddr);"
+        },
+        {
+          "line": 1566,
+          "text": "\t\t\t}"
+        },
+        {
+          "line": 1567,
+          "text": "\t\t} else {"
+        },
+        {
+          "line": 1568,
+          "text": "\t\t\t/*"
+        },
+        {
+          "line": 1569,
+          "text": "\t\t\t * Put entry in list and bump the addresses."
+        },
+        {
+          "line": 1570,
+          "text": "\t\t\t *"
+        },
+        {
+          "line": 1571,
+          "text": "\t\t\t * After PRP1 and PRP2 are filled in, this will fill in"
+        },
+        {
+          "line": 1572,
+          "text": "\t\t\t * all remaining PRP entries in a PRP List, one per"
+        },
+        {
+          "line": 1573,
+          "text": "\t\t\t * each time through the loop."
+        },
+        {
+          "line": 1574,
+          "text": "\t\t\t */"
+        },
+        {
+          "line": 1575,
+          "text": "\t\t\t*prp_entry = cpu_to_le64((u64)paddr);"
+        },
+        {
+          "line": 1576,
+          "text": "\t\t\tprp_entry++;"
+        },
+        {
+          "line": 1577,
+          "text": "\t\t\tprp_entry_phys++;"
+        },
+        {
+          "line": 1578,
+          "text": "\t\t}"
+        },
+        {
+          "line": 1579,
+          "text": ""
+        },
+        {
+          "line": 1580,
+          "text": "\t\t/*"
+        },
+        {
+          "line": 1581,
+          "text": "\t\t * Bump the phys address of the command's data buffer by the"
+        },
+        {
+          "line": 1582,
+          "text": "\t\t * entry_len."
+        },
+        {
+          "line": 1583,
+          "text": "\t\t */"
+        },
+        {
+          "line": 1584,
+          "text": "\t\tpaddr += entry_len;"
+        },
+        {
+          "line": 1585,
+          "text": ""
+        },
+        {
+          "line": 1586,
+          "text": "\t\t/* Decrement length accounting for last partial page. */"
+        },
+        {
+          "line": 1587,
+          "text": "\t\tif (entry_len > length)"
+        },
+        {
+          "line": 1588,
+          "text": "\t\t\tlength = 0;"
+        },
+        {
+          "line": 1589,
+          "text": "\t\telse"
+        },
+        {
+          "line": 1590,
+          "text": "\t\t\tlength -= entry_len;"
+        },
+        {
+          "line": 1611,
+          "text": "\t\tu16 smid, int sge_count)"
+        },
+        {
+          "line": 1612,
+          "text": "{"
+        },
+        {
+          "line": 1613,
+          "text": "\tint sge_len, offset, num_prp_in_chain = 0;"
+        },
+        {
+          "line": 1614,
+          "text": "\tMpi25IeeeSgeChain64_t *main_chain_element, *ptr_first_sgl;"
+        },
+        {
+          "line": 1615,
+          "text": "\tu64 *curr_buff;"
+        },
+        {
+          "line": 1616,
+          "text": "\tdma_addr_t msg_phys;"
+        },
+        {
+          "line": 1617,
+          "text": "\tu64 sge_addr;"
+        },
+        {
+          "line": 1618,
+          "text": "\tu32 page_mask, page_mask_result;"
+        },
+        {
+          "line": 1619,
+          "text": "\tstruct scatterlist *sg_scmd;"
+        },
+        {
+          "line": 1620,
+          "text": "\tu32 first_prp_len;"
+        },
+        {
+          "line": 1621,
+          "text": "\tint data_len = scsi_bufflen(scmd);"
+        },
+        {
+          "line": 1622,
+          "text": "\tu32 nvme_pg_size;"
+        },
+        {
+          "line": 1623,
+          "text": ""
+        },
+        {
+          "line": 1624,
+          "text": "\tnvme_pg_size = max_t(u32, ioc->page_size, NVME_PRP_PAGE_SIZE);"
+        },
+        {
+          "line": 1625,
+          "text": "\t/*"
+        },
+        {
+          "line": 1626,
+          "text": "\t * Nvme has a very convoluted prp format.  One prp is required"
+        },
+        {
+          "line": 1627,
+          "text": "\t * for each page or partial page. Driver need to split up OS sg_list"
+        },
+        {
+          "line": 1628,
+          "text": "\t * entries if it is longer than one page or cross a page"
+        },
+        {
+          "line": 1629,
+          "text": "\t * boundary.  Driver also have to insert a PRP list pointer entry as"
+        },
+        {
+          "line": 1630,
+          "text": "\t * the last entry in each physical page of the PRP list."
+        },
+        {
+          "line": 1631,
+          "text": "\t *"
+        },
+        {
+          "line": 1632,
+          "text": "\t * NOTE: The first PRP \"entry\" is actually placed in the first"
+        },
+        {
+          "line": 1633,
+          "text": "\t * SGL entry in the main message as IEEE 64 format.  The 2nd"
+        },
+        {
+          "line": 1634,
+          "text": "\t * entry in the main message is the chain element, and the rest"
+        },
+        {
+          "line": 1635,
+          "text": "\t * of the PRP entries are built in the contiguous pcie buffer."
+        },
+        {
+          "line": 1636,
+          "text": "\t */"
+        },
+        {
+          "line": 1637,
+          "text": "\tpage_mask = nvme_pg_size - 1;"
+        },
+        {
+          "line": 1638,
+          "text": ""
+        },
+        {
+          "line": 1639,
+          "text": "\t/*"
+        },
+        {
+          "line": 1640,
+          "text": "\t * Native SGL is needed."
+        },
+        {
+          "line": 1641,
+          "text": "\t * Put a chain element in main message frame that points to the first"
+        },
+        {
+          "line": 1642,
+          "text": "\t * chain buffer."
+        },
+        {
+          "line": 1643,
+          "text": "\t *"
+        },
+        {
+          "line": 1644,
+          "text": "\t * NOTE:  The ChainOffset field must be 0 when using a chain pointer to"
+        },
+        {
+          "line": 1645,
+          "text": "\t *        a native SGL."
+        },
+        {
+          "line": 1646,
+          "text": "\t */"
+        },
+        {
+          "line": 1647,
+          "text": ""
+        },
+        {
+          "line": 1648,
+          "text": "\t/* Set main message chain element pointer */"
+        },
+        {
+          "line": 1649,
+          "text": "\tmain_chain_element = (pMpi25IeeeSgeChain64_t)&mpi_request->SGL;"
+        },
+        {
+          "line": 1650,
+          "text": "\t/*"
+        },
+        {
+          "line": 1651,
+          "text": "\t * For NVMe the chain element needs to be the 2nd SG entry in the main"
+        },
+        {
+          "line": 1652,
+          "text": "\t * message."
+        },
+        {
+          "line": 1653,
+          "text": "\t */"
+        },
+        {
+          "line": 1654,
+          "text": "\tmain_chain_element = (Mpi25IeeeSgeChain64_t *)"
+        },
+        {
+          "line": 1655,
+          "text": "\t\t((u8 *)main_chain_element + sizeof(MPI25_IEEE_SGE_CHAIN64));"
+        },
+        {
+          "line": 1656,
+          "text": ""
+        },
+        {
+          "line": 1657,
+          "text": "\t/*"
+        },
+        {
+          "line": 1658,
+          "text": "\t * For the PRP entries, use the specially allocated buffer of"
+        },
+        {
+          "line": 1659,
+          "text": "\t * contiguous memory.  Normal chain buffers can't be used"
+        },
+        {
+          "line": 1660,
+          "text": "\t * because each chain buffer would need to be the size of an OS"
+        },
+        {
+          "line": 1661,
+          "text": "\t * page (4k)."
+        },
+        {
+          "line": 1662,
+          "text": "\t */"
+        },
+        {
+          "line": 1663,
+          "text": "\tcurr_buff = mpt3sas_base_get_pcie_sgl(ioc, smid);"
+        },
+        {
+          "line": 1664,
+          "text": "\tmsg_phys = (dma_addr_t)mpt3sas_base_get_pcie_sgl_dma(ioc, smid);"
+        },
+        {
+          "line": 1665,
+          "text": ""
+        },
+        {
+          "line": 1666,
+          "text": "\tmain_chain_element->Address = cpu_to_le64(msg_phys);"
+        },
+        {
+          "line": 1667,
+          "text": "\tmain_chain_element->NextChainOffset = 0;"
+        },
+        {
+          "line": 1668,
+          "text": "\tmain_chain_element->Flags = MPI2_IEEE_SGE_FLAGS_CHAIN_ELEMENT |"
+        },
+        {
+          "line": 1669,
+          "text": "\t\t\tMPI2_IEEE_SGE_FLAGS_SYSTEM_ADDR |"
+        },
+        {
+          "line": 1670,
+          "text": "\t\t\tMPI26_IEEE_SGE_FLAGS_NSF_NVME_PRP;"
+        },
+        {
+          "line": 1671,
+          "text": ""
+        },
+        {
+          "line": 1672,
+          "text": "\t/* Build first prp, sge need not to be page aligned*/"
+        },
+        {
+          "line": 1673,
+          "text": "\tptr_first_sgl = (pMpi25IeeeSgeChain64_t)&mpi_request->SGL;"
+        },
+        {
+          "line": 1674,
+          "text": "\tsg_scmd = scsi_sglist(scmd);"
+        },
+        {
+          "line": 1675,
+          "text": "\tsge_addr = sg_dma_address(sg_scmd);"
+        },
+        {
+          "line": 1676,
+          "text": "\tsge_len = sg_dma_len(sg_scmd);"
+        },
+        {
+          "line": 1677,
+          "text": ""
+        },
+        {
+          "line": 1678,
+          "text": "\toffset = (u32)(sge_addr & page_mask);"
+        },
+        {
+          "line": 1679,
+          "text": "\tfirst_prp_len = nvme_pg_size - offset;"
+        },
+        {
+          "line": 1680,
+          "text": ""
+        },
+        {
+          "line": 1681,
+          "text": "\tptr_first_sgl->Address = cpu_to_le64(sge_addr);"
+        },
+        {
+          "line": 1682,
+          "text": "\tptr_first_sgl->Length = cpu_to_le32(first_prp_len);"
+        },
+        {
+          "line": 1683,
+          "text": ""
+        },
+        {
+          "line": 1684,
+          "text": "\tdata_len -= first_prp_len;"
+        },
+        {
+          "line": 1685,
+          "text": ""
+        },
+        {
+          "line": 1686,
+          "text": "\tif (sge_len > first_prp_len) {"
+        },
+        {
+          "line": 1687,
+          "text": "\t\tsge_addr += first_prp_len;"
+        },
+        {
+          "line": 1688,
+          "text": "\t\tsge_len -= first_prp_len;"
+        },
+        {
+          "line": 1689,
+          "text": "\t} else if (data_len && (sge_len == first_prp_len)) {"
+        },
+        {
+          "line": 1690,
+          "text": "\t\tsg_scmd = sg_next(sg_scmd);"
+        },
+        {
+          "line": 1691,
+          "text": "\t\tsge_addr = sg_dma_address(sg_scmd);"
+        },
+        {
+          "line": 1692,
+          "text": "\t\tsge_len = sg_dma_len(sg_scmd);"
+        },
+        {
+          "line": 1693,
+          "text": "\t}"
+        },
+        {
+          "line": 1694,
+          "text": ""
+        },
+        {
+          "line": 1695,
+          "text": "\tfor (;;) {"
+        },
+        {
+          "line": 1696,
+          "text": "\t\toffset = (u32)(sge_addr & page_mask);"
+        },
+        {
+          "line": 1697,
+          "text": ""
+        },
+        {
+          "line": 1698,
+          "text": "\t\t/* Put PRP pointer due to page boundary*/"
+        },
+        {
+          "line": 1699,
+          "text": "\t\tpage_mask_result = (uintptr_t)(curr_buff + 1) & page_mask;"
+        },
+        {
+          "line": 1700,
+          "text": "\t\tif (unlikely(!page_mask_result)) {"
+        },
+        {
+          "line": 1701,
+          "text": "\t\t\tscmd_printk(KERN_NOTICE,"
+        },
+        {
+          "line": 1702,
+          "text": "\t\t\t\tscmd, \"page boundary curr_buff: 0x%p\\n\","
+        },
+        {
+          "line": 1703,
+          "text": "\t\t\t\tcurr_buff);"
+        },
+        {
+          "line": 1704,
+          "text": "\t\t\tmsg_phys += 8;"
+        },
+        {
+          "line": 1705,
+          "text": "\t\t\t*curr_buff = cpu_to_le64(msg_phys);"
+        },
+        {
+          "line": 1706,
+          "text": "\t\t\tcurr_buff++;"
+        },
+        {
+          "line": 1707,
+          "text": "\t\t\tnum_prp_in_chain++;"
+        },
+        {
+          "line": 1708,
+          "text": "\t\t}"
+        },
+        {
+          "line": 1709,
+          "text": ""
+        },
+        {
+          "line": 1710,
+          "text": "\t\t*curr_buff = cpu_to_le64(sge_addr);"
+        },
+        {
+          "line": 1730,
+          "text": "\tmain_chain_element->Length ="
+        },
+        {
+          "line": 1731,
+          "text": "\t\tcpu_to_le32(num_prp_in_chain * sizeof(u64));"
+        },
+        {
+          "line": 1732,
+          "text": "\treturn;"
+        },
+        {
+          "line": 1733,
+          "text": "}"
+        },
+        {
+          "line": 1734,
+          "text": ""
+        },
+        {
+          "line": 1735,
+          "text": "static bool"
+        },
+        {
+          "line": 1736,
+          "text": "base_is_prp_possible(struct MPT3SAS_ADAPTER *ioc,"
+        },
+        {
+          "line": 1737,
+          "text": "\tstruct _pcie_device *pcie_device, struct scsi_cmnd *scmd, int sge_count)"
+        },
+        {
+          "line": 1738,
+          "text": "{"
+        },
+        {
+          "line": 1739,
+          "text": "\tu32 data_length = 0;"
+        },
+        {
+          "line": 1740,
+          "text": "\tstruct scatterlist *sg_scmd;"
+        },
+        {
+          "line": 1741,
+          "text": "\tbool build_prp = true;"
+        },
+        {
+          "line": 1742,
+          "text": ""
+        },
+        {
+          "line": 1743,
+          "text": "\tdata_length = cpu_to_le32(scsi_bufflen(scmd));"
+        },
+        {
+          "line": 1744,
+          "text": "\tsg_scmd = scsi_sglist(scmd);"
+        },
+        {
+          "line": 1745,
+          "text": ""
+        },
+        {
+          "line": 1746,
+          "text": "\t/* If Datalenth is <= 16K and number of SGE’s entries are <= 2"
+        },
+        {
+          "line": 1747,
+          "text": "\t * we built IEEE SGL"
+        },
+        {
+          "line": 1748,
+          "text": "\t */"
+        },
+        {
+          "line": 1749,
+          "text": "\tif ((data_length <= NVME_PRP_PAGE_SIZE*4) && (sge_count <= 2))"
+        },
+        {
+          "line": 1750,
+          "text": "\t\tbuild_prp = false;"
+        },
+        {
+          "line": 1751,
+          "text": ""
+        },
+        {
+          "line": 1752,
+          "text": "\treturn build_prp;"
+        },
+        {
+          "line": 1753,
+          "text": "}"
+        },
+        {
+          "line": 1754,
+          "text": ""
+        },
+        {
+          "line": 1755,
+          "text": "/**"
+        },
+        {
+          "line": 1756,
+          "text": " * _base_check_pcie_native_sgl - This function is called for PCIe end devices to"
+        },
+        {
+          "line": 1757,
+          "text": " * determine if the driver needs to build a native SGL.  If so, that native"
+        },
+        {
+          "line": 1758,
+          "text": " * SGL is built in the special contiguous buffers allocated especially for"
+        },
+        {
+          "line": 1759,
+          "text": " * PCIe SGL creation.  If the driver will not build a native SGL, return"
+        },
+        {
+          "line": 1760,
+          "text": " * TRUE and a normal IEEE SGL will be built.  Currently this routine"
+        },
+        {
+          "line": 1761,
+          "text": " * supports NVMe."
+        },
+        {
+          "line": 1762,
+          "text": " * @ioc: per adapter object"
+        },
+        {
+          "line": 1763,
+          "text": " * @mpi_request: mf request pointer"
+        },
+        {
+          "line": 1764,
+          "text": " * @smid: system request message index"
+        },
+        {
+          "line": 1765,
+          "text": " * @scmd: scsi command"
+        },
+        {
+          "line": 1766,
+          "text": " * @pcie_device: points to the PCIe device's info"
+        },
+        {
+          "line": 1767,
+          "text": " *"
+        },
+        {
+          "line": 1768,
+          "text": " * Returns 0 if native SGL was built, 1 if no SGL was built"
+        },
+        {
+          "line": 1769,
+          "text": " */"
+        },
+        {
+          "line": 1770,
+          "text": "static int"
+        },
+        {
+          "line": 1771,
+          "text": "_base_check_pcie_native_sgl(struct MPT3SAS_ADAPTER *ioc,"
+        },
+        {
+          "line": 1772,
+          "text": "\tMpi25SCSIIORequest_t *mpi_request, u16 smid, struct scsi_cmnd *scmd,"
+        },
+        {
+          "line": 1773,
+          "text": "\tstruct _pcie_device *pcie_device)"
+        },
+        {
+          "line": 1774,
+          "text": "{"
+        },
+        {
+          "line": 1775,
+          "text": "\tstruct scatterlist *sg_scmd;"
+        },
+        {
+          "line": 1776,
+          "text": "\tint sges_left;"
+        },
+        {
+          "line": 1777,
+          "text": ""
+        },
+        {
+          "line": 1778,
+          "text": "\t/* Get the SG list pointer and info. */"
+        },
+        {
+          "line": 1779,
+          "text": "\tsg_scmd = scsi_sglist(scmd);"
+        },
+        {
+          "line": 1780,
+          "text": "\tsges_left = scsi_dma_map(scmd);"
+        },
+        {
+          "line": 1781,
+          "text": "\tif (sges_left < 0) {"
+        },
+        {
+          "line": 1782,
+          "text": "\t\tsdev_printk(KERN_ERR, scmd->device,"
+        },
+        {
+          "line": 1783,
+          "text": "\t\t\t\"scsi_dma_map failed: request for %d bytes!\\n\","
+        },
+        {
+          "line": 1784,
+          "text": "\t\t\tscsi_bufflen(scmd));"
+        },
+        {
+          "line": 1785,
+          "text": "\t\treturn 1;"
+        },
+        {
+          "line": 1786,
+          "text": "\t}"
+        },
+        {
+          "line": 1787,
+          "text": ""
+        },
+        {
+          "line": 1788,
+          "text": "\t/* Check if we need to build a native SG list. */"
+        }
+      ]
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "file": "drivers/scsi/mpt3sas/Kconfig",
+      "lines": [
+        {
+          "line": 43,
+          "text": "config SCSI_MPT3SAS"
+        },
+        {
+          "line": 44,
+          "text": "\ttristate \"LSI MPT Fusion SAS 3.0 & SAS 2.0 Device Driver\""
+        },
+        {
+          "line": 45,
+          "text": "\tdepends on PCI && SCSI"
+        },
+        {
+          "line": 46,
+          "text": "\tselect SCSI_SAS_ATTRS"
+        },
+        {
+          "line": 47,
+          "text": "\tselect RAID_ATTRS"
+        },
+        {
+          "line": 48,
+          "text": "\t---help---"
+        },
+        {
+          "line": 49,
+          "text": "\tThis driver supports PCI-Express SAS 12Gb/s Host Adapters."
+        },
+        {
+          "line": 50,
+          "text": ""
+        },
+        {
+          "line": 51,
+          "text": "config SCSI_MPT2SAS_MAX_SGE"
+        }
+      ]
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "file": "drivers/bluetooth/hci_ll.c",
+      "lines": [
+        {
+          "line": 620,
+          "text": "\t\taction_ptr = &(((struct bts_action *)ptr)->data[0]);"
+        },
+        {
+          "line": 621,
+          "text": ""
+        },
+        {
+          "line": 622,
+          "text": "\t\tswitch (((struct bts_action *)ptr)->type) {"
+        },
+        {
+          "line": 623,
+          "text": "\t\tcase ACTION_SEND_COMMAND:\t/* action send */"
+        },
+        {
+          "line": 624,
+          "text": "\t\t\tbt_dev_dbg(lldev->hu.hdev, \"S\");"
+        },
+        {
+          "line": 625,
+          "text": "\t\t\tcmd = (struct hci_command *)action_ptr;"
+        },
+        {
+          "line": 626,
+          "text": "\t\t\tif (cmd->opcode == HCI_VS_UPDATE_UART_HCI_BAUDRATE) {"
+        },
+        {
+          "line": 627,
+          "text": "\t\t\t\t/* ignore remote change"
+        },
+        {
+          "line": 628,
+          "text": "\t\t\t\t * baud rate HCI VS command"
+        },
+        {
+          "line": 629,
+          "text": "\t\t\t\t */"
+        },
+        {
+          "line": 630,
+          "text": "\t\t\t\tbt_dev_warn(lldev->hu.hdev, \"change remote baud rate command in firmware\");"
+        },
+        {
+          "line": 631,
+          "text": "\t\t\t\tbreak;"
+        },
+        {
+          "line": 632,
+          "text": "\t\t\t}"
+        },
+        {
+          "line": 633,
+          "text": "\t\t\tif (cmd->prefix != 1)"
+        },
+        {
+          "line": 634,
+          "text": "\t\t\t\tbt_dev_dbg(lldev->hu.hdev, \"command type %d\", cmd->prefix);"
+        },
+        {
+          "line": 635,
+          "text": ""
+        },
+        {
+          "line": 636,
+          "text": "\t\t\tskb = __hci_cmd_sync(lldev->hu.hdev, cmd->opcode, cmd->plen, &cmd->speed, HCI_INIT_TIMEOUT);"
+        },
+        {
+          "line": 637,
+          "text": "\t\t\tif (IS_ERR(skb)) {"
+        },
+        {
+          "line": 638,
+          "text": "\t\t\t\tbt_dev_err(lldev->hu.hdev, \"send command failed\");"
+        },
+        {
+          "line": 639,
+          "text": "\t\t\t\terr = PTR_ERR(skb);"
+        },
+        {
+          "line": 640,
+          "text": "\t\t\t\tgoto out_rel_fw;"
+        },
+        {
+          "line": 641,
+          "text": "\t\t\t}"
+        },
+        {
+          "line": 642,
+          "text": "\t\t\tkfree_skb(skb);"
+        },
+        {
+          "line": 643,
+          "text": "\t\t\tbreak;"
+        },
+        {
+          "line": 644,
+          "text": "\t\tcase ACTION_WAIT_EVENT:  /* wait */"
+        },
+        {
+          "line": 645,
+          "text": "\t\t\t/* no need to wait as command was synchronous */"
+        },
+        {
+          "line": 646,
+          "text": "\t\t\tbt_dev_dbg(lldev->hu.hdev, \"W\");"
+        },
+        {
+          "line": 647,
+          "text": "\t\t\tbreak;"
+        },
+        {
+          "line": 648,
+          "text": "\t\tcase ACTION_DELAY:\t/* sleep */"
+        },
+        {
+          "line": 649,
+          "text": "\t\t\tbt_dev_info(lldev->hu.hdev, \"sleep command in scr\");"
+        },
+        {
+          "line": 650,
+          "text": "\t\t\tmdelay(((struct bts_action_delay *)action_ptr)->msec);"
+        },
+        {
+          "line": 651,
+          "text": "\t\t\tbreak;"
+        },
+        {
+          "line": 652,
+          "text": "\t\t}"
+        },
+        {
+          "line": 653,
+          "text": "\t\tlen -= (sizeof(struct bts_action) +"
+        },
+        {
+          "line": 654,
+          "text": "\t\t\t((struct bts_action *)ptr)->size);"
+        },
+        {
+          "line": 655,
+          "text": "\t\tptr += sizeof(struct bts_action) +"
+        },
+        {
+          "line": 656,
+          "text": "\t\t\t((struct bts_action *)ptr)->size;"
+        },
+        {
+          "line": 657,
+          "text": "\t}"
+        },
+        {
+          "line": 658,
+          "text": ""
+        },
+        {
+          "line": 659,
+          "text": "out_rel_fw:"
+        },
+        {
+          "line": 660,
+          "text": "\t/* fw download complete */"
+        },
+        {
+          "line": 661,
+          "text": "\trelease_firmware(fw);"
+        },
+        {
+          "line": 662,
+          "text": "\treturn err;"
+        },
+        {
+          "line": 663,
+          "text": "}"
+        },
+        {
+          "line": 664,
+          "text": ""
+        },
+        {
+          "line": 665,
+          "text": "static int ll_setup(struct hci_uart *hu)"
+        },
+        {
+          "line": 666,
+          "text": "{"
+        },
+        {
+          "line": 667,
+          "text": "\tint err, retry = 3;"
+        },
+        {
+          "line": 668,
+          "text": "\tstruct ll_device *lldev;"
+        },
+        {
+          "line": 669,
+          "text": "\tstruct serdev_device *serdev = hu->serdev;"
+        },
+        {
+          "line": 670,
+          "text": "\tu32 speed;"
+        },
+        {
+          "line": 671,
+          "text": ""
+        },
+        {
+          "line": 672,
+          "text": "\tif (!serdev)"
+        },
+        {
+          "line": 673,
+          "text": "\t\treturn 0;"
+        },
+        {
+          "line": 674,
+          "text": ""
+        },
+        {
+          "line": 675,
+          "text": "\tlldev = serdev_device_get_drvdata(serdev);"
+        },
+        {
+          "line": 676,
+          "text": ""
+        },
+        {
+          "line": 677,
+          "text": "\tserdev_device_set_flow_control(serdev, true);"
+        },
+        {
+          "line": 678,
+          "text": ""
+        },
+        {
+          "line": 679,
+          "text": "\tdo {"
+        },
+        {
+          "line": 680,
+          "text": "\t\t/* Reset the Bluetooth device */"
+        },
+        {
+          "line": 681,
+          "text": "\t\tgpiod_set_value_cansleep(lldev->enable_gpio, 0);"
+        },
+        {
+          "line": 682,
+          "text": "\t\tmsleep(5);"
+        },
+        {
+          "line": 683,
+          "text": "\t\tgpiod_set_value_cansleep(lldev->enable_gpio, 1);"
+        },
+        {
+          "line": 684,
+          "text": "\t\terr = serdev_device_wait_for_cts(serdev, true, 200);"
+        },
+        {
+          "line": 685,
+          "text": "\t\tif (err) {"
+        },
+        {
+          "line": 686,
+          "text": "\t\t\tbt_dev_err(hu->hdev, \"Failed to get CTS\");"
+        },
+        {
+          "line": 687,
+          "text": "\t\t\treturn err;"
+        },
+        {
+          "line": 688,
+          "text": "\t\t}"
+        },
+        {
+          "line": 689,
+          "text": ""
+        },
+        {
+          "line": 690,
+          "text": "\t\terr = download_firmware(lldev);"
+        },
+        {
+          "line": 691,
+          "text": "\t\tif (!err)"
+        },
+        {
+          "line": 692,
+          "text": "\t\t\tbreak;"
+        },
+        {
+          "line": 693,
+          "text": ""
+        },
+        {
+          "line": 694,
+          "text": "\t\t/* Toggle BT_EN and retry */"
+        },
+        {
+          "line": 695,
+          "text": "\t\tbt_dev_err(hu->hdev, \"download firmware failed, retrying...\");"
+        },
+        {
+          "line": 696,
+          "text": "\t} while (retry--);"
+        },
+        {
+          "line": 697,
+          "text": ""
+        },
+        {
+          "line": 698,
+          "text": "\tif (err)"
+        },
+        {
+          "line": 699,
+          "text": "\t\treturn err;"
+        },
+        {
+          "line": 700,
+          "text": ""
+        },
+        {
+          "line": 701,
+          "text": "\t/* Operational speed if any */"
+        },
+        {
+          "line": 702,
+          "text": "\tif (hu->oper_speed)"
+        },
+        {
+          "line": 703,
+          "text": "\t\tspeed = hu->oper_speed;"
+        },
+        {
+          "line": 704,
+          "text": "\telse if (hu->proto->oper_speed)"
+        },
+        {
+          "line": 705,
+          "text": "\t\tspeed = hu->proto->oper_speed;"
+        },
+        {
+          "line": 706,
+          "text": "\telse"
+        },
+        {
+          "line": 707,
+          "text": "\t\tspeed = 0;"
+        },
+        {
+          "line": 708,
+          "text": ""
+        },
+        {
+          "line": 709,
+          "text": "\tif (speed) {"
+        },
+        {
+          "line": 710,
+          "text": "\t\tstruct sk_buff *skb;"
+        },
+        {
+          "line": 711,
+          "text": ""
+        },
+        {
+          "line": 712,
+          "text": "\t\tskb = __hci_cmd_sync(hu->hdev, HCI_VS_UPDATE_UART_HCI_BAUDRATE,"
+        },
+        {
+          "line": 713,
+          "text": "\t\t\t\t     sizeof(speed), &speed, HCI_INIT_TIMEOUT);"
+        },
+        {
+          "line": 714,
+          "text": "\t\tif (!IS_ERR(skb)) {"
+        },
+        {
+          "line": 715,
+          "text": "\t\t\tkfree_skb(skb);"
+        },
+        {
+          "line": 716,
+          "text": "\t\t\tserdev_device_set_baudrate(serdev, speed);"
+        },
+        {
+          "line": 717,
+          "text": "\t\t}"
+        },
+        {
+          "line": 718,
+          "text": "\t}"
+        },
+        {
+          "line": 719,
+          "text": ""
+        },
+        {
+          "line": 720,
+          "text": "\treturn 0;"
+        },
+        {
+          "line": 721,
+          "text": "}"
+        },
+        {
+          "line": 722,
+          "text": ""
+        },
+        {
+          "line": 723,
+          "text": "static const struct hci_uart_proto llp;"
+        },
+        {
+          "line": 724,
+          "text": ""
+        },
+        {
+          "line": 725,
+          "text": "static int hci_ti_probe(struct serdev_device *serdev)"
+        },
+        {
+          "line": 726,
+          "text": "{"
+        },
+        {
+          "line": 727,
+          "text": "\tstruct hci_uart *hu;"
+        },
+        {
+          "line": 728,
+          "text": "\tstruct ll_device *lldev;"
+        },
+        {
+          "line": 729,
+          "text": "\tu32 max_speed = 3000000;"
+        },
+        {
+          "line": 730,
+          "text": ""
+        },
+        {
+          "line": 731,
+          "text": "\tlldev = devm_kzalloc(&serdev->dev, sizeof(struct ll_device), GFP_KERNEL);"
+        },
+        {
+          "line": 732,
+          "text": "\tif (!lldev)"
+        },
+        {
+          "line": 733,
+          "text": "\t\treturn -ENOMEM;"
+        }
+      ]
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "file": "drivers/bluetooth/Kconfig",
+      "lines": [
+        {
+          "line": 77,
+          "text": "config BT_HCIUART"
+        },
+        {
+          "line": 78,
+          "text": "\ttristate \"HCI UART driver\""
+        },
+        {
+          "line": 79,
+          "text": "\tdepends on SERIAL_DEV_BUS || !SERIAL_DEV_BUS"
+        },
+        {
+          "line": 80,
+          "text": "\tdepends on TTY"
+        },
+        {
+          "line": 81,
+          "text": "\thelp"
+        },
+        {
+          "line": 82,
+          "text": "\t  Bluetooth HCI UART driver."
+        },
+        {
+          "line": 83,
+          "text": "\t  This driver is required if you want to use Bluetooth devices with"
+        },
+        {
+          "line": 84,
+          "text": "\t  serial port interface. You will also need this driver if you have"
+        },
+        {
+          "line": 85,
+          "text": "\t  UART based Bluetooth PCMCIA and CF devices like Xircom Credit Card"
+        },
+        {
+          "line": 86,
+          "text": "\t  adapter and BrainBoxes Bluetooth PC Card."
+        },
+        {
+          "line": 87,
+          "text": ""
+        },
+        {
+          "line": 88,
+          "text": "\t  Say Y here to compile support for Bluetooth UART devices into the"
+        },
+        {
+          "line": 89,
+          "text": "\t  kernel or say M to compile it as module (hci_uart)."
+        },
+        {
+          "line": 90,
+          "text": ""
+        },
+        {
+          "line": 91,
+          "text": "config BT_HCIUART_SERDEV"
+        },
+        {
+          "line": 92,
+          "text": "\tbool"
+        },
+        {
+          "line": 93,
+          "text": "\tdepends on SERIAL_DEV_BUS && BT_HCIUART"
+        },
+        {
+          "line": 94,
+          "text": "\tdefault y"
+        },
+        {
+          "line": 95,
+          "text": ""
+        },
+        {
+          "line": 96,
+          "text": "config BT_HCIUART_H4"
+        },
+        {
+          "line": 97,
+          "text": "\tbool \"UART (H4) protocol support\""
+        },
+        {
+          "line": 98,
+          "text": "\tdepends on BT_HCIUART"
+        },
+        {
+          "line": 99,
+          "text": "\thelp"
+        },
+        {
+          "line": 100,
+          "text": "\t  UART (H4) is serial protocol for communication between Bluetooth"
+        },
+        {
+          "line": 145,
+          "text": "config BT_HCIUART_LL"
+        },
+        {
+          "line": 146,
+          "text": "\tbool \"HCILL protocol support\""
+        },
+        {
+          "line": 147,
+          "text": "\tdepends on BT_HCIUART_SERDEV"
+        },
+        {
+          "line": 148,
+          "text": "\thelp"
+        },
+        {
+          "line": 149,
+          "text": "\t  HCILL (HCI Low Level) is a serial protocol for communication"
+        },
+        {
+          "line": 150,
+          "text": "\t  between Bluetooth device and host. This protocol is required for"
+        },
+        {
+          "line": 151,
+          "text": "\t  serial Bluetooth devices that are based on Texas Instruments'"
+        },
+        {
+          "line": 152,
+          "text": "\t  BRF chips."
+        },
+        {
+          "line": 153,
+          "text": ""
+        },
+        {
+          "line": 154,
+          "text": "\t  Say Y here to compile support for HCILL protocol."
+        },
+        {
+          "line": 155,
+          "text": ""
+        },
+        {
+          "line": 156,
+          "text": "config BT_HCIUART_3WIRE"
+        }
+      ]
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "file": "include/scsi/scsi_cmnd.h",
+      "lines": [
+        {
+          "line": 179,
+          "text": "{"
+        },
+        {
+          "line": 180,
+          "text": "\treturn cmd->sdb.table.nents;"
+        },
+        {
+          "line": 181,
+          "text": "}"
+        },
+        {
+          "line": 182,
+          "text": ""
+        },
+        {
+          "line": 183,
+          "text": "static inline struct scatterlist *scsi_sglist(struct scsi_cmnd *cmd)"
+        },
+        {
+          "line": 184,
+          "text": "{"
+        },
+        {
+          "line": 185,
+          "text": "\treturn cmd->sdb.table.sgl;"
+        },
+        {
+          "line": 186,
+          "text": "}"
+        },
+        {
+          "line": 187,
+          "text": ""
+        },
+        {
+          "line": 188,
+          "text": "static inline unsigned scsi_bufflen(struct scsi_cmnd *cmd)"
+        },
+        {
+          "line": 189,
+          "text": "{"
+        },
+        {
+          "line": 190,
+          "text": "\treturn cmd->sdb.length;"
+        },
+        {
+          "line": 191,
+          "text": "}"
+        },
+        {
+          "line": 192,
+          "text": ""
+        },
+        {
+          "line": 193,
+          "text": "static inline void scsi_set_resid(struct scsi_cmnd *cmd, int resid)"
+        },
+        {
+          "line": 194,
+          "text": "{"
+        },
+        {
+          "line": 195,
+          "text": "\tcmd->sdb.resid = resid;"
+        }
+      ]
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "file": "drivers/scsi/mpt3sas/mpt3sas_base.c",
+      "lines": [
+        {
+          "line": 1788,
+          "text": "\t/* Check if we need to build a native SG list. */"
+        },
+        {
+          "line": 1789,
+          "text": "\tif (base_is_prp_possible(ioc, pcie_device,"
+        },
+        {
+          "line": 1790,
+          "text": "\t\t\t\tscmd, sges_left) == 0) {"
+        },
+        {
+          "line": 1791,
+          "text": "\t\t/* We built a native SG list, just return. */"
+        },
+        {
+          "line": 1792,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "line": 1793,
+          "text": "\t}"
+        },
+        {
+          "line": 1794,
+          "text": ""
+        },
+        {
+          "line": 1795,
+          "text": "\t/*"
+        },
+        {
+          "line": 1796,
+          "text": "\t * Build native NVMe PRP."
+        },
+        {
+          "line": 1797,
+          "text": "\t */"
+        },
+        {
+          "line": 1798,
+          "text": "\tbase_make_prp_nvme(ioc, scmd, mpi_request,"
+        },
+        {
+          "line": 1799,
+          "text": "\t\t\tsmid, sges_left);"
+        },
+        {
+          "line": 1800,
+          "text": ""
+        },
+        {
+          "line": 1801,
+          "text": "\treturn 0;"
+        },
+        {
+          "line": 1802,
+          "text": "out:"
+        },
+        {
+          "line": 1803,
+          "text": "\tscsi_dma_unmap(scmd);"
+        },
+        {
+          "line": 1804,
+          "text": "\treturn 1;"
+        },
+        {
+          "line": 1805,
+          "text": "}"
+        },
+        {
+          "line": 1806,
+          "text": ""
+        },
+        {
+          "line": 1807,
+          "text": "/**"
+        },
+        {
+          "line": 1808,
+          "text": " * _base_add_sg_single_ieee - add sg element for IEEE format"
+        },
+        {
+          "line": 1809,
+          "text": " * @paddr: virtual address for SGE"
+        },
+        {
+          "line": 1810,
+          "text": " * @flags: SGE flags"
+        },
+        {
+          "line": 1811,
+          "text": " * @chain_offset: number of 128 byte elements from start of segment"
+        },
+        {
+          "line": 1812,
+          "text": " * @length: data transfer length"
+        },
+        {
+          "line": 1813,
+          "text": " * @dma_addr: Physical address"
+        },
+        {
+          "line": 1814,
+          "text": " *"
+        }
+      ]
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "file": "net/bluetooth/hci_request.c",
+      "lines": [
+        {
+          "line": 111,
+          "text": "void hci_req_sync_cancel(struct hci_dev *hdev, int err)"
+        },
+        {
+          "line": 112,
+          "text": "{"
+        },
+        {
+          "line": 113,
+          "text": "\tBT_DBG(\"%s err 0x%2.2x\", hdev->name, err);"
+        },
+        {
+          "line": 114,
+          "text": ""
+        },
+        {
+          "line": 115,
+          "text": "\tif (hdev->req_status == HCI_REQ_PEND) {"
+        },
+        {
+          "line": 116,
+          "text": "\t\thdev->req_result = err;"
+        },
+        {
+          "line": 117,
+          "text": "\t\thdev->req_status = HCI_REQ_CANCELED;"
+        },
+        {
+          "line": 118,
+          "text": "\t\twake_up_interruptible(&hdev->req_wait_q);"
+        },
+        {
+          "line": 119,
+          "text": "\t}"
+        },
+        {
+          "line": 120,
+          "text": "}"
+        },
+        {
+          "line": 121,
+          "text": ""
+        },
+        {
+          "line": 122,
+          "text": "struct sk_buff *__hci_cmd_sync_ev(struct hci_dev *hdev, u16 opcode, u32 plen,"
+        },
+        {
+          "line": 123,
+          "text": "\t\t\t\t  const void *param, u8 event, u32 timeout)"
+        },
+        {
+          "line": 124,
+          "text": "{"
+        },
+        {
+          "line": 125,
+          "text": "\tDECLARE_WAITQUEUE(wait, current);"
+        },
+        {
+          "line": 126,
+          "text": "\tstruct hci_request req;"
+        },
+        {
+          "line": 127,
+          "text": "\tstruct sk_buff *skb;"
+        },
+        {
+          "line": 128,
+          "text": "\tint err = 0;"
+        },
+        {
+          "line": 129,
+          "text": ""
+        },
+        {
+          "line": 130,
+          "text": "\tBT_DBG(\"%s\", hdev->name);"
+        },
+        {
+          "line": 131,
+          "text": ""
+        },
+        {
+          "line": 132,
+          "text": "\thci_req_init(&req, hdev);"
+        },
+        {
+          "line": 133,
+          "text": ""
+        },
+        {
+          "line": 134,
+          "text": "\thci_req_add_ev(&req, opcode, plen, param, event);"
+        },
+        {
+          "line": 135,
+          "text": ""
+        },
+        {
+          "line": 136,
+          "text": "\thdev->req_status = HCI_REQ_PEND;"
+        },
+        {
+          "line": 137,
+          "text": ""
+        },
+        {
+          "line": 138,
+          "text": "\tadd_wait_queue(&hdev->req_wait_q, &wait);"
+        },
+        {
+          "line": 139,
+          "text": "\tset_current_state(TASK_INTERRUPTIBLE);"
+        },
+        {
+          "line": 140,
+          "text": ""
+        },
+        {
+          "line": 141,
+          "text": "\terr = hci_req_run_skb(&req, hci_req_sync_complete);"
+        },
+        {
+          "line": 142,
+          "text": "\tif (err < 0) {"
+        },
+        {
+          "line": 143,
+          "text": "\t\tremove_wait_queue(&hdev->req_wait_q, &wait);"
+        },
+        {
+          "line": 144,
+          "text": "\t\tset_current_state(TASK_RUNNING);"
+        },
+        {
+          "line": 145,
+          "text": "\t\treturn ERR_PTR(err);"
+        },
+        {
+          "line": 146,
+          "text": "\t}"
+        },
+        {
+          "line": 147,
+          "text": ""
+        },
+        {
+          "line": 148,
+          "text": "\tschedule_timeout(timeout);"
+        },
+        {
+          "line": 149,
+          "text": ""
+        },
+        {
+          "line": 150,
+          "text": "\tremove_wait_queue(&hdev->req_wait_q, &wait);"
+        },
+        {
+          "line": 177,
+          "text": "\t\treturn ERR_PTR(err);"
+        },
+        {
+          "line": 178,
+          "text": "\t}"
+        },
+        {
+          "line": 179,
+          "text": ""
+        },
+        {
+          "line": 180,
+          "text": "\tif (!skb)"
+        },
+        {
+          "line": 181,
+          "text": "\t\treturn ERR_PTR(-ENODATA);"
+        },
+        {
+          "line": 182,
+          "text": ""
+        },
+        {
+          "line": 183,
+          "text": "\treturn skb;"
+        },
+        {
+          "line": 184,
+          "text": "}"
+        },
+        {
+          "line": 185,
+          "text": "EXPORT_SYMBOL(__hci_cmd_sync_ev);"
+        },
+        {
+          "line": 186,
+          "text": ""
+        },
+        {
+          "line": 187,
+          "text": "struct sk_buff *__hci_cmd_sync(struct hci_dev *hdev, u16 opcode, u32 plen,"
+        },
+        {
+          "line": 188,
+          "text": "\t\t\t       const void *param, u32 timeout)"
+        },
+        {
+          "line": 189,
+          "text": "{"
+        },
+        {
+          "line": 190,
+          "text": "\treturn __hci_cmd_sync_ev(hdev, opcode, plen, param, 0, timeout);"
+        },
+        {
+          "line": 191,
+          "text": "}"
+        },
+        {
+          "line": 192,
+          "text": "EXPORT_SYMBOL(__hci_cmd_sync);"
+        },
+        {
+          "line": 193,
+          "text": ""
+        },
+        {
+          "line": 194,
+          "text": "/* Execute request and wait for completion. */"
+        },
+        {
+          "line": 195,
+          "text": "int __hci_req_sync(struct hci_dev *hdev, int (*func)(struct hci_request *req,"
+        },
+        {
+          "line": 196,
+          "text": "\t\t\t\t\t\t     unsigned long opt),"
+        },
+        {
+          "line": 197,
+          "text": "\t\t   unsigned long opt, u32 timeout, u8 *hci_status)"
+        },
+        {
+          "line": 198,
+          "text": "{"
+        },
+        {
+          "line": 199,
+          "text": "\tstruct hci_request req;"
+        },
+        {
+          "line": 200,
+          "text": "\tDECLARE_WAITQUEUE(wait, current);"
+        },
+        {
+          "line": 201,
+          "text": "\tint err = 0;"
+        },
+        {
+          "line": 202,
+          "text": ""
+        },
+        {
+          "line": 203,
+          "text": "\tBT_DBG(\"%s start\", hdev->name);"
+        },
+        {
+          "line": 204,
+          "text": ""
+        },
+        {
+          "line": 205,
+          "text": "\thci_req_init(&req, hdev);"
+        },
+        {
+          "line": 206,
+          "text": ""
+        },
+        {
+          "line": 207,
+          "text": "\thdev->req_status = HCI_REQ_PEND;"
+        },
+        {
+          "line": 208,
+          "text": ""
+        },
+        {
+          "line": 209,
+          "text": "\terr = func(&req, opt);"
+        },
+        {
+          "line": 210,
+          "text": "\tif (err) {"
+        },
+        {
+          "line": 211,
+          "text": "\t\tif (hci_status)"
+        },
+        {
+          "line": 212,
+          "text": "\t\t\t*hci_status = HCI_ERROR_UNSPECIFIED;"
+        },
+        {
+          "line": 275,
+          "text": ""
+        },
+        {
+          "line": 276,
+          "text": "\treturn err;"
+        },
+        {
+          "line": 277,
+          "text": "}"
+        },
+        {
+          "line": 278,
+          "text": ""
+        },
+        {
+          "line": 279,
+          "text": "int hci_req_sync(struct hci_dev *hdev, int (*req)(struct hci_request *req,"
+        },
+        {
+          "line": 280,
+          "text": "\t\t\t\t\t\t  unsigned long opt),"
+        },
+        {
+          "line": 281,
+          "text": "\t\t unsigned long opt, u32 timeout, u8 *hci_status)"
+        },
+        {
+          "line": 282,
+          "text": "{"
+        },
+        {
+          "line": 283,
+          "text": "\tint ret;"
+        },
+        {
+          "line": 284,
+          "text": ""
+        },
+        {
+          "line": 285,
+          "text": "\tif (!test_bit(HCI_UP, &hdev->flags))"
+        },
+        {
+          "line": 286,
+          "text": "\t\treturn -ENETDOWN;"
+        },
+        {
+          "line": 287,
+          "text": ""
+        },
+        {
+          "line": 288,
+          "text": "\t/* Serialize all requests */"
+        },
+        {
+          "line": 289,
+          "text": "\thci_req_sync_lock(hdev);"
+        },
+        {
+          "line": 290,
+          "text": "\tret = __hci_req_sync(hdev, req, opt, timeout, hci_status);"
+        },
+        {
+          "line": 291,
+          "text": "\thci_req_sync_unlock(hdev);"
+        },
+        {
+          "line": 292,
+          "text": ""
+        },
+        {
+          "line": 293,
+          "text": "\treturn ret;"
+        },
+        {
+          "line": 294,
+          "text": "}"
+        },
+        {
+          "line": 295,
+          "text": ""
+        },
+        {
+          "line": 296,
+          "text": "struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,"
+        },
+        {
+          "line": 297,
+          "text": "\t\t\t\tconst void *param)"
+        },
+        {
+          "line": 298,
+          "text": "{"
+        },
+        {
+          "line": 299,
+          "text": "\tint len = HCI_COMMAND_HDR_SIZE + plen;"
+        },
+        {
+          "line": 300,
+          "text": "\tstruct hci_command_hdr *hdr;"
+        },
+        {
+          "line": 301,
+          "text": "\tstruct sk_buff *skb;"
+        },
+        {
+          "line": 302,
+          "text": ""
+        },
+        {
+          "line": 303,
+          "text": "\tskb = bt_skb_alloc(len, GFP_ATOMIC);"
+        },
+        {
+          "line": 304,
+          "text": "\tif (!skb)"
+        },
+        {
+          "line": 305,
+          "text": "\t\treturn NULL;"
+        },
+        {
+          "line": 306,
+          "text": ""
+        },
+        {
+          "line": 307,
+          "text": "\thdr = skb_put(skb, HCI_COMMAND_HDR_SIZE);"
+        },
+        {
+          "line": 308,
+          "text": "\thdr->opcode = cpu_to_le16(opcode);"
+        },
+        {
+          "line": 309,
+          "text": "\thdr->plen   = plen;"
+        },
+        {
+          "line": 310,
+          "text": ""
+        },
+        {
+          "line": 311,
+          "text": "\tif (plen)"
+        },
+        {
+          "line": 312,
+          "text": "\t\tskb_put_data(skb, param, plen);"
+        },
+        {
+          "line": 313,
+          "text": ""
+        },
+        {
+          "line": 314,
+          "text": "\tBT_DBG(\"skb len %d\", skb->len);"
+        },
+        {
+          "line": 315,
+          "text": ""
+        },
+        {
+          "line": 316,
+          "text": "\thci_skb_pkt_type(skb) = HCI_COMMAND_PKT;"
+        },
+        {
+          "line": 317,
+          "text": "\thci_skb_opcode(skb) = opcode;"
+        },
+        {
+          "line": 318,
+          "text": ""
+        },
+        {
+          "line": 319,
+          "text": "\treturn skb;"
+        },
+        {
+          "line": 320,
+          "text": "}"
+        },
+        {
+          "line": 321,
+          "text": ""
+        },
+        {
+          "line": 322,
+          "text": "/* Queue a command to an asynchronous HCI request */"
+        },
+        {
+          "line": 323,
+          "text": "void hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen,"
+        },
+        {
+          "line": 324,
+          "text": "\t\t    const void *param, u8 event)"
+        },
+        {
+          "line": 325,
+          "text": "{"
+        },
+        {
+          "line": 326,
+          "text": "\tstruct hci_dev *hdev = req->hdev;"
+        },
+        {
+          "line": 327,
+          "text": "\tstruct sk_buff *skb;"
+        },
+        {
+          "line": 328,
+          "text": ""
+        },
+        {
+          "line": 329,
+          "text": "\tBT_DBG(\"%s opcode 0x%4.4x plen %d\", hdev->name, opcode, plen);"
+        },
+        {
+          "line": 330,
+          "text": ""
+        },
+        {
+          "line": 331,
+          "text": "\t/* If an error occurred during request building, there is no point in"
+        },
+        {
+          "line": 332,
+          "text": "\t * queueing the HCI command. We can simply return."
+        },
+        {
+          "line": 333,
+          "text": "\t */"
+        },
+        {
+          "line": 334,
+          "text": "\tif (req->err)"
+        },
+        {
+          "line": 335,
+          "text": "\t\treturn;"
+        },
+        {
+          "line": 336,
+          "text": ""
+        },
+        {
+          "line": 337,
+          "text": "\tskb = hci_prepare_cmd(hdev, opcode, plen, param);"
+        },
+        {
+          "line": 338,
+          "text": "\tif (!skb) {"
+        },
+        {
+          "line": 339,
+          "text": "\t\tbt_dev_err(hdev, \"no memory for command (opcode 0x%4.4x)\","
+        },
+        {
+          "line": 340,
+          "text": "\t\t\t   opcode);"
+        },
+        {
+          "line": 341,
+          "text": "\t\treq->err = -ENOMEM;"
+        },
+        {
+          "line": 342,
+          "text": "\t\treturn;"
+        },
+        {
+          "line": 343,
+          "text": "\t}"
+        },
+        {
+          "line": 344,
+          "text": ""
+        },
+        {
+          "line": 345,
+          "text": "\tif (skb_queue_empty(&req->cmd_q))"
+        },
+        {
+          "line": 346,
+          "text": "\t\tbt_cb(skb)->hci.req_flags |= HCI_REQ_START;"
+        },
+        {
+          "line": 347,
+          "text": ""
+        },
+        {
+          "line": 348,
+          "text": "\tbt_cb(skb)->hci.req_event = event;"
+        },
+        {
+          "line": 349,
+          "text": ""
+        },
+        {
+          "line": 350,
+          "text": "\tskb_queue_tail(&req->cmd_q, skb);"
+        },
+        {
+          "line": 351,
+          "text": "}"
+        },
+        {
+          "line": 352,
+          "text": ""
+        },
+        {
+          "line": 353,
+          "text": "void hci_req_add(struct hci_request *req, u16 opcode, u32 plen,"
+        },
+        {
+          "line": 354,
+          "text": "\t\t const void *param)"
+        },
+        {
+          "line": 355,
+          "text": "{"
+        },
+        {
+          "line": 356,
+          "text": "\thci_req_add_ev(req, opcode, plen, param, 0);"
+        },
+        {
+          "line": 357,
+          "text": "}"
+        },
+        {
+          "line": 358,
+          "text": ""
+        },
+        {
+          "line": 359,
+          "text": "void __hci_req_write_fast_connectable(struct hci_request *req, bool enable)"
+        },
+        {
+          "line": 360,
+          "text": "{"
+        }
+      ]
+    },
+    {
+      "revision": "c30b93eade2ad1d77695669f25ddeb3833588d3b",
+      "file": "drivers/bluetooth/hci_ll.c",
+      "lines": [
+        {
+          "line": 670,
+          "text": "\tu32 speed;"
+        },
+        {
+          "line": 671,
+          "text": ""
+        },
+        {
+          "line": 709,
+          "text": "\tif (speed) {"
+        },
+        {
+          "line": 710,
+          "text": "\t\t__le32 speed_le = cpu_to_le32(speed);"
+        },
+        {
+          "line": 711,
+          "text": "\t\tstruct sk_buff *skb;"
+        },
+        {
+          "line": 712,
+          "text": ""
+        },
+        {
+          "line": 713,
+          "text": "\t\tskb = __hci_cmd_sync(hu->hdev, HCI_VS_UPDATE_UART_HCI_BAUDRATE,"
+        },
+        {
+          "line": 714,
+          "text": "\t\t\t\t     sizeof(speed_le), &speed_le,"
+        },
+        {
+          "line": 715,
+          "text": "\t\t\t\t     HCI_INIT_TIMEOUT);"
+        },
+        {
+          "line": 716,
+          "text": "\t\tif (!IS_ERR(skb)) {"
+        },
+        {
+          "line": 717,
+          "text": "\t\t\tkfree_skb(skb);"
+        },
+        {
+          "line": 718,
+          "text": "\t\t\tserdev_device_set_baudrate(serdev, speed);"
+        },
+        {
+          "line": 719,
+          "text": "\t\t}"
+        },
+        {
+          "line": 720,
+          "text": "\t}"
+        }
+      ]
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "file": "include/linux/skbuff.h",
+      "lines": [
+        {
+          "line": 2046,
+          "text": "static inline void *skb_put_data(struct sk_buff *skb, const void *data,"
+        },
+        {
+          "line": 2047,
+          "text": "\t\t\t\t unsigned int len)"
+        },
+        {
+          "line": 2048,
+          "text": "{"
+        },
+        {
+          "line": 2049,
+          "text": "\tvoid *tmp = skb_put(skb, len);"
+        },
+        {
+          "line": 2050,
+          "text": ""
+        },
+        {
+          "line": 2051,
+          "text": "\tmemcpy(tmp, data, len);"
+        },
+        {
+          "line": 2052,
+          "text": ""
+        },
+        {
+          "line": 2053,
+          "text": "\treturn tmp;"
+        },
+        {
+          "line": 2054,
+          "text": "}"
+        }
+      ]
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "file": "drivers/scsi/mpt3sas/mpt3sas_base.h",
+      "lines": [
+        {
+          "line": 1301,
+          "text": "\tstruct dma_pool *reply_dma_pool;"
+        },
+        {
+          "line": 1302,
+          "text": ""
+        },
+        {
+          "line": 1303,
+          "text": "\t/* reply free queue */"
+        },
+        {
+          "line": 1304,
+          "text": "\tu16\t\treply_free_queue_depth;"
+        },
+        {
+          "line": 1305,
+          "text": "\t__le32\t\t*reply_free;"
+        },
+        {
+          "line": 1306,
+          "text": "\tdma_addr_t\treply_free_dma;"
+        },
+        {
+          "line": 1307,
+          "text": "\tstruct dma_pool *reply_free_dma_pool;"
+        },
+        {
+          "line": 1308,
+          "text": "\tu32\t\treply_free_host_index;"
+        },
+        {
+          "line": 1309,
+          "text": ""
+        }
+      ]
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "file": "drivers/scsi/mpt3sas/mpt3sas_base.c",
+      "lines": [
+        {
+          "line": 3767,
+          "text": "\t\tdma_pool_destroy(ioc->reply_free_dma_pool);"
+        },
+        {
+          "line": 3768,
+          "text": "\t\tdexitprintk(ioc, pr_info(MPT3SAS_FMT"
+        },
+        {
+          "line": 3769,
+          "text": "\t\t\t\"reply_free_pool(0x%p): free\\n\","
+        },
+        {
+          "line": 3770,
+          "text": "\t\t\tioc->name, ioc->reply_free));"
+        },
+        {
+          "line": 3771,
+          "text": "\t\tioc->reply_free = NULL;"
+        },
+        {
+          "line": 3772,
+          "text": "\t}"
+        },
+        {
+          "line": 3773,
+          "text": ""
+        },
+        {
+          "line": 4293,
+          "text": "\t\tgoto out;"
+        },
+        {
+          "line": 4294,
+          "text": "\t}"
+        },
+        {
+          "line": 4295,
+          "text": "\tioc->reply_free = dma_pool_alloc(ioc->reply_free_dma_pool, GFP_KERNEL,"
+        },
+        {
+          "line": 4296,
+          "text": "\t    &ioc->reply_free_dma);"
+        },
+        {
+          "line": 4297,
+          "text": "\tif (!ioc->reply_free) {"
+        },
+        {
+          "line": 4298,
+          "text": "\t\tpr_err(MPT3SAS_FMT \"reply_free pool: dma_pool_alloc failed\\n\","
+        },
+        {
+          "line": 4299,
+          "text": "\t\t\tioc->name);"
+        },
+        {
+          "line": 5814,
+          "text": ""
+        },
+        {
+          "line": 5815,
+          "text": "\t/* initialize Reply Free Queue */"
+        },
+        {
+          "line": 5816,
+          "text": "\tfor (i = 0, reply_address = (u32)ioc->reply_dma ;"
+        },
+        {
+          "line": 5817,
+          "text": "\t    i < ioc->reply_free_queue_depth ; i++, reply_address +="
+        },
+        {
+          "line": 5818,
+          "text": "\t    ioc->reply_sz)"
+        },
+        {
+          "line": 5819,
+          "text": "\t\tioc->reply_free[i] = cpu_to_le32(reply_address);"
+        },
+        {
+          "line": 5820,
+          "text": ""
+        },
+        {
+          "line": 5821,
+          "text": "\t/* initialize reply queues */"
+        }
+      ]
+    },
+    {
+      "revision": "494f401bcd07d6b39f49f114e4eaa788842f16fe",
+      "file": "drivers/scsi/mpt3sas/mpt3sas_base.c",
+      "lines": [
+        {
+          "line": 1439,
+          "text": "\tint\t\tprp_size = NVME_PRP_SIZE;"
+        },
+        {
+          "line": 1440,
+          "text": "\t__le64\t\t*prp_entry, *prp1_entry, *prp2_entry, *prp_entry_phys;"
+        },
+        {
+          "line": 1441,
+          "text": "\t__le64\t\t*prp_page, *prp_page_phys;"
+        },
+        {
+          "line": 1442,
+          "text": "\tu32\t\toffset, entry_len;"
+        },
+        {
+          "line": 1739,
+          "text": "\tu32 data_length = 0;"
+        },
+        {
+          "line": 1740,
+          "text": "\tstruct scatterlist *sg_scmd;"
+        },
+        {
+          "line": 1741,
+          "text": "\tbool build_prp = true;"
+        },
+        {
+          "line": 1742,
+          "text": ""
+        },
+        {
+          "line": 1743,
+          "text": "\tdata_length = scsi_bufflen(scmd);"
+        },
+        {
+          "line": 1744,
+          "text": "\tsg_scmd = scsi_sglist(scmd);"
+        },
+        {
+          "line": 1745,
+          "text": ""
+        },
+        {
+          "line": 1746,
+          "text": "\t/* If Datalenth is <= 16K and number of SGE’s entries are <= 2"
+        },
+        {
+          "line": 1747,
+          "text": "\t * we built IEEE SGL"
+        },
+        {
+          "line": 1748,
+          "text": "\t */"
+        },
+        {
+          "line": 1749,
+          "text": "\tif ((data_length <= NVME_PRP_PAGE_SIZE*4) && (sge_count <= 2))"
+        },
+        {
+          "line": 1750,
+          "text": "\t\tbuild_prp = false;"
+        },
+        {
+          "line": 1751,
+          "text": ""
+        },
+        {
+          "line": 1752,
+          "text": "\treturn build_prp;"
+        }
+      ]
+    }
+  ],
+  "searches": [
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "pattern": "scsi_bufflen",
+      "matches": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb:include/scsi/scsi_cmnd.h:188:static inline unsigned scsi_bufflen(struct scsi_cmnd *cmd)\n",
+      "exit_code": 0
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "pattern": "NVMe_Command",
+      "matches": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb:drivers/scsi/mpt3sas/mpi/mpi2_pci.h:65:\tU8\tNVMe_Command[4];                /*0x20 */\n",
+      "exit_code": 0
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "pattern": "__hci_cmd_sync(",
+      "matches": "7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_core.c:98:\t\tskb = __hci_cmd_sync(hdev, HCI_OP_ENABLE_DUT_MODE, 0, NULL,\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_core.c:101:\t\tskb = __hci_cmd_sync(hdev, HCI_OP_RESET, 0, NULL,\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_core.c:3455:\tskb = __hci_cmd_sync(hdev, opcode, plen, param, timeout);\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_request.c:187:struct sk_buff *__hci_cmd_sync(struct hci_dev *hdev, u16 opcode, u32 plen,\n",
+      "exit_code": 0
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "pattern": "hci_prepare_cmd(",
+      "matches": "7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_core.c:3408:\tskb = hci_prepare_cmd(hdev, opcode, plen, param);\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_request.c:296:struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_request.c:337:\tskb = hci_prepare_cmd(hdev, opcode, plen, param);\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:net/bluetooth/hci_request.h:58:struct sk_buff *hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen,\n",
+      "exit_code": 0
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "pattern": "HCI_VS_UPDATE_UART_HCI_BAUDRATE",
+      "matches": "7c6ca1201e5e87513b27196138f06df9cbd09a7a:drivers/bluetooth/hci_ll.c:60:#define HCI_VS_UPDATE_UART_HCI_BAUDRATE\t\t0xff36\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:drivers/bluetooth/hci_ll.c:626:\t\t\tif (cmd->opcode == HCI_VS_UPDATE_UART_HCI_BAUDRATE) {\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:drivers/bluetooth/hci_ll.c:712:\t\tskb = __hci_cmd_sync(hu->hdev, HCI_VS_UPDATE_UART_HCI_BAUDRATE,\n",
+      "exit_code": 0
+    },
+    {
+      "revision": "7c6ca1201e5e87513b27196138f06df9cbd09a7a",
+      "pattern": "skb_put_data(",
+      "matches": "7c6ca1201e5e87513b27196138f06df9cbd09a7a:include/linux/skbuff.h:2023:static inline void *__skb_put_data(struct sk_buff *skb, const void *data,\n7c6ca1201e5e87513b27196138f06df9cbd09a7a:include/linux/skbuff.h:2046:static inline void *skb_put_data(struct sk_buff *skb, const void *data,\n",
+      "exit_code": 0
+    },
+    {
+      "revision": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb",
+      "pattern": "NVME_PRP_PAGE_SIZE",
+      "matches": "cd5897eda27dc155146f25ddf4b0dd9967b3e2bb:drivers/scsi/mpt3sas/mpt3sas_base.c:1624:\tnvme_pg_size = max_t(u32, ioc->page_size, NVME_PRP_PAGE_SIZE);\ncd5897eda27dc155146f25ddf4b0dd9967b3e2bb:drivers/scsi/mpt3sas/mpt3sas_base.c:1749:\tif ((data_length <= NVME_PRP_PAGE_SIZE*4) && (sge_count <= 2))\ncd5897eda27dc155146f25ddf4b0dd9967b3e2bb:drivers/scsi/mpt3sas/mpt3sas_base.h:144:#define\tNVME_PRP_PAGE_SIZE\t\t4096\t/* Page size */\n",
+      "exit_code": 0
+    }
+  ]
+}

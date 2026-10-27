@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-27",
+  "frozen_before_build_and_boot": true,
+  "user_authorization": "user approved: fixed x86_64 build; KVM, KVM+nopv, TCG, TCG -cpu max boots with QMP CPU hotplug",
+  "derived_from": "firmware_platform_audit_20261027/next_minimal_evidence_plan.json",
+  "revision": "adbf61cc47cb72b102682e690ad323e1eda652c2",
+  "cache_root": "/root/.cache/linux-bug-analyze/acpi-env-20261027",
+  "kernel": {
+    "config": "x86_64_defconfig; record CONFIG_SMP, HOTPLUG_CPU, ACPI_HOTPLUG_CPU, HYPERVISOR_GUEST, PARAVIRT, KVM_GUEST, BLK_DEV_INITRD, DEVTMPFS; enable KVM_GUEST/ACPI_HOTPLUG_CPU/DEVTMPFS only if absent and record the change; LOCALVERSION=-lba-acpi-env",
+    "source_changes": "none",
+    "target": "bzImage only"
+  },
+  "pid1": "static C; mounts proc/sysfs/devtmpfs; prints possible/present/online and cpu directories; prints LBA_READY; waits up to 45 s for a new cpuN directory; writes 1 to its online file and reports errno; prints final sets; powers off",
+  "qemu_common": ["-machine", "q35", "-m", "512", "-smp", "1,maxcpus=4", "-nodefaults", "-display", "none", "-serial", "stdio", "-no-reboot", "-qmp", "unix:<sock>,server=on,wait=off"],
+  "environments": [
+    {"name": "kvm", "accel": "kvm", "cpu": "qemu64", "append": ""},
+    {"name": "kvm_nopv", "accel": "kvm", "cpu": "qemu64", "append": "nopv"},
+    {"name": "tcg", "accel": "tcg", "cpu": "qemu64", "append": ""},
+    {"name": "tcg_cpu_max", "accel": "tcg", "cpu": "max", "append": ""}
+  ],
+  "hotplug": "after LBA_READY: qmp_capabilities, query-hotpluggable-cpus, device_add of the first slot without qom-path using its type and props; record every QMP reply",
+  "hypotheses_not_observations": {
+    "kvm": "Hypervisor detected: KVM; possible 0-3; hot-added CPU appears and onlines",
+    "kvm_nopv": "no hypervisor line; possible 0; hot-added CPU does not become usable",
+    "tcg": "no hypervisor line; possible 0; hot-added CPU does not become usable",
+    "tcg_cpu_max": "same as tcg"
+  },
+  "relations": {
+    "P1_policy_reach": "for a QEMU guest whose legacy MADT carries Enabled=0 hotplug slots, possible at boot covers present plus those slots (commit intent: QEMU use case allowed for guests)",
+    "P3_hotplug_consumption": "a hot-added CPU becomes online only if it was possible at boot (diagnostic of consequence, not of policy)"
+  },
+  "stop_rule": "failed build or boot is recorded and not silently retried; a corrected rerun is a separate attempt directory",
+  "not_claimed": ["bare-metal behaviour", "vendor firmware", "Xen", "that TCG is in upstream scope; any TCG/nopv loss is a policy-reach observation, not a confirmed defect"],
+  "model_calls_planned": 0
+}

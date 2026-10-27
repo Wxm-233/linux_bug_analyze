@@ -1,0 +1,11 @@
+# 有限新输入事前审阅：待执行门控
+
+2026-10-03。仅静态读取protocol_pre.md、run_holdout.py及准备环境说明；未查询Git，未运行规则，未读任何待验证父版源码或补丁。旧已封存stage未修改。
+
+准备顺序符合元数据选样边界：固定HEAD、fs/drivers各最多32条标题/父提交/日期元数据、精确SHA及12位前缀旧记录检索、name-only文件列表，最多选两项，不赋阳性标签。rg缺失后的grep回退发生在正式freeze前；首轮只留下版本查询原输出，未查询池或新源码。
+
+原runner有两个待门控问题。parents接受CLI返回码1/2，无raw也会形成parents_lock；unseal只验证锁文件哈希，尚不拒绝父版失败。Capture.run先执行再排他保存日志，重复parents调用可能在日志报错前重跑CLI。应在独立execution_gate_pre中先拒绝既有阶段输出，再只允许全部父版rc0、raw存在且SHA锁定的非空选择解封；正常零站点JSON不是失败。空选/失败必须收尾停止。
+
+按协议，人工目标判断在patch解封后；不能将此轮称为人工真值事前冻结或无提示盲测。原producer依赖原consumer，两份直接本地规则文件须同时冻结；无需把已承认不完整的stdlib快照称为递归闭包。
+
+最终审阅待freeze/selection/prepare命令记录及独立执行门控形成后保存bound hashes。本记录不授权目前未门控的runner直接解封。

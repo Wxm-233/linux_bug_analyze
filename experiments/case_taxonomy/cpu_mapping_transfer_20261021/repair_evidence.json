@@ -1,0 +1,40 @@
+{
+  "case": "I",
+  "child": "ea2dd8a5d4361ef0b000196043fa407f05b16f1d",
+  "parent": "7cdcdab1a660bbe9f98bf1591c048ce7ccee59e0",
+  "checkpoint_sha256": "178666e26c1024955bbae4b145e11be3d546706246f12fde0e53bd5e59a536bb",
+  "evidence": [
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/root/repos/linux",
+        "show",
+        "-s",
+        "--format=fuller",
+        "ea2dd8a5d4361ef0b000196043fa407f05b16f1d"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "6d33e7504aabb6213166bf59a325f20a01a3cc97e10c1b9fa3ed15eae9af84b0",
+      "text": "commit ea2dd8a5d4361ef0b000196043fa407f05b16f1d\nAuthor:     Thomas Gleixner <tglx@kernel.org>\nAuthorDate: Tue Feb 13 22:05:59 2024 +0100\nCommit:     Thomas Gleixner <tglx@kernel.org>\nCommitDate: Thu Feb 15 22:07:44 2024 +0100\n\n    x86/cpu/topology: Assign hotpluggable CPUIDs during init\n    \n    There is no point in assigning the CPU numbers during ACPI physical\n    hotplug. The number of possible hotplug CPUs is known when the possible map\n    is initialized, so the CPU numbers can be associated to the registered\n    non-present APIC IDs right there.\n    \n    This allows to put more code into the __init section and makes the related\n    data __ro_after_init.\n    \n    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>\n    Tested-by: Michael Kelley <mhklinux@outlook.com>\n    Tested-by: Sohil Mehta <sohil.mehta@intel.com>\n    Link: https://lore.kernel.org/r/20240213210252.517339971@linutronix.de\n"
+    },
+    {
+      "argv": [
+        "git",
+        "-C",
+        "/root/repos/linux",
+        "diff",
+        "--no-ext-diff",
+        "--no-renames",
+        "7cdcdab1a660bbe9f98bf1591c048ce7ccee59e0",
+        "ea2dd8a5d4361ef0b000196043fa407f05b16f1d",
+        "--",
+        "arch/x86/kernel/cpu/topology.c"
+      ],
+      "returncode": 0,
+      "stdout_sha256": "09e80cc10ce02203cae1381a8e774ce2702d9a394a9d18275a6a9dca58f887c0",
+      "text": "diff --git a/arch/x86/kernel/cpu/topology.c b/arch/x86/kernel/cpu/topology.c\nindex a6d045b15ebd..07124da9df71 100644\n--- a/arch/x86/kernel/cpu/topology.c\n+++ b/arch/x86/kernel/cpu/topology.c\n@@ -45,7 +45,7 @@ EXPORT_EARLY_PER_CPU_SYMBOL(x86_cpu_to_acpiid);\n DECLARE_BITMAP(phys_cpu_present_map, MAX_LOCAL_APIC) __read_mostly;\n \n /* Used for CPU number allocation and parallel CPU bringup */\n-u32 cpuid_to_apicid[] __read_mostly = { [0 ... NR_CPUS - 1] = BAD_APICID, };\n+u32 cpuid_to_apicid[] __ro_after_init = { [0 ... NR_CPUS - 1] = BAD_APICID, };\n \n /* Bitmaps to mark registered APICs at each topology domain */\n static struct { DECLARE_BITMAP(map, MAX_LOCAL_APIC); } apic_maps[TOPO_MAX_DOMAIN] __ro_after_init;\n@@ -60,7 +60,7 @@ static struct {\n \tunsigned int\t\tnr_rejected_cpus;\n \tu32\t\t\tboot_cpu_apic_id;\n \tu32\t\t\treal_bsp_apic_id;\n-} topo_info __read_mostly = {\n+} topo_info __ro_after_init = {\n \t.nr_assigned_cpus\t= 1,\n \t.boot_cpu_apic_id\t= BAD_APICID,\n \t.real_bsp_apic_id\t= BAD_APICID,\n@@ -133,7 +133,7 @@ static int topo_lookup_cpuid(u32 apic_id)\n \treturn -ENODEV;\n }\n \n-static int topo_get_cpunr(u32 apic_id)\n+static __init int topo_get_cpunr(u32 apic_id)\n {\n \tint cpu = topo_lookup_cpuid(apic_id);\n \n@@ -149,8 +149,6 @@ static void topo_set_cpuids(unsigned int cpu, u32 apic_id, u32 acpi_id)\n \tearly_per_cpu(x86_cpu_to_apicid, cpu) = apic_id;\n \tearly_per_cpu(x86_cpu_to_acpiid, cpu) = acpi_id;\n #endif\n-\tcpuid_to_apicid[cpu] = apic_id;\n-\n \tset_cpu_possible(cpu, true);\n \tset_cpu_present(cpu, true);\n \n@@ -206,6 +204,8 @@ static __init void topo_register_apic(u32 apic_id, u32 acpi_id, bool present)\n \t\t\tcpu = 0;\n \t\telse\n \t\t\tcpu = topo_get_cpunr(apic_id);\n+\n+\t\tcpuid_to_apicid[cpu] = apic_id;\n \t\ttopo_set_cpuids(cpu, apic_id, acpi_id);\n \t} else {\n \t\ttopo_info.nr_disabled_cpus++;\n@@ -277,12 +277,9 @@ int topology_hotplug_apic(u32 apic_id, u32 acpi_id)\n \t\treturn -ENODEV;\n \n \tcpu = topo_lookup_cpuid(apic_id);\n-\tif (cpu < 0) {\n-\t\tif (topo_info.nr_assigned_cpus >= nr_cpu_ids)\n-\t\t\treturn -ENOSPC;\n+\tif (cpu < 0)\n+\t\treturn -ENOSPC;\n \n-\t\tcpu = topo_assign_cpunr(apic_id);\n-\t}\n \tset_bit(apic_id, phys_cpu_present_map);\n \ttopo_set_cpuids(cpu, apic_id, acpi_id);\n \treturn cpu;\n@@ -353,6 +350,7 @@ void __init topology_init_possible_cpus(void)\n \tunsigned int disabled = topo_info.nr_disabled_cpus;\n \tunsigned int total = assigned + disabled;\n \tunsigned int cpu, allowed = 1;\n+\tu32 apicid;\n \n \tif (!restrict_to_up()) {\n \t\tif (WARN_ON_ONCE(assigned > nr_cpu_ids)) {\n@@ -381,8 +379,17 @@ void __init topology_init_possible_cpus(void)\n \tinit_cpu_present(cpumask_of(0));\n \tinit_cpu_possible(cpumask_of(0));\n \n+\t/* Assign CPU numbers to non-present CPUs */\n+\tfor (apicid = 0; disabled; disabled--, apicid++) {\n+\t\tapicid = find_next_andnot_bit(apic_maps[TOPO_SMT_DOMAIN].map, phys_cpu_present_map,\n+\t\t\t\t\t      MAX_LOCAL_APIC, apicid);\n+\t\tif (apicid >= MAX_LOCAL_APIC)\n+\t\t\tbreak;\n+\t\tcpuid_to_apicid[topo_info.nr_assigned_cpus++] = apicid;\n+\t}\n+\n \tfor (cpu = 0; cpu < allowed; cpu++) {\n-\t\tu32 apicid = cpuid_to_apicid[cpu];\n+\t\tapicid = cpuid_to_apicid[cpu];\n \n \t\tset_cpu_possible(cpu, true);\n \n"
+    }
+  ],
+  "J_has_no_child_or_assumed_normal_truth": true
+}

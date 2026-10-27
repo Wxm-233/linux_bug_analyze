@@ -1,0 +1,194 @@
+--- a/kernel/cpu.c
++++ b/kernel/cpu.c
+@@ -3,6 +3,7 @@
+  *
+  * This code is licenced under the GPL.
+  */
++#include <linux/r4_observe.h>
+ #include <linux/sched/mm.h>
+ #include <linux/proc_fs.h>
+ #include <linux/smp.h>
+@@ -152,6 +153,12 @@
+  *
+  * Called from cpu hotplug and from the state register machinery.
+  */
++static DEFINE_PER_CPU(unsigned int, r4_sequence);
++unsigned int r4_next_seq(unsigned int cpu)
++{
++	return ++per_cpu(r4_sequence, cpu);
++}
++
+ static int cpuhp_invoke_callback(unsigned int cpu, enum cpuhp_state state,
+ 				 bool bringup, struct hlist_node *node,
+ 				 struct hlist_node **lastp)
+@@ -177,7 +184,11 @@
+ 		cb = bringup ? step->startup.single : step->teardown.single;
+ 
+ 		trace_cpuhp_enter(cpu, st->target, state, cb);
++		if (bringup && state == CPUHP_AP_SCHED_STARTING)
++			r4_note("cpuhp_before", cpu, 0, -1, state, st->target, 0);
+ 		ret = cb(cpu);
++		if (bringup && state == CPUHP_AP_SCHED_STARTING)
++			r4_note("cpuhp_after", cpu, 0, -1, state, st->target, ret);
+ 		trace_cpuhp_exit(cpu, st->state, state, ret);
+ 		return ret;
+ 	}
+@@ -1260,9 +1271,11 @@
+ 	enum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);
+ 	int ret;
+ 
++	r4_note("notify_enter", cpu, 0, -1, st->state, target, 0);
+ 	rcu_cpu_starting(cpu);	/* Enables RCU usage on this CPU. */
+ 	cpumask_set_cpu(cpu, &cpus_booted_once_mask);
+ 	ret = cpuhp_invoke_callback_range(true, cpu, st, target);
++	r4_note("notify_exit", cpu, 0, -1, st->state, target, ret);
+ 
+ 	/*
+ 	 * STARTING must not fail!
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -7,6 +7,7 @@
+  *  Copyright (C) 1991-2002  Linus Torvalds
+  */
+ #define CREATE_TRACE_POINTS
++#include <linux/r4_observe.h>
+ #include <trace/events/sched.h>
+ #undef CREATE_TRACE_POINTS
+ 
+@@ -237,14 +238,35 @@
+ static atomic_t sched_core_count;
+ static struct cpumask sched_core_mask;
+ 
++struct r4_lock_observation {
++    bool active;
++    unsigned int seq, self, weight, count, rq_self, online;
++    unsigned long mask;
++};
++static DEFINE_PER_CPU(struct r4_lock_observation, r4_lock_observation);
++
++
+ static void sched_core_lock(int cpu, unsigned long *flags)
+ {
+ 	const struct cpumask *smt_mask = cpu_smt_mask(cpu);
+ 	int t, i = 0;
+-
++	struct r4_lock_observation *o = &per_cpu(r4_lock_observation, cpu);
++
++	if (o->active) {
++		o->seq = r4_next_seq(cpu);
++		o->mask = cpumask_bits(smt_mask)[0];
++		o->self = cpumask_test_cpu(cpu, smt_mask);
++		o->weight = cpumask_weight(smt_mask);
++		o->rq_self = cpu_rq(cpu)->core == cpu_rq(cpu);
++		o->online = cpu_online(cpu);
++		o->count = 0;
++	}
+ 	local_irq_save(*flags);
+-	for_each_cpu(t, smt_mask)
++	for_each_cpu(t, smt_mask) {
+ 		raw_spin_lock_nested(&cpu_rq(t)->__lock, i++);
++		if (o->active)
++			o->count++;
++	}
+ }
+ 
+ static void sched_core_unlock(int cpu, unsigned long *flags)
+@@ -5757,6 +5779,8 @@
+ 	unsigned long flags;
+ 	int t;
+ 
++	per_cpu(r4_lock_observation, cpu).active = true;
++	r4_note("core_enter", cpu, 0, -1, -1, -1, 0);
+ 	sched_core_lock(cpu, &flags);
+ 
+ 	WARN_ON_ONCE(rq->core != rq);
+@@ -5791,6 +5815,13 @@
+ 
+ unlock:
+ 	sched_core_unlock(cpu, &flags);
++	{
++		struct r4_lock_observation *o = &per_cpu(r4_lock_observation, cpu);
++		o->active = false;
++		pr_info("R4 phase=lock_snapshot cpu=%u current=%u seq=%u mask=%lx self=%u weight=%u locks=%u rq_self=%u online=%u printed_after_unlock=1\n",
++			cpu, raw_smp_processor_id(), o->seq, o->mask, o->self, o->weight, o->count, o->rq_self, o->online);
++	}
++	r4_note("core_exit", cpu, 0, -1, -1, -1, 0);
+ }
+ 
+ static void sched_core_cpu_deactivate(unsigned int cpu)
+--- a/arch/s390/kernel/smp.c
++++ b/arch/s390/kernel/smp.c
+@@ -19,6 +19,7 @@
+ #define KMSG_COMPONENT "cpu"
+ #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+ 
++#include <linux/r4_observe.h>
+ #include <linux/workqueue.h>
+ #include <linux/memblock.h>
+ #include <linux/export.h>
+@@ -905,12 +906,15 @@
+ 	pfault_init();
+ 	cpumask_set_cpu(cpu, &cpu_setup_mask);
+ 	update_cpu_masks();
++	r4_note("arch_before_notify", cpu, 1, cpumask_test_cpu(cpu, &cpu_setup_mask), -1, -1, 0);
+ 	notify_cpu_starting(cpu);
++	r4_note("arch_after_notify", cpu, 1, cpumask_test_cpu(cpu, &cpu_setup_mask), -1, -1, 0);
+ 	if (topology_cpu_dedicated(cpu))
+ 		set_cpu_flag(CIF_DEDICATED_CPU);
+ 	else
+ 		clear_cpu_flag(CIF_DEDICATED_CPU);
+ 	set_cpu_online(cpu, true);
++	r4_note("arch_online_ready", cpu, 1, cpumask_test_cpu(cpu, &cpu_setup_mask), -1, -1, 0);
+ 	inc_irq_stat(CPU_RST);
+ 	local_irq_enable();
+ 	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+--- a/arch/s390/kernel/topology.c
++++ b/arch/s390/kernel/topology.c
+@@ -572,6 +572,7 @@
+ 	cpumask_set_cpu(0, &cpu_setup_mask);
+ 	__arch_update_cpu_topology();
+ 	__arch_update_dedicated_flag(NULL);
++	pr_info("R4_MODE mode=%d facility=%d mtid=%u\n", topology_mode, !!MACHINE_HAS_TOPOLOGY, smp_cpu_mtid);
+ }
+ 
+ static inline int topology_get_mode(int enabled)
+--- a/arch/x86/kernel/smpboot.c
++++ b/arch/x86/kernel/smpboot.c
+@@ -39,6 +39,7 @@
+ 
+ #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+ 
++#include <linux/r4_observe.h>
+ #include <linux/init.h>
+ #include <linux/smp.h>
+ #include <linux/export.h>
+@@ -205,7 +206,9 @@
+ 
+ 	wmb();
+ 
++	r4_note("arch_before_notify", cpuid, 1, cpumask_test_cpu(cpuid, cpu_sibling_setup_mask), -1, -1, 0);
+ 	notify_cpu_starting(cpuid);
++	r4_note("arch_after_notify", cpuid, 1, cpumask_test_cpu(cpuid, cpu_sibling_setup_mask), -1, -1, 0);
+ 
+ 	/*
+ 	 * Allow the master to continue.
+--- a/include/linux/r4_observe.h
++++ b/include/linux/r4_observe.h
+@@ -0,0 +1,17 @@
++#ifndef _LINUX_R4_OBSERVE_H
++#define _LINUX_R4_OBSERVE_H
++#include <linux/printk.h>
++#include <linux/smp.h>
++#include <linux/cpuhotplug.h>
++#include <linux/sched/topology.h>
++unsigned int r4_next_seq(unsigned int cpu);
++static inline void r4_note(const char *phase, unsigned int cpu,
++                          int known, int prepared, int state, int target, int ret)
++{
++    const struct cpumask *mask = cpu_smt_mask(cpu);
++    pr_info("R4 phase=%s cpu=%u current=%u seq=%u online=%u mask=%lx self=%u weight=%u prepared_known=%d prepared=%d state=%d target=%d ret=%d sched_state=%d\n",
++        phase, cpu, raw_smp_processor_id(), r4_next_seq(cpu), cpu_online(cpu),
++        cpumask_bits(mask)[0], cpumask_test_cpu(cpu, mask), cpumask_weight(mask),
++        known, prepared, state, target, ret, CPUHP_AP_SCHED_STARTING);
++}
++#endif

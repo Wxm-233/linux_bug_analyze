@@ -1,0 +1,39 @@
+{
+  "contract_id": "riscv_topology_capacity_boot_phase",
+  "condition_A": "RISC-V DT contains /cpus/cpu-map and a mapped CPU node with capacity-dmips-mhz, with raw_capacity initially unset",
+  "producer_P": [
+    "mm_init() calls kmem_cache_init()",
+    "kernel_init_freeable() restores gfp_allowed_mask before smp_prepare_cpus()"
+  ],
+  "consumer_C": "init_cpu_topology() -> DT topology parser -> topology_parse_cpu_capacity() -> kcalloc(GFP_KERNEL)",
+  "failed_preparation": "If kcalloc returns NULL, cap_parsing_failed is set and parsing returns false; no later successful allocation is established on that path",
+  "commit_diff_candidate_calls": [
+    "init_cpu_topology"
+  ],
+  "negative_commit_diff_candidate_calls": [],
+  "old": {
+    "revision": "c1d6105869464635d8a2bcf87a43c05f4c0cfca4^",
+    "consumer_stage": "early",
+    "A_true": "precondition_order_violation",
+    "A_false": "allocation_path_inactive",
+    "stage_evidence": "start_kernel:smp_prepare_boot_cpu before mm_init",
+    "consumer_path_evidence": {
+      "call_edges_checked": 6,
+      "property_guarded_allocation": true,
+      "allocation_failure_marker": true
+    }
+  },
+  "fixed": {
+    "revision": "c1d6105869464635d8a2bcf87a43c05f4c0cfca4",
+    "consumer_stage": "late",
+    "A_true": "order_satisfied",
+    "A_false": "allocation_path_inactive",
+    "stage_evidence": "kernel_init_freeable:smp_prepare_cpus after mm_init and GFP restoration",
+    "consumer_path_evidence": {
+      "call_edges_checked": 6,
+      "property_guarded_allocation": true,
+      "allocation_failure_marker": true
+    }
+  },
+  "scope": "manual P/C/A annotation plus source-order check; no kernel execution or general automatic role extraction"
+}

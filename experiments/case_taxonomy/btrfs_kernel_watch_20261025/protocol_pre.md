@@ -1,0 +1,7 @@
+# 实际父版内核parse区间监测
+
+模型调用0。复用同一观测Image和initrd，SHA核对，克隆原blank.img，新磁盘单独保存。只在QEMU TCG单CPU运行，启动参数追加nokaslr用于确定符号地址（改变调试环境，不能称完全相同启动条件）。从同构建super.i追加offsetof常量并交叉编译为汇编取得布局，原Image不重建。最初initrd顶层搜索失败，依据旧run.py找到fix-64k/initrd.gz，核原SHA后继续，原失败与编译输出保留。
+
+观察范围是btrfs_parse_options函数入口到本次返回，而非super_copy初始化至所有消费。入口由实际vmlinux符号和AArch64参数寄存器取得info及options，不用旧日志地址/缓存值推路径；返回地址和SP作事件约束。记录传入选项、缓存、super指针及磁盘字段。目标观察点为super_copy指针槽8字节和该super对象sectorsize4字节；另外观察info->max_inline作为同区间自然CPU写入的正控制。目标写触发则立即失败并保留，不对实际目标做注入写。
+
+正控制命中时只撤max_inline观察点、单步、重装；两个目标观察点保持安装，若单步触发目标写须失败。记录PC与前后值，不把重复停点计多次写。即使成功，也只支持当前虚拟地址、当前单CPU运行及RSP覆盖；无DMA/物理别名/全部写者证明。不直接提升C/whole_path。

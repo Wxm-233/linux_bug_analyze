@@ -1,0 +1,530 @@
+{
+  "phase": "pre_projection_implementation_and_execution",
+  "kind": "independent_hand_derived_oracle",
+  "author_role": "config_protocol_review",
+  "scope": "message_informed_development_user_space_register_projection",
+  "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+  "source_quotes": [
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "drivers/i3c/master/mipi-i3c-hci/core.c",
+      "saved_relative_to_stage": "config_contract_20261010/raw/01_drivers__i3c__master__mipi-i3c-hci__core.c",
+      "sha256": "c3f534d1da90a4d13a75d841523b296d1bf54fb1183e135ff0511fd3693603bd",
+      "start_line": 37,
+      "end_line": 45,
+      "text": "#define HC_CONTROL\t\t\t0x04\n#define HC_CONTROL_BUS_ENABLE\t\tBIT(31)\n#define HC_CONTROL_RESUME\t\tBIT(30)\n#define HC_CONTROL_ABORT\t\tBIT(29)\n#define HC_CONTROL_HALT_ON_CMD_TIMEOUT\tBIT(12)\n#define HC_CONTROL_HOT_JOIN_CTRL\tBIT(8)\t/* Hot-Join ACK/NACK Control */\n#define HC_CONTROL_I2C_TARGET_PRESENT\tBIT(7)\n#define HC_CONTROL_PIO_MODE\t\tBIT(6)\t/* DMA/PIO Mode Selector */\n#define HC_CONTROL_DATA_BIG_ENDIAN\tBIT(4)"
+    },
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "drivers/i3c/master/mipi-i3c-hci/core.c",
+      "saved_relative_to_stage": "config_contract_20261010/raw/01_drivers__i3c__master__mipi-i3c-hci__core.c",
+      "sha256": "c3f534d1da90a4d13a75d841523b296d1bf54fb1183e135ff0511fd3693603bd",
+      "start_line": 663,
+      "end_line": 685,
+      "text": "\t/* Make sure our data ordering fits the host's */\n\tregval = reg_read(HC_CONTROL);\n\tif (IS_ENABLED(CONFIG_BIG_ENDIAN)) {\n\t\tif (!(regval & HC_CONTROL_DATA_BIG_ENDIAN)) {\n\t\t\tregval |= HC_CONTROL_DATA_BIG_ENDIAN;\n\t\t\treg_write(HC_CONTROL, regval);\n\t\t\tregval = reg_read(HC_CONTROL);\n\t\t\tif (!(regval & HC_CONTROL_DATA_BIG_ENDIAN)) {\n\t\t\t\tdev_err(&hci->master.dev, \"cannot set BE mode\\n\");\n\t\t\t\treturn -EOPNOTSUPP;\n\t\t\t}\n\t\t}\n\t} else {\n\t\tif (regval & HC_CONTROL_DATA_BIG_ENDIAN) {\n\t\t\tregval &= ~HC_CONTROL_DATA_BIG_ENDIAN;\n\t\t\treg_write(HC_CONTROL, regval);\n\t\t\tregval = reg_read(HC_CONTROL);\n\t\t\tif (regval & HC_CONTROL_DATA_BIG_ENDIAN) {\n\t\t\t\tdev_err(&hci->master.dev, \"cannot clear BE mode\\n\");\n\t\t\t\treturn -EOPNOTSUPP;\n\t\t\t}\n\t\t}\n\t}"
+    },
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "include/linux/kconfig.h",
+      "saved_relative_to_stage": "config_mode_projection_20261011/raw/01_include__linux__kconfig.h",
+      "sha256": "1b51cc51b6e4beb9b249853e0a0774f63679599f9a27b9e9fb8cc26ca14265f1",
+      "start_line": 7,
+      "end_line": 14,
+      "text": "#ifdef CONFIG_CPU_BIG_ENDIAN\n#define __BIG_ENDIAN 4321\n#else\n#define __LITTLE_ENDIAN 1234\n#endif\n\n#define __ARG_PLACEHOLDER_1 0,\n#define __take_second_arg(__ignored, val, ...) val"
+    },
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "include/linux/kconfig.h",
+      "saved_relative_to_stage": "config_mode_projection_20261011/raw/01_include__linux__kconfig.h",
+      "sha256": "1b51cc51b6e4beb9b249853e0a0774f63679599f9a27b9e9fb8cc26ca14265f1",
+      "start_line": 24,
+      "end_line": 26,
+      "text": "#define __or(x, y)\t\t\t___or(x, y)\n#define ___or(x, y)\t\t\t____or(__ARG_PLACEHOLDER_##x, y)\n#define ____or(arg1_or_junk, y)\t\t__take_second_arg(arg1_or_junk 1, y)"
+    },
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "include/linux/kconfig.h",
+      "saved_relative_to_stage": "config_mode_projection_20261011/raw/01_include__linux__kconfig.h",
+      "sha256": "1b51cc51b6e4beb9b249853e0a0774f63679599f9a27b9e9fb8cc26ca14265f1",
+      "start_line": 33,
+      "end_line": 57,
+      "text": "/*\n * Getting something that works in C and CPP for an arg that may or may\n * not be defined is tricky.  Here, if we have \"#define CONFIG_BOOGER 1\"\n * we match on the placeholder define, insert the \"0,\" for arg1 and generate\n * the triplet (0, 1, 0).  Then the last step cherry picks the 2nd arg (a one).\n * When CONFIG_BOOGER is not defined, we generate a (... 1, 0) pair, and when\n * the last step cherry picks the 2nd arg, we get a zero.\n */\n#define __is_defined(x)\t\t\t___is_defined(x)\n#define ___is_defined(val)\t\t____is_defined(__ARG_PLACEHOLDER_##val)\n#define ____is_defined(arg1_or_junk)\t__take_second_arg(arg1_or_junk 1, 0)\n\n/*\n * IS_BUILTIN(CONFIG_FOO) evaluates to 1 if CONFIG_FOO is set to 'y', 0\n * otherwise. For boolean options, this is equivalent to\n * IS_ENABLED(CONFIG_FOO).\n */\n#define IS_BUILTIN(option) __is_defined(option)\n\n/*\n * IS_MODULE(CONFIG_FOO) evaluates to 1 if CONFIG_FOO is set to 'm', 0\n * otherwise.  CONFIG_FOO=m results in \"#define CONFIG_FOO_MODULE 1\" in\n * autoconf.h.\n */\n#define IS_MODULE(option) __is_defined(option##_MODULE)"
+    },
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "include/linux/kconfig.h",
+      "saved_relative_to_stage": "config_mode_projection_20261011/raw/01_include__linux__kconfig.h",
+      "sha256": "1b51cc51b6e4beb9b249853e0a0774f63679599f9a27b9e9fb8cc26ca14265f1",
+      "start_line": 68,
+      "end_line": 73,
+      "text": "/*\n * IS_ENABLED(CONFIG_FOO) evaluates to 1 if CONFIG_FOO is set to 'y' or 'm',\n * 0 otherwise.  Note that CONFIG_FOO=y results in \"#define CONFIG_FOO 1\" in\n * autoconf.h, while CONFIG_FOO=m results in \"#define CONFIG_FOO_MODULE 1\".\n */\n#define IS_ENABLED(option) __or(IS_BUILTIN(option), IS_MODULE(option))"
+    },
+    {
+      "parent": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "path": "arch/arm/mm/Kconfig",
+      "saved_relative_to_stage": "config_mode_projection_20261011/raw/02_arch__arm__mm__Kconfig",
+      "sha256": "505456b7d0a9b7ccd9fe57be5cd918912f0a192000876aeaf0b7e681679704c2",
+      "start_line": 740,
+      "end_line": 748,
+      "text": "config CPU_BIG_ENDIAN\n\tbool \"Build big-endian kernel\"\n\tdepends on ARCH_SUPPORTS_BIG_ENDIAN\n\tdepends on !LD_IS_LLD\n\thelp\n\t  Say Y if you plan on running a kernel in big-endian mode.\n\t  Note that your board must be properly built and your board\n\t  port must properly enable any big-endian related features\n\t  of your chipset/board/processor."
+    }
+  ],
+  "assumptions": {
+    "CONFIG_BIG_ENDIAN": "undefined in every translation unit",
+    "CONFIG_BIG_ENDIAN_MODULE": "undefined in every translation unit",
+    "CONFIG_CPU_BIG_ENDIAN": "1 for injected BE, undefined for injected LE",
+    "CONFIG_CPU_BIG_ENDIAN_MODULE": "undefined in every translation unit",
+    "helper": "same-parent IS_ENABLED, IS_BUILTIN, IS_MODULE and support macros; generated/autoconf.h is harness injection, not a historical actual .config",
+    "data_big_endian_mask": "0x10, same-parent BIT(4)",
+    "other_control_bits": "0xA5000100 and remain invariant",
+    "write_accept": "target data bit follows write request; other bits remain unchanged",
+    "write_reject": "target data bit remains at initial state; other bits remain unchanged",
+    "initial_read": "one HC_CONTROL read on entry to the projected region",
+    "readback": "exactly one additional HC_CONTROL read after any write",
+    "success_zero": "harness wrapper returns 0 when region reaches end, not original full hci_init return",
+    "EOPNOTSUPP": 95,
+    "errno_scope": "harness numeric convention, source semantics are -EOPNOTSUPP",
+    "mode_contract": "injected CPU mode equals final data bit AND local return is 0",
+    "no_write_policy_cases": "accept/reject labels do not execute hardware policy when no write is attempted"
+  },
+  "row_count": 16,
+  "rows": [
+    {
+      "id": "original_BE_initial0_accept",
+      "predicate": "original",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": false,
+        "final_bit_matches_injected_cpu_mode": false,
+        "successful_cpu_mode_contract": false,
+        "outcome": "silent_mode_mismatch",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_BE_initial0_reject",
+      "predicate": "original",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": false,
+        "final_bit_matches_injected_cpu_mode": false,
+        "successful_cpu_mode_contract": false,
+        "outcome": "silent_mode_mismatch",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_BE_initial1_accept",
+      "predicate": "original",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000100"
+        ],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": false,
+        "final_bit_matches_injected_cpu_mode": false,
+        "successful_cpu_mode_contract": false,
+        "outcome": "silent_mode_mismatch",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_BE_initial1_reject",
+      "predicate": "original",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 1,
+        "final_control_register": "0xa5000110",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000100"
+        ],
+        "local_return_value": -95,
+        "local_return_symbol": "-EOPNOTSUPP",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": false,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": false,
+        "outcome": "local_controlled_rejection",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_LE_initial0_accept",
+      "predicate": "original",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_LE_initial0_reject",
+      "predicate": "original",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_LE_initial1_accept",
+      "predicate": "original",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000100"
+        ],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "original_LE_initial1_reject",
+      "predicate": "original",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 1,
+        "final_control_register": "0xa5000110",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000100"
+        ],
+        "local_return_value": -95,
+        "local_return_symbol": "-EOPNOTSUPP",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": false,
+        "successful_cpu_mode_contract": false,
+        "outcome": "local_controlled_rejection",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_BE_initial0_accept",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 1,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 1,
+        "final_control_register": "0xa5000110",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000110"
+        ],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_BE_initial0_reject",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 1,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000110"
+        ],
+        "local_return_value": -95,
+        "local_return_symbol": "-EOPNOTSUPP",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": false,
+        "successful_cpu_mode_contract": false,
+        "outcome": "local_controlled_rejection",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_BE_initial1_accept",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 1,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 1,
+        "final_control_register": "0xa5000110",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_BE_initial1_reject",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "BE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 1,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 1,
+        "final_control_register": "0xa5000110",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_LE_initial0_accept",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_LE_initial0_reject",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 0,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000100",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 1,
+        "reg_write_calls": 0,
+        "write_request_values": [],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_LE_initial1_accept",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "accept",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 0,
+        "final_control_register": "0xa5000100",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000100"
+        ],
+        "local_return_value": 0,
+        "local_return_symbol": "0-wrapper-success-sentinel",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": true,
+        "successful_cpu_mode_contract": true,
+        "outcome": "local_success_with_mode_match",
+        "mode_region_entered": true
+      }
+    },
+    {
+      "id": "cpu_attribute_LE_initial1_reject",
+      "predicate": "cpu_attribute",
+      "cpu_mode": "LE",
+      "initial_data_big_endian_bit": 1,
+      "write_policy": "reject",
+      "expected": {
+        "selector": 0,
+        "initial_control_register": "0xa5000110",
+        "final_data_big_endian_bit": 1,
+        "final_control_register": "0xa5000110",
+        "reg_read_calls": 2,
+        "reg_write_calls": 1,
+        "write_request_values": [
+          "0xa5000100"
+        ],
+        "local_return_value": -95,
+        "local_return_symbol": "-EOPNOTSUPP",
+        "unrelated_bits_unchanged": true,
+        "selector_matches_injected_cpu_mode": true,
+        "final_bit_matches_injected_cpu_mode": false,
+        "successful_cpu_mode_contract": false,
+        "outcome": "local_controlled_rejection",
+        "mode_region_entered": true
+      }
+    }
+  ],
+  "expected_summary": {
+    "original": {
+      "rows": 8,
+      "local_return_zero": 6,
+      "successful_cpu_mode_contract": 3,
+      "silent_mode_mismatch": 3,
+      "local_controlled_rejection": 2
+    },
+    "cpu_attribute": {
+      "rows": 8,
+      "local_return_zero": 6,
+      "successful_cpu_mode_contract": 6,
+      "silent_mode_mismatch": 0,
+      "local_controlled_rejection": 2
+    },
+    "total": {
+      "rows": 16,
+      "successful_cpu_mode_contract": 9,
+      "silent_mode_mismatch": 3,
+      "local_controlled_rejection": 4,
+      "reg_read_calls": 24,
+      "reg_write_calls": 8
+    }
+  },
+  "not_established": [
+    "actual_historical_configuration",
+    "driver_build_or_probe_reachability",
+    "full_hci_init_outcome",
+    "CPU_ISA_emulation_or_real_endian_execution",
+    "real_hardware_register_response",
+    "payload_or_command_descriptor_endianness_contract",
+    "independent_unknown_case_detection",
+    "new_confirmed_bug"
+  ],
+  "projection_implementation_read": false,
+  "projection_outputs_read": false,
+  "compilation_or_projection_execution_by_oracle_agent": 0
+}

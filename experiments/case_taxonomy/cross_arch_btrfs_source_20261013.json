@@ -1,0 +1,867 @@
+{
+  "versions": {
+    "before": "0d977e0eba234e01a60bdde27314dc21374201b3",
+    "after": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7"
+  },
+  "commits": {
+    "before": {
+      "sha": "0d977e0eba234e01a60bdde27314dc21374201b3",
+      "parents": "939c7feb19217c752a4b368d35aae1ed98f40b61",
+      "author": "Desmond Cheong Zhi Xi",
+      "author_date": "2021-08-21T01:50:40+08:00",
+      "committer": "David Sterba",
+      "committer_date": "2021-08-23T13:57:18+02:00",
+      "message": "btrfs: reset replace target device to allocation state on close\n\nThis crash was observed with a failed assertion on device close:\n\n  BTRFS: Transaction aborted (error -28)\n  WARNING: CPU: 1 PID: 3902 at fs/btrfs/extent-tree.c:2150 btrfs_run_delayed_refs+0x1d2/0x1e0 [btrfs]\n  Modules linked in: btrfs blake2b_generic libcrc32c crc32c_intel xor zstd_decompress zstd_compress xxhash lzo_compress lzo_decompress raid6_pq loop\n  CPU: 1 PID: 3902 Comm: kworker/u8:4 Not tainted 5.14.0-rc5-default+ #1532\n  Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.12.0-59-gc9ba527-rebuilt.opensuse.org 04/01/2014\n  Workqueue: events_unbound btrfs_async_reclaim_metadata_space [btrfs]\n  RIP: 0010:btrfs_run_delayed_refs+0x1d2/0x1e0 [btrfs]\n  RSP: 0018:ffffb7a5452d7d80 EFLAGS: 00010282\n  RAX: 0000000000000000 RBX: 0000000000000003 RCX: 0000000000000000\n  RDX: 0000000000000001 RSI: ffffffffabee13c4 RDI: 00000000ffffffff\n  RBP: ffff97834176a378 R08: 0000000000000001 R09: 0000000000000001\n  R10: 0000000000000000 R11: 0000000000000001 R12: ffff97835195d388\n  R13: 0000000005b08000 R14: ffff978385484000 R15: 000000000000016c\n  FS:  0000000000000000(0000) GS:ffff9783bd800000(0000) knlGS:0000000000000000\n  CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\n  CR2: 000056190d003fe8 CR3: 000000002a81e005 CR4: 0000000000170ea0\n  Call Trace:\n   flush_space+0x197/0x2f0 [btrfs]\n   btrfs_async_reclaim_metadata_space+0x139/0x300 [btrfs]\n   process_one_work+0x262/0x5e0\n   worker_thread+0x4c/0x320\n   ? process_one_work+0x5e0/0x5e0\n   kthread+0x144/0x170\n   ? set_kthread_struct+0x40/0x40\n   ret_from_fork+0x1f/0x30\n  irq event stamp: 19334989\n  hardirqs last  enabled at (19334997): [<ffffffffab0e0c87>] console_unlock+0x2b7/0x400\n  hardirqs last disabled at (19335006): [<ffffffffab0e0d0d>] console_unlock+0x33d/0x400\n  softirqs last  enabled at (19334900): [<ffffffffaba0030d>] __do_softirq+0x30d/0x574\n  softirqs last disabled at (19334893): [<ffffffffab0721ec>] irq_exit_rcu+0x12c/0x140\n  ---[ end trace 45939e308e0dd3c7 ]---\n  BTRFS: error (device vdd) in btrfs_run_delayed_refs:2150: errno=-28 No space left\n  BTRFS info (device vdd): forced readonly\n  BTRFS warning (device vdd): failed setting block group ro: -30\n  BTRFS info (device vdd): suspending dev_replace for unmount\n  assertion failed: !test_bit(BTRFS_DEV_STATE_REPLACE_TGT, &device->dev_state), in fs/btrfs/volumes.c:1150\n  ------------[ cut here ]------------\n  kernel BUG at fs/btrfs/ctree.h:3431!\n  invalid opcode: 0000 [#1] PREEMPT SMP\n  CPU: 1 PID: 3982 Comm: umount Tainted: G        W         5.14.0-rc5-default+ #1532\n  Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS rel-1.12.0-59-gc9ba527-rebuilt.opensuse.org 04/01/2014\n  RIP: 0010:assertfail.constprop.0+0x18/0x1a [btrfs]\n  RSP: 0018:ffffb7a5454c7db8 EFLAGS: 00010246\n  RAX: 0000000000000068 RBX: ffff978364b91c00 RCX: 0000000000000000\n  RDX: 0000000000000000 RSI: ffffffffabee13c4 RDI: 00000000ffffffff\n  RBP: ffff9783523a4c00 R08: 0000000000000001 R09: 0000000000000001\n  R10: 0000000000000000 R11: 0000000000000001 R12: ffff9783523a4d18\n  R13: 0000000000000000 R14: 0000000000000004 R15: 0000000000000003\n  FS:  00007f61c8f42800(0000) GS:ffff9783bd800000(0000) knlGS:0000000000000000\n  CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033\n  CR2: 000056190cffa810 CR3: 0000000030b96002 CR4: 0000000000170ea0\n  Call Trace:\n   btrfs_close_one_device.cold+0x11/0x55 [btrfs]\n   close_fs_devices+0x44/0xb0 [btrfs]\n   btrfs_close_devices+0x48/0x160 [btrfs]\n   generic_shutdown_super+0x69/0x100\n   kill_anon_super+0x14/0x30\n   btrfs_kill_super+0x12/0x20 [btrfs]\n   deactivate_locked_super+0x2c/0xa0\n   cleanup_mnt+0x144/0x1b0\n   task_work_run+0x59/0xa0\n   exit_to_user_mode_loop+0xe7/0xf0\n   exit_to_user_mode_prepare+0xaf/0xf0\n   syscall_exit_to_user_mode+0x19/0x50\n   do_syscall_64+0x4a/0x90\n   entry_SYSCALL_64_after_hwframe+0x44/0xae\n\nThis happens when close_ctree is called while a dev_replace hasn't\ncompleted. In close_ctree, we suspend the dev_replace, but keep the\nreplace target around so that we can resume the dev_replace procedure\nwhen we mount the root again. This is the call trace:\n\n  close_ctree():\n    btrfs_dev_replace_suspend_for_unmount();\n    btrfs_close_devices():\n      btrfs_close_fs_devices():\n        btrfs_close_one_device():\n          ASSERT(!test_bit(BTRFS_DEV_STATE_REPLACE_TGT,\n                 &device->dev_state));\n\nHowever, since the replace target sticks around, there is a device\nwith BTRFS_DEV_STATE_REPLACE_TGT set on close, and we fail the\nassertion in btrfs_close_one_device.\n\nTo fix this, if we come across the replace target device when\nclosing, we should properly reset it back to allocation state. This\nfix also ensures that if a non-target device has a corrupted state and\nhas the BTRFS_DEV_STATE_REPLACE_TGT bit set, the assertion will still\ncatch the error.\n\nReported-by: David Sterba <dsterba@suse.com>\nFixes: b2a616676839 (\"btrfs: fix rw device counting in __btrfs_free_extra_devids\")\nCC: stable@vger.kernel.org # 4.19+\nReviewed-by: Anand Jain <anand.jain@oracle.com>\nSigned-off-by: Desmond Cheong Zhi Xi <desmondcheongzx@gmail.com>\nReviewed-by: David Sterba <dsterba@suse.com>\nSigned-off-by: David Sterba <dsterba@suse.com>"
+    },
+    "after": {
+      "sha": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7",
+      "parents": "0d977e0eba234e01a60bdde27314dc21374201b3",
+      "author": "Anand Jain",
+      "author_date": "2021-08-10T23:23:44+08:00",
+      "committer": "David Sterba",
+      "committer_date": "2021-09-07T14:28:46+02:00",
+      "message": "btrfs: fix upper limit for max_inline for page size 64K\n\nThe mount option max_inline ranges from 0 to the sectorsize (which is\nnow equal to page size). But we parse the mount options too early and\nbefore the actual sectorsize is read from the superblock. So the upper\nlimit of max_inline is unaware of the actual sectorsize and is limited\nby the temporary sectorsize 4096, even on a system where the default\nsectorsize is 64K.\n\nFix this by reading the superblock sectorsize before the mount option\nparse.\n\nReported-by: Alexander Tsvetkov <alexander.tsvetkov@oracle.com>\nCC: stable@vger.kernel.org # 5.4+\nSigned-off-by: Anand Jain <anand.jain@oracle.com>\nReviewed-by: David Sterba <dsterba@suse.com>\nSigned-off-by: David Sterba <dsterba@suse.com>"
+    }
+  },
+  "version_blobs": {
+    "before": {
+      "fs/btrfs/disk-io.c": "2f9515dccce0b3452513737eb9d4cd81f0bfa0e5",
+      "fs/btrfs/super.c": "537d90bf5d844b094baeab7a1c2f2e3590320e9f",
+      "fs/btrfs/ctree.h": "f07c82fafa046dbba06d04e29b9c920b4f27b04d",
+      "arch/arm64/Kconfig": "fdcd54d39c1efcd789e7860b81d1033f2104f4b9",
+      "arch/arm64/include/asm/page-def.h": "2403f7b4cdbfb63d038b5b3a86cc6570061928fc",
+      "arch/x86/include/asm/page_types.h": "a506a411474d4ad0213d1cdfb64fe6598ab1f9ca",
+      "fs/btrfs/Kconfig": "520a0f6a7d9e9708e456b2fea116247f19f79430",
+      "fs/btrfs/inode.c": "2aa9646bce568d694bd97e22e4457fa4fd815407"
+    },
+    "after": {
+      "fs/btrfs/disk-io.c": "355ea88d5c5f72113924e3bb891c89dcbe9d342b",
+      "fs/btrfs/super.c": "537d90bf5d844b094baeab7a1c2f2e3590320e9f",
+      "fs/btrfs/ctree.h": "f07c82fafa046dbba06d04e29b9c920b4f27b04d",
+      "arch/arm64/Kconfig": "fdcd54d39c1efcd789e7860b81d1033f2104f4b9",
+      "arch/arm64/include/asm/page-def.h": "2403f7b4cdbfb63d038b5b3a86cc6570061928fc",
+      "arch/x86/include/asm/page_types.h": "a506a411474d4ad0213d1cdfb64fe6598ab1f9ca",
+      "fs/btrfs/Kconfig": "520a0f6a7d9e9708e456b2fea116247f19f79430",
+      "fs/btrfs/inode.c": "2aa9646bce568d694bd97e22e4457fa4fd815407"
+    }
+  },
+  "new_sources": [
+    {
+      "git_path": "arch/arm64/Kconfig",
+      "git_blob": "fdcd54d39c1efcd789e7860b81d1033f2104f4b9",
+      "representation": "full_source",
+      "text": "# SPDX-License-Identifier: GPL-2.0-only\nconfig ARM64\n\tdef_bool y\n\tselect ACPI_CCA_REQUIRED if ACPI\n\tselect ACPI_GENERIC_GSI if ACPI\n\tselect ACPI_GTDT if ACPI\n\tselect ACPI_IORT if ACPI\n\tselect ACPI_REDUCED_HARDWARE_ONLY if ACPI\n\tselect ACPI_MCFG if (ACPI && PCI)\n\tselect ACPI_SPCR_TABLE if ACPI\n\tselect ACPI_PPTT if ACPI\n\tselect ARCH_HAS_DEBUG_WX\n\tselect ARCH_BINFMT_ELF_STATE\n\tselect ARCH_ENABLE_HUGEPAGE_MIGRATION if HUGETLB_PAGE && MIGRATION\n\tselect ARCH_ENABLE_MEMORY_HOTPLUG\n\tselect ARCH_ENABLE_MEMORY_HOTREMOVE\n\tselect ARCH_ENABLE_SPLIT_PMD_PTLOCK if PGTABLE_LEVELS > 2\n\tselect ARCH_ENABLE_THP_MIGRATION if TRANSPARENT_HUGEPAGE\n\tselect ARCH_HAS_CACHE_LINE_SIZE\n\tselect ARCH_HAS_DEBUG_VIRTUAL\n\tselect ARCH_HAS_DEBUG_VM_PGTABLE\n\tselect ARCH_HAS_DMA_PREP_COHERENT\n\tselect ARCH_HAS_ACPI_TABLE_UPGRADE if ACPI\n\tselect ARCH_HAS_FAST_MULTIPLIER\n\tselect ARCH_HAS_FORTIFY_SOURCE\n\tselect ARCH_HAS_GCOV_PROFILE_ALL\n\tselect ARCH_HAS_GIGANTIC_PAGE\n\tselect ARCH_HAS_KCOV\n\tselect ARCH_HAS_KEEPINITRD\n\tselect ARCH_HAS_MEMBARRIER_SYNC_CORE\n\tselect ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE\n\tselect ARCH_HAS_PTE_DEVMAP\n\tselect ARCH_HAS_PTE_SPECIAL\n\tselect ARCH_HAS_SETUP_DMA_OPS\n\tselect ARCH_HAS_SET_DIRECT_MAP\n\tselect ARCH_HAS_SET_MEMORY\n\tselect ARCH_STACKWALK\n\tselect ARCH_HAS_STRICT_KERNEL_RWX\n\tselect ARCH_HAS_STRICT_MODULE_RWX\n\tselect ARCH_HAS_SYNC_DMA_FOR_DEVICE\n\tselect ARCH_HAS_SYNC_DMA_FOR_CPU\n\tselect ARCH_HAS_SYSCALL_WRAPPER\n\tselect ARCH_HAS_TEARDOWN_DMA_OPS if IOMMU_SUPPORT\n\tselect ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST\n\tselect ARCH_HAS_ZONE_DMA_SET if EXPERT\n\tselect ARCH_HAVE_ELF_PROT\n\tselect ARCH_HAVE_NMI_SAFE_CMPXCHG\n\tselect ARCH_INLINE_READ_LOCK if !PREEMPTION\n\tselect ARCH_INLINE_READ_LOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_READ_LOCK_IRQ if !PREEMPTION\n\tselect ARCH_INLINE_READ_LOCK_IRQSAVE if !PREEMPTION\n\tselect ARCH_INLINE_READ_UNLOCK if !PREEMPTION\n\tselect ARCH_INLINE_READ_UNLOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_READ_UNLOCK_IRQ if !PREEMPTION\n\tselect ARCH_INLINE_READ_UNLOCK_IRQRESTORE if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_LOCK if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_LOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_LOCK_IRQ if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_LOCK_IRQSAVE if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_UNLOCK if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_UNLOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_UNLOCK_IRQ if !PREEMPTION\n\tselect ARCH_INLINE_WRITE_UNLOCK_IRQRESTORE if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_TRYLOCK if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_TRYLOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_LOCK if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_LOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_LOCK_IRQ if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_LOCK_IRQSAVE if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_UNLOCK if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_UNLOCK_BH if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_UNLOCK_IRQ if !PREEMPTION\n\tselect ARCH_INLINE_SPIN_UNLOCK_IRQRESTORE if !PREEMPTION\n\tselect ARCH_KEEP_MEMBLOCK\n\tselect ARCH_USE_CMPXCHG_LOCKREF\n\tselect ARCH_USE_GNU_PROPERTY\n\tselect ARCH_USE_MEMTEST\n\tselect ARCH_USE_QUEUED_RWLOCKS\n\tselect ARCH_USE_QUEUED_SPINLOCKS\n\tselect ARCH_USE_SYM_ANNOTATIONS\n\tselect ARCH_SUPPORTS_DEBUG_PAGEALLOC\n\tselect ARCH_SUPPORTS_HUGETLBFS\n\tselect ARCH_SUPPORTS_MEMORY_FAILURE\n\tselect ARCH_SUPPORTS_SHADOW_CALL_STACK if CC_HAVE_SHADOW_CALL_STACK\n\tselect ARCH_SUPPORTS_LTO_CLANG if CPU_LITTLE_ENDIAN\n\tselect ARCH_SUPPORTS_LTO_CLANG_THIN\n\tselect ARCH_SUPPORTS_CFI_CLANG\n\tselect ARCH_SUPPORTS_ATOMIC_RMW\n\tselect ARCH_SUPPORTS_INT128 if CC_HAS_INT128 && (GCC_VERSION >= 50000 || CC_IS_CLANG)\n\tselect ARCH_SUPPORTS_NUMA_BALANCING\n\tselect ARCH_WANT_COMPAT_IPC_PARSE_VERSION if COMPAT\n\tselect ARCH_WANT_DEFAULT_BPF_JIT\n\tselect ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT\n\tselect ARCH_WANT_FRAME_POINTERS\n\tselect ARCH_WANT_HUGE_PMD_SHARE if ARM64_4K_PAGES || (ARM64_16K_PAGES && !ARM64_VA_BITS_36)\n\tselect ARCH_WANT_LD_ORPHAN_WARN\n\tselect ARCH_WANTS_NO_INSTR\n\tselect ARCH_HAS_UBSAN_SANITIZE_ALL\n\tselect ARM_AMBA\n\tselect ARM_ARCH_TIMER\n\tselect ARM_GIC\n\tselect AUDIT_ARCH_COMPAT_GENERIC\n\tselect ARM_GIC_V2M if PCI\n\tselect ARM_GIC_V3\n\tselect ARM_GIC_V3_ITS if PCI\n\tselect ARM_PSCI_FW\n\tselect BUILDTIME_TABLE_SORT\n\tselect CLONE_BACKWARDS\n\tselect COMMON_CLK\n\tselect CPU_PM if (SUSPEND || CPU_IDLE)\n\tselect CRC32\n\tselect DCACHE_WORD_ACCESS\n\tselect DMA_DIRECT_REMAP\n\tselect EDAC_SUPPORT\n\tselect FRAME_POINTER\n\tselect GENERIC_ALLOCATOR\n\tselect GENERIC_ARCH_TOPOLOGY\n\tselect GENERIC_CLOCKEVENTS_BROADCAST\n\tselect GENERIC_CPU_AUTOPROBE\n\tselect GENERIC_CPU_VULNERABILITIES\n\tselect GENERIC_EARLY_IOREMAP\n\tselect GENERIC_FIND_FIRST_BIT\n\tselect GENERIC_IDLE_POLL_SETUP\n\tselect GENERIC_IRQ_IPI\n\tselect GENERIC_IRQ_PROBE\n\tselect GENERIC_IRQ_SHOW\n\tselect GENERIC_IRQ_SHOW_LEVEL\n\tselect GENERIC_LIB_DEVMEM_IS_ALLOWED\n\tselect GENERIC_PCI_IOMAP\n\tselect GENERIC_PTDUMP\n\tselect GENERIC_SCHED_CLOCK\n\tselect GENERIC_SMP_IDLE_THREAD\n\tselect GENERIC_STRNCPY_FROM_USER\n\tselect GENERIC_STRNLEN_USER\n\tselect GENERIC_TIME_VSYSCALL\n\tselect GENERIC_GETTIMEOFDAY\n\tselect GENERIC_VDSO_TIME_NS\n\tselect HANDLE_DOMAIN_IRQ\n\tselect HARDIRQS_SW_RESEND\n\tselect HAVE_MOVE_PMD\n\tselect HAVE_MOVE_PUD\n\tselect HAVE_PCI\n\tselect HAVE_ACPI_APEI if (ACPI && EFI)\n\tselect HAVE_ALIGNED_STRUCT_PAGE if SLUB\n\tselect HAVE_ARCH_AUDITSYSCALL\n\tselect HAVE_ARCH_BITREVERSE\n\tselect HAVE_ARCH_COMPILER_H\n\tselect HAVE_ARCH_HUGE_VMAP\n\tselect HAVE_ARCH_JUMP_LABEL\n\tselect HAVE_ARCH_JUMP_LABEL_RELATIVE\n\tselect HAVE_ARCH_KASAN if !(ARM64_16K_PAGES && ARM64_VA_BITS_48)\n\tselect HAVE_ARCH_KASAN_VMALLOC if HAVE_ARCH_KASAN\n\tselect HAVE_ARCH_KASAN_SW_TAGS if HAVE_ARCH_KASAN\n\tselect HAVE_ARCH_KASAN_HW_TAGS if (HAVE_ARCH_KASAN && ARM64_MTE)\n\tselect HAVE_ARCH_KFENCE\n\tselect HAVE_ARCH_KGDB\n\tselect HAVE_ARCH_MMAP_RND_BITS\n\tselect HAVE_ARCH_MMAP_RND_COMPAT_BITS if COMPAT\n\tselect HAVE_ARCH_PREL32_RELOCATIONS\n\tselect HAVE_ARCH_RANDOMIZE_KSTACK_OFFSET\n\tselect HAVE_ARCH_SECCOMP_FILTER\n\tselect HAVE_ARCH_STACKLEAK\n\tselect HAVE_ARCH_THREAD_STRUCT_WHITELIST\n\tselect HAVE_ARCH_TRACEHOOK\n\tselect HAVE_ARCH_TRANSPARENT_HUGEPAGE\n\tselect HAVE_ARCH_VMAP_STACK\n\tselect HAVE_ARM_SMCCC\n\tselect HAVE_ASM_MODVERSIONS\n\tselect HAVE_EBPF_JIT\n\tselect HAVE_C_RECORDMCOUNT\n\tselect HAVE_CMPXCHG_DOUBLE\n\tselect HAVE_CMPXCHG_LOCAL\n\tselect HAVE_CONTEXT_TRACKING\n\tselect HAVE_DEBUG_KMEMLEAK\n\tselect HAVE_DMA_CONTIGUOUS\n\tselect HAVE_DYNAMIC_FTRACE\n\tselect HAVE_DYNAMIC_FTRACE_WITH_REGS \\\n\t\tif $(cc-option,-fpatchable-function-entry=2)\n\tselect FTRACE_MCOUNT_USE_PATCHABLE_FUNCTION_ENTRY \\\n\t\tif DYNAMIC_FTRACE_WITH_REGS\n\tselect HAVE_EFFICIENT_UNALIGNED_ACCESS\n\tselect HAVE_FAST_GUP\n\tselect HAVE_FTRACE_MCOUNT_RECORD\n\tselect HAVE_FUNCTION_TRACER\n\tselect HAVE_FUNCTION_ERROR_INJECTION\n\tselect HAVE_FUNCTION_GRAPH_TRACER\n\tselect HAVE_GCC_PLUGINS\n\tselect HAVE_HW_BREAKPOINT if PERF_EVENTS\n\tselect HAVE_IRQ_TIME_ACCOUNTING\n\tselect HAVE_NMI\n\tselect HAVE_PATA_PLATFORM\n\tselect HAVE_PERF_EVENTS\n\tselect HAVE_PERF_REGS\n\tselect HAVE_PERF_USER_STACK_DUMP\n\tselect HAVE_REGS_AND_STACK_ACCESS_API\n\tselect HAVE_FUNCTION_ARG_ACCESS_API\n\tselect HAVE_FUTEX_CMPXCHG if FUTEX\n\tselect MMU_GATHER_RCU_TABLE_FREE\n\tselect HAVE_RSEQ\n\tselect HAVE_STACKPROTECTOR\n\tselect HAVE_SYSCALL_TRACEPOINTS\n\tselect HAVE_KPROBES\n\tselect HAVE_KRETPROBES\n\tselect HAVE_GENERIC_VDSO\n\tselect IOMMU_DMA if IOMMU_SUPPORT\n\tselect IRQ_DOMAIN\n\tselect IRQ_FORCED_THREADING\n\tselect KASAN_VMALLOC if KASAN_GENERIC\n\tselect MODULES_USE_ELF_RELA\n\tselect NEED_DMA_MAP_STATE\n\tselect NEED_SG_DMA_LENGTH\n\tselect OF\n\tselect OF_EARLY_FLATTREE\n\tselect PCI_DOMAINS_GENERIC if PCI\n\tselect PCI_ECAM if (ACPI && PCI)\n\tselect PCI_SYSCALL if PCI\n\tselect POWER_RESET\n\tselect POWER_SUPPLY\n\tselect SPARSE_IRQ\n\tselect SWIOTLB\n\tselect SYSCTL_EXCEPTION_TRACE\n\tselect THREAD_INFO_IN_TASK\n\tselect HAVE_ARCH_USERFAULTFD_MINOR if USERFAULTFD\n\thelp\n\t  ARM 64-bit (AArch64) Linux support.\n\nconfig 64BIT\n\tdef_bool y\n\nconfig MMU\n\tdef_bool y\n\nconfig ARM64_PAGE_SHIFT\n\tint\n\tdefault 16 if ARM64_64K_PAGES\n\tdefault 14 if ARM64_16K_PAGES\n\tdefault 12\n\nconfig ARM64_CONT_PTE_SHIFT\n\tint\n\tdefault 5 if ARM64_64K_PAGES\n\tdefault 7 if ARM64_16K_PAGES\n\tdefault 4\n\nconfig ARM64_CONT_PMD_SHIFT\n\tint\n\tdefault 5 if ARM64_64K_PAGES\n\tdefault 5 if ARM64_16K_PAGES\n\tdefault 4\n\nconfig ARCH_MMAP_RND_BITS_MIN\n       default 14 if ARM64_64K_PAGES\n       default 16 if ARM64_16K_PAGES\n       default 18\n\n# max bits determined by the following formula:\n#  VA_BITS - PAGE_SHIFT - 3\nconfig ARCH_MMAP_RND_BITS_MAX\n       default 19 if ARM64_VA_BITS=36\n       default 24 if ARM64_VA_BITS=39\n       default 27 if ARM64_VA_BITS=42\n       default 30 if ARM64_VA_BITS=47\n       default 29 if ARM64_VA_BITS=48 && ARM64_64K_PAGES\n       default 31 if ARM64_VA_BITS=48 && ARM64_16K_PAGES\n       default 33 if ARM64_VA_BITS=48\n       default 14 if ARM64_64K_PAGES\n       default 16 if ARM64_16K_PAGES\n       default 18\n\nconfig ARCH_MMAP_RND_COMPAT_BITS_MIN\n       default 7 if ARM64_64K_PAGES\n       default 9 if ARM64_16K_PAGES\n       default 11\n\nconfig ARCH_MMAP_RND_COMPAT_BITS_MAX\n       default 16\n\nconfig NO_IOPORT_MAP\n\tdef_bool y if !PCI\n\nconfig STACKTRACE_SUPPORT\n\tdef_bool y\n\nconfig ILLEGAL_POINTER_VALUE\n\thex\n\tdefault 0xdead000000000000\n\nconfig LOCKDEP_SUPPORT\n\tdef_bool y\n\nconfig TRACE_IRQFLAGS_SUPPORT\n\tdef_bool y\n\nconfig GENERIC_BUG\n\tdef_bool y\n\tdepends on BUG\n\nconfig GENERIC_BUG_RELATIVE_POINTERS\n\tdef_bool y\n\tdepends on GENERIC_BUG\n\nconfig GENERIC_HWEIGHT\n\tdef_bool y\n\nconfig GENERIC_CSUM\n        def_bool y\n\nconfig GENERIC_CALIBRATE_DELAY\n\tdef_bool y\n\nconfig ARCH_MHP_MEMMAP_ON_MEMORY_ENABLE\n\tdef_bool y\n\nconfig SMP\n\tdef_bool y\n\nconfig KERNEL_MODE_NEON\n\tdef_bool y\n\nconfig FIX_EARLYCON_MEM\n\tdef_bool y\n\nconfig PGTABLE_LEVELS\n\tint\n\tdefault 2 if ARM64_16K_PAGES && ARM64_VA_BITS_36\n\tdefault 2 if ARM64_64K_PAGES && ARM64_VA_BITS_42\n\tdefault 3 if ARM64_64K_PAGES && (ARM64_VA_BITS_48 || ARM64_VA_BITS_52)\n\tdefault 3 if ARM64_4K_PAGES && ARM64_VA_BITS_39\n\tdefault 3 if ARM64_16K_PAGES && ARM64_VA_BITS_47\n\tdefault 4 if !ARM64_64K_PAGES && ARM64_VA_BITS_48\n\nconfig ARCH_SUPPORTS_UPROBES\n\tdef_bool y\n\nconfig ARCH_PROC_KCORE_TEXT\n\tdef_bool y\n\nconfig BROKEN_GAS_INST\n\tdef_bool !$(as-instr,1:\\n.inst 0\\n.rept . - 1b\\n\\nnop\\n.endr\\n)\n\nconfig KASAN_SHADOW_OFFSET\n\thex\n\tdepends on KASAN_GENERIC || KASAN_SW_TAGS\n\tdefault 0xdfff800000000000 if (ARM64_VA_BITS_48 || ARM64_VA_BITS_52) && !KASAN_SW_TAGS\n\tdefault 0xdfffc00000000000 if ARM64_VA_BITS_47 && !KASAN_SW_TAGS\n\tdefault 0xdffffe0000000000 if ARM64_VA_BITS_42 && !KASAN_SW_TAGS\n\tdefault 0xdfffffc000000000 if ARM64_VA_BITS_39 && !KASAN_SW_TAGS\n\tdefault 0xdffffff800000000 if ARM64_VA_BITS_36 && !KASAN_SW_TAGS\n\tdefault 0xefff800000000000 if (ARM64_VA_BITS_48 || ARM64_VA_BITS_52) && KASAN_SW_TAGS\n\tdefault 0xefffc00000000000 if ARM64_VA_BITS_47 && KASAN_SW_TAGS\n\tdefault 0xeffffe0000000000 if ARM64_VA_BITS_42 && KASAN_SW_TAGS\n\tdefault 0xefffffc000000000 if ARM64_VA_BITS_39 && KASAN_SW_TAGS\n\tdefault 0xeffffff800000000 if ARM64_VA_BITS_36 && KASAN_SW_TAGS\n\tdefault 0xffffffffffffffff\n\nsource \"arch/arm64/Kconfig.platforms\"\n\nmenu \"Kernel Features\"\n\nmenu \"ARM errata workarounds via the alternatives framework\"\n\nconfig ARM64_WORKAROUND_CLEAN_CACHE\n\tbool\n\nconfig ARM64_ERRATUM_826319\n\tbool \"Cortex-A53: 826319: System might deadlock if a write cannot complete until read data is accepted\"\n\tdefault y\n\tselect ARM64_WORKAROUND_CLEAN_CACHE\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 826319 on Cortex-A53 parts up to r0p2 with an AMBA 4 ACE or\n\t  AXI master interface and an L2 cache.\n\n\t  If a Cortex-A53 uses an AMBA AXI4 ACE interface to other processors\n\t  and is unable to accept a certain write via this interface, it will\n\t  not progress on read data presented on the read data channel and the\n\t  system can deadlock.\n\n\t  The workaround promotes data cache clean instructions to\n\t  data cache clean-and-invalidate.\n\t  Please note that this does not necessarily enable the workaround,\n\t  as it depends on the alternative framework, which will only patch\n\t  the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_827319\n\tbool \"Cortex-A53: 827319: Data cache clean instructions might cause overlapping transactions to the interconnect\"\n\tdefault y\n\tselect ARM64_WORKAROUND_CLEAN_CACHE\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 827319 on Cortex-A53 parts up to r0p2 with an AMBA 5 CHI\n\t  master interface and an L2 cache.\n\n\t  Under certain conditions this erratum can cause a clean line eviction\n\t  to occur at the same time as another transaction to the same address\n\t  on the AMBA 5 CHI interface, which can cause data corruption if the\n\t  interconnect reorders the two transactions.\n\n\t  The workaround promotes data cache clean instructions to\n\t  data cache clean-and-invalidate.\n\t  Please note that this does not necessarily enable the workaround,\n\t  as it depends on the alternative framework, which will only patch\n\t  the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_824069\n\tbool \"Cortex-A53: 824069: Cache line might not be marked as clean after a CleanShared snoop\"\n\tdefault y\n\tselect ARM64_WORKAROUND_CLEAN_CACHE\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 824069 on Cortex-A53 parts up to r0p2 when it is connected\n\t  to a coherent interconnect.\n\n\t  If a Cortex-A53 processor is executing a store or prefetch for\n\t  write instruction at the same time as a processor in another\n\t  cluster is executing a cache maintenance operation to the same\n\t  address, then this erratum might cause a clean cache line to be\n\t  incorrectly marked as dirty.\n\n\t  The workaround promotes data cache clean instructions to\n\t  data cache clean-and-invalidate.\n\t  Please note that this option does not necessarily enable the\n\t  workaround, as it depends on the alternative framework, which will\n\t  only patch the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_819472\n\tbool \"Cortex-A53: 819472: Store exclusive instructions might cause data corruption\"\n\tdefault y\n\tselect ARM64_WORKAROUND_CLEAN_CACHE\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 819472 on Cortex-A53 parts up to r0p1 with an L2 cache\n\t  present when it is connected to a coherent interconnect.\n\n\t  If the processor is executing a load and store exclusive sequence at\n\t  the same time as a processor in another cluster is executing a cache\n\t  maintenance operation to the same address, then this erratum might\n\t  cause data corruption.\n\n\t  The workaround promotes data cache clean instructions to\n\t  data cache clean-and-invalidate.\n\t  Please note that this does not necessarily enable the workaround,\n\t  as it depends on the alternative framework, which will only patch\n\t  the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_832075\n\tbool \"Cortex-A57: 832075: possible deadlock on mixing exclusive memory accesses with device loads\"\n\tdefault y\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 832075 on Cortex-A57 parts up to r1p2.\n\n\t  Affected Cortex-A57 parts might deadlock when exclusive load/store\n\t  instructions to Write-Back memory are mixed with Device loads.\n\n\t  The workaround is to promote device loads to use Load-Acquire\n\t  semantics.\n\t  Please note that this does not necessarily enable the workaround,\n\t  as it depends on the alternative framework, which will only patch\n\t  the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_834220\n\tbool \"Cortex-A57: 834220: Stage 2 translation fault might be incorrectly reported in presence of a Stage 1 fault\"\n\tdepends on KVM\n\tdefault y\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 834220 on Cortex-A57 parts up to r1p2.\n\n\t  Affected Cortex-A57 parts might report a Stage 2 translation\n\t  fault as the result of a Stage 1 fault for load crossing a\n\t  page boundary when there is a permission or device memory\n\t  alignment fault at Stage 1 and a translation fault at Stage 2.\n\n\t  The workaround is to verify that the Stage 1 translation\n\t  doesn't generate a fault before handling the Stage 2 fault.\n\t  Please note that this does not necessarily enable the workaround,\n\t  as it depends on the alternative framework, which will only patch\n\t  the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_845719\n\tbool \"Cortex-A53: 845719: a load might read incorrect data\"\n\tdepends on COMPAT\n\tdefault y\n\thelp\n\t  This option adds an alternative code sequence to work around ARM\n\t  erratum 845719 on Cortex-A53 parts up to r0p4.\n\n\t  When running a compat (AArch32) userspace on an affected Cortex-A53\n\t  part, a load at EL0 from a virtual address that matches the bottom 32\n\t  bits of the virtual address used by a recent load at (AArch64) EL1\n\t  might return incorrect data.\n\n\t  The workaround is to write the contextidr_el1 register on exception\n\t  return to a 32-bit task.\n\t  Please note that this does not necessarily enable the workaround,\n\t  as it depends on the alternative framework, which will only patch\n\t  the kernel if an affected CPU is detected.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_843419\n\tbool \"Cortex-A53: 843419: A load or store might access an incorrect address\"\n\tdefault y\n\tselect ARM64_MODULE_PLTS if MODULES\n\thelp\n\t  This option links the kernel with '--fix-cortex-a53-843419' and\n\t  enables PLT support to replace certain ADRP instructions, which can\n\t  cause subsequent memory accesses to use an incorrect address on\n\t  Cortex-A53 parts up to r0p4.\n\n\t  If unsure, say Y.\n\nconfig ARM64_LD_HAS_FIX_ERRATUM_843419\n\tdef_bool $(ld-option,--fix-cortex-a53-843419)\n\nconfig ARM64_ERRATUM_1024718\n\tbool \"Cortex-A55: 1024718: Update of DBM/AP bits without break before make might result in incorrect update\"\n\tdefault y\n\thelp\n\t  This option adds a workaround for ARM Cortex-A55 Erratum 1024718.\n\n\t  Affected Cortex-A55 cores (all revisions) could cause incorrect\n\t  update of the hardware dirty bit when the DBM/AP bits are updated\n\t  without a break-before-make. The workaround is to disable the usage\n\t  of hardware DBM locally on the affected cores. CPUs not affected by\n\t  this erratum will continue to use the feature.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_1418040\n\tbool \"Cortex-A76/Neoverse-N1: MRC read following MRRC read of specific Generic Timer in AArch32 might give incorrect result\"\n\tdefault y\n\tdepends on COMPAT\n\thelp\n\t  This option adds a workaround for ARM Cortex-A76/Neoverse-N1\n\t  errata 1188873 and 1418040.\n\n\t  Affected Cortex-A76/Neoverse-N1 cores (r0p0 to r3p1) could\n\t  cause register corruption when accessing the timer registers\n\t  from AArch32 userspace.\n\n\t  If unsure, say Y.\n\nconfig ARM64_WORKAROUND_SPECULATIVE_AT\n\tbool\n\nconfig ARM64_ERRATUM_1165522\n\tbool \"Cortex-A76: 1165522: Speculative AT instruction using out-of-context translation regime could cause subsequent request to generate an incorrect translation\"\n\tdefault y\n\tselect ARM64_WORKAROUND_SPECULATIVE_AT\n\thelp\n\t  This option adds a workaround for ARM Cortex-A76 erratum 1165522.\n\n\t  Affected Cortex-A76 cores (r0p0, r1p0, r2p0) could end-up with\n\t  corrupted TLBs by speculating an AT instruction during a guest\n\t  context switch.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_1319367\n\tbool \"Cortex-A57/A72: 1319537: Speculative AT instruction using out-of-context translation regime could cause subsequent request to generate an incorrect translation\"\n\tdefault y\n\tselect ARM64_WORKAROUND_SPECULATIVE_AT\n\thelp\n\t  This option adds work arounds for ARM Cortex-A57 erratum 1319537\n\t  and A72 erratum 1319367\n\n\t  Cortex-A57 and A72 cores could end-up with corrupted TLBs by\n\t  speculating an AT instruction during a guest context switch.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_1530923\n\tbool \"Cortex-A55: 1530923: Speculative AT instruction using out-of-context translation regime could cause subsequent request to generate an incorrect translation\"\n\tdefault y\n\tselect ARM64_WORKAROUND_SPECULATIVE_AT\n\thelp\n\t  This option adds a workaround for ARM Cortex-A55 erratum 1530923.\n\n\t  Affected Cortex-A55 cores (r0p0, r0p1, r1p0, r2p0) could end-up with\n\t  corrupted TLBs by speculating an AT instruction during a guest\n\t  context switch.\n\n\t  If unsure, say Y.\n\nconfig ARM64_WORKAROUND_REPEAT_TLBI\n\tbool\n\nconfig ARM64_ERRATUM_1286807\n\tbool \"Cortex-A76: Modification of the translation table for a virtual address might lead to read-after-read ordering violation\"\n\tdefault y\n\tselect ARM64_WORKAROUND_REPEAT_TLBI\n\thelp\n\t  This option adds a workaround for ARM Cortex-A76 erratum 1286807.\n\n\t  On the affected Cortex-A76 cores (r0p0 to r3p0), if a virtual\n\t  address for a cacheable mapping of a location is being\n\t  accessed by a core while another core is remapping the virtual\n\t  address to a new physical page using the recommended\n\t  break-before-make sequence, then under very rare circumstances\n\t  TLBI+DSB completes before a read using the translation being\n\t  invalidated has been observed by other observers. The\n\t  workaround repeats the TLBI+DSB operation.\n\nconfig ARM64_ERRATUM_1463225\n\tbool \"Cortex-A76: Software Step might prevent interrupt recognition\"\n\tdefault y\n\thelp\n\t  This option adds a workaround for Arm Cortex-A76 erratum 1463225.\n\n\t  On the affected Cortex-A76 cores (r0p0 to r3p1), software stepping\n\t  of a system call instruction (SVC) can prevent recognition of\n\t  subsequent interrupts when software stepping is disabled in the\n\t  exception handler of the system call and either kernel debugging\n\t  is enabled or VHE is in use.\n\n\t  Work around the erratum by triggering a dummy step exception\n\t  when handling a system call from a task that is being stepped\n\t  in a VHE configuration of the kernel.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_1542419\n\tbool \"Neoverse-N1: workaround mis-ordering of instruction fetches\"\n\tdefault y\n\thelp\n\t  This option adds a workaround for ARM Neoverse-N1 erratum\n\t  1542419.\n\n\t  Affected Neoverse-N1 cores could execute a stale instruction when\n\t  modified by another CPU. The workaround depends on a firmware\n\t  counterpart.\n\n\t  Workaround the issue by hiding the DIC feature from EL0. This\n\t  forces user-space to perform cache maintenance.\n\n\t  If unsure, say Y.\n\nconfig ARM64_ERRATUM_1508412\n\tbool \"Cortex-A77: 1508412: workaround deadlock on sequence of NC/Device load and store exclusive or PAR read\"\n\tdefault y\n\thelp\n\t  This option adds a workaround for Arm Cortex-A77 erratum 1508412.\n\n\t  Affected Cortex-A77 cores (r0p0, r1p0) could deadlock on a sequence\n\t  of a store-exclusive or read of PAR_EL1 and a load with device or\n\t  non-cacheable memory attributes. The workaround depends on a firmware\n\t  counterpart.\n\n\t  KVM guests must also have the workaround implemented or they can\n\t  deadlock the system.\n\n\t  Work around the issue by inserting DMB SY barriers around PAR_EL1\n\t  register reads and warning KVM users. The DMB barrier is sufficient\n\t  to prevent a speculative PAR_EL1 read.\n\n\t  If unsure, say Y.\n\nconfig CAVIUM_ERRATUM_22375\n\tbool \"Cavium erratum 22375, 24313\"\n\tdefault y\n\thelp\n\t  Enable workaround for errata 22375 and 24313.\n\n\t  This implements two gicv3-its errata workarounds for ThunderX. Both\n\t  with a small impact affecting only ITS table allocation.\n\n\t    erratum 22375: only alloc 8MB table size\n\t    erratum 24313: ignore memory access type\n\n\t  The fixes are in ITS initialization and basically ignore memory access\n\t  type and table size provided by the TYPER and BASER registers.\n\n\t  If unsure, say Y.\n\nconfig CAVIUM_ERRATUM_23144\n\tbool \"Cavium erratum 23144: ITS SYNC hang on dual socket system\"\n\tdepends on NUMA\n\tdefault y\n\thelp\n\t  ITS SYNC command hang for cross node io and collections/cpu mapping.\n\n\t  If unsure, say Y.\n\nconfig CAVIUM_ERRATUM_23154\n\tbool \"Cavium erratum 23154: Access to ICC_IAR1_EL1 is not sync'ed\"\n\tdefault y\n\thelp\n\t  The gicv3 of ThunderX requires a modified version for\n\t  reading the IAR status to ensure data synchronization\n\t  (access to icc_iar1_el1 is not sync'ed before and after).\n\n\t  If unsure, say Y.\n\nconfig CAVIUM_ERRATUM_27456\n\tbool \"Cavium erratum 27456: Broadcast TLBI instructions may cause icache corruption\"\n\tdefault y\n\thelp\n\t  On ThunderX T88 pass 1.x through 2.1 parts, broadcast TLBI\n\t  instructions may cause the icache to become corrupted if it\n\t  contains data for a non-current ASID.  The fix is to\n\t  invalidate the icache when changing the mm context.\n\n\t  If unsure, say Y.\n\nconfig CAVIUM_ERRATUM_30115\n\tbool \"Cavium erratum 30115: Guest may disable interrupts in host\"\n\tdefault y\n\thelp\n\t  On ThunderX T88 pass 1.x through 2.2, T81 pass 1.0 through\n\t  1.2, and T83 Pass 1.0, KVM guest execution may disable\n\t  interrupts in host. Trapping both GICv3 group-0 and group-1\n\t  accesses sidesteps the issue.\n\n\t  If unsure, say Y.\n\nconfig CAVIUM_TX2_ERRATUM_219\n\tbool \"Cavium ThunderX2 erratum 219: PRFM between TTBR change and ISB fails\"\n\tdefault y\n\thelp\n\t  On Cavium ThunderX2, a load, store or prefetch instruction between a\n\t  TTBR update and the corresponding context synchronizing operation can\n\t  cause a spurious Data Abort to be delivered to any hardware thread in\n\t  the CPU core.\n\n\t  Work around the issue by avoiding the problematic code sequence and\n\t  trapping KVM guest TTBRx_EL1 writes to EL2 when SMT is enabled. The\n\t  trap handler performs the corresponding register access, skips the\n\t  instruction and ensures context synchronization by virtue of the\n\t  exception return.\n\n\t  If unsure, say Y.\n\nconfig FUJITSU_ERRATUM_010001\n\tbool \"Fujitsu-A64FX erratum E#010001: Undefined fault may occur wrongly\"\n\tdefault y\n\thelp\n\t  This option adds a workaround for Fujitsu-A64FX erratum E#010001.\n\t  On some variants of the Fujitsu-A64FX cores ver(1.0, 1.1), memory\n\t  accesses may cause undefined fault (Data abort, DFSC=0b111111).\n\t  This fault occurs under a specific hardware condition when a\n\t  load/store instruction performs an address translation using:\n\t  case-1  TTBR0_EL1 with TCR_EL1.NFD0 == 1.\n\t  case-2  TTBR0_EL2 with TCR_EL2.NFD0 == 1.\n\t  case-3  TTBR1_EL1 with TCR_EL1.NFD1 == 1.\n\t  case-4  TTBR1_EL2 with TCR_EL2.NFD1 == 1.\n\n\t  The workaround is to ensure these bits are clear in TCR_ELx.\n\t  The workaround only affects the Fujitsu-A64FX.\n\n\t  If unsure, say Y.\n\nconfig HISILICON_ERRATUM_161600802\n\tbool \"Hip07 161600802: Erroneous redistributor VLPI base\"\n\tdefault y\n\thelp\n\t  The HiSilicon Hip07 SoC uses the wrong redistributor base\n\t  when issued ITS commands such as VMOVP and VMAPP, and requires\n\t  a 128kB offset to be applied to the target address in this commands.\n\n\t  If unsure, say Y.\n\nconfig QCOM_FALKOR_ERRATUM_1003\n\tbool \"Falkor E1003: Incorrect translation due to ASID change\"\n\tdefault y\n\thelp\n\t  On Falkor v1, an incorrect ASID may be cached in the TLB when ASID\n\t  and BADDR are changed together in TTBRx_EL1. Since we keep the ASID\n\t  in TTBR1_EL1, this situation only occurs in the entry trampoline and\n\t  then only for entries in the walk cache, since the leaf translation\n\t  is unchanged. Work around the erratum by invalidating the walk cache\n\t  entries for the trampoline before entering the kernel proper.\n\nconfig QCOM_FALKOR_ERRATUM_1009\n\tbool \"Falkor E1009: Prematurely complete a DSB after a TLBI\"\n\tdefault y\n\tselect ARM64_WORKAROUND_REPEAT_TLBI\n\thelp\n\t  On Falkor v1, the CPU may prematurely complete a DSB following a\n\t  TLBI xxIS invalidate maintenance operation. Repeat the TLBI operation\n\t  one more time to fix the issue.\n\n\t  If unsure, say Y.\n\nconfig QCOM_QDF2400_ERRATUM_0065\n\tbool \"QDF2400 E0065: Incorrect GITS_TYPER.ITT_Entry_size\"\n\tdefault y\n\thelp\n\t  On Qualcomm Datacenter Technologies QDF2400 SoC, ITS hardware reports\n\t  ITE size incorrectly. The GITS_TYPER.ITT_Entry_size field should have\n\t  been indicated as 16Bytes (0xf), not 8Bytes (0x7).\n\n\t  If unsure, say Y.\n\nconfig QCOM_FALKOR_ERRATUM_E1041\n\tbool \"Falkor E1041: Speculative instruction fetches might cause errant memory access\"\n\tdefault y\n\thelp\n\t  Falkor CPU may speculatively fetch instructions from an improper\n\t  memory location when MMU translation is changed from SCTLR_ELn[M]=1\n\t  to SCTLR_ELn[M]=0. Prefix an ISB instruction to fix the problem.\n\n\t  If unsure, say Y.\n\nconfig NVIDIA_CARMEL_CNP_ERRATUM\n\tbool \"NVIDIA Carmel CNP: CNP on Carmel semantically different than ARM cores\"\n\tdefault y\n\thelp\n\t  If CNP is enabled on Carmel cores, non-sharable TLBIs on a core will not\n\t  invalidate shared TLB entries installed by a different core, as it would\n\t  on standard ARM cores.\n\n\t  If unsure, say Y.\n\nconfig SOCIONEXT_SYNQUACER_PREITS\n\tbool \"Socionext Synquacer: Workaround for GICv3 pre-ITS\"\n\tdefault y\n\thelp\n\t  Socionext Synquacer SoCs implement a separate h/w block to generate\n\t  MSI doorbell writes with non-zero values for the device ID.\n\n\t  If unsure, say Y.\n\nendmenu\n\n\nchoice\n\tprompt \"Page size\"\n\tdefault ARM64_4K_PAGES\n\thelp\n\t  Page size (translation granule) configuration.\n\nconfig ARM64_4K_PAGES\n\tbool \"4KB\"\n\thelp\n\t  This feature enables 4KB pages support.\n\nconfig ARM64_16K_PAGES\n\tbool \"16KB\"\n\thelp\n\t  The system will use 16KB pages support. AArch32 emulation\n\t  requires applications compiled with 16K (or a multiple of 16K)\n\t  aligned segments.\n\nconfig ARM64_64K_PAGES\n\tbool \"64KB\"\n\thelp\n\t  This feature enables 64KB pages support (4KB by default)\n\t  allowing only two levels of page tables and faster TLB\n\t  look-up. AArch32 emulation requires applications compiled\n\t  with 64K aligned segments.\n\nendchoice\n\nchoice\n\tprompt \"Virtual address space size\"\n\tdefault ARM64_VA_BITS_39 if ARM64_4K_PAGES\n\tdefault ARM64_VA_BITS_47 if ARM64_16K_PAGES\n\tdefault ARM64_VA_BITS_42 if ARM64_64K_PAGES\n\thelp\n\t  Allows choosing one of multiple possible virtual address\n\t  space sizes. The level of translation table is determined by\n\t  a combination of page size and virtual address space size.\n\nconfig ARM64_VA_BITS_36\n\tbool \"36-bit\" if EXPERT\n\tdepends on ARM64_16K_PAGES\n\nconfig ARM64_VA_BITS_39\n\tbool \"39-bit\"\n\tdepends on ARM64_4K_PAGES\n\nconfig ARM64_VA_BITS_42\n\tbool \"42-bit\"\n\tdepends on ARM64_64K_PAGES\n\nconfig ARM64_VA_BITS_47\n\tbool \"47-bit\"\n\tdepends on ARM64_16K_PAGES\n\nconfig ARM64_VA_BITS_48\n\tbool \"48-bit\"\n\nconfig ARM64_VA_BITS_52\n\tbool \"52-bit\"\n\tdepends on ARM64_64K_PAGES && (ARM64_PAN || !ARM64_SW_TTBR0_PAN)\n\thelp\n\t  Enable 52-bit virtual addressing for userspace when explicitly\n\t  requested via a hint to mmap(). The kernel will also use 52-bit\n\t  virtual addresses for its own mappings (provided HW support for\n\t  this feature is available, otherwise it reverts to 48-bit).\n\n\t  NOTE: Enabling 52-bit virtual addressing in conjunction with\n\t  ARMv8.3 Pointer Authentication will result in the PAC being\n\t  reduced from 7 bits to 3 bits, which may have a significant\n\t  impact on its susceptibility to brute-force attacks.\n\n\t  If unsure, select 48-bit virtual addressing instead.\n\nendchoice\n\nconfig ARM64_FORCE_52BIT\n\tbool \"Force 52-bit virtual addresses for userspace\"\n\tdepends on ARM64_VA_BITS_52 && EXPERT\n\thelp\n\t  For systems with 52-bit userspace VAs enabled, the kernel will attempt\n\t  to maintain compatibility with older software by providing 48-bit VAs\n\t  unless a hint is supplied to mmap.\n\n\t  This configuration option disables the 48-bit compatibility logic, and\n\t  forces all userspace addresses to be 52-bit on HW that supports it. One\n\t  should only enable this configuration option for stress testing userspace\n\t  memory management code. If unsure say N here.\n\nconfig ARM64_VA_BITS\n\tint\n\tdefault 36 if ARM64_VA_BITS_36\n\tdefault 39 if ARM64_VA_BITS_39\n\tdefault 42 if ARM64_VA_BITS_42\n\tdefault 47 if ARM64_VA_BITS_47\n\tdefault 48 if ARM64_VA_BITS_48\n\tdefault 52 if ARM64_VA_BITS_52\n\nchoice\n\tprompt \"Physical address space size\"\n\tdefault ARM64_PA_BITS_48\n\thelp\n\t  Choose the maximum physical address range that the kernel will\n\t  support.\n\nconfig ARM64_PA_BITS_48\n\tbool \"48-bit\"\n\nconfig ARM64_PA_BITS_52\n\tbool \"52-bit (ARMv8.2)\"\n\tdepends on ARM64_64K_PAGES\n\tdepends on ARM64_PAN || !ARM64_SW_TTBR0_PAN\n\thelp\n\t  Enable support for a 52-bit physical address space, introduced as\n\t  part of the ARMv8.2-LPA extension.\n\n\t  With this enabled, the kernel will also continue to work on CPUs that\n\t  do not support ARMv8.2-LPA, but with some added memory overhead (and\n\t  minor performance overhead).\n\nendchoice\n\nconfig ARM64_PA_BITS\n\tint\n\tdefault 48 if ARM64_PA_BITS_48\n\tdefault 52 if ARM64_PA_BITS_52\n\nchoice\n\tprompt \"Endianness\"\n\tdefault CPU_LITTLE_ENDIAN\n\thelp\n\t  Select the endianness of data accesses performed by the CPU. Userspace\n\t  applications will need to be compiled and linked for the endianness\n\t  that is selected here.\n\nconfig CPU_BIG_ENDIAN\n\tbool \"Build big-endian kernel\"\n\tdepends on !LD_IS_LLD || LLD_VERSION >= 130000\n\thelp\n\t  Say Y if you plan on running a kernel with a big-endian userspace.\n\nconfig CPU_LITTLE_ENDIAN\n\tbool \"Build little-endian kernel\"\n\thelp\n\t  Say Y if you plan on running a kernel with a little-endian userspace.\n\t  This is usually the case for distributions targeting arm64.\n\nendchoice\n\nconfig SCHED_MC\n\tbool \"Multi-core scheduler support\"\n\thelp\n\t  Multi-core scheduler support improves the CPU scheduler's decision\n\t  making when dealing with multi-core CPU chips at a cost of slightly\n\t  increased overhead in some places. If unsure say N here.\n\nconfig SCHED_SMT\n\tbool \"SMT scheduler support\"\n\thelp\n\t  Improves the CPU scheduler's decision making when dealing with\n\t  MultiThreading at a cost of slightly increased overhead in some\n\t  places. If unsure say N here.\n\nconfig NR_CPUS\n\tint \"Maximum number of CPUs (2-4096)\"\n\trange 2 4096\n\tdefault \"256\"\n\nconfig HOTPLUG_CPU\n\tbool \"Support for hot-pluggable CPUs\"\n\tselect GENERIC_IRQ_MIGRATION\n\thelp\n\t  Say Y here to experiment with turning CPUs off and on.  CPUs\n\t  can be controlled through /sys/devices/system/cpu.\n\n# Common NUMA Features\nconfig NUMA\n\tbool \"NUMA Memory Allocation and Scheduler Support\"\n\tselect GENERIC_ARCH_NUMA\n\tselect ACPI_NUMA if ACPI\n\tselect OF_NUMA\n\thelp\n\t  Enable NUMA (Non-Uniform Memory Access) support.\n\n\t  The kernel will try to allocate memory used by a CPU on the\n\t  local memory of the CPU and add some more\n\t  NUMA awareness to the kernel.\n\nconfig NODES_SHIFT\n\tint \"Maximum NUMA Nodes (as a power of 2)\"\n\trange 1 10\n\tdefault \"4\"\n\tdepends on NUMA\n\thelp\n\t  Specify the maximum number of NUMA Nodes available on the target\n\t  system.  Increases memory reserved to accommodate various tables.\n\nconfig USE_PERCPU_NUMA_NODE_ID\n\tdef_bool y\n\tdepends on NUMA\n\nconfig HAVE_SETUP_PER_CPU_AREA\n\tdef_bool y\n\tdepends on NUMA\n\nconfig NEED_PER_CPU_EMBED_FIRST_CHUNK\n\tdef_bool y\n\tdepends on NUMA\n\nsource \"kernel/Kconfig.hz\"\n\nconfig ARCH_SPARSEMEM_ENABLE\n\tdef_bool y\n\tselect SPARSEMEM_VMEMMAP_ENABLE\n\tselect SPARSEMEM_VMEMMAP\n\nconfig HW_PERF_EVENTS\n\tdef_bool y\n\tdepends on ARM_PMU\n\nconfig ARCH_HAS_FILTER_PGPROT\n\tdef_bool y\n\n# Supported by clang >= 7.0\nconfig CC_HAVE_SHADOW_CALL_STACK\n\tdef_bool $(cc-option, -fsanitize=shadow-call-stack -ffixed-x18)\n\nconfig PARAVIRT\n\tbool \"Enable paravirtualization code\"\n\thelp\n\t  This changes the kernel so it can modify itself when it is run\n\t  under a hypervisor, potentially improving performance significantly\n\t  over full virtualization.\n\nconfig PARAVIRT_TIME_ACCOUNTING\n\tbool \"Paravirtual steal time accounting\"\n\tselect PARAVIRT\n\thelp\n\t  Select this option to enable fine granularity task steal time\n\t  accounting. Time spent executing other tasks in parallel with\n\t  the current vCPU is discounted from the vCPU power. To account for\n\t  that, there can be a small performance impact.\n\n\t  If in doubt, say N here.\n\nconfig KEXEC\n\tdepends on PM_SLEEP_SMP\n\tselect KEXEC_CORE\n\tbool \"kexec system call\"\n\thelp\n\t  kexec is a system call that implements the ability to shutdown your\n\t  current kernel, and to start another kernel.  It is like a reboot\n\t  but it is independent of the system firmware.   And like a reboot\n\t  you can start any kernel with it, not just Linux.\n\nconfig KEXEC_FILE\n\tbool \"kexec file based system call\"\n\tselect KEXEC_CORE\n\tselect HAVE_IMA_KEXEC if IMA\n\thelp\n\t  This is new version of kexec system call. This system call is\n\t  file based and takes file descriptors as system call argument\n\t  for kernel and initramfs as opposed to list of segments as\n\t  accepted by previous system call.\n\nconfig KEXEC_SIG\n\tbool \"Verify kernel signature during kexec_file_load() syscall\"\n\tdepends on KEXEC_FILE\n\thelp\n\t  Select this option to verify a signature with loaded kernel\n\t  image. If configured, any attempt of loading a image without\n\t  valid signature will fail.\n\n\t  In addition to that option, you need to enable signature\n\t  verification for the corresponding kernel image type being\n\t  loaded in order for this to work.\n\nconfig KEXEC_IMAGE_VERIFY_SIG\n\tbool \"Enable Image signature verification support\"\n\tdefault y\n\tdepends on KEXEC_SIG\n\tdepends on EFI && SIGNED_PE_FILE_VERIFICATION\n\thelp\n\t  Enable Image signature verification support.\n\ncomment \"Support for PE file signature verification disabled\"\n\tdepends on KEXEC_SIG\n\tdepends on !EFI || !SIGNED_PE_FILE_VERIFICATION\n\nconfig CRASH_DUMP\n\tbool \"Build kdump crash kernel\"\n\thelp\n\t  Generate crash dump after being started by kexec. This should\n\t  be normally only set in special crash dump kernels which are\n\t  loaded in the main kernel with kexec-tools into a specially\n\t  reserved region and then later executed after a crash by\n\t  kdump/kexec.\n\n\t  For more details see Documentation/admin-guide/kdump/kdump.rst\n\nconfig TRANS_TABLE\n\tdef_bool y\n\tdepends on HIBERNATION\n\nconfig XEN_DOM0\n\tdef_bool y\n\tdepends on XEN\n\nconfig XEN\n\tbool \"Xen guest support on ARM64\"\n\tdepends on ARM64 && OF\n\tselect SWIOTLB_XEN\n\tselect PARAVIRT\n\thelp\n\t  Say Y if you want to run Linux in a Virtual Machine on Xen on ARM64.\n\nconfig FORCE_MAX_ZONEORDER\n\tint\n\tdefault \"14\" if ARM64_64K_PAGES\n\tdefault \"12\" if ARM64_16K_PAGES\n\tdefault \"11\"\n\thelp\n\t  The kernel memory allocator divides physically contiguous memory\n\t  blocks into \"zones\", where each zone is a power of two number of\n\t  pages.  This option selects the largest power of two that the kernel\n\t  keeps in the memory allocator.  If you need to allocate very large\n\t  blocks of physically contiguous memory, then you may need to\n\t  increase this value.\n\n\t  This config option is actually maximum order plus one. For example,\n\t  a value of 11 means that the largest free memory block is 2^10 pages.\n\n\t  We make sure that we can allocate upto a HugePage size for each configuration.\n\t  Hence we have :\n\t\tMAX_ORDER = (PMD_SHIFT - PAGE_SHIFT) + 1 => PAGE_SHIFT - 2\n\n\t  However for 4K, we choose a higher default value, 11 as opposed to 10, giving us\n\t  4M allocations matching the default size used by generic code.\n\nconfig UNMAP_KERNEL_AT_EL0\n\tbool \"Unmap kernel when running in userspace (aka \\\"KAISER\\\")\" if EXPERT\n\tdefault y\n\thelp\n\t  Speculation attacks against some high-performance processors can\n\t  be used to bypass MMU permission checks and leak kernel data to\n\t  userspace. This can be defended against by unmapping the kernel\n\t  when running in userspace, mapping it back in on exception entry\n\t  via a trampoline page in the vector table.\n\n\t  If unsure, say Y.\n\nconfig RODATA_FULL_DEFAULT_ENABLED\n\tbool \"Apply r/o permissions of VM areas also to their linear aliases\"\n\tdefault y\n\thelp\n\t  Apply read-only attributes of VM areas to the linear alias of\n\t  the backing pages as well. This prevents code or read-only data\n\t  from being modified (inadvertently or intentionally) via another\n\t  mapping of the same memory page. This additional enhancement can\n\t  be turned off at runtime by passing rodata=[off|on] (and turned on\n\t  with rodata=full if this option is set to 'n')\n\n\t  This requires the linear region to be mapped down to pages,\n\t  which may adversely affect performance in some cases.\n\nconfig ARM64_SW_TTBR0_PAN\n\tbool \"Emulate Privileged Access Never using TTBR0_EL1 switching\"\n\thelp\n\t  Enabling this option prevents the kernel from accessing\n\t  user-space memory directly by pointing TTBR0_EL1 to a reserved\n\t  zeroed area and reserved ASID. The user access routines\n\t  restore the valid TTBR0_EL1 temporarily.\n\nconfig ARM64_TAGGED_ADDR_ABI\n\tbool \"Enable the tagged user addresses syscall ABI\"\n\tdefault y\n\thelp\n\t  When this option is enabled, user applications can opt in to a\n\t  relaxed ABI via prctl() allowing tagged addresses to be passed\n\t  to system calls as pointer arguments. For details, see\n\t  Documentation/arm64/tagged-address-abi.rst.\n\nmenuconfig COMPAT\n\tbool \"Kernel support for 32-bit EL0\"\n\tdepends on ARM64_4K_PAGES || EXPERT\n\tselect HAVE_UID16\n\tselect OLD_SIGSUSPEND3\n\tselect COMPAT_OLD_SIGACTION\n\thelp\n\t  This option enables support for a 32-bit EL0 running under a 64-bit\n\t  kernel at EL1. AArch32-specific components such as system calls,\n\t  the user helper functions, VFP support and the ptrace interface are\n\t  handled appropriately by the kernel.\n\n\t  If you use a page size other than 4KB (i.e, 16KB or 64KB), please be aware\n\t  that you will only be able to execute AArch32 binaries that were compiled\n\t  with page size aligned segments.\n\n\t  If you want to execute 32-bit userspace applications, say Y.\n\nif COMPAT\n\nconfig KUSER_HELPERS\n\tbool \"Enable kuser helpers page for 32-bit applications\"\n\tdefault y\n\thelp\n\t  Warning: disabling this option may break 32-bit user programs.\n\n\t  Provide kuser helpers to compat tasks. The kernel provides\n\t  helper code to userspace in read only form at a fixed location\n\t  to allow userspace to be independent of the CPU type fitted to\n\t  the system. This permits binaries to be run on ARMv4 through\n\t  to ARMv8 without modification.\n\n\t  See Documentation/arm/kernel_user_helpers.rst for details.\n\n\t  However, the fixed address nature of these helpers can be used\n\t  by ROP (return orientated programming) authors when creating\n\t  exploits.\n\n\t  If all of the binaries and libraries which run on your platform\n\t  are built specifically for your platform, and make no use of\n\t  these helpers, then you can turn this option off to hinder\n\t  such exploits. However, in that case, if a binary or library\n\t  relying on those helpers is run, it will not function correctly.\n\n\t  Say N here only if you are absolutely certain that you do not\n\t  need these helpers; otherwise, the safe option is to say Y.\n\nconfig COMPAT_VDSO\n\tbool \"Enable vDSO for 32-bit applications\"\n\tdepends on !CPU_BIG_ENDIAN && \"$(CROSS_COMPILE_COMPAT)\" != \"\"\n\tselect GENERIC_COMPAT_VDSO\n\tdefault y\n\thelp\n\t  Place in the process address space of 32-bit applications an\n\t  ELF shared object providing fast implementations of gettimeofday\n\t  and clock_gettime.\n\n\t  You must have a 32-bit build of glibc 2.22 or later for programs\n\t  to seamlessly take advantage of this.\n\nconfig THUMB2_COMPAT_VDSO\n\tbool \"Compile the 32-bit vDSO for Thumb-2 mode\" if EXPERT\n\tdepends on COMPAT_VDSO\n\tdefault y\n\thelp\n\t  Compile the compat vDSO with '-mthumb -fomit-frame-pointer' if y,\n\t  otherwise with '-marm'.\n\nmenuconfig ARMV8_DEPRECATED\n\tbool \"Emulate deprecated/obsolete ARMv8 instructions\"\n\tdepends on SYSCTL\n\thelp\n\t  Legacy software support may require certain instructions\n\t  that have been deprecated or obsoleted in the architecture.\n\n\t  Enable this config to enable selective emulation of these\n\t  features.\n\n\t  If unsure, say Y\n\nif ARMV8_DEPRECATED\n\nconfig SWP_EMULATION\n\tbool \"Emulate SWP/SWPB instructions\"\n\thelp\n\t  ARMv8 obsoletes the use of A32 SWP/SWPB instructions such that\n\t  they are always undefined. Say Y here to enable software\n\t  emulation of these instructions for userspace using LDXR/STXR.\n\t  This feature can be controlled at runtime with the abi.swp\n\t  sysctl which is disabled by default.\n\n\t  In some older versions of glibc [<=2.8] SWP is used during futex\n\t  trylock() operations with the assumption that the code will not\n\t  be preempted. This invalid assumption may be more likely to fail\n\t  with SWP emulation enabled, leading to deadlock of the user\n\t  application.\n\n\t  NOTE: when accessing uncached shared regions, LDXR/STXR rely\n\t  on an external transaction monitoring block called a global\n\t  monitor to maintain update atomicity. If your system does not\n\t  implement a global monitor, this option can cause programs that\n\t  perform SWP operations to uncached memory to deadlock.\n\n\t  If unsure, say Y\n\nconfig CP15_BARRIER_EMULATION\n\tbool \"Emulate CP15 Barrier instructions\"\n\thelp\n\t  The CP15 barrier instructions - CP15ISB, CP15DSB, and\n\t  CP15DMB - are deprecated in ARMv8 (and ARMv7). It is\n\t  strongly recommended to use the ISB, DSB, and DMB\n\t  instructions instead.\n\n\t  Say Y here to enable software emulation of these\n\t  instructions for AArch32 userspace code. When this option is\n\t  enabled, CP15 barrier usage is traced which can help\n\t  identify software that needs updating. This feature can be\n\t  controlled at runtime with the abi.cp15_barrier sysctl.\n\n\t  If unsure, say Y\n\nconfig SETEND_EMULATION\n\tbool \"Emulate SETEND instruction\"\n\thelp\n\t  The SETEND instruction alters the data-endianness of the\n\t  AArch32 EL0, and is deprecated in ARMv8.\n\n\t  Say Y here to enable software emulation of the instruction\n\t  for AArch32 userspace code. This feature can be controlled\n\t  at runtime with the abi.setend sysctl.\n\n\t  Note: All the cpus on the system must have mixed endian support at EL0\n\t  for this feature to be enabled. If a new CPU - which doesn't support mixed\n\t  endian - is hotplugged in after this feature has been enabled, there could\n\t  be unexpected results in the applications.\n\n\t  If unsure, say Y\nendif\n\nendif\n\nmenu \"ARMv8.1 architectural features\"\n\nconfig ARM64_HW_AFDBM\n\tbool \"Support for hardware updates of the Access and Dirty page flags\"\n\tdefault y\n\thelp\n\t  The ARMv8.1 architecture extensions introduce support for\n\t  hardware updates of the access and dirty information in page\n\t  table entries. When enabled in TCR_EL1 (HA and HD bits) on\n\t  capable processors, accesses to pages with PTE_AF cleared will\n\t  set this bit instead of raising an access flag fault.\n\t  Similarly, writes to read-only pages with the DBM bit set will\n\t  clear the read-only bit (AP[2]) instead of raising a\n\t  permission fault.\n\n\t  Kernels built with this configuration option enabled continue\n\t  to work on pre-ARMv8.1 hardware and the performance impact is\n\t  minimal. If unsure, say Y.\n\nconfig ARM64_PAN\n\tbool \"Enable support for Privileged Access Never (PAN)\"\n\tdefault y\n\thelp\n\t Privileged Access Never (PAN; part of the ARMv8.1 Extensions)\n\t prevents the kernel or hypervisor from accessing user-space (EL0)\n\t memory directly.\n\n\t Choosing this option will cause any unprotected (not using\n\t copy_to_user et al) memory access to fail with a permission fault.\n\n\t The feature is detected at runtime, and will remain as a 'nop'\n\t instruction if the cpu does not implement the feature.\n\nconfig AS_HAS_LDAPR\n\tdef_bool $(as-instr,.arch_extension rcpc)\n\nconfig AS_HAS_LSE_ATOMICS\n\tdef_bool $(as-instr,.arch_extension lse)\n\nconfig ARM64_LSE_ATOMICS\n\tbool\n\tdefault ARM64_USE_LSE_ATOMICS\n\tdepends on AS_HAS_LSE_ATOMICS\n\nconfig ARM64_USE_LSE_ATOMICS\n\tbool \"Atomic instructions\"\n\tdepends on JUMP_LABEL\n\tdefault y\n\thelp\n\t  As part of the Large System Extensions, ARMv8.1 introduces new\n\t  atomic instructions that are designed specifically to scale in\n\t  very large systems.\n\n\t  Say Y here to make use of these instructions for the in-kernel\n\t  atomic routines. This incurs a small overhead on CPUs that do\n\t  not support these instructions and requires the kernel to be\n\t  built with binutils >= 2.25 in order for the new instructions\n\t  to be used.\n\nendmenu\n\nmenu \"ARMv8.2 architectural features\"\n\nconfig ARM64_PMEM\n\tbool \"Enable support for persistent memory\"\n\tselect ARCH_HAS_PMEM_API\n\tselect ARCH_HAS_UACCESS_FLUSHCACHE\n\thelp\n\t  Say Y to enable support for the persistent memory API based on the\n\t  ARMv8.2 DCPoP feature.\n\n\t  The feature is detected at runtime, and the kernel will use DC CVAC\n\t  operations if DC CVAP is not supported (following the behaviour of\n\t  DC CVAP itself if the system does not define a point of persistence).\n\nconfig ARM64_RAS_EXTN\n\tbool \"Enable support for RAS CPU Extensions\"\n\tdefault y\n\thelp\n\t  CPUs that support the Reliability, Availability and Serviceability\n\t  (RAS) Extensions, part of ARMv8.2 are able to track faults and\n\t  errors, classify them and report them to software.\n\n\t  On CPUs with these extensions system software can use additional\n\t  barriers to determine if faults are pending and read the\n\t  classification from a new set of registers.\n\n\t  Selecting this feature will allow the kernel to use these barriers\n\t  and access the new registers if the system supports the extension.\n\t  Platform RAS features may additionally depend on firmware support.\n\nconfig ARM64_CNP\n\tbool \"Enable support for Common Not Private (CNP) translations\"\n\tdefault y\n\tdepends on ARM64_PAN || !ARM64_SW_TTBR0_PAN\n\thelp\n\t  Common Not Private (CNP) allows translation table entries to\n\t  be shared between different PEs in the same inner shareable\n\t  domain, so the hardware can use this fact to optimise the\n\t  caching of such entries in the TLB.\n\n\t  Selecting this option allows the CNP feature to be detected\n\t  at runtime, and does not affect PEs that do not implement\n\t  this feature.\n\nendmenu\n\nmenu \"ARMv8.3 architectural features\"\n\nconfig ARM64_PTR_AUTH\n\tbool \"Enable support for pointer authentication\"\n\tdefault y\n\thelp\n\t  Pointer authentication (part of the ARMv8.3 Extensions) provides\n\t  instructions for signing and authenticating pointers against secret\n\t  keys, which can be used to mitigate Return Oriented Programming (ROP)\n\t  and other attacks.\n\n\t  This option enables these instructions at EL0 (i.e. for userspace).\n\t  Choosing this option will cause the kernel to initialise secret keys\n\t  for each process at exec() time, with these keys being\n\t  context-switched along with the process.\n\n\t  The feature is detected at runtime. If the feature is not present in\n\t  hardware it will not be advertised to userspace/KVM guest nor will it\n\t  be enabled.\n\n\t  If the feature is present on the boot CPU but not on a late CPU, then\n\t  the late CPU will be parked. Also, if the boot CPU does not have\n\t  address auth and the late CPU has then the late CPU will still boot\n\t  but with the feature disabled. On such a system, this option should\n\t  not be selected.\n\nconfig ARM64_PTR_AUTH_KERNEL\n\tbool \"Use pointer authentication for kernel\"\n\tdefault y\n\tdepends on ARM64_PTR_AUTH\n\tdepends on (CC_HAS_SIGN_RETURN_ADDRESS || CC_HAS_BRANCH_PROT_PAC_RET) && AS_HAS_PAC\n\t# Modern compilers insert a .note.gnu.property section note for PAC\n\t# which is only understood by binutils starting with version 2.33.1.\n\tdepends on LD_IS_LLD || LD_VERSION >= 23301 || (CC_IS_GCC && GCC_VERSION < 90100)\n\tdepends on !CC_IS_CLANG || AS_HAS_CFI_NEGATE_RA_STATE\n\tdepends on (!FUNCTION_GRAPH_TRACER || DYNAMIC_FTRACE_WITH_REGS)\n\thelp\n\t  If the compiler supports the -mbranch-protection or\n\t  -msign-return-address flag (e.g. GCC 7 or later), then this option\n\t  will cause the kernel itself to be compiled with return address\n\t  protection. In this case, and if the target hardware is known to\n\t  support pointer authentication, then CONFIG_STACKPROTECTOR can be\n\t  disabled with minimal loss of protection.\n\n\t  This feature works with FUNCTION_GRAPH_TRACER option only if\n\t  DYNAMIC_FTRACE_WITH_REGS is enabled.\n\nconfig CC_HAS_BRANCH_PROT_PAC_RET\n\t# GCC 9 or later, clang 8 or later\n\tdef_bool $(cc-option,-mbranch-protection=pac-ret+leaf)\n\nconfig CC_HAS_SIGN_RETURN_ADDRESS\n\t# GCC 7, 8\n\tdef_bool $(cc-option,-msign-return-address=all)\n\nconfig AS_HAS_PAC\n\tdef_bool $(cc-option,-Wa$(comma)-march=armv8.3-a)\n\nconfig AS_HAS_CFI_NEGATE_RA_STATE\n\tdef_bool $(as-instr,.cfi_startproc\\n.cfi_negate_ra_state\\n.cfi_endproc\\n)\n\nendmenu\n\nmenu \"ARMv8.4 architectural features\"\n\nconfig ARM64_AMU_EXTN\n\tbool \"Enable support for the Activity Monitors Unit CPU extension\"\n\tdefault y\n\thelp\n\t  The activity monitors extension is an optional extension introduced\n\t  by the ARMv8.4 CPU architecture. This enables support for version 1\n\t  of the activity monitors architecture, AMUv1.\n\n\t  To enable the use of this extension on CPUs that implement it, say Y.\n\n\t  Note that for architectural reasons, firmware _must_ implement AMU\n\t  support when running on CPUs that present the activity monitors\n\t  extension. The required support is present in:\n\t    * Version 1.5 and later of the ARM Trusted Firmware\n\n\t  For kernels that have this configuration enabled but boot with broken\n\t  firmware, you may need to say N here until the firmware is fixed.\n\t  Otherwise you may experience firmware panics or lockups when\n\t  accessing the counter registers. Even if you are not observing these\n\t  symptoms, the values returned by the register reads might not\n\t  correctly reflect reality. Most commonly, the value read will be 0,\n\t  indicating that the counter is not enabled.\n\nconfig AS_HAS_ARMV8_4\n\tdef_bool $(cc-option,-Wa$(comma)-march=armv8.4-a)\n\nconfig ARM64_TLB_RANGE\n\tbool \"Enable support for tlbi range feature\"\n\tdefault y\n\tdepends on AS_HAS_ARMV8_4\n\thelp\n\t  ARMv8.4-TLBI provides TLBI invalidation instruction that apply to a\n\t  range of input addresses.\n\n\t  The feature introduces new assembly instructions, and they were\n\t  support when binutils >= 2.30.\n\nendmenu\n\nmenu \"ARMv8.5 architectural features\"\n\nconfig AS_HAS_ARMV8_5\n\tdef_bool $(cc-option,-Wa$(comma)-march=armv8.5-a)\n\nconfig ARM64_BTI\n\tbool \"Branch Target Identification support\"\n\tdefault y\n\thelp\n\t  Branch Target Identification (part of the ARMv8.5 Extensions)\n\t  provides a mechanism to limit the set of locations to which computed\n\t  branch instructions such as BR or BLR can jump.\n\n\t  To make use of BTI on CPUs that support it, say Y.\n\n\t  BTI is intended to provide complementary protection to other control\n\t  flow integrity protection mechanisms, such as the Pointer\n\t  authentication mechanism provided as part of the ARMv8.3 Extensions.\n\t  For this reason, it does not make sense to enable this option without\n\t  also enabling support for pointer authentication.  Thus, when\n\t  enabling this option you should also select ARM64_PTR_AUTH=y.\n\n\t  Userspace binaries must also be specifically compiled to make use of\n\t  this mechanism.  If you say N here or the hardware does not support\n\t  BTI, such binaries can still run, but you get no additional\n\t  enforcement of branch destinations.\n\nconfig ARM64_BTI_KERNEL\n\tbool \"Use Branch Target Identification for kernel\"\n\tdefault y\n\tdepends on ARM64_BTI\n\tdepends on ARM64_PTR_AUTH_KERNEL\n\tdepends on CC_HAS_BRANCH_PROT_PAC_RET_BTI\n\t# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=94697\n\tdepends on !CC_IS_GCC || GCC_VERSION >= 100100\n\t# https://github.com/llvm/llvm-project/commit/a88c722e687e6780dcd6a58718350dc76fcc4cc9\n\tdepends on !CC_IS_CLANG || CLANG_VERSION >= 120000\n\tdepends on (!FUNCTION_GRAPH_TRACER || DYNAMIC_FTRACE_WITH_REGS)\n\thelp\n\t  Build the kernel with Branch Target Identification annotations\n\t  and enable enforcement of this for kernel code. When this option\n\t  is enabled and the system supports BTI all kernel code including\n\t  modular code must have BTI enabled.\n\nconfig CC_HAS_BRANCH_PROT_PAC_RET_BTI\n\t# GCC 9 or later, clang 8 or later\n\tdef_bool $(cc-option,-mbranch-protection=pac-ret+leaf+bti)\n\nconfig ARM64_E0PD\n\tbool \"Enable support for E0PD\"\n\tdefault y\n\thelp\n\t  E0PD (part of the ARMv8.5 extensions) allows us to ensure\n\t  that EL0 accesses made via TTBR1 always fault in constant time,\n\t  providing similar benefits to KASLR as those provided by KPTI, but\n\t  with lower overhead and without disrupting legitimate access to\n\t  kernel memory such as SPE.\n\n\t  This option enables E0PD for TTBR1 where available.\n\nconfig ARCH_RANDOM\n\tbool \"Enable support for random number generation\"\n\tdefault y\n\thelp\n\t  Random number generation (part of the ARMv8.5 Extensions)\n\t  provides a high bandwidth, cryptographically secure\n\t  hardware random number generator.\n\nconfig ARM64_AS_HAS_MTE\n\t# Initial support for MTE went in binutils 2.32.0, checked with\n\t# \".arch armv8.5-a+memtag\" below. However, this was incomplete\n\t# as a late addition to the final architecture spec (LDGM/STGM)\n\t# is only supported in the newer 2.32.x and 2.33 binutils\n\t# versions, hence the extra \"stgm\" instruction check below.\n\tdef_bool $(as-instr,.arch armv8.5-a+memtag\\nstgm xzr$(comma)[x0])\n\nconfig ARM64_MTE\n\tbool \"Memory Tagging Extension support\"\n\tdefault y\n\tdepends on ARM64_AS_HAS_MTE && ARM64_TAGGED_ADDR_ABI\n\tdepends on AS_HAS_ARMV8_5\n\tdepends on AS_HAS_LSE_ATOMICS\n\t# Required for tag checking in the uaccess routines\n\tdepends on ARM64_PAN\n\tselect ARCH_USES_HIGH_VMA_FLAGS\n\thelp\n\t  Memory Tagging (part of the ARMv8.5 Extensions) provides\n\t  architectural support for run-time, always-on detection of\n\t  various classes of memory error to aid with software debugging\n\t  to eliminate vulnerabilities arising from memory-unsafe\n\t  languages.\n\n\t  This option enables the support for the Memory Tagging\n\t  Extension at EL0 (i.e. for userspace).\n\n\t  Selecting this option allows the feature to be detected at\n\t  runtime. Any secondary CPU not implementing this feature will\n\t  not be allowed a late bring-up.\n\n\t  Userspace binaries that want to use this feature must\n\t  explicitly opt in. The mechanism for the userspace is\n\t  described in:\n\n\t  Documentation/arm64/memory-tagging-extension.rst.\n\nendmenu\n\nmenu \"ARMv8.7 architectural features\"\n\nconfig ARM64_EPAN\n\tbool \"Enable support for Enhanced Privileged Access Never (EPAN)\"\n\tdefault y\n\tdepends on ARM64_PAN\n\thelp\n\t Enhanced Privileged Access Never (EPAN) allows Privileged\n\t Access Never to be used with Execute-only mappings.\n\n\t The feature is detected at runtime, and will remain disabled\n\t if the cpu does not implement the feature.\nendmenu\n\nconfig ARM64_SVE\n\tbool \"ARM Scalable Vector Extension support\"\n\tdefault y\n\thelp\n\t  The Scalable Vector Extension (SVE) is an extension to the AArch64\n\t  execution state which complements and extends the SIMD functionality\n\t  of the base architecture to support much larger vectors and to enable\n\t  additional vectorisation opportunities.\n\n\t  To enable use of this extension on CPUs that implement it, say Y.\n\n\t  On CPUs that support the SVE2 extensions, this option will enable\n\t  those too.\n\n\t  Note that for architectural reasons, firmware _must_ implement SVE\n\t  support when running on SVE capable hardware.  The required support\n\t  is present in:\n\n\t    * version 1.5 and later of the ARM Trusted Firmware\n\t    * the AArch64 boot wrapper since commit 5e1261e08abf\n\t      (\"bootwrapper: SVE: Enable SVE for EL2 and below\").\n\n\t  For other firmware implementations, consult the firmware documentation\n\t  or vendor.\n\n\t  If you need the kernel to boot on SVE-capable hardware with broken\n\t  firmware, you may need to say N here until you get your firmware\n\t  fixed.  Otherwise, you may experience firmware panics or lockups when\n\t  booting the kernel.  If unsure and you are not observing these\n\t  symptoms, you should assume that it is safe to say Y.\n\nconfig ARM64_MODULE_PLTS\n\tbool \"Use PLTs to allow module memory to spill over into vmalloc area\"\n\tdepends on MODULES\n\tselect HAVE_MOD_ARCH_SPECIFIC\n\thelp\n\t  Allocate PLTs when loading modules so that jumps and calls whose\n\t  targets are too far away for their relative offsets to be encoded\n\t  in the instructions themselves can be bounced via veneers in the\n\t  module's PLT. This allows modules to be allocated in the generic\n\t  vmalloc area after the dedicated module memory area has been\n\t  exhausted.\n\n\t  When running with address space randomization (KASLR), the module\n\t  region itself may be too far away for ordinary relative jumps and\n\t  calls, and so in that case, module PLTs are required and cannot be\n\t  disabled.\n\n\t  Specific errata workaround(s) might also force module PLTs to be\n\t  enabled (ARM64_ERRATUM_843419).\n\nconfig ARM64_PSEUDO_NMI\n\tbool \"Support for NMI-like interrupts\"\n\tselect ARM_GIC_V3\n\thelp\n\t  Adds support for mimicking Non-Maskable Interrupts through the use of\n\t  GIC interrupt priority. This support requires version 3 or later of\n\t  ARM GIC.\n\n\t  This high priority configuration for interrupts needs to be\n\t  explicitly enabled by setting the kernel parameter\n\t  \"irqchip.gicv3_pseudo_nmi\" to 1.\n\n\t  If unsure, say N\n\nif ARM64_PSEUDO_NMI\nconfig ARM64_DEBUG_PRIORITY_MASKING\n\tbool \"Debug interrupt priority masking\"\n\thelp\n\t  This adds runtime checks to functions enabling/disabling\n\t  interrupts when using priority masking. The additional checks verify\n\t  the validity of ICC_PMR_EL1 when calling concerned functions.\n\n\t  If unsure, say N\nendif\n\nconfig RELOCATABLE\n\tbool \"Build a relocatable kernel image\" if EXPERT\n\tselect ARCH_HAS_RELR\n\tdefault y\n\thelp\n\t  This builds the kernel as a Position Independent Executable (PIE),\n\t  which retains all relocation metadata required to relocate the\n\t  kernel binary at runtime to a different virtual address than the\n\t  address it was linked at.\n\t  Since AArch64 uses the RELA relocation format, this requires a\n\t  relocation pass at runtime even if the kernel is loaded at the\n\t  same address it was linked at.\n\nconfig RANDOMIZE_BASE\n\tbool \"Randomize the address of the kernel image\"\n\tselect ARM64_MODULE_PLTS if MODULES\n\tselect RELOCATABLE\n\thelp\n\t  Randomizes the virtual address at which the kernel image is\n\t  loaded, as a security feature that deters exploit attempts\n\t  relying on knowledge of the location of kernel internals.\n\n\t  It is the bootloader's job to provide entropy, by passing a\n\t  random u64 value in /chosen/kaslr-seed at kernel entry.\n\n\t  When booting via the UEFI stub, it will invoke the firmware's\n\t  EFI_RNG_PROTOCOL implementation (if available) to supply entropy\n\t  to the kernel proper. In addition, it will randomise the physical\n\t  location of the kernel Image as well.\n\n\t  If unsure, say N.\n\nconfig RANDOMIZE_MODULE_REGION_FULL\n\tbool \"Randomize the module region over a 2 GB range\"\n\tdepends on RANDOMIZE_BASE\n\tdefault y\n\thelp\n\t  Randomizes the location of the module region inside a 2 GB window\n\t  covering the core kernel. This way, it is less likely for modules\n\t  to leak information about the location of core kernel data structures\n\t  but it does imply that function calls between modules and the core\n\t  kernel will need to be resolved via veneers in the module PLT.\n\n\t  When this option is not set, the module region will be randomized over\n\t  a limited range that contains the [_stext, _etext] interval of the\n\t  core kernel, so branch relocations are almost always in range unless\n\t  ARM64_MODULE_PLTS is enabled and the region is exhausted. In this\n\t  particular case of region exhaustion, modules might be able to fall\n\t  back to a larger 2GB area.\n\nconfig CC_HAVE_STACKPROTECTOR_SYSREG\n\tdef_bool $(cc-option,-mstack-protector-guard=sysreg -mstack-protector-guard-reg=sp_el0 -mstack-protector-guard-offset=0)\n\nconfig STACKPROTECTOR_PER_TASK\n\tdef_bool y\n\tdepends on STACKPROTECTOR && CC_HAVE_STACKPROTECTOR_SYSREG\n\nendmenu\n\nmenu \"Boot options\"\n\nconfig ARM64_ACPI_PARKING_PROTOCOL\n\tbool \"Enable support for the ARM64 ACPI parking protocol\"\n\tdepends on ACPI\n\thelp\n\t  Enable support for the ARM64 ACPI parking protocol. If disabled\n\t  the kernel will not allow booting through the ARM64 ACPI parking\n\t  protocol even if the corresponding data is present in the ACPI\n\t  MADT table.\n\nconfig CMDLINE\n\tstring \"Default kernel command string\"\n\tdefault \"\"\n\thelp\n\t  Provide a set of default command-line options at build time by\n\t  entering them here. As a minimum, you should specify the the\n\t  root device (e.g. root=/dev/nfs).\n\nchoice\n\tprompt \"Kernel command line type\" if CMDLINE != \"\"\n\tdefault CMDLINE_FROM_BOOTLOADER\n\thelp\n\t  Choose how the kernel will handle the provided default kernel\n\t  command line string.\n\nconfig CMDLINE_FROM_BOOTLOADER\n\tbool \"Use bootloader kernel arguments if available\"\n\thelp\n\t  Uses the command-line options passed by the boot loader. If\n\t  the boot loader doesn't provide any, the default kernel command\n\t  string provided in CMDLINE will be used.\n\nconfig CMDLINE_FORCE\n\tbool \"Always use the default kernel command string\"\n\thelp\n\t  Always use the default kernel command string, even if the boot\n\t  loader passes other arguments to the kernel.\n\t  This is useful if you cannot or don't want to change the\n\t  command-line options your boot loader passes to the kernel.\n\nendchoice\n\nconfig EFI_STUB\n\tbool\n\nconfig EFI\n\tbool \"UEFI runtime support\"\n\tdepends on OF && !CPU_BIG_ENDIAN\n\tdepends on KERNEL_MODE_NEON\n\tselect ARCH_SUPPORTS_ACPI\n\tselect LIBFDT\n\tselect UCS2_STRING\n\tselect EFI_PARAMS_FROM_FDT\n\tselect EFI_RUNTIME_WRAPPERS\n\tselect EFI_STUB\n\tselect EFI_GENERIC_STUB\n\timply IMA_SECURE_AND_OR_TRUSTED_BOOT\n\tdefault y\n\thelp\n\t  This option provides support for runtime services provided\n\t  by UEFI firmware (such as non-volatile variables, realtime\n          clock, and platform reset). A UEFI stub is also provided to\n\t  allow the kernel to be booted as an EFI application. This\n\t  is only useful on systems that have UEFI firmware.\n\nconfig DMI\n\tbool \"Enable support for SMBIOS (DMI) tables\"\n\tdepends on EFI\n\tdefault y\n\thelp\n\t  This enables SMBIOS/DMI feature for systems.\n\n\t  This option is only useful on systems that have UEFI firmware.\n\t  However, even with this option, the resultant kernel should\n\t  continue to boot on existing non-UEFI platforms.\n\nendmenu\n\nconfig SYSVIPC_COMPAT\n\tdef_bool y\n\tdepends on COMPAT && SYSVIPC\n\nmenu \"Power management options\"\n\nsource \"kernel/power/Kconfig\"\n\nconfig ARCH_HIBERNATION_POSSIBLE\n\tdef_bool y\n\tdepends on CPU_PM\n\nconfig ARCH_HIBERNATION_HEADER\n\tdef_bool y\n\tdepends on HIBERNATION\n\nconfig ARCH_SUSPEND_POSSIBLE\n\tdef_bool y\n\nendmenu\n\nmenu \"CPU Power Management\"\n\nsource \"drivers/cpuidle/Kconfig\"\n\nsource \"drivers/cpufreq/Kconfig\"\n\nendmenu\n\nsource \"drivers/firmware/Kconfig\"\n\nsource \"drivers/acpi/Kconfig\"\n\nsource \"arch/arm64/kvm/Kconfig\"\n\nif CRYPTO\nsource \"arch/arm64/crypto/Kconfig\"\nendif\n",
+      "version_refs": [
+        "before",
+        "after"
+      ]
+    },
+    {
+      "git_path": "arch/arm64/include/asm/page-def.h",
+      "git_blob": "2403f7b4cdbfb63d038b5b3a86cc6570061928fc",
+      "representation": "full_source",
+      "text": "/* SPDX-License-Identifier: GPL-2.0-only */\n/*\n * Based on arch/arm/include/asm/page.h\n *\n * Copyright (C) 1995-2003 Russell King\n * Copyright (C) 2017 ARM Ltd.\n */\n#ifndef __ASM_PAGE_DEF_H\n#define __ASM_PAGE_DEF_H\n\n#include <linux/const.h>\n\n/* PAGE_SHIFT determines the page size */\n#define PAGE_SHIFT\t\tCONFIG_ARM64_PAGE_SHIFT\n#define PAGE_SIZE\t\t(_AC(1, UL) << PAGE_SHIFT)\n#define PAGE_MASK\t\t(~(PAGE_SIZE-1))\n\n#endif /* __ASM_PAGE_DEF_H */\n",
+      "version_refs": [
+        "before",
+        "after"
+      ]
+    },
+    {
+      "git_path": "arch/x86/include/asm/page_types.h",
+      "git_blob": "a506a411474d4ad0213d1cdfb64fe6598ab1f9ca",
+      "representation": "full_source",
+      "text": "/* SPDX-License-Identifier: GPL-2.0 */\n#ifndef _ASM_X86_PAGE_DEFS_H\n#define _ASM_X86_PAGE_DEFS_H\n\n#include <linux/const.h>\n#include <linux/types.h>\n#include <linux/mem_encrypt.h>\n\n/* PAGE_SHIFT determines the page size */\n#define PAGE_SHIFT\t\t12\n#define PAGE_SIZE\t\t(_AC(1,UL) << PAGE_SHIFT)\n#define PAGE_MASK\t\t(~(PAGE_SIZE-1))\n\n#define PMD_PAGE_SIZE\t\t(_AC(1, UL) << PMD_SHIFT)\n#define PMD_PAGE_MASK\t\t(~(PMD_PAGE_SIZE-1))\n\n#define PUD_PAGE_SIZE\t\t(_AC(1, UL) << PUD_SHIFT)\n#define PUD_PAGE_MASK\t\t(~(PUD_PAGE_SIZE-1))\n\n#define __VIRTUAL_MASK\t\t((1UL << __VIRTUAL_MASK_SHIFT) - 1)\n\n/* Cast *PAGE_MASK to a signed type so that it is sign-extended if\n   virtual addresses are 32-bits but physical addresses are larger\n   (ie, 32-bit PAE). */\n#define PHYSICAL_PAGE_MASK\t(((signed long)PAGE_MASK) & __PHYSICAL_MASK)\n#define PHYSICAL_PMD_PAGE_MASK\t(((signed long)PMD_PAGE_MASK) & __PHYSICAL_MASK)\n#define PHYSICAL_PUD_PAGE_MASK\t(((signed long)PUD_PAGE_MASK) & __PHYSICAL_MASK)\n\n#define HPAGE_SHIFT\t\tPMD_SHIFT\n#define HPAGE_SIZE\t\t(_AC(1,UL) << HPAGE_SHIFT)\n#define HPAGE_MASK\t\t(~(HPAGE_SIZE - 1))\n#define HUGETLB_PAGE_ORDER\t(HPAGE_SHIFT - PAGE_SHIFT)\n\n#define HUGE_MAX_HSTATE 2\n\n#define PAGE_OFFSET\t\t((unsigned long)__PAGE_OFFSET)\n\n#define VM_DATA_DEFAULT_FLAGS\tVM_DATA_FLAGS_TSK_EXEC\n\n#define __PHYSICAL_START\tALIGN(CONFIG_PHYSICAL_START, \\\n\t\t\t\t      CONFIG_PHYSICAL_ALIGN)\n\n#define __START_KERNEL\t\t(__START_KERNEL_map + __PHYSICAL_START)\n\n#ifdef CONFIG_X86_64\n#include <asm/page_64_types.h>\n#define IOREMAP_MAX_ORDER       (PUD_SHIFT)\n#else\n#include <asm/page_32_types.h>\n#define IOREMAP_MAX_ORDER       (PMD_SHIFT)\n#endif\t/* CONFIG_X86_64 */\n\n#ifndef __ASSEMBLY__\n\n#ifdef CONFIG_DYNAMIC_PHYSICAL_MASK\nextern phys_addr_t physical_mask;\n#define __PHYSICAL_MASK\t\tphysical_mask\n#else\n#define __PHYSICAL_MASK\t\t((phys_addr_t)((1ULL << __PHYSICAL_MASK_SHIFT) - 1))\n#endif\n\nextern int devmem_is_allowed(unsigned long pagenr);\n\nextern unsigned long max_low_pfn_mapped;\nextern unsigned long max_pfn_mapped;\n\nstatic inline phys_addr_t get_max_mapped(void)\n{\n\treturn (phys_addr_t)max_pfn_mapped << PAGE_SHIFT;\n}\n\nbool pfn_range_is_mapped(unsigned long start_pfn, unsigned long end_pfn);\n\nextern void initmem_init(void);\n\n#endif\t/* !__ASSEMBLY__ */\n\n#endif\t/* _ASM_X86_PAGE_DEFS_H */\n",
+      "version_refs": [
+        "before",
+        "after"
+      ]
+    },
+    {
+      "git_path": "fs/btrfs/Kconfig",
+      "git_blob": "520a0f6a7d9e9708e456b2fea116247f19f79430",
+      "representation": "full_source",
+      "text": "# SPDX-License-Identifier: GPL-2.0\n\nconfig BTRFS_FS\n\ttristate \"Btrfs filesystem support\"\n\tselect CRYPTO\n\tselect CRYPTO_CRC32C\n\tselect LIBCRC32C\n\tselect CRYPTO_XXHASH\n\tselect CRYPTO_SHA256\n\tselect CRYPTO_BLAKE2B\n\tselect ZLIB_INFLATE\n\tselect ZLIB_DEFLATE\n\tselect LZO_COMPRESS\n\tselect LZO_DECOMPRESS\n\tselect ZSTD_COMPRESS\n\tselect ZSTD_DECOMPRESS\n\tselect FS_IOMAP\n\tselect RAID6_PQ\n\tselect XOR_BLOCKS\n\tselect SRCU\n\tdepends on !PPC_256K_PAGES\t# powerpc\n\tdepends on !PAGE_SIZE_256KB\t# hexagon\n\n\thelp\n\t  Btrfs is a general purpose copy-on-write filesystem with extents,\n\t  writable snapshotting, support for multiple devices and many more\n\t  features focused on fault tolerance, repair and easy administration.\n\n\t  The filesystem disk format is no longer unstable, and it's not\n\t  expected to change unless there are strong reasons to do so. If there\n\t  is a format change, file systems with a unchanged format will\n\t  continue to be mountable and usable by newer kernels.\n\n\t  For more information, please see the web pages at\n\t  http://btrfs.wiki.kernel.org.\n\n\t  To compile this file system support as a module, choose M here. The\n\t  module will be called btrfs.\n\n\t  If unsure, say N.\n\nconfig BTRFS_FS_POSIX_ACL\n\tbool \"Btrfs POSIX Access Control Lists\"\n\tdepends on BTRFS_FS\n\tselect FS_POSIX_ACL\n\thelp\n\t  POSIX Access Control Lists (ACLs) support permissions for users and\n\t  groups beyond the owner/group/world scheme.\n\n\t  If you don't know what Access Control Lists are, say N\n\nconfig BTRFS_FS_CHECK_INTEGRITY\n\tbool \"Btrfs with integrity check tool compiled in (DANGEROUS)\"\n\tdepends on BTRFS_FS\n\thelp\n\t  Adds code that examines all block write requests (including\n\t  writes of the super block). The goal is to verify that the\n\t  state of the filesystem on disk is always consistent, i.e.,\n\t  after a power-loss or kernel panic event the filesystem is\n\t  in a consistent state.\n\n\t  If the integrity check tool is included and activated in\n\t  the mount options, plenty of kernel memory is used, and\n\t  plenty of additional CPU cycles are spent. Enabling this\n\t  functionality is not intended for normal use.\n\n\t  In most cases, unless you are a btrfs developer who needs\n\t  to verify the integrity of (super)-block write requests\n\t  during the run of a regression test, say N\n\nconfig BTRFS_FS_RUN_SANITY_TESTS\n\tbool \"Btrfs will run sanity tests upon loading\"\n\tdepends on BTRFS_FS\n\thelp\n\t  This will run some basic sanity tests on the free space cache\n\t  code to make sure it is acting as it should.  These are mostly\n\t  regression tests and are only really interesting to btrfs\n\t  developers.\n\n\t  If unsure, say N.\n\nconfig BTRFS_DEBUG\n\tbool \"Btrfs debugging support\"\n\tdepends on BTRFS_FS\n\thelp\n\t  Enable run-time debugging support for the btrfs filesystem. This may\n\t  enable additional and expensive checks with negative impact on\n\t  performance, or export extra information via sysfs.\n\n\t  If unsure, say N.\n\nconfig BTRFS_ASSERT\n\tbool \"Btrfs assert support\"\n\tdepends on BTRFS_FS\n\thelp\n\t  Enable run-time assertion checking.  This will result in panics if\n\t  any of the assertions trip.  This is meant for btrfs developers only.\n\n\t  If unsure, say N.\n\nconfig BTRFS_FS_REF_VERIFY\n\tbool \"Btrfs with the ref verify tool compiled in\"\n\tdepends on BTRFS_FS\n\tdefault n\n\thelp\n\t  Enable run-time extent reference verification instrumentation.  This\n\t  is meant to be used by btrfs developers for tracking down extent\n\t  reference problems or verifying they didn't break something.\n\n\t  If unsure, say N.\n",
+      "version_refs": [
+        "before",
+        "after"
+      ]
+    },
+    {
+      "git_path": "fs/btrfs/inode.c",
+      "git_blob": "2aa9646bce568d694bd97e22e4457fa4fd815407",
+      "representation": "explicit_line_excerpt",
+      "excerpt_start": 335,
+      "excerpt_end": 386,
+      "text": "\n/*\n * conditionally insert an inline extent into the file.  This\n * does the checks required to make sure the data is small enough\n * to fit as an inline extent.\n */\nstatic noinline int cow_file_range_inline(struct btrfs_inode *inode, u64 start,\n\t\t\t\t\t  u64 end, size_t compressed_size,\n\t\t\t\t\t  int compress_type,\n\t\t\t\t\t  struct page **compressed_pages)\n{\n\tstruct btrfs_drop_extents_args drop_args = { 0 };\n\tstruct btrfs_root *root = inode->root;\n\tstruct btrfs_fs_info *fs_info = root->fs_info;\n\tstruct btrfs_trans_handle *trans;\n\tu64 isize = i_size_read(&inode->vfs_inode);\n\tu64 actual_end = min(end + 1, isize);\n\tu64 inline_len = actual_end - start;\n\tu64 aligned_end = ALIGN(end, fs_info->sectorsize);\n\tu64 data_len = inline_len;\n\tint ret;\n\tstruct btrfs_path *path;\n\n\tif (compressed_size)\n\t\tdata_len = compressed_size;\n\n\tif (start > 0 ||\n\t    actual_end > fs_info->sectorsize ||\n\t    data_len > BTRFS_MAX_INLINE_DATA_SIZE(fs_info) ||\n\t    (!compressed_size &&\n\t    (actual_end & (fs_info->sectorsize - 1)) == 0) ||\n\t    end + 1 < isize ||\n\t    data_len > fs_info->max_inline) {\n\t\treturn 1;\n\t}\n\n\tpath = btrfs_alloc_path();\n\tif (!path)\n\t\treturn -ENOMEM;\n\n\ttrans = btrfs_join_transaction(root);\n\tif (IS_ERR(trans)) {\n\t\tbtrfs_free_path(path);\n\t\treturn PTR_ERR(trans);\n\t}\n\ttrans->block_rsv = &inode->block_rsv;\n\n\tdrop_args.path = path;\n\tdrop_args.start = start;\n\tdrop_args.end = aligned_end;\n\tdrop_args.drop_cache = true;\n\tdrop_args.replace_extent = true;\n",
+      "version_refs": [
+        "before",
+        "after"
+      ]
+    }
+  ],
+  "fixed_diff": "diff --git a/fs/btrfs/disk-io.c b/fs/btrfs/disk-io.c\nindex 2f9515dccce0..355ea88d5c5f 100644\n--- a/fs/btrfs/disk-io.c\n+++ b/fs/btrfs/disk-io.c\n@@ -3314,6 +3314,30 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device\n \t */\n \tfs_info->compress_type = BTRFS_COMPRESS_ZLIB;\n \n+\t/*\n+\t * Flag our filesystem as having big metadata blocks if they are bigger\n+\t * than the page size.\n+\t */\n+\tif (btrfs_super_nodesize(disk_super) > PAGE_SIZE) {\n+\t\tif (!(features & BTRFS_FEATURE_INCOMPAT_BIG_METADATA))\n+\t\t\tbtrfs_info(fs_info,\n+\t\t\t\t\"flagging fs with big metadata feature\");\n+\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_BIG_METADATA;\n+\t}\n+\n+\t/* Set up fs_info before parsing mount options */\n+\tnodesize = btrfs_super_nodesize(disk_super);\n+\tsectorsize = btrfs_super_sectorsize(disk_super);\n+\tstripesize = sectorsize;\n+\tfs_info->dirty_metadata_batch = nodesize * (1 + ilog2(nr_cpu_ids));\n+\tfs_info->delalloc_batch = sectorsize * 512 * (1 + ilog2(nr_cpu_ids));\n+\n+\tfs_info->nodesize = nodesize;\n+\tfs_info->sectorsize = sectorsize;\n+\tfs_info->sectorsize_bits = ilog2(sectorsize);\n+\tfs_info->csums_per_leaf = BTRFS_MAX_ITEM_SIZE(fs_info) / fs_info->csum_size;\n+\tfs_info->stripesize = stripesize;\n+\n \tret = btrfs_parse_options(fs_info, options, sb->s_flags);\n \tif (ret) {\n \t\terr = ret;\n@@ -3340,30 +3364,6 @@ int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_device\n \tif (features & BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA)\n \t\tbtrfs_info(fs_info, \"has skinny extents\");\n \n-\t/*\n-\t * flag our filesystem as having big metadata blocks if\n-\t * they are bigger than the page size\n-\t */\n-\tif (btrfs_super_nodesize(disk_super) > PAGE_SIZE) {\n-\t\tif (!(features & BTRFS_FEATURE_INCOMPAT_BIG_METADATA))\n-\t\t\tbtrfs_info(fs_info,\n-\t\t\t\t\"flagging fs with big metadata feature\");\n-\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_BIG_METADATA;\n-\t}\n-\n-\tnodesize = btrfs_super_nodesize(disk_super);\n-\tsectorsize = btrfs_super_sectorsize(disk_super);\n-\tstripesize = sectorsize;\n-\tfs_info->dirty_metadata_batch = nodesize * (1 + ilog2(nr_cpu_ids));\n-\tfs_info->delalloc_batch = sectorsize * 512 * (1 + ilog2(nr_cpu_ids));\n-\n-\t/* Cache block sizes */\n-\tfs_info->nodesize = nodesize;\n-\tfs_info->sectorsize = sectorsize;\n-\tfs_info->sectorsize_bits = ilog2(sectorsize);\n-\tfs_info->csums_per_leaf = BTRFS_MAX_ITEM_SIZE(fs_info) / fs_info->csum_size;\n-\tfs_info->stripesize = stripesize;\n-\n \t/*\n \t * mixed block groups end up with duplicate but slightly offset\n \t * extent buffers for the same range.  It leads to corruptions\n",
+  "reused_sources": [
+    {
+      "version": "before",
+      "commit": "0d977e0eba234e01a60bdde27314dc21374201b3",
+      "git_path": "fs/btrfs/disk-io.c",
+      "git_blob": "2f9515dccce0b3452513737eb9d4cd81f0bfa0e5",
+      "existing_saved_path": "analysis_out/boundary-contracts-20260915-v2/btrfs/before/fs_btrfs_disk-io.c",
+      "bytes": 142101,
+      "current_bytes_sha256": "55e2c1ca63518484f94e4a461d156292d23fbff4582c4f9c961c55fca3814fc7",
+      "git_blob_match": true,
+      "representation": "explicit_line_excerpts_from_existing_full_source",
+      "excerpts": [
+        {
+          "start": 2543,
+          "end": 2616,
+          "text": " * NOTE: super csum type and incompat features will not be checked here.\n *\n * @sb:\t\tsuper block to check\n * @mirror_num:\tthe super block number to check its bytenr:\n * \t\t0\tthe primary (1st) sb\n * \t\t1, 2\t2nd and 3rd backup copy\n * \t       -1\tskip bytenr check\n */\nstatic int validate_super(struct btrfs_fs_info *fs_info,\n\t\t\t    struct btrfs_super_block *sb, int mirror_num)\n{\n\tu64 nodesize = btrfs_super_nodesize(sb);\n\tu64 sectorsize = btrfs_super_sectorsize(sb);\n\tint ret = 0;\n\n\tif (btrfs_super_magic(sb) != BTRFS_MAGIC) {\n\t\tbtrfs_err(fs_info, \"no valid FS found\");\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_flags(sb) & ~BTRFS_SUPER_FLAG_SUPP) {\n\t\tbtrfs_err(fs_info, \"unrecognized or unsupported super flag: %llu\",\n\t\t\t\tbtrfs_super_flags(sb) & ~BTRFS_SUPER_FLAG_SUPP);\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_root_level(sb) >= BTRFS_MAX_LEVEL) {\n\t\tbtrfs_err(fs_info, \"tree_root level too big: %d >= %d\",\n\t\t\t\tbtrfs_super_root_level(sb), BTRFS_MAX_LEVEL);\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_chunk_root_level(sb) >= BTRFS_MAX_LEVEL) {\n\t\tbtrfs_err(fs_info, \"chunk_root level too big: %d >= %d\",\n\t\t\t\tbtrfs_super_chunk_root_level(sb), BTRFS_MAX_LEVEL);\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_log_root_level(sb) >= BTRFS_MAX_LEVEL) {\n\t\tbtrfs_err(fs_info, \"log_root level too big: %d >= %d\",\n\t\t\t\tbtrfs_super_log_root_level(sb), BTRFS_MAX_LEVEL);\n\t\tret = -EINVAL;\n\t}\n\n\t/*\n\t * Check sectorsize and nodesize first, other check will need it.\n\t * Check all possible sectorsize(4K, 8K, 16K, 32K, 64K) here.\n\t */\n\tif (!is_power_of_2(sectorsize) || sectorsize < 4096 ||\n\t    sectorsize > BTRFS_MAX_METADATA_BLOCKSIZE) {\n\t\tbtrfs_err(fs_info, \"invalid sectorsize %llu\", sectorsize);\n\t\tret = -EINVAL;\n\t}\n\n\t/*\n\t * For 4K page size, we only support 4K sector size.\n\t * For 64K page size, we support read-write for 64K sector size, and\n\t * read-only for 4K sector size.\n\t */\n\tif ((PAGE_SIZE == SZ_4K && sectorsize != PAGE_SIZE) ||\n\t    (PAGE_SIZE == SZ_64K && (sectorsize != SZ_4K &&\n\t\t\t\t     sectorsize != SZ_64K))) {\n\t\tbtrfs_err(fs_info,\n\t\t\t\"sectorsize %llu not yet supported for page size %lu\",\n\t\t\tsectorsize, PAGE_SIZE);\n\t\tret = -EINVAL;\n\t}\n\n\tif (!is_power_of_2(nodesize) || nodesize < sectorsize ||\n\t    nodesize > BTRFS_MAX_METADATA_BLOCKSIZE) {\n\t\tbtrfs_err(fs_info, \"invalid nodesize %llu\", nodesize);\n\t\tret = -EINVAL;\n\t}\n\tif (nodesize != le32_to_cpu(sb->__unused_leafsize)) {\n\t\tbtrfs_err(fs_info, \"invalid leafsize %u, should be %llu\",\n\t\t\t  le32_to_cpu(sb->__unused_leafsize), nodesize);\n\t\tret = -EINVAL;\n\t}\n"
+        },
+        {
+          "start": 2728,
+          "end": 2736,
+          "text": "/*\n * Validation of super block at mount time.\n * Some checks already done early at mount time, like csum type and incompat\n * flags will be skipped.\n */\nstatic int btrfs_validate_mount_super(struct btrfs_fs_info *fs_info)\n{\n\treturn validate_super(fs_info, fs_info->super_copy, 0);\n}\n"
+        },
+        {
+          "start": 2977,
+          "end": 2981,
+          "text": "\t/* Usable values until the real ones are cached from the superblock */\n\tfs_info->nodesize = 4096;\n\tfs_info->sectorsize = 4096;\n\tfs_info->sectorsize_bits = ilog2(4096);\n\tfs_info->stripesize = 4096;\n"
+        },
+        {
+          "start": 3188,
+          "end": 3212,
+          "text": "int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_devices,\n\t\t      char *options)\n{\n\tu32 sectorsize;\n\tu32 nodesize;\n\tu32 stripesize;\n\tu64 generation;\n\tu64 features;\n\tu16 csum_type;\n\tstruct btrfs_super_block *disk_super;\n\tstruct btrfs_fs_info *fs_info = btrfs_sb(sb);\n\tstruct btrfs_root *tree_root;\n\tstruct btrfs_root *chunk_root;\n\tint ret;\n\tint err = -EINVAL;\n\tint level;\n\n\tret = init_mount_fs_info(fs_info, sb);\n\tif (ret) {\n\t\terr = ret;\n\t\tgoto fail;\n\t}\n\n\t/* These need to be init'ed before we start creating inodes and such. */\n\ttree_root = btrfs_alloc_root(fs_info, BTRFS_ROOT_TREE_OBJECTID,\n"
+        },
+        {
+          "start": 3233,
+          "end": 3317,
+          "text": "\t/*\n\t * Read super block and check the signature bytes only\n\t */\n\tdisk_super = btrfs_read_dev_super(fs_devices->latest_bdev);\n\tif (IS_ERR(disk_super)) {\n\t\terr = PTR_ERR(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * Verify the type first, if that or the checksum value are\n\t * corrupted, we'll find out\n\t */\n\tcsum_type = btrfs_super_csum_type(disk_super);\n\tif (!btrfs_supported_super_csum(csum_type)) {\n\t\tbtrfs_err(fs_info, \"unsupported checksum algorithm: %u\",\n\t\t\t  csum_type);\n\t\terr = -EINVAL;\n\t\tbtrfs_release_disk_super(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\tfs_info->csum_size = btrfs_super_csum_size(disk_super);\n\n\tret = btrfs_init_csum_hash(fs_info, csum_type);\n\tif (ret) {\n\t\terr = ret;\n\t\tbtrfs_release_disk_super(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * We want to check superblock checksum, the type is stored inside.\n\t * Pass the whole disk block of size BTRFS_SUPER_INFO_SIZE (4k).\n\t */\n\tif (btrfs_check_super_csum(fs_info, (u8 *)disk_super)) {\n\t\tbtrfs_err(fs_info, \"superblock checksum mismatch\");\n\t\terr = -EINVAL;\n\t\tbtrfs_release_disk_super(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * super_copy is zeroed at allocation time and we never touch the\n\t * following bytes up to INFO_SIZE, the checksum is calculated from\n\t * the whole block of INFO_SIZE\n\t */\n\tmemcpy(fs_info->super_copy, disk_super, sizeof(*fs_info->super_copy));\n\tbtrfs_release_disk_super(disk_super);\n\n\tdisk_super = fs_info->super_copy;\n\n\n\tfeatures = btrfs_super_flags(disk_super);\n\tif (features & BTRFS_SUPER_FLAG_CHANGING_FSID_V2) {\n\t\tfeatures &= ~BTRFS_SUPER_FLAG_CHANGING_FSID_V2;\n\t\tbtrfs_set_super_flags(disk_super, features);\n\t\tbtrfs_info(fs_info,\n\t\t\t\"found metadata UUID change in progress flag, clearing\");\n\t}\n\n\tmemcpy(fs_info->super_for_commit, fs_info->super_copy,\n\t       sizeof(*fs_info->super_for_commit));\n\n\tret = btrfs_validate_mount_super(fs_info);\n\tif (ret) {\n\t\tbtrfs_err(fs_info, \"superblock contains fatal errors\");\n\t\terr = -EINVAL;\n\t\tgoto fail_alloc;\n\t}\n\n\tif (!btrfs_super_root(disk_super))\n\t\tgoto fail_alloc;\n\n\t/* check FS state, whether FS is broken. */\n\tif (btrfs_super_flags(disk_super) & BTRFS_SUPER_FLAG_ERROR)\n\t\tset_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state);\n\n\t/*\n\t * In the long term, we'll store the compression type in the super\n\t * block, and it'll be used for per file compression control.\n\t */\n\tfs_info->compress_type = BTRFS_COMPRESS_ZLIB;\n\n\tret = btrfs_parse_options(fs_info, options, sb->s_flags);\n"
+        },
+        {
+          "start": 3317,
+          "end": 3408,
+          "text": "\tret = btrfs_parse_options(fs_info, options, sb->s_flags);\n\tif (ret) {\n\t\terr = ret;\n\t\tgoto fail_alloc;\n\t}\n\n\tfeatures = btrfs_super_incompat_flags(disk_super) &\n\t\t~BTRFS_FEATURE_INCOMPAT_SUPP;\n\tif (features) {\n\t\tbtrfs_err(fs_info,\n\t\t    \"cannot mount because of unsupported optional features (%llx)\",\n\t\t    features);\n\t\terr = -EINVAL;\n\t\tgoto fail_alloc;\n\t}\n\n\tfeatures = btrfs_super_incompat_flags(disk_super);\n\tfeatures |= BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF;\n\tif (fs_info->compress_type == BTRFS_COMPRESS_LZO)\n\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO;\n\telse if (fs_info->compress_type == BTRFS_COMPRESS_ZSTD)\n\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD;\n\n\tif (features & BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA)\n\t\tbtrfs_info(fs_info, \"has skinny extents\");\n\n\t/*\n\t * flag our filesystem as having big metadata blocks if\n\t * they are bigger than the page size\n\t */\n\tif (btrfs_super_nodesize(disk_super) > PAGE_SIZE) {\n\t\tif (!(features & BTRFS_FEATURE_INCOMPAT_BIG_METADATA))\n\t\t\tbtrfs_info(fs_info,\n\t\t\t\t\"flagging fs with big metadata feature\");\n\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_BIG_METADATA;\n\t}\n\n\tnodesize = btrfs_super_nodesize(disk_super);\n\tsectorsize = btrfs_super_sectorsize(disk_super);\n\tstripesize = sectorsize;\n\tfs_info->dirty_metadata_batch = nodesize * (1 + ilog2(nr_cpu_ids));\n\tfs_info->delalloc_batch = sectorsize * 512 * (1 + ilog2(nr_cpu_ids));\n\n\t/* Cache block sizes */\n\tfs_info->nodesize = nodesize;\n\tfs_info->sectorsize = sectorsize;\n\tfs_info->sectorsize_bits = ilog2(sectorsize);\n\tfs_info->csums_per_leaf = BTRFS_MAX_ITEM_SIZE(fs_info) / fs_info->csum_size;\n\tfs_info->stripesize = stripesize;\n\n\t/*\n\t * mixed block groups end up with duplicate but slightly offset\n\t * extent buffers for the same range.  It leads to corruptions\n\t */\n\tif ((features & BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS) &&\n\t    (sectorsize != nodesize)) {\n\t\tbtrfs_err(fs_info,\n\"unequal nodesize/sectorsize (%u != %u) are not allowed for mixed block groups\",\n\t\t\tnodesize, sectorsize);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * Needn't use the lock because there is no other task which will\n\t * update the flag.\n\t */\n\tbtrfs_set_super_incompat_flags(disk_super, features);\n\n\tfeatures = btrfs_super_compat_ro_flags(disk_super) &\n\t\t~BTRFS_FEATURE_COMPAT_RO_SUPP;\n\tif (!sb_rdonly(sb) && features) {\n\t\tbtrfs_err(fs_info,\n\t\"cannot mount read-write because of unsupported optional features (%llx)\",\n\t\t       features);\n\t\terr = -EINVAL;\n\t\tgoto fail_alloc;\n\t}\n\n\tif (sectorsize != PAGE_SIZE) {\n\t\tbtrfs_warn(fs_info,\n\t\t\"read-write for sector size %u with page size %lu is experimental\",\n\t\t\t   sectorsize, PAGE_SIZE);\n\t}\n\tif (sectorsize != PAGE_SIZE) {\n\t\tif (btrfs_super_incompat_flags(fs_info->super_copy) &\n\t\t\tBTRFS_FEATURE_INCOMPAT_RAID56) {\n\t\t\tbtrfs_err(fs_info,\n\t\t\"RAID56 is not yet supported for sector size %u with page size %lu\",\n\t\t\t\tsectorsize, PAGE_SIZE);\n\t\t\terr = -EINVAL;\n\t\t\tgoto fail_alloc;\n\t\t}\n"
+        },
+        {
+          "start": 2868,
+          "end": 2875,
+          "text": "void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)\n{\n\tINIT_RADIX_TREE(&fs_info->fs_roots_radix, GFP_ATOMIC);\n\tINIT_RADIX_TREE(&fs_info->buffer_radix, GFP_ATOMIC);\n\tINIT_LIST_HEAD(&fs_info->trans_list);\n\tINIT_LIST_HEAD(&fs_info->dead_roots);\n\tINIT_LIST_HEAD(&fs_info->delayed_iputs);\n\tINIT_LIST_HEAD(&fs_info->delalloc_roots);\n"
+        },
+        {
+          "start": 2915,
+          "end": 2925,
+          "text": "\tatomic_set(&fs_info->async_delalloc_pages, 0);\n\tatomic_set(&fs_info->defrag_running, 0);\n\tatomic_set(&fs_info->reada_works_cnt, 0);\n\tatomic_set(&fs_info->nr_delayed_iputs, 0);\n\tatomic64_set(&fs_info->tree_mod_seq, 0);\n\tfs_info->max_inline = BTRFS_DEFAULT_MAX_INLINE;\n\tfs_info->metadata_ratio = 0;\n\tfs_info->defrag_inodes = RB_ROOT;\n\tatomic64_set(&fs_info->free_chunk_space, 0);\n\tfs_info->tree_mod_log = RB_ROOT;\n\tfs_info->commit_interval = BTRFS_DEFAULT_COMMIT_INTERVAL;\n"
+        }
+      ]
+    },
+    {
+      "version": "before",
+      "commit": "0d977e0eba234e01a60bdde27314dc21374201b3",
+      "git_path": "fs/btrfs/super.c",
+      "git_blob": "537d90bf5d844b094baeab7a1c2f2e3590320e9f",
+      "existing_saved_path": "analysis_out/boundary-contracts-20260915-v2/btrfs/before/fs_btrfs_super.c",
+      "bytes": 73932,
+      "current_bytes_sha256": "866f42dbd643afc4ac292a8dbb0157033644ea1e5ee524b0ae2633bffdd9c47a",
+      "git_blob_match": true,
+      "representation": "explicit_line_excerpts_from_existing_full_source",
+      "excerpts": [
+        {
+          "start": 564,
+          "end": 590,
+          "text": "int btrfs_parse_options(struct btrfs_fs_info *info, char *options,\n\t\t\tunsigned long new_flags)\n{\n\tsubstring_t args[MAX_OPT_ARGS];\n\tchar *p, *num;\n\tint intarg;\n\tint ret = 0;\n\tchar *compress_type;\n\tbool compress_force = false;\n\tenum btrfs_compression_type saved_compress_type;\n\tint saved_compress_level;\n\tbool saved_compress_force;\n\tint no_compress = 0;\n\n\tif (btrfs_fs_compat_ro(info, FREE_SPACE_TREE))\n\t\tbtrfs_set_opt(info->mount_opt, FREE_SPACE_TREE);\n\telse if (btrfs_free_space_cache_v1_active(info)) {\n\t\tif (btrfs_is_zoned(info)) {\n\t\t\tbtrfs_info(info,\n\t\t\t\"zoned: clearing existing space cache\");\n\t\t\tbtrfs_set_super_cache_generation(info->super_copy, 0);\n\t\t} else {\n\t\t\tbtrfs_set_opt(info->mount_opt, SPACE_CACHE);\n\t\t}\n\t}\n\n\t/*\n"
+        },
+        {
+          "start": 780,
+          "end": 797,
+          "text": "\t\tcase Opt_max_inline:\n\t\t\tnum = match_strdup(&args[0]);\n\t\t\tif (num) {\n\t\t\t\tinfo->max_inline = memparse(num, NULL);\n\t\t\t\tkfree(num);\n\n\t\t\t\tif (info->max_inline) {\n\t\t\t\t\tinfo->max_inline = min_t(u64,\n\t\t\t\t\t\tinfo->max_inline,\n\t\t\t\t\t\tinfo->sectorsize);\n\t\t\t\t}\n\t\t\t\tbtrfs_info(info, \"max_inline at %llu\",\n\t\t\t\t\t   info->max_inline);\n\t\t\t} else {\n\t\t\t\tret = -ENOMEM;\n\t\t\t\tgoto out;\n\t\t\t}\n\t\t\tbreak;\n"
+        },
+        {
+          "start": 1340,
+          "end": 1363,
+          "text": "\tsb->s_d_op = &btrfs_dentry_operations;\n\tsb->s_export_op = &btrfs_export_ops;\n#ifdef CONFIG_FS_VERITY\n\tsb->s_vop = &btrfs_verityops;\n#endif\n\tsb->s_xattr = btrfs_xattr_handlers;\n\tsb->s_time_gran = 1;\n#ifdef CONFIG_BTRFS_FS_POSIX_ACL\n\tsb->s_flags |= SB_POSIXACL;\n#endif\n\tsb->s_flags |= SB_I_VERSION;\n\tsb->s_iflags |= SB_I_CGROUPWB;\n\n\terr = super_setup_bdi(sb);\n\tif (err) {\n\t\tbtrfs_err(fs_info, \"super_setup_bdi failed\");\n\t\treturn err;\n\t}\n\n\terr = open_ctree(sb, fs_devices, (char *)data);\n\tif (err) {\n\t\tbtrfs_err(fs_info, \"open_ctree failed\");\n\t\treturn err;\n\t}\n"
+        },
+        {
+          "start": 1445,
+          "end": 1455,
+          "text": "\t\tseq_puts(seq, \",nodatasum\");\n\tif (btrfs_test_opt(info, NODATACOW))\n\t\tseq_puts(seq, \",nodatacow\");\n\tif (btrfs_test_opt(info, NOBARRIER))\n\t\tseq_puts(seq, \",nobarrier\");\n\tif (info->max_inline != BTRFS_DEFAULT_MAX_INLINE)\n\t\tseq_printf(seq, \",max_inline=%llu\", info->max_inline);\n\tif (info->thread_pool_size !=  min_t(unsigned long,\n\t\t\t\t\t     num_online_cpus() + 2, 8))\n\t\tseq_printf(seq, \",thread_pool=%u\", info->thread_pool_size);\n\tif (btrfs_test_opt(info, COMPRESS)) {\n"
+        },
+        {
+          "start": 1549,
+          "end": 1554,
+          "text": "static int btrfs_set_super(struct super_block *s, void *data)\n{\n\tint err = set_anon_super(s, data);\n\tif (!err)\n\t\ts->s_fs_info = data;\n\treturn err;\n"
+        },
+        {
+          "start": 1659,
+          "end": 1734,
+          "text": "\t/*\n\t * Setup a dummy root and fs_info for test/set super.  This is because\n\t * we don't actually fill this stuff out until open_ctree, but we need\n\t * then open_ctree will properly initialize the file system specific\n\t * settings later.  btrfs_init_fs_info initializes the static elements\n\t * of the fs_info (locks and such) to make cleanup easier if we find a\n\t * superblock with our given fs_devices later on at sget() time.\n\t */\n\tfs_info = kvzalloc(sizeof(struct btrfs_fs_info), GFP_KERNEL);\n\tif (!fs_info) {\n\t\terror = -ENOMEM;\n\t\tgoto error_sec_opts;\n\t}\n\tbtrfs_init_fs_info(fs_info);\n\n\tfs_info->super_copy = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);\n\tfs_info->super_for_commit = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);\n\tif (!fs_info->super_copy || !fs_info->super_for_commit) {\n\t\terror = -ENOMEM;\n\t\tgoto error_fs_info;\n\t}\n\n\tmutex_lock(&uuid_mutex);\n\terror = btrfs_parse_device_options(data, mode, fs_type);\n\tif (error) {\n\t\tmutex_unlock(&uuid_mutex);\n\t\tgoto error_fs_info;\n\t}\n\n\tdevice = btrfs_scan_one_device(device_name, mode, fs_type);\n\tif (IS_ERR(device)) {\n\t\tmutex_unlock(&uuid_mutex);\n\t\terror = PTR_ERR(device);\n\t\tgoto error_fs_info;\n\t}\n\n\tfs_devices = device->fs_devices;\n\tfs_info->fs_devices = fs_devices;\n\n\terror = btrfs_open_devices(fs_devices, mode, fs_type);\n\tmutex_unlock(&uuid_mutex);\n\tif (error)\n\t\tgoto error_fs_info;\n\n\tif (!(flags & SB_RDONLY) && fs_devices->rw_devices == 0) {\n\t\terror = -EACCES;\n\t\tgoto error_close_devices;\n\t}\n\n\tbdev = fs_devices->latest_bdev;\n\ts = sget(fs_type, btrfs_test_super, btrfs_set_super, flags | SB_NOSEC,\n\t\t fs_info);\n\tif (IS_ERR(s)) {\n\t\terror = PTR_ERR(s);\n\t\tgoto error_close_devices;\n\t}\n\n\tif (s->s_root) {\n\t\tbtrfs_close_devices(fs_devices);\n\t\tbtrfs_free_fs_info(fs_info);\n\t\tif ((flags ^ s->s_flags) & SB_RDONLY)\n\t\t\terror = -EBUSY;\n\t} else {\n\t\tsnprintf(s->s_id, sizeof(s->s_id), \"%pg\", bdev);\n\t\tbtrfs_sb(s)->bdev_holder = fs_type;\n\t\tif (!strstr(crc32c_impl(), \"generic\"))\n\t\t\tset_bit(BTRFS_FS_CSUM_IMPL_FAST, &fs_info->flags);\n\t\terror = btrfs_fill_super(s, fs_devices, data);\n\t}\n\tif (!error)\n\t\terror = security_sb_set_mnt_opts(s, new_sec_opts, 0, NULL);\n\tsecurity_free_mnt_opts(&new_sec_opts);\n\tif (error) {\n\t\tdeactivate_locked_super(s);\n\t\treturn ERR_PTR(error);\n\t}\n"
+        }
+      ]
+    },
+    {
+      "version": "before",
+      "commit": "0d977e0eba234e01a60bdde27314dc21374201b3",
+      "git_path": "fs/btrfs/ctree.h",
+      "git_blob": "f07c82fafa046dbba06d04e29b9c920b4f27b04d",
+      "existing_saved_path": "experiments/case_taxonomy/btrfs_geometry_authority_20261012/source/before_ctree.h",
+      "bytes": 132433,
+      "current_bytes_sha256": "9e36c935aaf39fc2811b0ccd8c50c5dfbeb04daa214f5e7dfd832c7c97c258d4",
+      "git_blob_match": true,
+      "representation": "explicit_line_excerpts_from_existing_full_source",
+      "excerpts": [
+        {
+          "start": 224,
+          "end": 272,
+          "text": "struct btrfs_super_block {\n\t/* the first 4 fields must match struct btrfs_header */\n\tu8 csum[BTRFS_CSUM_SIZE];\n\t/* FS specific UUID, visible to user */\n\tu8 fsid[BTRFS_FSID_SIZE];\n\t__le64 bytenr; /* this block number */\n\t__le64 flags;\n\n\t/* allowed to be different from the btrfs_header from here own down */\n\t__le64 magic;\n\t__le64 generation;\n\t__le64 root;\n\t__le64 chunk_root;\n\t__le64 log_root;\n\n\t/* this will help find the new super based on the log root */\n\t__le64 log_root_transid;\n\t__le64 total_bytes;\n\t__le64 bytes_used;\n\t__le64 root_dir_objectid;\n\t__le64 num_devices;\n\t__le32 sectorsize;\n\t__le32 nodesize;\n\t__le32 __unused_leafsize;\n\t__le32 stripesize;\n\t__le32 sys_chunk_array_size;\n\t__le64 chunk_root_generation;\n\t__le64 compat_flags;\n\t__le64 compat_ro_flags;\n\t__le64 incompat_flags;\n\t__le16 csum_type;\n\tu8 root_level;\n\tu8 chunk_root_level;\n\tu8 log_root_level;\n\tstruct btrfs_dev_item dev_item;\n\n\tchar label[BTRFS_LABEL_SIZE];\n\n\t__le64 cache_generation;\n\t__le64 uuid_tree_generation;\n\n\t/* the UUID written into btree blocks */\n\tu8 metadata_uuid[BTRFS_FSID_SIZE];\n\n\t/* future expansion */\n\t__le64 reserved[28];\n\tu8 sys_chunk_array[BTRFS_SYSTEM_CHUNK_ARRAY_SIZE];\n\tstruct btrfs_root_backup super_roots[BTRFS_NUM_BACKUP_ROOTS];\n} __attribute__ ((__packed__));\n"
+        },
+        {
+          "start": 982,
+          "end": 989,
+          "text": "\t/* Cached block sizes */\n\tu32 nodesize;\n\tu32 sectorsize;\n\t/* ilog2 of sectorsize, use to avoid 64bit division */\n\tu32 sectorsize_bits;\n\tu32 csum_size;\n\tu32 csums_per_leaf;\n\tu32 stripesize;\n"
+        },
+        {
+          "start": 1035,
+          "end": 1038,
+          "text": "static inline struct btrfs_fs_info *btrfs_sb(struct super_block *sb)\n{\n\treturn sb->s_fs_info;\n}\n"
+        },
+        {
+          "start": 1345,
+          "end": 1373,
+          "text": "\tvoid *filldir_buf;\n};\n\n\nstatic inline u32 BTRFS_LEAF_DATA_SIZE(const struct btrfs_fs_info *info)\n{\n\n\treturn info->nodesize - sizeof(struct btrfs_header);\n}\n\n#define BTRFS_LEAF_DATA_OFFSET\t\toffsetof(struct btrfs_leaf, items)\n\nstatic inline u32 BTRFS_MAX_ITEM_SIZE(const struct btrfs_fs_info *info)\n{\n\treturn BTRFS_LEAF_DATA_SIZE(info) - sizeof(struct btrfs_item);\n}\n\nstatic inline u32 BTRFS_NODEPTRS_PER_BLOCK(const struct btrfs_fs_info *info)\n{\n\treturn BTRFS_LEAF_DATA_SIZE(info) / sizeof(struct btrfs_key_ptr);\n}\n\n#define BTRFS_FILE_EXTENT_INLINE_DATA_START\t\t\\\n\t\t(offsetof(struct btrfs_file_extent_item, disk_bytenr))\nstatic inline u32 BTRFS_MAX_INLINE_DATA_SIZE(const struct btrfs_fs_info *info)\n{\n\treturn BTRFS_MAX_ITEM_SIZE(info) -\n\t       BTRFS_FILE_EXTENT_INLINE_DATA_START;\n}\n"
+        },
+        {
+          "start": 1420,
+          "end": 1420,
+          "text": "#define BTRFS_DEFAULT_MAX_INLINE\t(2048)\n"
+        },
+        {
+          "start": 1623,
+          "end": 1631,
+          "text": "#define BTRFS_SETGET_STACK_FUNCS(name, type, member, bits)\t\t\\\nstatic inline u##bits btrfs_##name(const type *s)\t\t\t\\\n{\t\t\t\t\t\t\t\t\t\\\n\treturn get_unaligned_le##bits(&s->member);\t\t\t\\\n}\t\t\t\t\t\t\t\t\t\\\nstatic inline void btrfs_set_##name(type *s, u##bits val)\t\t\\\n{\t\t\t\t\t\t\t\t\t\\\n\tput_unaligned_le##bits(val, &s->member);\t\t\t\\\n}\n"
+        },
+        {
+          "start": 2401,
+          "end": 2406,
+          "text": "BTRFS_SETGET_STACK_FUNCS(super_sectorsize, struct btrfs_super_block,\n\t\t\t sectorsize, 32);\nBTRFS_SETGET_STACK_FUNCS(super_nodesize, struct btrfs_super_block,\n\t\t\t nodesize, 32);\nBTRFS_SETGET_STACK_FUNCS(super_stripesize, struct btrfs_super_block,\n\t\t\t stripesize, 32);\n"
+        }
+      ]
+    },
+    {
+      "version": "after",
+      "commit": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7",
+      "git_path": "fs/btrfs/disk-io.c",
+      "git_blob": "355ea88d5c5f72113924e3bb891c89dcbe9d342b",
+      "existing_saved_path": "analysis_out/boundary-contracts-20260915-v2/btrfs/after/fs_btrfs_disk-io.c",
+      "bytes": 142128,
+      "current_bytes_sha256": "4c5be7ab508f0aec3af738ac9640a79d3ae6d4ee37f0d6ce6055abd401dfbf7e",
+      "git_blob_match": true,
+      "representation": "explicit_line_excerpts_from_existing_full_source",
+      "excerpts": [
+        {
+          "start": 2543,
+          "end": 2616,
+          "text": " * NOTE: super csum type and incompat features will not be checked here.\n *\n * @sb:\t\tsuper block to check\n * @mirror_num:\tthe super block number to check its bytenr:\n * \t\t0\tthe primary (1st) sb\n * \t\t1, 2\t2nd and 3rd backup copy\n * \t       -1\tskip bytenr check\n */\nstatic int validate_super(struct btrfs_fs_info *fs_info,\n\t\t\t    struct btrfs_super_block *sb, int mirror_num)\n{\n\tu64 nodesize = btrfs_super_nodesize(sb);\n\tu64 sectorsize = btrfs_super_sectorsize(sb);\n\tint ret = 0;\n\n\tif (btrfs_super_magic(sb) != BTRFS_MAGIC) {\n\t\tbtrfs_err(fs_info, \"no valid FS found\");\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_flags(sb) & ~BTRFS_SUPER_FLAG_SUPP) {\n\t\tbtrfs_err(fs_info, \"unrecognized or unsupported super flag: %llu\",\n\t\t\t\tbtrfs_super_flags(sb) & ~BTRFS_SUPER_FLAG_SUPP);\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_root_level(sb) >= BTRFS_MAX_LEVEL) {\n\t\tbtrfs_err(fs_info, \"tree_root level too big: %d >= %d\",\n\t\t\t\tbtrfs_super_root_level(sb), BTRFS_MAX_LEVEL);\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_chunk_root_level(sb) >= BTRFS_MAX_LEVEL) {\n\t\tbtrfs_err(fs_info, \"chunk_root level too big: %d >= %d\",\n\t\t\t\tbtrfs_super_chunk_root_level(sb), BTRFS_MAX_LEVEL);\n\t\tret = -EINVAL;\n\t}\n\tif (btrfs_super_log_root_level(sb) >= BTRFS_MAX_LEVEL) {\n\t\tbtrfs_err(fs_info, \"log_root level too big: %d >= %d\",\n\t\t\t\tbtrfs_super_log_root_level(sb), BTRFS_MAX_LEVEL);\n\t\tret = -EINVAL;\n\t}\n\n\t/*\n\t * Check sectorsize and nodesize first, other check will need it.\n\t * Check all possible sectorsize(4K, 8K, 16K, 32K, 64K) here.\n\t */\n\tif (!is_power_of_2(sectorsize) || sectorsize < 4096 ||\n\t    sectorsize > BTRFS_MAX_METADATA_BLOCKSIZE) {\n\t\tbtrfs_err(fs_info, \"invalid sectorsize %llu\", sectorsize);\n\t\tret = -EINVAL;\n\t}\n\n\t/*\n\t * For 4K page size, we only support 4K sector size.\n\t * For 64K page size, we support read-write for 64K sector size, and\n\t * read-only for 4K sector size.\n\t */\n\tif ((PAGE_SIZE == SZ_4K && sectorsize != PAGE_SIZE) ||\n\t    (PAGE_SIZE == SZ_64K && (sectorsize != SZ_4K &&\n\t\t\t\t     sectorsize != SZ_64K))) {\n\t\tbtrfs_err(fs_info,\n\t\t\t\"sectorsize %llu not yet supported for page size %lu\",\n\t\t\tsectorsize, PAGE_SIZE);\n\t\tret = -EINVAL;\n\t}\n\n\tif (!is_power_of_2(nodesize) || nodesize < sectorsize ||\n\t    nodesize > BTRFS_MAX_METADATA_BLOCKSIZE) {\n\t\tbtrfs_err(fs_info, \"invalid nodesize %llu\", nodesize);\n\t\tret = -EINVAL;\n\t}\n\tif (nodesize != le32_to_cpu(sb->__unused_leafsize)) {\n\t\tbtrfs_err(fs_info, \"invalid leafsize %u, should be %llu\",\n\t\t\t  le32_to_cpu(sb->__unused_leafsize), nodesize);\n\t\tret = -EINVAL;\n\t}\n"
+        },
+        {
+          "start": 2728,
+          "end": 2736,
+          "text": "/*\n * Validation of super block at mount time.\n * Some checks already done early at mount time, like csum type and incompat\n * flags will be skipped.\n */\nstatic int btrfs_validate_mount_super(struct btrfs_fs_info *fs_info)\n{\n\treturn validate_super(fs_info, fs_info->super_copy, 0);\n}\n"
+        },
+        {
+          "start": 2977,
+          "end": 2981,
+          "text": "\t/* Usable values until the real ones are cached from the superblock */\n\tfs_info->nodesize = 4096;\n\tfs_info->sectorsize = 4096;\n\tfs_info->sectorsize_bits = ilog2(4096);\n\tfs_info->stripesize = 4096;\n"
+        },
+        {
+          "start": 3188,
+          "end": 3212,
+          "text": "int __cold open_ctree(struct super_block *sb, struct btrfs_fs_devices *fs_devices,\n\t\t      char *options)\n{\n\tu32 sectorsize;\n\tu32 nodesize;\n\tu32 stripesize;\n\tu64 generation;\n\tu64 features;\n\tu16 csum_type;\n\tstruct btrfs_super_block *disk_super;\n\tstruct btrfs_fs_info *fs_info = btrfs_sb(sb);\n\tstruct btrfs_root *tree_root;\n\tstruct btrfs_root *chunk_root;\n\tint ret;\n\tint err = -EINVAL;\n\tint level;\n\n\tret = init_mount_fs_info(fs_info, sb);\n\tif (ret) {\n\t\terr = ret;\n\t\tgoto fail;\n\t}\n\n\t/* These need to be init'ed before we start creating inodes and such. */\n\ttree_root = btrfs_alloc_root(fs_info, BTRFS_ROOT_TREE_OBJECTID,\n"
+        },
+        {
+          "start": 3233,
+          "end": 3317,
+          "text": "\t/*\n\t * Read super block and check the signature bytes only\n\t */\n\tdisk_super = btrfs_read_dev_super(fs_devices->latest_bdev);\n\tif (IS_ERR(disk_super)) {\n\t\terr = PTR_ERR(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * Verify the type first, if that or the checksum value are\n\t * corrupted, we'll find out\n\t */\n\tcsum_type = btrfs_super_csum_type(disk_super);\n\tif (!btrfs_supported_super_csum(csum_type)) {\n\t\tbtrfs_err(fs_info, \"unsupported checksum algorithm: %u\",\n\t\t\t  csum_type);\n\t\terr = -EINVAL;\n\t\tbtrfs_release_disk_super(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\tfs_info->csum_size = btrfs_super_csum_size(disk_super);\n\n\tret = btrfs_init_csum_hash(fs_info, csum_type);\n\tif (ret) {\n\t\terr = ret;\n\t\tbtrfs_release_disk_super(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * We want to check superblock checksum, the type is stored inside.\n\t * Pass the whole disk block of size BTRFS_SUPER_INFO_SIZE (4k).\n\t */\n\tif (btrfs_check_super_csum(fs_info, (u8 *)disk_super)) {\n\t\tbtrfs_err(fs_info, \"superblock checksum mismatch\");\n\t\terr = -EINVAL;\n\t\tbtrfs_release_disk_super(disk_super);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * super_copy is zeroed at allocation time and we never touch the\n\t * following bytes up to INFO_SIZE, the checksum is calculated from\n\t * the whole block of INFO_SIZE\n\t */\n\tmemcpy(fs_info->super_copy, disk_super, sizeof(*fs_info->super_copy));\n\tbtrfs_release_disk_super(disk_super);\n\n\tdisk_super = fs_info->super_copy;\n\n\n\tfeatures = btrfs_super_flags(disk_super);\n\tif (features & BTRFS_SUPER_FLAG_CHANGING_FSID_V2) {\n\t\tfeatures &= ~BTRFS_SUPER_FLAG_CHANGING_FSID_V2;\n\t\tbtrfs_set_super_flags(disk_super, features);\n\t\tbtrfs_info(fs_info,\n\t\t\t\"found metadata UUID change in progress flag, clearing\");\n\t}\n\n\tmemcpy(fs_info->super_for_commit, fs_info->super_copy,\n\t       sizeof(*fs_info->super_for_commit));\n\n\tret = btrfs_validate_mount_super(fs_info);\n\tif (ret) {\n\t\tbtrfs_err(fs_info, \"superblock contains fatal errors\");\n\t\terr = -EINVAL;\n\t\tgoto fail_alloc;\n\t}\n\n\tif (!btrfs_super_root(disk_super))\n\t\tgoto fail_alloc;\n\n\t/* check FS state, whether FS is broken. */\n\tif (btrfs_super_flags(disk_super) & BTRFS_SUPER_FLAG_ERROR)\n\t\tset_bit(BTRFS_FS_STATE_ERROR, &fs_info->fs_state);\n\n\t/*\n\t * In the long term, we'll store the compression type in the super\n\t * block, and it'll be used for per file compression control.\n\t */\n\tfs_info->compress_type = BTRFS_COMPRESS_ZLIB;\n\n\t/*\n"
+        },
+        {
+          "start": 3317,
+          "end": 3408,
+          "text": "\t/*\n\t * Flag our filesystem as having big metadata blocks if they are bigger\n\t * than the page size.\n\t */\n\tif (btrfs_super_nodesize(disk_super) > PAGE_SIZE) {\n\t\tif (!(features & BTRFS_FEATURE_INCOMPAT_BIG_METADATA))\n\t\t\tbtrfs_info(fs_info,\n\t\t\t\t\"flagging fs with big metadata feature\");\n\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_BIG_METADATA;\n\t}\n\n\t/* Set up fs_info before parsing mount options */\n\tnodesize = btrfs_super_nodesize(disk_super);\n\tsectorsize = btrfs_super_sectorsize(disk_super);\n\tstripesize = sectorsize;\n\tfs_info->dirty_metadata_batch = nodesize * (1 + ilog2(nr_cpu_ids));\n\tfs_info->delalloc_batch = sectorsize * 512 * (1 + ilog2(nr_cpu_ids));\n\n\tfs_info->nodesize = nodesize;\n\tfs_info->sectorsize = sectorsize;\n\tfs_info->sectorsize_bits = ilog2(sectorsize);\n\tfs_info->csums_per_leaf = BTRFS_MAX_ITEM_SIZE(fs_info) / fs_info->csum_size;\n\tfs_info->stripesize = stripesize;\n\n\tret = btrfs_parse_options(fs_info, options, sb->s_flags);\n\tif (ret) {\n\t\terr = ret;\n\t\tgoto fail_alloc;\n\t}\n\n\tfeatures = btrfs_super_incompat_flags(disk_super) &\n\t\t~BTRFS_FEATURE_INCOMPAT_SUPP;\n\tif (features) {\n\t\tbtrfs_err(fs_info,\n\t\t    \"cannot mount because of unsupported optional features (%llx)\",\n\t\t    features);\n\t\terr = -EINVAL;\n\t\tgoto fail_alloc;\n\t}\n\n\tfeatures = btrfs_super_incompat_flags(disk_super);\n\tfeatures |= BTRFS_FEATURE_INCOMPAT_MIXED_BACKREF;\n\tif (fs_info->compress_type == BTRFS_COMPRESS_LZO)\n\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_COMPRESS_LZO;\n\telse if (fs_info->compress_type == BTRFS_COMPRESS_ZSTD)\n\t\tfeatures |= BTRFS_FEATURE_INCOMPAT_COMPRESS_ZSTD;\n\n\tif (features & BTRFS_FEATURE_INCOMPAT_SKINNY_METADATA)\n\t\tbtrfs_info(fs_info, \"has skinny extents\");\n\n\t/*\n\t * mixed block groups end up with duplicate but slightly offset\n\t * extent buffers for the same range.  It leads to corruptions\n\t */\n\tif ((features & BTRFS_FEATURE_INCOMPAT_MIXED_GROUPS) &&\n\t    (sectorsize != nodesize)) {\n\t\tbtrfs_err(fs_info,\n\"unequal nodesize/sectorsize (%u != %u) are not allowed for mixed block groups\",\n\t\t\tnodesize, sectorsize);\n\t\tgoto fail_alloc;\n\t}\n\n\t/*\n\t * Needn't use the lock because there is no other task which will\n\t * update the flag.\n\t */\n\tbtrfs_set_super_incompat_flags(disk_super, features);\n\n\tfeatures = btrfs_super_compat_ro_flags(disk_super) &\n\t\t~BTRFS_FEATURE_COMPAT_RO_SUPP;\n\tif (!sb_rdonly(sb) && features) {\n\t\tbtrfs_err(fs_info,\n\t\"cannot mount read-write because of unsupported optional features (%llx)\",\n\t\t       features);\n\t\terr = -EINVAL;\n\t\tgoto fail_alloc;\n\t}\n\n\tif (sectorsize != PAGE_SIZE) {\n\t\tbtrfs_warn(fs_info,\n\t\t\"read-write for sector size %u with page size %lu is experimental\",\n\t\t\t   sectorsize, PAGE_SIZE);\n\t}\n\tif (sectorsize != PAGE_SIZE) {\n\t\tif (btrfs_super_incompat_flags(fs_info->super_copy) &\n\t\t\tBTRFS_FEATURE_INCOMPAT_RAID56) {\n\t\t\tbtrfs_err(fs_info,\n\t\t\"RAID56 is not yet supported for sector size %u with page size %lu\",\n\t\t\t\tsectorsize, PAGE_SIZE);\n\t\t\terr = -EINVAL;\n\t\t\tgoto fail_alloc;\n\t\t}\n"
+        },
+        {
+          "start": 2868,
+          "end": 2875,
+          "text": "void btrfs_init_fs_info(struct btrfs_fs_info *fs_info)\n{\n\tINIT_RADIX_TREE(&fs_info->fs_roots_radix, GFP_ATOMIC);\n\tINIT_RADIX_TREE(&fs_info->buffer_radix, GFP_ATOMIC);\n\tINIT_LIST_HEAD(&fs_info->trans_list);\n\tINIT_LIST_HEAD(&fs_info->dead_roots);\n\tINIT_LIST_HEAD(&fs_info->delayed_iputs);\n\tINIT_LIST_HEAD(&fs_info->delalloc_roots);\n"
+        },
+        {
+          "start": 2915,
+          "end": 2925,
+          "text": "\tatomic_set(&fs_info->async_delalloc_pages, 0);\n\tatomic_set(&fs_info->defrag_running, 0);\n\tatomic_set(&fs_info->reada_works_cnt, 0);\n\tatomic_set(&fs_info->nr_delayed_iputs, 0);\n\tatomic64_set(&fs_info->tree_mod_seq, 0);\n\tfs_info->max_inline = BTRFS_DEFAULT_MAX_INLINE;\n\tfs_info->metadata_ratio = 0;\n\tfs_info->defrag_inodes = RB_ROOT;\n\tatomic64_set(&fs_info->free_chunk_space, 0);\n\tfs_info->tree_mod_log = RB_ROOT;\n\tfs_info->commit_interval = BTRFS_DEFAULT_COMMIT_INTERVAL;\n"
+        }
+      ]
+    },
+    {
+      "version": "after",
+      "commit": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7",
+      "git_path": "fs/btrfs/super.c",
+      "git_blob": "537d90bf5d844b094baeab7a1c2f2e3590320e9f",
+      "existing_saved_path": "analysis_out/boundary-contracts-20260915-v2/btrfs/after/fs_btrfs_super.c",
+      "bytes": 73932,
+      "current_bytes_sha256": "866f42dbd643afc4ac292a8dbb0157033644ea1e5ee524b0ae2633bffdd9c47a",
+      "git_blob_match": true,
+      "representation": "explicit_line_excerpts_from_existing_full_source",
+      "excerpts": [
+        {
+          "start": 564,
+          "end": 590,
+          "text": "int btrfs_parse_options(struct btrfs_fs_info *info, char *options,\n\t\t\tunsigned long new_flags)\n{\n\tsubstring_t args[MAX_OPT_ARGS];\n\tchar *p, *num;\n\tint intarg;\n\tint ret = 0;\n\tchar *compress_type;\n\tbool compress_force = false;\n\tenum btrfs_compression_type saved_compress_type;\n\tint saved_compress_level;\n\tbool saved_compress_force;\n\tint no_compress = 0;\n\n\tif (btrfs_fs_compat_ro(info, FREE_SPACE_TREE))\n\t\tbtrfs_set_opt(info->mount_opt, FREE_SPACE_TREE);\n\telse if (btrfs_free_space_cache_v1_active(info)) {\n\t\tif (btrfs_is_zoned(info)) {\n\t\t\tbtrfs_info(info,\n\t\t\t\"zoned: clearing existing space cache\");\n\t\t\tbtrfs_set_super_cache_generation(info->super_copy, 0);\n\t\t} else {\n\t\t\tbtrfs_set_opt(info->mount_opt, SPACE_CACHE);\n\t\t}\n\t}\n\n\t/*\n"
+        },
+        {
+          "start": 780,
+          "end": 797,
+          "text": "\t\tcase Opt_max_inline:\n\t\t\tnum = match_strdup(&args[0]);\n\t\t\tif (num) {\n\t\t\t\tinfo->max_inline = memparse(num, NULL);\n\t\t\t\tkfree(num);\n\n\t\t\t\tif (info->max_inline) {\n\t\t\t\t\tinfo->max_inline = min_t(u64,\n\t\t\t\t\t\tinfo->max_inline,\n\t\t\t\t\t\tinfo->sectorsize);\n\t\t\t\t}\n\t\t\t\tbtrfs_info(info, \"max_inline at %llu\",\n\t\t\t\t\t   info->max_inline);\n\t\t\t} else {\n\t\t\t\tret = -ENOMEM;\n\t\t\t\tgoto out;\n\t\t\t}\n\t\t\tbreak;\n"
+        },
+        {
+          "start": 1340,
+          "end": 1363,
+          "text": "\tsb->s_d_op = &btrfs_dentry_operations;\n\tsb->s_export_op = &btrfs_export_ops;\n#ifdef CONFIG_FS_VERITY\n\tsb->s_vop = &btrfs_verityops;\n#endif\n\tsb->s_xattr = btrfs_xattr_handlers;\n\tsb->s_time_gran = 1;\n#ifdef CONFIG_BTRFS_FS_POSIX_ACL\n\tsb->s_flags |= SB_POSIXACL;\n#endif\n\tsb->s_flags |= SB_I_VERSION;\n\tsb->s_iflags |= SB_I_CGROUPWB;\n\n\terr = super_setup_bdi(sb);\n\tif (err) {\n\t\tbtrfs_err(fs_info, \"super_setup_bdi failed\");\n\t\treturn err;\n\t}\n\n\terr = open_ctree(sb, fs_devices, (char *)data);\n\tif (err) {\n\t\tbtrfs_err(fs_info, \"open_ctree failed\");\n\t\treturn err;\n\t}\n"
+        },
+        {
+          "start": 1445,
+          "end": 1455,
+          "text": "\t\tseq_puts(seq, \",nodatasum\");\n\tif (btrfs_test_opt(info, NODATACOW))\n\t\tseq_puts(seq, \",nodatacow\");\n\tif (btrfs_test_opt(info, NOBARRIER))\n\t\tseq_puts(seq, \",nobarrier\");\n\tif (info->max_inline != BTRFS_DEFAULT_MAX_INLINE)\n\t\tseq_printf(seq, \",max_inline=%llu\", info->max_inline);\n\tif (info->thread_pool_size !=  min_t(unsigned long,\n\t\t\t\t\t     num_online_cpus() + 2, 8))\n\t\tseq_printf(seq, \",thread_pool=%u\", info->thread_pool_size);\n\tif (btrfs_test_opt(info, COMPRESS)) {\n"
+        },
+        {
+          "start": 1549,
+          "end": 1554,
+          "text": "static int btrfs_set_super(struct super_block *s, void *data)\n{\n\tint err = set_anon_super(s, data);\n\tif (!err)\n\t\ts->s_fs_info = data;\n\treturn err;\n"
+        },
+        {
+          "start": 1659,
+          "end": 1734,
+          "text": "\t/*\n\t * Setup a dummy root and fs_info for test/set super.  This is because\n\t * we don't actually fill this stuff out until open_ctree, but we need\n\t * then open_ctree will properly initialize the file system specific\n\t * settings later.  btrfs_init_fs_info initializes the static elements\n\t * of the fs_info (locks and such) to make cleanup easier if we find a\n\t * superblock with our given fs_devices later on at sget() time.\n\t */\n\tfs_info = kvzalloc(sizeof(struct btrfs_fs_info), GFP_KERNEL);\n\tif (!fs_info) {\n\t\terror = -ENOMEM;\n\t\tgoto error_sec_opts;\n\t}\n\tbtrfs_init_fs_info(fs_info);\n\n\tfs_info->super_copy = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);\n\tfs_info->super_for_commit = kzalloc(BTRFS_SUPER_INFO_SIZE, GFP_KERNEL);\n\tif (!fs_info->super_copy || !fs_info->super_for_commit) {\n\t\terror = -ENOMEM;\n\t\tgoto error_fs_info;\n\t}\n\n\tmutex_lock(&uuid_mutex);\n\terror = btrfs_parse_device_options(data, mode, fs_type);\n\tif (error) {\n\t\tmutex_unlock(&uuid_mutex);\n\t\tgoto error_fs_info;\n\t}\n\n\tdevice = btrfs_scan_one_device(device_name, mode, fs_type);\n\tif (IS_ERR(device)) {\n\t\tmutex_unlock(&uuid_mutex);\n\t\terror = PTR_ERR(device);\n\t\tgoto error_fs_info;\n\t}\n\n\tfs_devices = device->fs_devices;\n\tfs_info->fs_devices = fs_devices;\n\n\terror = btrfs_open_devices(fs_devices, mode, fs_type);\n\tmutex_unlock(&uuid_mutex);\n\tif (error)\n\t\tgoto error_fs_info;\n\n\tif (!(flags & SB_RDONLY) && fs_devices->rw_devices == 0) {\n\t\terror = -EACCES;\n\t\tgoto error_close_devices;\n\t}\n\n\tbdev = fs_devices->latest_bdev;\n\ts = sget(fs_type, btrfs_test_super, btrfs_set_super, flags | SB_NOSEC,\n\t\t fs_info);\n\tif (IS_ERR(s)) {\n\t\terror = PTR_ERR(s);\n\t\tgoto error_close_devices;\n\t}\n\n\tif (s->s_root) {\n\t\tbtrfs_close_devices(fs_devices);\n\t\tbtrfs_free_fs_info(fs_info);\n\t\tif ((flags ^ s->s_flags) & SB_RDONLY)\n\t\t\terror = -EBUSY;\n\t} else {\n\t\tsnprintf(s->s_id, sizeof(s->s_id), \"%pg\", bdev);\n\t\tbtrfs_sb(s)->bdev_holder = fs_type;\n\t\tif (!strstr(crc32c_impl(), \"generic\"))\n\t\t\tset_bit(BTRFS_FS_CSUM_IMPL_FAST, &fs_info->flags);\n\t\terror = btrfs_fill_super(s, fs_devices, data);\n\t}\n\tif (!error)\n\t\terror = security_sb_set_mnt_opts(s, new_sec_opts, 0, NULL);\n\tsecurity_free_mnt_opts(&new_sec_opts);\n\tif (error) {\n\t\tdeactivate_locked_super(s);\n\t\treturn ERR_PTR(error);\n\t}\n"
+        }
+      ]
+    },
+    {
+      "version": "after",
+      "commit": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7",
+      "git_path": "fs/btrfs/ctree.h",
+      "git_blob": "f07c82fafa046dbba06d04e29b9c920b4f27b04d",
+      "existing_saved_path": "experiments/case_taxonomy/btrfs_geometry_authority_20261012/source/before_ctree.h",
+      "bytes": 132433,
+      "current_bytes_sha256": "9e36c935aaf39fc2811b0ccd8c50c5dfbeb04daa214f5e7dfd832c7c97c258d4",
+      "git_blob_match": true,
+      "representation": "explicit_line_excerpts_from_existing_full_source",
+      "excerpts": [
+        {
+          "start": 224,
+          "end": 272,
+          "text": "struct btrfs_super_block {\n\t/* the first 4 fields must match struct btrfs_header */\n\tu8 csum[BTRFS_CSUM_SIZE];\n\t/* FS specific UUID, visible to user */\n\tu8 fsid[BTRFS_FSID_SIZE];\n\t__le64 bytenr; /* this block number */\n\t__le64 flags;\n\n\t/* allowed to be different from the btrfs_header from here own down */\n\t__le64 magic;\n\t__le64 generation;\n\t__le64 root;\n\t__le64 chunk_root;\n\t__le64 log_root;\n\n\t/* this will help find the new super based on the log root */\n\t__le64 log_root_transid;\n\t__le64 total_bytes;\n\t__le64 bytes_used;\n\t__le64 root_dir_objectid;\n\t__le64 num_devices;\n\t__le32 sectorsize;\n\t__le32 nodesize;\n\t__le32 __unused_leafsize;\n\t__le32 stripesize;\n\t__le32 sys_chunk_array_size;\n\t__le64 chunk_root_generation;\n\t__le64 compat_flags;\n\t__le64 compat_ro_flags;\n\t__le64 incompat_flags;\n\t__le16 csum_type;\n\tu8 root_level;\n\tu8 chunk_root_level;\n\tu8 log_root_level;\n\tstruct btrfs_dev_item dev_item;\n\n\tchar label[BTRFS_LABEL_SIZE];\n\n\t__le64 cache_generation;\n\t__le64 uuid_tree_generation;\n\n\t/* the UUID written into btree blocks */\n\tu8 metadata_uuid[BTRFS_FSID_SIZE];\n\n\t/* future expansion */\n\t__le64 reserved[28];\n\tu8 sys_chunk_array[BTRFS_SYSTEM_CHUNK_ARRAY_SIZE];\n\tstruct btrfs_root_backup super_roots[BTRFS_NUM_BACKUP_ROOTS];\n} __attribute__ ((__packed__));\n"
+        },
+        {
+          "start": 982,
+          "end": 989,
+          "text": "\t/* Cached block sizes */\n\tu32 nodesize;\n\tu32 sectorsize;\n\t/* ilog2 of sectorsize, use to avoid 64bit division */\n\tu32 sectorsize_bits;\n\tu32 csum_size;\n\tu32 csums_per_leaf;\n\tu32 stripesize;\n"
+        },
+        {
+          "start": 1035,
+          "end": 1038,
+          "text": "static inline struct btrfs_fs_info *btrfs_sb(struct super_block *sb)\n{\n\treturn sb->s_fs_info;\n}\n"
+        },
+        {
+          "start": 1345,
+          "end": 1373,
+          "text": "\tvoid *filldir_buf;\n};\n\n\nstatic inline u32 BTRFS_LEAF_DATA_SIZE(const struct btrfs_fs_info *info)\n{\n\n\treturn info->nodesize - sizeof(struct btrfs_header);\n}\n\n#define BTRFS_LEAF_DATA_OFFSET\t\toffsetof(struct btrfs_leaf, items)\n\nstatic inline u32 BTRFS_MAX_ITEM_SIZE(const struct btrfs_fs_info *info)\n{\n\treturn BTRFS_LEAF_DATA_SIZE(info) - sizeof(struct btrfs_item);\n}\n\nstatic inline u32 BTRFS_NODEPTRS_PER_BLOCK(const struct btrfs_fs_info *info)\n{\n\treturn BTRFS_LEAF_DATA_SIZE(info) / sizeof(struct btrfs_key_ptr);\n}\n\n#define BTRFS_FILE_EXTENT_INLINE_DATA_START\t\t\\\n\t\t(offsetof(struct btrfs_file_extent_item, disk_bytenr))\nstatic inline u32 BTRFS_MAX_INLINE_DATA_SIZE(const struct btrfs_fs_info *info)\n{\n\treturn BTRFS_MAX_ITEM_SIZE(info) -\n\t       BTRFS_FILE_EXTENT_INLINE_DATA_START;\n}\n"
+        },
+        {
+          "start": 1420,
+          "end": 1420,
+          "text": "#define BTRFS_DEFAULT_MAX_INLINE\t(2048)\n"
+        },
+        {
+          "start": 1623,
+          "end": 1631,
+          "text": "#define BTRFS_SETGET_STACK_FUNCS(name, type, member, bits)\t\t\\\nstatic inline u##bits btrfs_##name(const type *s)\t\t\t\\\n{\t\t\t\t\t\t\t\t\t\\\n\treturn get_unaligned_le##bits(&s->member);\t\t\t\\\n}\t\t\t\t\t\t\t\t\t\\\nstatic inline void btrfs_set_##name(type *s, u##bits val)\t\t\\\n{\t\t\t\t\t\t\t\t\t\\\n\tput_unaligned_le##bits(val, &s->member);\t\t\t\\\n}\n"
+        },
+        {
+          "start": 2401,
+          "end": 2406,
+          "text": "BTRFS_SETGET_STACK_FUNCS(super_sectorsize, struct btrfs_super_block,\n\t\t\t sectorsize, 32);\nBTRFS_SETGET_STACK_FUNCS(super_nodesize, struct btrfs_super_block,\n\t\t\t nodesize, 32);\nBTRFS_SETGET_STACK_FUNCS(super_stripesize, struct btrfs_super_block,\n\t\t\t stripesize, 32);\n"
+        }
+      ]
+    }
+  ],
+  "schema": "cross_arch_causal_source_review_v1",
+  "written_on_local_date": "2026-10-13",
+  "role": "btrfs_source_review",
+  "kernel_repo": "/root/repos/linux",
+  "scope_zh": "有限复核已知Btrfs挂载几何/选项时序机制、同版ARM64/x86页大小和当时可达的磁盘扇区配置。只读源码；不扩大CFG/模型/内核实验。",
+  "acquisition": {
+    "readonly_git": true,
+    "version_paths": 16,
+    "distinct_new_path_blobs": 5,
+    "existing_core_references": 6,
+    "existing_core_blob_bytes_authenticated": true,
+    "network": false,
+    "linux_checkout_changed": false,
+    "historical_artifacts_changed": false,
+    "new_source_only_not_new_experiment": true
+  },
+  "line_facts": [
+    {
+      "id": "arm64_page_choices",
+      "claim_zh": "同一ARM64 ISA可选择4K或64K基页；4K为默认，选择64K时CONFIG_ARM64_PAGE_SHIFT=16。",
+      "evidence": [
+        {
+          "git_path": "arch/arm64/Kconfig",
+          "lines": [
+            233,
+            237
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "arch/arm64/Kconfig",
+          "lines": [
+            840,
+            866
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "Kconfig文本与表达式，未执行配置解算、构建或硬件支持检查。"
+    },
+    {
+      "id": "arm64_page_definition",
+      "claim_zh": "ARM64 PAGE_SIZE由CONFIG_ARM64_PAGE_SHIFT左移得到；4K和64K是配置差异，不能自动等价为两种ISA。",
+      "evidence": [
+        {
+          "git_path": "arch/arm64/include/asm/page-def.h",
+          "lines": [
+            13,
+            16
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source"
+    },
+    {
+      "id": "x86_page_definition",
+      "claim_zh": "本版x86基页PAGE_SHIFT固定12，PAGE_SIZE为4096；不得以PMD大页代替Btrfs读取的PAGE_SIZE。",
+      "evidence": [
+        {
+          "git_path": "arch/x86/include/asm/page_types.h",
+          "lines": [
+            9,
+            12
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source"
+    },
+    {
+      "id": "btrfs_config_scope",
+      "claim_zh": "BTRFS_FS定义无ARM64或x86专属依赖；同版公共文件系统逻辑可用于两种架构。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/Kconfig",
+          "lines": [
+            3,
+            40
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "只检查该配置项文本，未证明任意完整配置均能编译运行。"
+    },
+    {
+      "id": "new_superblock_object_path",
+      "claim_zh": "新超级块路径分配fs_info并调用btrfs_init_fs_info；sget接收该对象；成功set_super回调将对象写入s_fs_info；非已有s_root路径调用btrfs_fill_super，后者调用open_ctree。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/super.c",
+          "lines": [
+            1549,
+            1554
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/super.c",
+          "lines": [
+            1659,
+            1734
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/super.c",
+          "lines": [
+            1353,
+            1363
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/ctree.h",
+          "lines": [
+            1035,
+            1038
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "外部sget的所有效果与所有失败路径没有重新审计，属于所选新超级块正常路径的源码链。"
+    },
+    {
+      "id": "temporary_geometry",
+      "claim_zh": "btrfs_init_fs_info临时nodesize/sectorsize/stripesize均为4096；源码说明只供真实值缓存前使用。max_inline默认2048。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2868,
+            2875
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2915,
+            2925
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2977,
+            2981
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/ctree.h",
+          "lines": [
+            1420,
+            1420
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source"
+    },
+    {
+      "id": "disk_origin",
+      "claim_zh": "open_ctree读取设备superblock，校验/复制到super_copy；btrfs_validate_mount_super调用validate_super，后者读取磁盘的sectorsize和nodesize，不依赖临时fs_info->sectorsize判断几何合法性。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            3233,
+            3305
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2733,
+            2736
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2551,
+            2556
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "真实I/O、校验成功和对象生命周期未运行；磁盘字段LE解码的实际编译绑定沿用旧阶段的不足，不称新认证。"
+    },
+    {
+      "id": "mount_page_geometry_gate",
+      "claim_zh": "在解析选项之前验证：4K基页下sectorsize必须4K；64K基页下sectorsize可以4K或64K；节点大小必须不小于sectorsize且不大于元数据上限。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2583,
+            2615
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            3297,
+            3305
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "仅4K/64K两种页配置条件已核对。其他16K/8K组合不在本次结论范围。"
+    },
+    {
+      "id": "subpage_comment_boundary",
+      "claim_zh": "validate_super注释称64K页+4K扇区只读，但后续代码是sectorsize!=PAGE_SIZE时警告读写为experimental，并在RAID56时拒绝；注释不能当成所有读写路径一律拒绝。64K页+64K扇区无此不相等分支。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            2593,
+            2605
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            3395,
+            3408
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source"
+    },
+    {
+      "id": "old_order",
+      "claim_zh": "父版open_ctree先于3317调用btrfs_parse_options，再于3354–3365读取并缓存真实几何；本轮选择的正常路径上临时4096因此可能被消费者读取。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            3317,
+            3321
+          ],
+          "version": "before"
+        },
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            3354,
+            3365
+          ],
+          "version": "before"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "可见调用顺序与选定新mount对象状态；不称完整C CFG/别名/外部调用效果证明。"
+    },
+    {
+      "id": "max_inline_consumer",
+      "claim_zh": "max_inline选项成功解析且非零时，min_t(u64,请求值,info->sectorsize)裁剪上限；字符串分配失败则返回ENOMEM，不纳入可见错误路径。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/super.c",
+          "lines": [
+            780,
+            797
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source"
+    },
+    {
+      "id": "fixed_order",
+      "claim_zh": "修复版在3330读取真实sectorsize并于3336缓存，再在3341调用btrfs_parse_options；不会追溯修复已经用临时值裁剪过的旧状态，而是把准备移到首次消费前。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/disk-io.c",
+          "lines": [
+            3328,
+            3345
+          ],
+          "version": "after"
+        }
+      ],
+      "level": "historical_source"
+    },
+    {
+      "id": "later_public_uses",
+      "claim_zh": "选项显示路径导出max_inline；cow_file_range_inline把data_len>fs_info->max_inline作为拒绝内联的条件之一，同时还检查实际文件范围、sectorsize、元数据容量、压缩和文件长度等。",
+      "evidence": [
+        {
+          "git_path": "fs/btrfs/super.c",
+          "lines": [
+            1445,
+            1455
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/inode.c",
+          "lines": [
+            341,
+            368
+          ],
+          "version": "both"
+        },
+        {
+          "git_path": "fs/btrfs/ctree.h",
+          "lines": [
+            1345,
+            1373
+          ],
+          "version": "both"
+        }
+      ],
+      "level": "historical_source",
+      "boundary_zh": "本轮未运行文件写入、分配或挂载；max_inline不同不代表每次写入一定产生不同布局。"
+    }
+  ],
+  "architecture_geometry_comparison": {
+    "kind": "source_conditional_comparison_not_test_run",
+    "controlled_request": "显式max_inline=8192；合法superblock、匹配nodesize、校验/分配成功、新超级块且正常解析路径。",
+    "profiles": [
+      {
+        "id": "A_x86_4K",
+        "isa": "x86",
+        "page_size": 4096,
+        "disk_sectorsize": 4096,
+        "source_gate": "允许该几何，其他前置条件另需成立",
+        "old_clamp": 4096,
+        "fixed_clamp": 4096,
+        "interpretation_zh": "临时值恰与真实值一致，掩盖缺陷；不是同一64K磁盘镜像正常挂载。"
+      },
+      {
+        "id": "bridge_ARM64_4K",
+        "isa": "ARM64",
+        "page_size": 4096,
+        "disk_sectorsize": 4096,
+        "source_gate": "允许该几何，其他前置条件另需成立",
+        "old_clamp": 4096,
+        "fixed_clamp": 4096,
+        "interpretation_zh": "同ARM64 ISA采用4K配置时不出现该上限差异，说明不能仅按ISA标签判断。"
+      },
+      {
+        "id": "bridge_ARM64_64K_disk4K",
+        "isa": "ARM64",
+        "page_size": 65536,
+        "disk_sectorsize": 4096,
+        "source_gate": "通过几何检查；若读写则有实验性警告及RAID56约束",
+        "old_clamp": 4096,
+        "fixed_clamp": 4096,
+        "interpretation_zh": "页64K本身不足触发，实际磁盘扇区仍4K时临时值一致。"
+      },
+      {
+        "id": "B_ARM64_64K_disk64K",
+        "isa": "ARM64",
+        "page_size": 65536,
+        "disk_sectorsize": 65536,
+        "nodesize": 65536,
+        "source_gate": "允许该几何，其他前置条件另需成立",
+        "old_clamp": 4096,
+        "fixed_clamp": 8192,
+        "interpretation_zh": "源码合法架构配置与磁盘几何组合，旧值错误提前裁剪；本轮不是实际ARM64运行报告。"
+      },
+      {
+        "id": "non_applicable_x86_disk64K",
+        "isa": "x86",
+        "page_size": 4096,
+        "disk_sectorsize": 65536,
+        "source_gate": "validate_super拒绝，早于parse_options",
+        "old_clamp": null,
+        "fixed_clamp": null,
+        "interpretation_zh": "不能把此组称x86正常几何控制；同一64K镜像跨ISA A/B挂载对照不可由本版源码成立。"
+      }
+    ],
+    "masking_conditions_zh": [
+      "默认max_inline=2048或显式请求不超过4096，裁剪输出旧新相同。",
+      "max_inline=0关闭内联，非零裁剪分支不消费该上限。",
+      "字符串分配失败、超级块校验失败、旧超级块复用等不能直接套入本次新mount正常路径。",
+      "后续文件尺寸、压缩、元数据容量等条件不满足时，max_inline差异未必改变当次写入。"
+    ]
+  },
+  "causal_chain_zh": [
+    "架构页大小定义/配置给公共挂载校验提供PAGE_SIZE，限制当时可接受的磁盘sectorsize组合。",
+    "真实接口权威值来自当前挂载superblock的磁盘几何，不是临时4096，也不能以多数架构的4K默认作标准。",
+    "新mount对象先持有临时4K几何；旧open_ctree在读取缓存真实几何前，公共选项解析已按临时值截断。",
+    "后来缓存真实64K几何不会恢复先前被截断的max_inline；公共选项显示及内联选择继续消费错误上限。",
+    "x864K或ARM644K+4K盘，以及ARM6464K+4K盘，都因真实扇区等于临时4K而掩盖；64K页+64K盘且请求较大才有差异。"
+  ],
+  "five_dimensions": {
+    "trigger_architecture": {
+      "reported_cpu_isa": "unknown",
+      "report_claim": "提交描述64K page/default sectorsize系统；无ARM64/powerpc等实际CPU身份",
+      "source_legal_exemplar": "ARM64的64K页配置+64K磁盘扇区；同ISA4K与x864K桥接对照",
+      "not_claimed": "历史故障确定发生ARM64，或已成对复现跨ISA逃逸"
+    },
+    "subsystem": "公共Btrfs挂载选项/文件内联策略",
+    "horizontal_or_vertical": {
+      "current": "架构配置条件化的纵向几何/准备时序辅助；还耦合磁盘格式",
+      "limit": "没有找到一个架构实现改动经公共逻辑造成另一ISA回归的横向引入链，也没有架构专有provider把错误值传给Btrfs。"
+    },
+    "origin_side": "公共Btrfs初始临时几何与选项解析的顺序；架构64K配置及磁盘64K格式可合法，不是其自身违反契约。",
+    "timelines": {
+      "author_date": "2021-08-10T23:23:44+08:00",
+      "committer_date": "2021-09-07T14:28:46+02:00",
+      "reported_by": "Alexander Tsvetkov",
+      "first_fault_date": null,
+      "first_discovery_date": null,
+      "report_date": null,
+      "fault_to_discovery": null,
+      "discovery_to_fix": null,
+      "known_date_note": "提交日期不是发现日期；稳定版5.4+标签不是独立验证的语义引入点。",
+      "old_material_note": "历史da17066c4047临时字段迁移与0b246afa62b0访问重写仅沿用台账来源，当前不重新归因或据此计算漏洞存活时长。"
+    }
+  },
+  "detection_mechanism": {
+    "contract_zh": "在可达的新mount max_inline正值裁剪入口，所用fs_info->sectorsize必须已对应当前superblock的真实合法几何；若尚未准备则不得按最终上限消费。",
+    "architecture_specific_inputs": [
+      "实际目标PAGE_SIZE及配置来源",
+      "当时版本可挂载的superblock sectorsize集合",
+      "磁盘nodesize/sectorsize约束",
+      "请求值是否超过临时上限"
+    ],
+    "provider": "btrfs_super_sectorsize(disk_super) -> fs_info->sectorsize",
+    "consumer": "btrfs_parse_options Opt_max_inline非零 min_t入口",
+    "check_position": "open_ctree调用parse_options之前，结合新对象身份、superblock来源及成功路径。",
+    "would_reject": "只在解析之后赋真实几何；只改默认值但对别的合法几何仍不对应；分支或外部改写证据不齐却声明已准备。",
+    "normal_or_nonapplicable": "临时与真实均4K、请求<=4K或0、几何挂载拒绝、未进入消费者不能当新缺陷。",
+    "authority": "当前版本磁盘格式/挂载校验与实际superblock几何；不是CPU ISA标签或多数实现。",
+    "status": "已知机制的源码规则输入；未自动发现未见缺陷、未做独立泛化验证；不推进通用CFG。"
+  },
+  "assessment": {
+    "source_chain_status": "所选正常挂载路径及先后差异有固定版源码支持。",
+    "research_usefulness": "有用的配置×磁盘几何逃逸辅助和消费前准备契约；比仅说参数未准备更明确。",
+    "cross_isa_positive_status": "insufficient：提交没有实际ISA身份，且同64K磁盘对x86不合法；不升级为真实跨ISA A正常/B失败成对核心阳性。",
+    "arm64_profile_status": "Kconfig/头定义支持的配置示例；本轮未执行配置解算或实际挂载。",
+    "previous_numerical_prototypes": "保留既有每版18组投影及后续几何/条件性模板原物，本轮没有重跑或新计数量。",
+    "frozen_counts_changed": false,
+    "new_confirmed_cases": 0,
+    "independent_positive_cases": 0,
+    "new_experiment_topics": 0
+  },
+  "execution": {
+    "source_review_only": true,
+    "kernel_boot": false,
+    "mount": false,
+    "old_prototype_rerun": false,
+    "model_call": false,
+    "new_rule_runner": false,
+    "hardware": false,
+    "linux_checkout_write": false,
+    "frozen_material_write": false
+  },
+  "unknowns_zh": [
+    "报告具体CPU/平台及实际.config未给出。",
+    "最早错误生效/发现时间未知，不统计两个时长。",
+    "真实新mount I/O、sget/对象绑定的所有行为、外部调用效果和完整CFG未执行/证明。",
+    "磁盘LE getter在实际目标编译下的完整include/转换绑定及ABI未新认证。",
+    "没有旧/新内核实际挂载与文件写出布局对照。",
+    "没有未参与规则开发的同机制独立阳性。"
+  ]
+}

@@ -1,0 +1,475 @@
+{
+  "schema": "n28_source_rubric_v1",
+  "date": "2026-10-18",
+  "stage": "controlled_contract_comparison_20261018",
+  "purpose": "Score raw model semantic coverage before seeing new actual checker reports; separately attribute machine and human contributions later.",
+  "source_scope": "Only unchanged 14 numbered documents from aligned_contract_candidates_20261017/documents.json; source_oracle.md and candidate_card.md are internal research references, never model inputs.",
+  "reviewer_disclosure": {
+    "role": "assistant research reviewer, not human domain expert",
+    "prior_contact": "Reviewer previously read this development source, old n25 model answer/checks and historical research conclusions; this is not globally blind or independent gold-standard evaluation.",
+    "current_round_restriction": "No old final/semantic_review/candidate_checks re-read for this rubric; no new model final/checks read before rubric creation.",
+    "excluded_scoring_knowledge": [
+      "old runtime outcomes",
+      "repair/known correct labels",
+      "historical model scores or checker decisions",
+      "unprovided helpers or architectures"
+    ]
+  },
+  "evaluation_unit": "Eight semantic questions applied identically to each unchanged raw answer; not eight defects or independent cases.",
+  "maximum_total_score": 16,
+  "score_boundaries": [
+    "Semantic score belongs to raw answer and is never increased by source/citation binding.",
+    "Report unsupported strong assertions separately from completeness score.",
+    "Conditionally supported, unknown and not applicable are different; absent evidence is not normality.",
+    "Full refusal or all-insufficient without extracting visible facts cannot receive full coverage credit.",
+    "Both repeats and all reviews remain development evidence; no accuracy/generalization/N2-selection-gain claim."
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "prompt": "两架构经同一公共用途消费的对象是什么？哪些身份已连接，哪些仍未连接？",
+      "facts": [
+        {
+          "statement": "s390公共getter返回cpu_topology[cpu].thread_mask；x86公共getter展开为目标CPU的per-CPU cpu_sibling_map。",
+          "evidence": [
+            {
+              "document": "D04",
+              "start_line": 1,
+              "end_line": 4
+            },
+            {
+              "document": "D09",
+              "start_line": 1,
+              "end_line": 4
+            }
+          ]
+        },
+        {
+          "statement": "两公共起始函数调用sched_core_lock；锁循环按mask成员取得相应rq锁。",
+          "evidence": [
+            {
+              "document": "D05",
+              "start_line": 3,
+              "end_line": 10
+            },
+            {
+              "document": "D10",
+              "start_line": 3,
+              "end_line": 10
+            },
+            {
+              "document": "D06",
+              "start_line": 16,
+              "end_line": 22
+            },
+            {
+              "document": "D11",
+              "start_line": 16,
+              "end_line": 22
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "同一适用用途、合法目标CPU和所选配置；目标索引/参数关系需要绑定，不能仅按同名变量认定。"
+      ],
+      "unknowns": [
+        "两次实际执行的CPU值是否相等、最终链接/运行地址是否为同一对象。",
+        "notify到共同消费者的外部调用链不在材料内。"
+      ],
+      "forbidden_overclaims": [
+        "两架构原始mask必须逐字相等。",
+        "字段/getter名称相同就证明实际CPU和最终对象身份相同。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q2",
+      "prompt": "目标rq覆盖能支持何种检查？该检查是必要还是充分，依据和用途前提是什么？",
+      "facts": [
+        {
+          "statement": "锁函数只遍历mask中的t并锁其rq；起始函数在后续循环t==cpu时写rq->core。",
+          "evidence": [
+            {
+              "document": "D06",
+              "start_line": 17,
+              "end_line": 22
+            },
+            {
+              "document": "D11",
+              "start_line": 17,
+              "end_line": 22
+            },
+            {
+              "document": "D05",
+              "start_line": 33,
+              "end_line": 39
+            },
+            {
+              "document": "D10",
+              "start_line": 33,
+              "end_line": 39
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "若本次mask遍历承担保护目标CPU rq的用途，覆盖该目标(cpu属于mask)是可提出的必要候选。",
+        "外部锁规范、合法目标、实际执行及相关初始状态仍需审核；不将推断冒充接口明文规范。"
+      ],
+      "unknowns": [
+        "完整SMT组的硬件含义、leader/初始rq状态、对象与整个使用窗口的稳定性。"
+      ],
+      "forbidden_overclaims": [
+        "非空或weight>0足够证明目标rq已被锁。",
+        "self成立充分证明初始化、整组拓扑或并发正确。",
+        "没有外部规范就一律不能识别此局部条件性覆盖关系。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q3",
+      "prompt": "旧s390 mapper采用什么资格，哪些条件出口可从本包识别？",
+      "facts": [
+        {
+          "statement": "cpu_thread_map清空临时mask；!cpu_online(cpu)直接转copy；接受后先set自身，非HW直接转copy，HW另有present及online交集。",
+          "evidence": [
+            {
+              "document": "D02",
+              "start_line": 1,
+              "end_line": 19
+            }
+          ]
+        },
+        {
+          "statement": "调用mapper的是update_cpu_masks中的possible循环；后面另一个online循环不是同一目标域。",
+          "evidence": [
+            {
+              "document": "D03",
+              "start_line": 6,
+              "end_line": 11
+            },
+            {
+              "document": "D03",
+              "start_line": 22,
+              "end_line": 31
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "合法存储/目标、原语语义、正常返回、迭代覆盖和无干扰等前提。",
+        "在这些前提下可解释拒绝路径clear→copy、接受非HW路径clear→set→copy，不求本次实际guard。"
+      ],
+      "unknowns": [
+        "实际入口online值、topology_mode/smp_cpu_mtid、所有目标是否实际经过循环、原语完整效果。"
+      ],
+      "forbidden_overclaims": [
+        "online为真等价于准备完成或完整正确。",
+        "possible循环等同online循环。",
+        "本包已经证明所有实际目标得到某一运行值。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q4",
+      "prompt": "旧s390局部顺序为何可能错过公共使用期限？哪些环节使结论必须保持条件式？",
+      "facts": [
+        {
+          "statement": "smp_start_secondary中notify在set_cpu_online和update_cpu_masks之前。",
+          "evidence": [
+            {
+              "document": "D01",
+              "start_line": 18,
+              "end_line": 27
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "若notify同步进入该公共消费者，且消费者依赖本轮更新的目标对象，那么notify后的更新可能晚于候选消费期限。",
+        "只提前更新未必足够：旧online资格仍可能拒绝目标。"
+      ],
+      "unknowns": [
+        "notify→CPUHP→sched_core_cpu_starting的体/绑定未提供。",
+        "通知时的实际online值、此前准备/保留状态、其他writer及实际对象身份未证明。"
+      ],
+      "forbidden_overclaims": [
+        "后面才set_online就足以证明入口一定offline。",
+        "只调整函数先后即可保证修复。",
+        "源码局部顺序已证明实际s390故障或完整全局首次消费。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q5",
+      "prompt": "x86的准备资格和局部通知顺序与s390有何不同？online能否直接作为准备标准？",
+      "facts": [
+        {
+          "statement": "set_cpu_sibling_map先将目标加入setup集合；有自成员处理，另一路遍历setup集合写sibling map。",
+          "evidence": [
+            {
+              "document": "D07",
+              "start_line": 9,
+              "end_line": 16
+            },
+            {
+              "document": "D07",
+              "start_line": 20,
+              "end_line": 27
+            }
+          ]
+        },
+        {
+          "statement": "smp_callin先调用set_cpu_sibling_map再notify；start_secondary先smp_callin后set_online。",
+          "evidence": [
+            {
+              "document": "D12",
+              "start_line": 31,
+              "end_line": 31
+            },
+            {
+              "document": "D12",
+              "start_line": 47,
+              "end_line": 49
+            },
+            {
+              "document": "D08",
+              "start_line": 18,
+              "end_line": 18
+            },
+            {
+              "document": "D08",
+              "start_line": 38,
+              "end_line": 38
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "同一实际CPU、合法索引、目标迭代/原语及无清除干扰等前提。",
+        "局部源码调用顺序与完成效果分开；setup资格不等于所有准备步骤完成。"
+      ],
+      "unknowns": [
+        "实际目标CPU身份、match/helper效果、迭代覆盖、写后稳定及外部消费者链。"
+      ],
+      "forbidden_overclaims": [
+        "公共使用前必须先online。",
+        "先调用准备或出现setup位就证明准备已完成。",
+        "已证明x86整个启动/SMT路径正常。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q6",
+      "prompt": "空集合、单个其他CPU及leader查找揭示了哪些必要/充分边界？",
+      "facts": [
+        {
+          "statement": "weight==1跳过leader查找；其余路径跳过t==cpu，搜索rq(t)->core==rq(t)的其他成员，找不到则WARN后退出。",
+          "evidence": [
+            {
+              "document": "D05",
+              "start_line": 15,
+              "end_line": 30
+            },
+            {
+              "document": "D10",
+              "start_line": 15,
+              "end_line": 30
+            }
+          ]
+        },
+        {
+          "statement": "在局部条件保持时空集合会无leader；singleton-other可跳过缺leader检查，却未由该锁遍历覆盖目标。self存在也不证明有正确的其他leader或完整组。",
+          "evidence": [
+            {
+              "document": "D06",
+              "start_line": 17,
+              "end_line": 22
+            },
+            {
+              "document": "D11",
+              "start_line": 17,
+              "end_line": 22
+            },
+            {
+              "document": "D05",
+              "start_line": 15,
+              "end_line": 30
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "这些是给定消费者的逻辑分支边界，不是新增真实架构输入。",
+        "避免某个WARN的存在条件不等同完整接口规范或成功标准。"
+      ],
+      "unknowns": [
+        "实际可达mask、rq初始/leader状态、真正硬件同核关系及合法失败语义。"
+      ],
+      "forbidden_overclaims": [
+        "无WARN就证明满足。",
+        "存在一个leader就证明全部mask成员已建立正确同核关系。",
+        "空组或其他leader逻辑例就是新的架构运行结果/独立缺陷。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q7",
+      "prompt": "取指针、观测采样、原始内容消费和打印分别在哪里，能否互相替代？",
+      "facts": [
+        {
+          "statement": "锁函数第3行取getter指针；9–13为额外探针读取，16关中断，17开始原mask遍历。",
+          "evidence": [
+            {
+              "document": "D06",
+              "start_line": 3,
+              "end_line": 17
+            },
+            {
+              "document": "D11",
+              "start_line": 3,
+              "end_line": 17
+            }
+          ]
+        },
+        {
+          "statement": "起始函数先unlock再打印此前记录的观测。",
+          "evidence": [
+            {
+              "document": "D05",
+              "start_line": 43,
+              "end_line": 49
+            },
+            {
+              "document": "D10",
+              "start_line": 43,
+              "end_line": 49
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "当前源码含观测；探针读取与原消费者读取必须分别归属。",
+        "循环前样本若要代表随后消费还需对象/目标相同和区间稳定等依据。"
+      ],
+      "unknowns": [
+        "精确遍历时内容、全局首次读、采样到原读期间稳定性未证明。"
+      ],
+      "forbidden_overclaims": [
+        "getter取指针就是内容消费。",
+        "o->self、标签/常量或打印即准备完成/故障真值。",
+        "关中断前采样等价于精确循环读或打印时读值。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    },
+    {
+      "id": "Q8",
+      "prompt": "稳定性需要怎样的证据？在当前材料下两架构路线和整体检查能到什么结论等级？",
+      "facts": [
+        {
+          "statement": "共享mask被多次使用，存在提出快照/协调要求的理由；当前包只见unlock调用，没有其实现，也没有全部writer串行化证据。",
+          "evidence": [
+            {
+              "document": "D05",
+              "start_line": 15,
+              "end_line": 30
+            },
+            {
+              "document": "D05",
+              "start_line": 33,
+              "end_line": 43
+            },
+            {
+              "document": "D10",
+              "start_line": 15,
+              "end_line": 30
+            },
+            {
+              "document": "D10",
+              "start_line": 33,
+              "end_line": 43
+            },
+            {
+              "document": "D06",
+              "start_line": 16,
+              "end_line": 22
+            },
+            {
+              "document": "D11",
+              "start_line": 16,
+              "end_line": 22
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        "可保留有原文依据的局部事实/条件候选，并分别标出依据等级。",
+        "稳定性可由合法快照、协调或其他协议保证，不能先认定唯一实现是全程禁止所有写入。"
+      ],
+      "unknowns": [
+        "最终对象/CPU身份、完整外链、原语/目标准备效果、实际期限与区间稳定性。",
+        "没有本轮运行值支持架构满足/违反或正常判断。"
+      ],
+      "forbidden_overclaims": [
+        "已证明A正常/B实际失败或已取得独立检测增益。",
+        "所有未知项统称正常、不适用或确认违反。",
+        "只说全部不足而遗漏本包可直接识别的提供对象、守卫和局部顺序。"
+      ],
+      "scoring": {
+        "maximum": 2,
+        "score_2": "说明本题核心源码事实，并正确限定与结论实质相关的必要前提/未知，无关键过推；不要求逐字列完全部清单。",
+        "score_1": "识别部分核心事实或边界，但不完整；无本题关键反向断言或把未知升成确认。",
+        "score_0": "核心内容遗漏、仅泛称不足而不识别可见事实，或存在本题关键矛盾/无依据强结论。",
+        "contradiction_rule": "同一答案其他段的关键强断言不能仅由末尾笼统免责声明抵消；以明确的条件化实质判断为准。"
+      }
+    }
+  ],
+  "new_model_outputs_read": false,
+  "new_actual_checker_reports_read": false,
+  "new_runtime_observations_used": false,
+  "new_sources": 0,
+  "r3_resumed": false
+}

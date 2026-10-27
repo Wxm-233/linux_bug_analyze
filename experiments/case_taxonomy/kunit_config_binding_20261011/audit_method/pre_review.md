@@ -1,0 +1,15 @@
+# KUnit 配置请求来源：方法与离线执行前审阅
+
+2026-10-11。结论：四消费者的有限检索和六格空用户base离线匹配范围合理，尚未执行runner。初始方法意见在取物前送达，书面审阅在原物取得后保存，不将本文件冒充取物前封存。审阅没有运行Git、历史脚本、解析函数或内核流程。
+
+固定提交09ea的四份消费者、一次batch和512KiB验收上限与收据相符；四物料的SHA、字节长度和blob核对一致。超时/启动错误已保存原始可得输出和异常。上限在完整capture后检查，超额必须停止，不能截断后当成功材料。
+
+同版kunit_config.py只依赖dataclasses/re/typing，已逐字审阅可在冻结身份下独立加载。runner只从提供者AST字面量取kconfig，不运行powerpc.py或导入kunit_kernel/kunit.py；使用真实parse_from_string、merge_in_entries空base、is_subset_of，共六次匹配，没有oracle读取。执行仍应使用-B并先冻结runner、输入、原模块、提供者和独立预期。
+
+源码显示make_arch_config先解析架构请求，再merge用户base，后者覆盖同名键。build_config将合并请求写出、运行olddefconfig后validate；build_kernel也重新validate；正常run_tests在配置/构建失败时不进入执行。这里的静态调用顺序不是本轮实际构建或启动观察。六格固定空base，没有验证覆盖冲突。
+
+独立预期：父请求对合成BE、LE(n)、未指定均满足；提交请求显式CPU_BIG_ENDIAN=y，仅BE满足。新请求对LE或缺省不满足，原因是请求y与输出n/缺失冲突。请求n可容许输出缺省是is_subset_of的额外规则，但这不是本轮新请求y的情形。
+
+集合匹配通过只表示请求项被合成输出满足。父请求没有端序条件，所以通过不能证明端序正确；新请求满足也不证明真实Kconfig可达、实际.config、QEMU规范、编译或启动成功。需要独立审核的环境契约，再分别核对请求覆盖和真实生成配置。六格不是六个真实配置或独立样例，父/提交是同一案例版本对照。
+
+预期源于同版函数与提供者字符串，先于执行保存。预期推导在runner审阅前已反馈；书面oracle在runner静态审阅后保存，未使用运行结果生成。后置复核另存，不重写本预期。新增确认和独立阳性仍为0。

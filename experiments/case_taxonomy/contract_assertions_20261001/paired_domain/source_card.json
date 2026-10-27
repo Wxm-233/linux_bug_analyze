@@ -1,0 +1,88 @@
+{
+  "schema": "paired-internal-domain-authority-v1",
+  "case_fix": "0ab905c3be8c2be368821dd2bd1f8d126064d993",
+  "case_parent": "25c150ac103a4ebeed0319994c742a90634ddf18",
+  "scope": "Already read development example, not a new independent sample",
+  "prior_evidence_path": "/mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/structured_payload_20261001/compiler_probe/source_evidence.json",
+  "prior_evidence_sha256": "45c36839bde51918832cca18cc4beb2beb9adc6ca055b24c8f6569b8a5379f29",
+  "historical_sources_verified": {
+    "25c150ac103a4ebeed0319994c742a90634ddf18": {
+      "source_sha256": "736b6afa4cdad8ee90e113c89820c69c770c538eae3dbb4d257245d0ef1a3904",
+      "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1"
+    },
+    "0ab905c3be8c2be368821dd2bd1f8d126064d993": {
+      "source_sha256": "49ac53fbed059f5a19fc7692c23e0ce7e6d8cbb49da7469303eb103c92932d75",
+      "blob": "d2d2624ec708fe2f61518b871f33a5167911923f"
+    }
+  },
+  "source_excerpts": [
+    {
+      "label": "cd_old_hci_devcd_init",
+      "revision": "25c150ac103a4ebeed0319994c742a90634ddf18",
+      "path": "net/bluetooth/coredump.c",
+      "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1",
+      "source_sha256": "736b6afa4cdad8ee90e113c89820c69c770c538eae3dbb4d257245d0ef1a3904",
+      "start_line": 289,
+      "end_line": 373,
+      "text": " *              been initialized using hci_devcd_init(). Once active, the driver\n *              can append data using hci_devcd_append() or insert a pattern\n *              using hci_devcd_append_pattern().\n *\n *      HCI_DEVCOREDUMP_DONE: Once the dump collection is complete, the drive\n *              can signal the completion using hci_devcd_complete(). A\n *              devcoredump is generated indicating the completion event and\n *              then the state machine is reset to the default state.\n *\n *      HCI_DEVCOREDUMP_ABORT: The driver can cancel ongoing dump collection in\n *              case of any error using hci_devcd_abort(). A devcoredump is\n *              still generated with the available data indicating the abort\n *              event and then the state machine is reset to the default state.\n *\n *      HCI_DEVCOREDUMP_TIMEOUT: A timeout timer for HCI_DEVCOREDUMP_TIMEOUT sec\n *              is started during devcoredump initialization. Once the timeout\n *              occurs, the driver is notified, a devcoredump is generated with\n *              the available data indicating the timeout event and then the\n *              state machine is reset to the default state.\n *\n * The driver must register using hci_devcd_register() before using the hci\n * devcoredump APIs.\n */\nvoid hci_devcd_rx(struct work_struct *work)\n{\n\tstruct hci_dev *hdev = container_of(work, struct hci_dev, dump.dump_rx);\n\tstruct sk_buff *skb;\n\tint start_state;\n\n\twhile ((skb = skb_dequeue(&hdev->dump.dump_q))) {\n\t\t/* Return if timeout occurs. The timeout handler function\n\t\t * hci_devcd_timeout() will report the available dump data.\n\t\t */\n\t\tif (hdev->dump.state == HCI_DEVCOREDUMP_TIMEOUT) {\n\t\t\tkfree_skb(skb);\n\t\t\treturn;\n\t\t}\n\n\t\thci_dev_lock(hdev);\n\t\tstart_state = hdev->dump.state;\n\n\t\tswitch (hci_dmp_cb(skb)->pkt_type) {\n\t\tcase HCI_DEVCOREDUMP_PKT_INIT:\n\t\t\thci_devcd_handle_pkt_init(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_SKB:\n\t\t\thci_devcd_handle_pkt_skb(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_PATTERN:\n\t\t\thci_devcd_handle_pkt_pattern(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_COMPLETE:\n\t\t\thci_devcd_handle_pkt_complete(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_ABORT:\n\t\t\thci_devcd_handle_pkt_abort(hdev, skb);\n\t\t\tbreak;\n\n\t\tdefault:\n\t\t\tbt_dev_dbg(hdev, \"Unknown packet (%d) for state (%d). \",\n\t\t\t\t   hci_dmp_cb(skb)->pkt_type, hdev->dump.state);\n\t\t\tbreak;\n\t\t}\n\n\t\thci_dev_unlock(hdev);\n\t\tkfree_skb(skb);\n\n\t\t/* Notify the driver about any state changes before resetting\n\t\t * the state machine\n\t\t */\n\t\tif (start_state != hdev->dump.state)\n\t\t\thci_devcd_notify(hdev, hdev->dump.state);\n\n\t\t/* Reset the state machine if the devcoredump is complete */\n\t\thci_dev_lock(hdev);\n\t\tif (hdev->dump.state == HCI_DEVCOREDUMP_DONE ||\n\t\t    hdev->dump.state == HCI_DEVCOREDUMP_ABORT)\n\t\t\thci_devcd_reset(hdev);\n\t\thci_dev_unlock(hdev);\n\t}\n}"
+    },
+    {
+      "label": "cd_old_hci_devcd_handle_pkt_init",
+      "revision": "25c150ac103a4ebeed0319994c742a90634ddf18",
+      "path": "net/bluetooth/coredump.c",
+      "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1",
+      "source_sha256": "736b6afa4cdad8ee90e113c89820c69c770c538eae3dbb4d257245d0ef1a3904",
+      "start_line": 181,
+      "end_line": 209,
+      "text": "static void hci_devcd_handle_pkt_init(struct hci_dev *hdev, struct sk_buff *skb)\n{\n\tu32 *dump_size;\n\n\tif (hdev->dump.state != HCI_DEVCOREDUMP_IDLE) {\n\t\tDBG_UNEXPECTED_STATE();\n\t\treturn;\n\t}\n\n\tif (skb->len != sizeof(*dump_size)) {\n\t\tbt_dev_dbg(hdev, \"Invalid dump init pkt\");\n\t\treturn;\n\t}\n\n\tdump_size = skb_pull_data(skb, sizeof(*dump_size));\n\tif (!*dump_size) {\n\t\tbt_dev_err(hdev, \"Zero size dump init pkt\");\n\t\treturn;\n\t}\n\n\tif (hci_devcd_prepare(hdev, *dump_size)) {\n\t\tbt_dev_err(hdev, \"Failed to prepare for dump\");\n\t\treturn;\n\t}\n\n\thci_devcd_update_state(hdev, HCI_DEVCOREDUMP_ACTIVE);\n\tqueue_delayed_work(hdev->workqueue, &hdev->dump.dump_timeout,\n\t\t\t   hdev->dump.timeout);\n}"
+    },
+    {
+      "label": "cd_old_hci_devcd_rx",
+      "revision": "25c150ac103a4ebeed0319994c742a90634ddf18",
+      "path": "net/bluetooth/coredump.c",
+      "blob": "08fa98505454a150401f9881d2cf1a0fe3b9f5d1",
+      "source_sha256": "736b6afa4cdad8ee90e113c89820c69c770c538eae3dbb4d257245d0ef1a3904",
+      "start_line": 312,
+      "end_line": 373,
+      "text": "void hci_devcd_rx(struct work_struct *work)\n{\n\tstruct hci_dev *hdev = container_of(work, struct hci_dev, dump.dump_rx);\n\tstruct sk_buff *skb;\n\tint start_state;\n\n\twhile ((skb = skb_dequeue(&hdev->dump.dump_q))) {\n\t\t/* Return if timeout occurs. The timeout handler function\n\t\t * hci_devcd_timeout() will report the available dump data.\n\t\t */\n\t\tif (hdev->dump.state == HCI_DEVCOREDUMP_TIMEOUT) {\n\t\t\tkfree_skb(skb);\n\t\t\treturn;\n\t\t}\n\n\t\thci_dev_lock(hdev);\n\t\tstart_state = hdev->dump.state;\n\n\t\tswitch (hci_dmp_cb(skb)->pkt_type) {\n\t\tcase HCI_DEVCOREDUMP_PKT_INIT:\n\t\t\thci_devcd_handle_pkt_init(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_SKB:\n\t\t\thci_devcd_handle_pkt_skb(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_PATTERN:\n\t\t\thci_devcd_handle_pkt_pattern(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_COMPLETE:\n\t\t\thci_devcd_handle_pkt_complete(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_ABORT:\n\t\t\thci_devcd_handle_pkt_abort(hdev, skb);\n\t\t\tbreak;\n\n\t\tdefault:\n\t\t\tbt_dev_dbg(hdev, \"Unknown packet (%d) for state (%d). \",\n\t\t\t\t   hci_dmp_cb(skb)->pkt_type, hdev->dump.state);\n\t\t\tbreak;\n\t\t}\n\n\t\thci_dev_unlock(hdev);\n\t\tkfree_skb(skb);\n\n\t\t/* Notify the driver about any state changes before resetting\n\t\t * the state machine\n\t\t */\n\t\tif (start_state != hdev->dump.state)\n\t\t\thci_devcd_notify(hdev, hdev->dump.state);\n\n\t\t/* Reset the state machine if the devcoredump is complete */\n\t\thci_dev_lock(hdev);\n\t\tif (hdev->dump.state == HCI_DEVCOREDUMP_DONE ||\n\t\t    hdev->dump.state == HCI_DEVCOREDUMP_ABORT)\n\t\t\thci_devcd_reset(hdev);\n\t\thci_dev_unlock(hdev);\n\t}\n}"
+    },
+    {
+      "label": "cd_fix_hci_devcd_init",
+      "revision": "0ab905c3be8c2be368821dd2bd1f8d126064d993",
+      "path": "net/bluetooth/coredump.c",
+      "blob": "d2d2624ec708fe2f61518b871f33a5167911923f",
+      "source_sha256": "49ac53fbed059f5a19fc7692c23e0ce7e6d8cbb49da7469303eb103c92932d75",
+      "start_line": 290,
+      "end_line": 374,
+      "text": " *              been initialized using hci_devcd_init(). Once active, the driver\n *              can append data using hci_devcd_append() or insert a pattern\n *              using hci_devcd_append_pattern().\n *\n *      HCI_DEVCOREDUMP_DONE: Once the dump collection is complete, the drive\n *              can signal the completion using hci_devcd_complete(). A\n *              devcoredump is generated indicating the completion event and\n *              then the state machine is reset to the default state.\n *\n *      HCI_DEVCOREDUMP_ABORT: The driver can cancel ongoing dump collection in\n *              case of any error using hci_devcd_abort(). A devcoredump is\n *              still generated with the available data indicating the abort\n *              event and then the state machine is reset to the default state.\n *\n *      HCI_DEVCOREDUMP_TIMEOUT: A timeout timer for HCI_DEVCOREDUMP_TIMEOUT sec\n *              is started during devcoredump initialization. Once the timeout\n *              occurs, the driver is notified, a devcoredump is generated with\n *              the available data indicating the timeout event and then the\n *              state machine is reset to the default state.\n *\n * The driver must register using hci_devcd_register() before using the hci\n * devcoredump APIs.\n */\nvoid hci_devcd_rx(struct work_struct *work)\n{\n\tstruct hci_dev *hdev = container_of(work, struct hci_dev, dump.dump_rx);\n\tstruct sk_buff *skb;\n\tint start_state;\n\n\twhile ((skb = skb_dequeue(&hdev->dump.dump_q))) {\n\t\t/* Return if timeout occurs. The timeout handler function\n\t\t * hci_devcd_timeout() will report the available dump data.\n\t\t */\n\t\tif (hdev->dump.state == HCI_DEVCOREDUMP_TIMEOUT) {\n\t\t\tkfree_skb(skb);\n\t\t\treturn;\n\t\t}\n\n\t\thci_dev_lock(hdev);\n\t\tstart_state = hdev->dump.state;\n\n\t\tswitch (hci_dmp_cb(skb)->pkt_type) {\n\t\tcase HCI_DEVCOREDUMP_PKT_INIT:\n\t\t\thci_devcd_handle_pkt_init(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_SKB:\n\t\t\thci_devcd_handle_pkt_skb(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_PATTERN:\n\t\t\thci_devcd_handle_pkt_pattern(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_COMPLETE:\n\t\t\thci_devcd_handle_pkt_complete(hdev, skb);\n\t\t\tbreak;\n\n\t\tcase HCI_DEVCOREDUMP_PKT_ABORT:\n\t\t\thci_devcd_handle_pkt_abort(hdev, skb);\n\t\t\tbreak;\n\n\t\tdefault:\n\t\t\tbt_dev_dbg(hdev, \"Unknown packet (%d) for state (%d). \",\n\t\t\t\t   hci_dmp_cb(skb)->pkt_type, hdev->dump.state);\n\t\t\tbreak;\n\t\t}\n\n\t\thci_dev_unlock(hdev);\n\t\tkfree_skb(skb);\n\n\t\t/* Notify the driver about any state changes before resetting\n\t\t * the state machine\n\t\t */\n\t\tif (start_state != hdev->dump.state)\n\t\t\thci_devcd_notify(hdev, hdev->dump.state);\n\n\t\t/* Reset the state machine if the devcoredump is complete */\n\t\thci_dev_lock(hdev);\n\t\tif (hdev->dump.state == HCI_DEVCOREDUMP_DONE ||\n\t\t    hdev->dump.state == HCI_DEVCOREDUMP_ABORT)\n\t\t\thci_devcd_reset(hdev);\n\t\thci_dev_unlock(hdev);\n\t}\n}"
+    },
+    {
+      "label": "cd_fix_hci_devcd_handle_pkt_init",
+      "revision": "0ab905c3be8c2be368821dd2bd1f8d126064d993",
+      "path": "net/bluetooth/coredump.c",
+      "blob": "d2d2624ec708fe2f61518b871f33a5167911923f",
+      "source_sha256": "49ac53fbed059f5a19fc7692c23e0ce7e6d8cbb49da7469303eb103c92932d75",
+      "start_line": 182,
+      "end_line": 210,
+      "text": "static void hci_devcd_handle_pkt_init(struct hci_dev *hdev, struct sk_buff *skb)\n{\n\tu32 dump_size;\n\n\tif (hdev->dump.state != HCI_DEVCOREDUMP_IDLE) {\n\t\tDBG_UNEXPECTED_STATE();\n\t\treturn;\n\t}\n\n\tif (skb->len != sizeof(dump_size)) {\n\t\tbt_dev_dbg(hdev, \"Invalid dump init pkt\");\n\t\treturn;\n\t}\n\n\tdump_size = get_unaligned_le32(skb_pull_data(skb, 4));\n\tif (!dump_size) {\n\t\tbt_dev_err(hdev, \"Zero size dump init pkt\");\n\t\treturn;\n\t}\n\n\tif (hci_devcd_prepare(hdev, dump_size)) {\n\t\tbt_dev_err(hdev, \"Failed to prepare for dump\");\n\t\treturn;\n\t}\n\n\thci_devcd_update_state(hdev, HCI_DEVCOREDUMP_ACTIVE);\n\tqueue_delayed_work(hdev->workqueue, &hdev->dump.dump_timeout,\n\t\t\t   hdev->dump.timeout);\n}"
+    }
+  ],
+  "authority": {
+    "internal": "Same-version actual reader and local producer/queue path determine interpretation for this internal payload.",
+    "old_pair": "32-bit host representation written via skb_put_data and read by host u32 dereference, on the same host.",
+    "fixed_pair": "Explicit little-endian put_unaligned_le32/get_unaligned_le32 pair.",
+    "external": "No externally required fixed payload order has been bound; do not require LE automatically.",
+    "when_conflicting": "Mark unresolved if version/mode/same-host reader cannot be established or an independently bound external contract conflicts."
+  },
+  "synthetic_dimensions": [
+    "16-bit and 64-bit widths",
+    "big-endian explicit representation",
+    "all mixed domains except single-end changes of known 32-bit pair"
+  ],
+  "limits": [
+    "No real sk_buff, workqueue, kernel or device execution",
+    "No alignment/aliasing/lifetime proof",
+    "Zero is an arithmetic control only; both historical coredump consumers reject zero before successful preparation",
+    "Historical case remains outside confirmed cross-architecture core without additional failure/contract evidence"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "riscv_topology_capacity_boot_phase",
+  "fix_commit": "c1d6105869464635d8a2bcf87a43c05f4c0cfca4",
+  "negative_commit": "bdb1b1f03b9b1cc1cde7d54f8b5b2f9a6bdda782",
+  "condition_A": "RISC-V DT contains /cpus/cpu-map and a mapped CPU node with capacity-dmips-mhz, with raw_capacity initially unset",
+  "producer_P": [
+    "mm_init() calls kmem_cache_init()",
+    "kernel_init_freeable() restores gfp_allowed_mask before smp_prepare_cpus()"
+  ],
+  "consumer_C": "init_cpu_topology() -> DT topology parser -> topology_parse_cpu_capacity() -> kcalloc(GFP_KERNEL)",
+  "failed_preparation": "If kcalloc returns NULL, cap_parsing_failed is set and parsing returns false; no later successful allocation is established on that path",
+  "main_file": "init/main.c",
+  "arch_file": "arch/riscv/kernel/smpboot.c",
+  "topology_file": "drivers/base/arch_topology.c",
+  "early_entry": "smp_prepare_boot_cpu",
+  "late_entry": "smp_prepare_cpus",
+  "consumer_call": "init_cpu_topology",
+  "topology_edges": [
+    ["init_cpu_topology", "parse_dt_topology"],
+    ["parse_dt_topology", "parse_socket"],
+    ["parse_socket", "parse_cluster"],
+    ["parse_cluster", "parse_core"],
+    ["parse_core", "get_cpu_for_node"],
+    ["get_cpu_for_node", "topology_parse_cpu_capacity"]
+  ],
+  "allocation_function": "topology_parse_cpu_capacity",
+  "allocation_call": "kcalloc",
+  "property": "capacity-dmips-mhz",
+  "tree_node": "cpu-map"
+}

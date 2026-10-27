@@ -1,0 +1,144 @@
+{
+  "target": "0ab905c3be8c2be368821dd2bd1f8d126064d993",
+  "revision": "25c150ac103a4ebeed0319994c742a90634ddf18",
+  "source_path": "net/bluetooth/coredump.c",
+  "phase": "parent",
+  "module": "outbound_scalar_single_revision",
+  "analysis": {
+    "version": "outbound-scalar-single-revision-v1.0",
+    "revision": "25c150ac103a4ebeed0319994c742a90634ddf18",
+    "source_file": "net/bluetooth/coredump.c",
+    "files_read": [
+      {
+        "path": "net/bluetooth/coredump.c",
+        "sha256": "736b6afa4cdad8ee90e113c89820c69c770c538eae3dbb4d257245d0ef1a3904"
+      },
+      {
+        "path": "net/bluetooth/hci_request.c",
+        "sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+      },
+      {
+        "path": "include/linux/skbuff.h",
+        "sha256": "41e20778cd32f3fee66e8c05423fc4173e51c9c3744420ca6e7176803e1850ee"
+      }
+    ],
+    "consumer_proof": {
+      "__hci_cmd_sync": {
+        "status": "insufficient",
+        "reason": "ambiguous definition or macro: __hci_cmd_sync/__hci_cmd_sync_ev",
+        "chain": []
+      },
+      "hci_req_add": {
+        "status": "proven_byte_copy_chain",
+        "chain": [
+          {
+            "function": "hci_req_add",
+            "pointer_parameter": "param",
+            "length_parameter": "plen",
+            "definition": {
+              "file": "net/bluetooth/hci_request.c",
+              "line": 269,
+              "text": "hci_req_add(struct hci_request *req, u16 opcode, u32 plen, const void *param)",
+              "source_sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+            },
+            "forward_call": {
+              "file": "net/bluetooth/hci_request.c",
+              "line": 273,
+              "text": "hci_req_add_ev(req, opcode, plen, param, 0)",
+              "source_sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+            },
+            "forward_arguments": [
+              "req",
+              "opcode",
+              "plen",
+              "param",
+              "0"
+            ]
+          },
+          {
+            "function": "hci_req_add_ev",
+            "pointer_parameter": "param",
+            "length_parameter": "plen",
+            "definition": {
+              "file": "net/bluetooth/hci_request.c",
+              "line": 239,
+              "text": "hci_req_add_ev(struct hci_request *req, u16 opcode, u32 plen, const void *param, u8 event)",
+              "source_sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+            },
+            "forward_call": {
+              "file": "net/bluetooth/hci_request.c",
+              "line": 253,
+              "text": "hci_prepare_cmd(hdev, opcode, plen, param)",
+              "source_sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+            },
+            "forward_arguments": [
+              "hdev",
+              "opcode",
+              "plen",
+              "param"
+            ]
+          },
+          {
+            "function": "hci_prepare_cmd",
+            "pointer_parameter": "param",
+            "length_parameter": "plen",
+            "definition": {
+              "file": "net/bluetooth/hci_request.c",
+              "line": 212,
+              "text": "hci_prepare_cmd(struct hci_dev *hdev, u16 opcode, u32 plen, const void *param)",
+              "source_sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+            },
+            "forward_call": {
+              "file": "net/bluetooth/hci_request.c",
+              "line": 228,
+              "text": "skb_put_data(skb, param, plen)",
+              "source_sha256": "c9ebe4d778677c70107d25e3727884e10ea916bf3e8bc826fe3e4962aa7ce302"
+            },
+            "forward_arguments": [
+              "skb",
+              "param",
+              "plen"
+            ]
+          },
+          {
+            "function": "skb_put_data",
+            "pointer_parameter": "data",
+            "length_parameter": "len",
+            "definition": {
+              "file": "include/linux/skbuff.h",
+              "line": 2602,
+              "text": "skb_put_data(struct sk_buff *skb, const void *data, unsigned int len)",
+              "source_sha256": "41e20778cd32f3fee66e8c05423fc4173e51c9c3744420ca6e7176803e1850ee"
+            },
+            "forward_call": {
+              "file": "include/linux/skbuff.h",
+              "line": 2607,
+              "text": "memcpy(tmp, data, len)",
+              "source_sha256": "41e20778cd32f3fee66e8c05423fc4173e51c9c3744420ca6e7176803e1850ee"
+            },
+            "forward_arguments": [
+              "tmp",
+              "data",
+              "len"
+            ]
+          }
+        ],
+        "terminal_semantics": "standard Linux memcpy copies source bytes without per-payload conversion",
+        "payload_format": "not established; opcode-specific format evidence is required"
+      }
+    },
+    "findings": [],
+    "counts": {
+      "raw_host_bytes": 0,
+      "matched_endian_scalar": 0,
+      "insufficient": 0
+    },
+    "scope": "Only direct &fixed-width scalar with sizeof(same scalar) at __hci_cmd_sync/hci_req_add, using the exact same-revision HCI-to-memcpy route. No opcode-format oracle, defect or reachability claim. Zero sites is out of scope, never normal.",
+    "assumptions": [
+      "__KERNEL__=true in this Linux kernel source context; only simple #ifdef/#ifndef on that symbol is interpreted, other configuration expressions remain unknown",
+      "Linux fixed-width and __le/__be type spelling has its standard meaning",
+      "Linux cpu_to_le/be conversion spelling and memcpy retain their documented semantics unless redefined in the bounded files read",
+      "included-header macro expansion and complete C compilation are not modeled"
+    ]
+  }
+}

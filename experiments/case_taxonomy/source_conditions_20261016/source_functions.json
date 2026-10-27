@@ -1,0 +1,102 @@
+{
+  "schema": "complete_known_source_functions_v1",
+  "purpose": "known-case development; unchanged original functions, not preprocessed/configured translation units",
+  "documents": [
+    {
+      "id": "old_s390_start",
+      "kind": "source",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "path": "arch/s390/kernel/smp.c",
+      "function": "smp_start_secondary",
+      "start_line": 888,
+      "end_line": 915,
+      "text": "static void smp_start_secondary(void *cpuvoid)\n{\n\tint cpu = raw_smp_processor_id();\n\n\tS390_lowcore.last_update_clock = get_tod_clock();\n\tS390_lowcore.restart_stack = (unsigned long)restart_stack;\n\tS390_lowcore.restart_fn = (unsigned long)do_restart;\n\tS390_lowcore.restart_data = 0;\n\tS390_lowcore.restart_source = -1U;\n\tS390_lowcore.restart_flags = 0;\n\trestore_access_regs(S390_lowcore.access_regs_save_area);\n\tcpu_init();\n\trcu_cpu_starting(cpu);\n\tinit_cpu_timer();\n\tvtime_init();\n\tvdso_getcpu_init();\n\tpfault_init();\n\tnotify_cpu_starting(cpu);\n\tif (topology_cpu_dedicated(cpu))\n\t\tset_cpu_flag(CIF_DEDICATED_CPU);\n\telse\n\t\tclear_cpu_flag(CIF_DEDICATED_CPU);\n\tset_cpu_online(cpu, true);\n\tupdate_cpu_masks();\n\tinc_irq_stat(CPU_RST);\n\tlocal_irq_enable();\n\tcpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n}\n",
+      "full_file_sha256": "b6a8ce2df8f314196fa9eca38a05ecdb44a52496463b6200bc276a8abeb20989",
+      "function_sha256": "aef5f81f49494e66753c688ea2a230c3105178952a1eebde25d37ad40781e0fa"
+    },
+    {
+      "id": "fixed_s390_start",
+      "kind": "source",
+      "revision": "a052096bdd6809eeab809202726634d1ac975aa1",
+      "path": "arch/s390/kernel/smp.c",
+      "function": "smp_start_secondary",
+      "start_line": 889,
+      "end_line": 917,
+      "text": "static void smp_start_secondary(void *cpuvoid)\n{\n\tint cpu = raw_smp_processor_id();\n\n\tS390_lowcore.last_update_clock = get_tod_clock();\n\tS390_lowcore.restart_stack = (unsigned long)restart_stack;\n\tS390_lowcore.restart_fn = (unsigned long)do_restart;\n\tS390_lowcore.restart_data = 0;\n\tS390_lowcore.restart_source = -1U;\n\tS390_lowcore.restart_flags = 0;\n\trestore_access_regs(S390_lowcore.access_regs_save_area);\n\tcpu_init();\n\trcu_cpu_starting(cpu);\n\tinit_cpu_timer();\n\tvtime_init();\n\tvdso_getcpu_init();\n\tpfault_init();\n\tcpumask_set_cpu(cpu, &cpu_setup_mask);\n\tupdate_cpu_masks();\n\tnotify_cpu_starting(cpu);\n\tif (topology_cpu_dedicated(cpu))\n\t\tset_cpu_flag(CIF_DEDICATED_CPU);\n\telse\n\t\tclear_cpu_flag(CIF_DEDICATED_CPU);\n\tset_cpu_online(cpu, true);\n\tinc_irq_stat(CPU_RST);\n\tlocal_irq_enable();\n\tcpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n}\n",
+      "full_file_sha256": "bd9890b03d4d94defa89c0c1b1277550b185afff4506c28af4ada19e43f44c83",
+      "function_sha256": "2297f48ca706ce469cdd632c7f5c2407d156a86d33a84b113c4aedf9b20d7f6b"
+    },
+    {
+      "id": "old_s390_map",
+      "kind": "source",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "path": "arch/s390/kernel/topology.c",
+      "function": "cpu_thread_map",
+      "start_line": 96,
+      "end_line": 114,
+      "text": "static void cpu_thread_map(cpumask_t *dst, unsigned int cpu)\n{\n\tstatic cpumask_t mask;\n\tint i;\n\n\tcpumask_clear(&mask);\n\tif (!cpu_online(cpu))\n\t\tgoto out;\n\tcpumask_set_cpu(cpu, &mask);\n\tif (topology_mode != TOPOLOGY_MODE_HW)\n\t\tgoto out;\n\tcpu -= cpu % (smp_cpu_mtid + 1);\n\tfor (i = 0; i <= smp_cpu_mtid; i++)\n\t\tif (cpu_present(cpu + i))\n\t\t\tcpumask_set_cpu(cpu + i, &mask);\n\tcpumask_and(&mask, &mask, cpu_online_mask);\nout:\n\tcpumask_copy(dst, &mask);\n}\n",
+      "full_file_sha256": "6a9f5039416c15786244cc708f0a536a8dd0bda33a24bd74e9a15e618ef690f3",
+      "function_sha256": "668803dbb381ff01811768828fe2b6b8bed47d9b2e9ed2edc62d4e0258a886d9"
+    },
+    {
+      "id": "fixed_s390_map",
+      "kind": "source",
+      "revision": "a052096bdd6809eeab809202726634d1ac975aa1",
+      "path": "arch/s390/kernel/topology.c",
+      "function": "cpu_thread_map",
+      "start_line": 96,
+      "end_line": 114,
+      "text": "static void cpu_thread_map(cpumask_t *dst, unsigned int cpu)\n{\n\tstatic cpumask_t mask;\n\tint i;\n\n\tcpumask_clear(&mask);\n\tif (!cpumask_test_cpu(cpu, &cpu_setup_mask))\n\t\tgoto out;\n\tcpumask_set_cpu(cpu, &mask);\n\tif (topology_mode != TOPOLOGY_MODE_HW)\n\t\tgoto out;\n\tcpu -= cpu % (smp_cpu_mtid + 1);\n\tfor (i = 0; i <= smp_cpu_mtid; i++) {\n\t\tif (cpumask_test_cpu(cpu + i, &cpu_setup_mask))\n\t\t\tcpumask_set_cpu(cpu + i, &mask);\n\t}\nout:\n\tcpumask_copy(dst, &mask);\n}\n",
+      "full_file_sha256": "9d0f73b3a05fe07df0c8cea5d6cd761b9dfa5c4a9bcd86e6d0c0a2cadf2e0a44",
+      "function_sha256": "ff4cddb6deb5e5dca24c43c6b6e7a4b690c7737d3fed070068101ee5de85fccd"
+    },
+    {
+      "id": "x86_callin",
+      "kind": "source",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "path": "arch/x86/kernel/smpboot.c",
+      "function": "smp_callin",
+      "start_line": 162,
+      "end_line": 214,
+      "text": "static void smp_callin(void)\n{\n\tint cpuid;\n\n\t/*\n\t * If waken up by an INIT in an 82489DX configuration\n\t * cpu_callout_mask guarantees we don't get here before\n\t * an INIT_deassert IPI reaches our local APIC, so it is\n\t * now safe to touch our local APIC.\n\t */\n\tcpuid = smp_processor_id();\n\n\t/*\n\t * the boot CPU has finished the init stage and is spinning\n\t * on callin_map until we finish. We are free to set up this\n\t * CPU, first the APIC. (this is probably redundant on most\n\t * boards)\n\t */\n\tapic_ap_setup();\n\n\t/*\n\t * Save our processor parameters. Note: this information\n\t * is needed for clock calibration.\n\t */\n\tsmp_store_cpu_info(cpuid);\n\n\t/*\n\t * The topology information must be up to date before\n\t * calibrate_delay() and notify_cpu_starting().\n\t */\n\tset_cpu_sibling_map(raw_smp_processor_id());\n\n\tinit_freq_invariance(true, false);\n\n\t/*\n\t * Get our bogomips.\n\t * Update loops_per_jiffy in cpu_data. Previous call to\n\t * smp_store_cpu_info() stored a value that is close but not as\n\t * accurate as the value just calculated.\n\t */\n\tcalibrate_delay();\n\tcpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;\n\tpr_debug(\"Stack at about %p\\n\", &cpuid);\n\n\twmb();\n\n\tnotify_cpu_starting(cpuid);\n\n\t/*\n\t * Allow the master to continue.\n\t */\n\tcpumask_set_cpu(cpuid, cpu_callin_mask);\n}\n",
+      "full_file_sha256": "7b58b6f8639680531710bff12fa4b575bd29520515c54e2236cdc183b21dbff8",
+      "function_sha256": "240ead342b9f9090bf915ad32b0667eeb23a3ba7d67f9e73bd5781f1779e7b3d"
+    },
+    {
+      "id": "common_starting",
+      "kind": "source",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "path": "kernel/sched/core.c",
+      "function": "sched_cpu_starting",
+      "start_line": 8834,
+      "end_line": 8840,
+      "text": "int sched_cpu_starting(unsigned int cpu)\n{\n\tsched_core_cpu_starting(cpu);\n\tsched_rq_cpu_starting(cpu);\n\tsched_tick_start(cpu);\n\treturn 0;\n}\n",
+      "full_file_sha256": "106a72f05176d464d468f85b6e95b89fe2938562f9bf8923df19b8c2e3627303",
+      "function_sha256": "31355d74c51a1072e8763d2ffb58ae770e0e7ae223d73d086cbfb7e216b6ce83"
+    },
+    {
+      "id": "common_notify",
+      "kind": "source",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "path": "kernel/cpu.c",
+      "function": "notify_cpu_starting",
+      "start_line": 1257,
+      "end_line": 1271,
+      "text": "void notify_cpu_starting(unsigned int cpu)\n{\n\tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n\tenum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);\n\tint ret;\n\n\trcu_cpu_starting(cpu);\t/* Enables RCU usage on this CPU. */\n\tcpumask_set_cpu(cpu, &cpus_booted_once_mask);\n\tret = cpuhp_invoke_callback_range(true, cpu, st, target);\n\n\t/*\n\t * STARTING must not fail!\n\t */\n\tWARN_ON_ONCE(ret);\n}\n",
+      "full_file_sha256": "ce5c313c4bc8455d0d180d8e5f6fd4a21cde7769fc37d8a1af312d01259f4d99",
+      "function_sha256": "f92d6129db69520b20840f987646ea1ee783f8379256a8393c9cac744fb617f3"
+    },
+    {
+      "id": "common_lock",
+      "kind": "source",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "path": "kernel/sched/core.c",
+      "function": "sched_core_lock",
+      "start_line": 240,
+      "end_line": 248,
+      "text": "static void sched_core_lock(int cpu, unsigned long *flags)\n{\n\tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n\tint t, i = 0;\n\n\tlocal_irq_save(*flags);\n\tfor_each_cpu(t, smt_mask)\n\t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n}\n",
+      "full_file_sha256": "106a72f05176d464d468f85b6e95b89fe2938562f9bf8923df19b8c2e3627303",
+      "function_sha256": "1440b1f71517c16aaf748b4011cdff260a5299dff112d16b45781ad8e74fc88e"
+    }
+  ]
+}

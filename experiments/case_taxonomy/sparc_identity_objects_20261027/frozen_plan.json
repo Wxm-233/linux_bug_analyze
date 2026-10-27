@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-27",
+  "frozen_before_build": true,
+  "user_authorization": "user approved apt install of gcc-sparc64-linux-gnu and real sparc64 defconfig object compilation of parent/fixed to check loop bounds",
+  "follows": "sparc_identity_chain_20261027 (host projection; candidate only)",
+  "purpose": "raise the cpumask width premise from host projection to actual sparc64 compiler objects: in the default configuration, do record_one_cpu's num_possible_cpus() and alloc_irqstack_bootmem's for_each_possible_cpu bound read runtime nr_cpu_ids, and does an NR_CPUS=64 control compile them with constant width?",
+  "revisions": {
+    "parent": "95706e717c4f55ca62025c151451ccc28863d085",
+    "fixed": "98937707fea8375e8acea0aaa0b68a956dd52719"
+  },
+  "configurations": {
+    "default": "make ARCH=sparc64 sparc64_defconfig, no changes (expected NR_CPUS=4096 from Kconfig default; verified from .config, not assumed)",
+    "nr64": "same defconfig then scripts/config --set-val NR_CPUS 64 and olddefconfig; a legal Kconfig value (range 2..4096) used only as width-branch control"
+  },
+  "builds": "2 revisions x 2 configurations = 4 out-of-tree build directories; targets arch/sparc/kernel/{prom_64,setup_64,smp_64}.o and .i only; no vmlinux, no boot",
+  "toolchain": "Ubuntu gcc-sparc64-linux-gnu 4:13.2.1-2ubuntu1 (sparc64-linux-gnu-gcc 13.3.0), binutils-sparc64-linux-gnu 2.42",
+  "checks": {
+    "O1_irqstack_loop_bound": "function containing alloc_irqstack_bootmem's loop (setup_arch after inlining, or the function itself) references nr_cpu_ids and a find-bit helper in default; no nr_cpu_ids reference in nr64",
+    "O2_record_one_cpu_weight": "record_one_cpu references nr_cpu_ids and __bitmap_weight in default; nr64 has no __bitmap_weight call",
+    "O3_preprocessed_expansion": ".i text of the two functions shows the loop/weight size expression expanded to nr_cpu_ids (default) vs a constant 64 (nr64)",
+    "O4_fixed_parent_diff": "only fixed record_one_cpu contains the possible-guard comparison; parent smp_64.o contains smp_fill_in_cpu_possible_map"
+  },
+  "reading_rule": "object facts are extracted by objdump relocations/disassembly per symbol; dataflow from the nr_cpu_ids load into the helper size argument is shown as an excerpt for human review, not claimed as automatic dataflow proof",
+  "not_claimed": [
+    "no runtime behaviour, multi-CPU boot, or IRQ-stack fault observation",
+    "the candidate remains unconfirmed; object evidence shows which width branch the compiled code takes, not that affected machines exist",
+    "no upstream report"
+  ],
+  "model_calls_planned": 0,
+  "stop_rule": "failed builds are recorded and not silently retried; any fix is a separate attempt"
+}

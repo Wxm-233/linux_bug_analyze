@@ -1,0 +1,339 @@
+{
+  "schema": "n25_contract_candidates_v1",
+  "documents": [
+    {
+      "id": "D01",
+      "profile": "old_s390",
+      "kind": "configured_function",
+      "function": "smp_start_secondary",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/arch/s390/kernel/smp.c",
+      "text": "static void smp_start_secondary(void *cpuvoid)\n{\n int cpu = ((*((struct lowcore *) 0)).cpu_nr);\n\n (*((struct lowcore *) 0)).last_update_clock = get_tod_clock();\n (*((struct lowcore *) 0)).restart_stack = (unsigned long)restart_stack;\n (*((struct lowcore *) 0)).restart_fn = (unsigned long)do_restart;\n (*((struct lowcore *) 0)).restart_data = 0;\n (*((struct lowcore *) 0)).restart_source = -1U;\n (*((struct lowcore *) 0)).restart_flags = 0;\n restore_access_regs((*((struct lowcore *) 0)).access_regs_save_area);\n cpu_init();\n rcu_cpu_starting(cpu);\n init_cpu_timer();\n vtime_init();\n vdso_getcpu_init();\n ({-1;});\n r4_note(\"arch_before_notify\", cpu, 0, -1, -1, -1, 0);\n notify_cpu_starting(cpu);\n r4_note(\"arch_after_notify\", cpu, 0, -1, -1, -1, 0);\n if ((cpu_topology[cpu].dedicated))\n  set_cpu_flag(7);\n else\n  clear_cpu_flag(7);\n set_cpu_online(cpu, true);\n update_cpu_masks();\n r4_note(\"arch_online_ready\", cpu, 0, -1, -1, -1, 0);\n inc_irq_stat(CPU_RST);\n do { arch_local_irq_enable(); } while (0);\n cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n}",
+      "text_sha256": "390dff4f7177ced8859b33796a9846d26115e6fea11ede7b54afeaa1f276c819",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "image_sha256": "5baf6f876b80379136b280d31289d14e5c6f675a975a2c92ec920086a2fb1ab9",
+      "preprocessed_sha256": "b8ea12933d853f90ba3f490163cd38bc67bde489bd630785d0857aa8cbd82d2a",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_arch_s390_kernel_smp.c.regions.json",
+        "artifact_sha256": "10ecfb3ca53cff383f0e5ece1caf3fe1fc5ee4475d0bd68917dc81adcc422504",
+        "json_pointer": "/functions/smp_start_secondary/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D02",
+      "profile": "old_s390",
+      "kind": "configured_function",
+      "function": "cpu_thread_map",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/arch/s390/kernel/topology.c",
+      "text": "static void cpu_thread_map(cpumask_t *dst, unsigned int cpu)\n{\n static cpumask_t mask;\n int i;\n\n cpumask_clear(&mask);\n if (!cpu_online(cpu))\n  goto out;\n cpumask_set_cpu(cpu, &mask);\n if (topology_mode != TOPOLOGY_MODE_HW)\n  goto out;\n cpu -= cpu % (smp_cpu_mtid + 1);\n for (i = 0; i <= smp_cpu_mtid; i++)\n  if (cpu_present(cpu + i))\n   cpumask_set_cpu(cpu + i, &mask);\n cpumask_and(&mask, &mask, ((const struct cpumask *)&__cpu_online_mask));\nout:\n cpumask_copy(dst, &mask);\n}",
+      "text_sha256": "3beafa4ba5049dfe32bcac2e92cf854a77e1d6d93627093534f9f6432287c903",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "image_sha256": "5baf6f876b80379136b280d31289d14e5c6f675a975a2c92ec920086a2fb1ab9",
+      "preprocessed_sha256": "12660f9c5583c828e03656622ceff11ed2f46edceddc1035c8c6f06e0bf434aa",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_arch_s390_kernel_topology.c.regions.json",
+        "artifact_sha256": "bb5dd76c1413ad35f03b60bde946a396946c2f42d43f67c73e3513dcc27a3823",
+        "json_pointer": "/functions/cpu_thread_map/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D03",
+      "profile": "old_s390",
+      "kind": "configured_function",
+      "function": "update_cpu_masks",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/arch/s390/kernel/topology.c",
+      "text": "void update_cpu_masks(void)\n{\n struct cpu_topology_s390 *topo, *topo_package, *topo_sibling;\n int cpu, sibling, pkg_first, smt_first, id;\n\n for (((cpu)) = -1; ((cpu)) = cpumask_next(((cpu)), (((const struct cpumask *)&__cpu_possible_mask))), ((cpu)) < nr_cpu_ids;) {\n  topo = &cpu_topology[cpu];\n  cpu_thread_map(&topo->thread_mask, cpu);\n  cpu_group_map(&topo->core_mask, &socket_info, cpu);\n  cpu_group_map(&topo->book_mask, &book_info, cpu);\n  cpu_group_map(&topo->drawer_mask, &drawer_info, cpu);\n  topo->booted_cores = 0;\n  if (topology_mode != TOPOLOGY_MODE_HW) {\n   id = topology_mode == TOPOLOGY_MODE_PACKAGE ? 0 : cpu;\n   topo->thread_id = cpu;\n   topo->core_id = cpu;\n   topo->socket_id = id;\n   topo->book_id = id;\n   topo->drawer_id = id;\n  }\n }\n for (((cpu)) = -1; ((cpu)) = cpumask_next(((cpu)), (((const struct cpumask *)&__cpu_online_mask))), ((cpu)) < nr_cpu_ids;) {\n  topo = &cpu_topology[cpu];\n  pkg_first = cpumask_first(&topo->core_mask);\n  topo_package = &cpu_topology[pkg_first];\n  if (cpu == pkg_first) {\n   for ((sibling) = -1; (sibling) = cpumask_next((sibling), (&topo->core_mask)), (sibling) < nr_cpu_ids;) {\n    topo_sibling = &cpu_topology[sibling];\n    smt_first = cpumask_first(&topo_sibling->thread_mask);\n    if (sibling == smt_first)\n     topo_package->booted_cores++;\n   }\n  } else {\n   topo->booted_cores = topo_package->booted_cores;\n  }\n }\n}",
+      "text_sha256": "826d91d2b55d415e6793f5294c94be81c34ab652698b8148e80cf51269890d74",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "image_sha256": "5baf6f876b80379136b280d31289d14e5c6f675a975a2c92ec920086a2fb1ab9",
+      "preprocessed_sha256": "12660f9c5583c828e03656622ceff11ed2f46edceddc1035c8c6f06e0bf434aa",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_arch_s390_kernel_topology.c.regions.json",
+        "artifact_sha256": "bb5dd76c1413ad35f03b60bde946a396946c2f42d43f67c73e3513dcc27a3823",
+        "json_pointer": "/functions/update_cpu_masks/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D04",
+      "profile": "old_s390",
+      "kind": "configured_function",
+      "function": "cpu_smt_mask",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/include/linux/topology.h",
+      "text": "static inline __attribute__((__gnu_inline__)) __attribute__((__unused__)) __attribute__((__no_instrument_function__)) const struct cpumask *cpu_smt_mask(int cpu)\n{\n return (&cpu_topology[cpu].thread_mask);\n}",
+      "text_sha256": "8b5ba7719d9c85605b96923346de65e2d9de7d838928ba7575b72e7fb31e8036",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "image_sha256": "5baf6f876b80379136b280d31289d14e5c6f675a975a2c92ec920086a2fb1ab9",
+      "preprocessed_sha256": "fdfc334f81f2d4e83ab268b291e736b2438fdaa45f1942d5fa6ccc7a8ed4e707",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_kernel_sched_core.c.regions.json",
+        "artifact_sha256": "60f0d1da5ddbbe0adb5623048ad566b3e11ea11c47688a336b79e96dd1389c16",
+        "json_pointer": "/functions/cpu_smt_mask/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D05",
+      "profile": "old_s390",
+      "kind": "configured_function",
+      "function": "sched_core_cpu_starting",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/kernel/sched/core.c",
+      "text": "static void sched_core_cpu_starting(unsigned int cpu)\n{\n const struct cpumask *smt_mask = cpu_smt_mask(cpu);\n struct rq *rq = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((cpu))])))); }); }))), *core_rq = ((void *)0);\n unsigned long flags;\n int t;\n\n (*({ do { const void *__vpp_verify = (typeof((&(r4_lock_observation)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))); (typeof((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); })).active = true;\n r4_note(\"core_enter\", cpu, 0, -1, -1, -1, 0);\n sched_core_lock(cpu, &flags);\n\n ({ int __ret_warn_on = !!(rq->core != rq); if (__builtin_expect(!!(__ret_warn_on), 0)) do { do { asm __inline volatile( \"0:\tmc\t0,0\\n\" \".section .rodata.str,\\\"aMS\\\",@progbits,1\\n\" \"1:\t.asciz\t\\\"\"\"kernel/sched/core.c\"\"\\\"\\n\" \".previous\\n\" \".section __bug_table,\\\"awM\\\",@progbits,%2\\n\" \"2:\t.long\t0b-2b,1b-2b\\n\" \"\t.short\t%0,%1\\n\" \"\t.org\t2b+%2\\n\" \".previous\\n\" : : \"i\" (5786), \"i\" ((1 << 0)|((1 << 1) | ((9) << 8))), \"i\" (sizeof(struct bug_entry))); } while (0); } while (0); __builtin_expect(!!(__ret_warn_on), 0); });\n\n\n if (cpumask_weight(smt_mask) == 1)\n  goto unlock;\n\n\n for ((t) = -1; (t) = cpumask_next((t), (smt_mask)), (t) < nr_cpu_ids;) {\n  if (t == cpu)\n   continue;\n  rq = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((t))])))); }); })));\n  if (rq->core == rq) {\n   core_rq = rq;\n   break;\n  }\n }\n\n if (({ int __ret_warn_on = !!(!core_rq); if (__builtin_expect(!!(__ret_warn_on), 0)) do { do { asm __inline volatile( \"0:\tmc\t0,0\\n\" \".section .rodata.str,\\\"aMS\\\",@progbits,1\\n\" \"1:\t.asciz\t\\\"\"\"kernel/sched/core.c\"\"\\\"\\n\" \".previous\\n\" \".section __bug_table,\\\"awM\\\",@progbits,%2\\n\" \"2:\t.long\t0b-2b,1b-2b\\n\" \"\t.short\t%0,%1\\n\" \"\t.org\t2b+%2\\n\" \".previous\\n\" : : \"i\" (5803), \"i\" ((1 << 0)|((1 << 1) | ((9) << 8))), \"i\" (sizeof(struct bug_entry))); } while (0); } while (0); __builtin_expect(!!(__ret_warn_on), 0); }))\n  goto unlock;\n\n\n for ((t) = -1; (t) = cpumask_next((t), (smt_mask)), (t) < nr_cpu_ids;) {\n  rq = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((t))])))); }); })));\n\n  if (t == cpu)\n   rq->core = core_rq;\n\n  ({ int __ret_warn_on = !!(rq->core != core_rq); if (__builtin_expect(!!(__ret_warn_on), 0)) do { do { asm __inline volatile( \"0:\tmc\t0,0\\n\" \".section .rodata.str,\\\"aMS\\\",@progbits,1\\n\" \"1:\t.asciz\t\\\"\"\"kernel/sched/core.c\"\"\\\"\\n\" \".previous\\n\" \".section __bug_table,\\\"awM\\\",@progbits,%2\\n\" \"2:\t.long\t0b-2b,1b-2b\\n\" \"\t.short\t%0,%1\\n\" \"\t.org\t2b+%2\\n\" \".previous\\n\" : : \"i\" (5813), \"i\" ((1 << 0)|((1 << 1) | ((9) << 8))), \"i\" (sizeof(struct bug_entry))); } while (0); } while (0); __builtin_expect(!!(__ret_warn_on), 0); });\n }\n\nunlock:\n sched_core_unlock(cpu, &flags);\n {\n  struct r4_lock_observation *o = &(*({ do { const void *__vpp_verify = (typeof((&(r4_lock_observation)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))); (typeof((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }));\n  o->active = false;\n  printk(\"\\001\" \"6\" \"R4 phase=lock_snapshot cpu=%u current=%u seq=%u mask=%lx self=%u weight=%u locks=%u rq_self=%u online=%u printed_after_unlock=1\\n\", cpu, ((*((struct lowcore *) 0)).cpu_nr), o->seq, o->mask, o->self, o->weight, o->count, o->rq_self, o->online)\n                                                                                                     ;\n }\n r4_note(\"core_exit\", cpu, 0, -1, -1, -1, 0);\n}",
+      "text_sha256": "02e58d4328883fe6ca7c7b63d34b36d42d698e6820716f1c9a26933d193f03e1",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "image_sha256": "5baf6f876b80379136b280d31289d14e5c6f675a975a2c92ec920086a2fb1ab9",
+      "preprocessed_sha256": "fdfc334f81f2d4e83ab268b291e736b2438fdaa45f1942d5fa6ccc7a8ed4e707",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_kernel_sched_core.c.regions.json",
+        "artifact_sha256": "60f0d1da5ddbbe0adb5623048ad566b3e11ea11c47688a336b79e96dd1389c16",
+        "json_pointer": "/functions/sched_core_cpu_starting/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D06",
+      "profile": "old_s390",
+      "kind": "configured_function",
+      "function": "sched_core_lock",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/kernel/sched/core.c",
+      "text": "static void sched_core_lock(int cpu, unsigned long *flags)\n{\n const struct cpumask *smt_mask = cpu_smt_mask(cpu);\n int t, i = 0;\n struct r4_lock_observation *o = &(*({ do { const void *__vpp_verify = (typeof((&(r4_lock_observation)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))); (typeof((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }));\n\n if (o->active) {\n  o->seq = r4_next_seq(cpu);\n  o->mask = ((smt_mask)->bits)[0];\n  o->self = cpumask_test_cpu(cpu, smt_mask);\n  o->weight = cpumask_weight(smt_mask);\n  o->rq_self = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((cpu))])))); }); })))->core == (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((cpu))])))); }); })));\n  o->online = cpu_online(cpu);\n  o->count = 0;\n }\n do { do { ({ unsigned long __dummy; typeof(*flags) __dummy2; (void)(&__dummy == &__dummy2); 1; }); *flags = arch_local_irq_save(); } while (0); } while (0);\n for ((t) = -1; (t) = cpumask_next((t), (smt_mask)), (t) < nr_cpu_ids;) {\n  __raw_spin_lock(((void)(i++), (&(&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((t))])))); }); })))->__lock)));\n  if (o->active)\n   o->count++;\n }\n}",
+      "text_sha256": "2b9301868a07dc92e41725ac3604dbf6460012589a5e5fa5dd997b52f876168c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "image_sha256": "5baf6f876b80379136b280d31289d14e5c6f675a975a2c92ec920086a2fb1ab9",
+      "preprocessed_sha256": "fdfc334f81f2d4e83ab268b291e736b2438fdaa45f1942d5fa6ccc7a8ed4e707",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_kernel_sched_core.c.regions.json",
+        "artifact_sha256": "60f0d1da5ddbbe0adb5623048ad566b3e11ea11c47688a336b79e96dd1389c16",
+        "json_pointer": "/functions/sched_core_lock/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D07",
+      "profile": "old_x86",
+      "kind": "configured_function",
+      "function": "set_cpu_sibling_map",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/arch/x86/kernel/smpboot.c",
+      "text": "void set_cpu_sibling_map(int cpu)\n{\n bool has_smt = smp_num_siblings > 1;\n bool has_mp = has_smt || boot_cpu_data.x86_max_cores > 1;\n struct cpuinfo_x86 *c = &(*({ do { const void *__vpp_verify = (typeof((&(cpu_info)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_info)))) *)((&(cpu_info))))); (typeof((typeof(*((&(cpu_info)))) *)((&(cpu_info))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }));\n struct cpuinfo_x86 *o;\n int i, threads;\n\n cpumask_set_cpu(cpu, cpu_sibling_setup_mask);\n\n if (!has_mp) {\n  cpumask_set_cpu(cpu, ((*({ do { const void *__vpp_verify = (typeof((&(cpu_sibling_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))); (typeof((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }))));\n  cpumask_set_cpu(cpu, cpu_llc_shared_mask(cpu));\n  cpumask_set_cpu(cpu, ((*({ do { const void *__vpp_verify = (typeof((&(cpu_core_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_core_map)))) *)((&(cpu_core_map))))); (typeof((typeof(*((&(cpu_core_map)))) *)((&(cpu_core_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }))));\n  cpumask_set_cpu(cpu, ((*({ do { const void *__vpp_verify = (typeof((&(cpu_die_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_die_map)))) *)((&(cpu_die_map))))); (typeof((typeof(*((&(cpu_die_map)))) *)((&(cpu_die_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }))));\n  c->booted_cores = 1;\n  return;\n }\n\n for ((i) = -1; (i) = cpumask_next((i), (cpu_sibling_setup_mask)), (i) < nr_cpu_ids;) {\n  o = &(*({ do { const void *__vpp_verify = (typeof((&(cpu_info)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_info)))) *)((&(cpu_info))))); (typeof((typeof(*((&(cpu_info)))) *)((&(cpu_info))))) (__ptr + (((__per_cpu_offset[(i)])))); }); }));\n\n  if (match_pkg(c, o) && !topology_same_node(c, o))\n   x86_has_numa_in_package = true;\n\n  if ((i == cpu) || (has_smt && match_smt(c, o)))\n   do { cpumask_set_cpu((cpu), ((*({ do { const void *__vpp_verify = (typeof((&(cpu_sibling_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))); (typeof((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))) (__ptr + (((__per_cpu_offset[(i)])))); }); })))); cpumask_set_cpu((i), ((*({ do { const void *__vpp_verify = (typeof((&(cpu_sibling_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))); (typeof((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); })))); } while (0);\n\n  if ((i == cpu) || (has_mp && match_llc(c, o)))\n   do { cpumask_set_cpu((cpu), cpu_llc_shared_mask(i)); cpumask_set_cpu((i), cpu_llc_shared_mask(cpu)); } while (0);\n\n  if ((i == cpu) || (has_mp && match_die(c, o)))\n   do { cpumask_set_cpu((cpu), ((*({ do { const void *__vpp_verify = (typeof((&(cpu_die_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_die_map)))) *)((&(cpu_die_map))))); (typeof((typeof(*((&(cpu_die_map)))) *)((&(cpu_die_map))))) (__ptr + (((__per_cpu_offset[(i)])))); }); })))); cpumask_set_cpu((i), ((*({ do { const void *__vpp_verify = (typeof((&(cpu_die_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_die_map)))) *)((&(cpu_die_map))))); (typeof((typeof(*((&(cpu_die_map)))) *)((&(cpu_die_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); })))); } while (0);\n }\n\n threads = cpumask_weight(((*({ do { const void *__vpp_verify = (typeof((&(cpu_sibling_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))); (typeof((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }))));\n if (threads > __max_smt_threads)\n  __max_smt_threads = threads;\n\n\n\n\n\n for ((i) = -1; (i) = cpumask_next((i), (cpu_sibling_setup_mask)), (i) < nr_cpu_ids;) {\n  o = &(*({ do { const void *__vpp_verify = (typeof((&(cpu_info)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_info)))) *)((&(cpu_info))))); (typeof((typeof(*((&(cpu_info)))) *)((&(cpu_info))))) (__ptr + (((__per_cpu_offset[(i)])))); }); }));\n\n  if ((i == cpu) || (has_mp && match_pkg(c, o))) {\n   do { cpumask_set_cpu((cpu), ((*({ do { const void *__vpp_verify = (typeof((&(cpu_core_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_core_map)))) *)((&(cpu_core_map))))); (typeof((typeof(*((&(cpu_core_map)))) *)((&(cpu_core_map))))) (__ptr + (((__per_cpu_offset[(i)])))); }); })))); cpumask_set_cpu((i), ((*({ do { const void *__vpp_verify = (typeof((&(cpu_core_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_core_map)))) *)((&(cpu_core_map))))); (typeof((typeof(*((&(cpu_core_map)))) *)((&(cpu_core_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); })))); } while (0);\n\n\n\n\n   if (threads == 1) {\n\n\n\n\n    if (cpumask_first(\n        ((*({ do { const void *__vpp_verify = (typeof((&(cpu_sibling_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))); (typeof((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))) (__ptr + (((__per_cpu_offset[(i)])))); }); })))) == i)\n     c->booted_cores++;\n\n\n\n\n    if (i != cpu)\n     (*({ do { const void *__vpp_verify = (typeof((&(cpu_info)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_info)))) *)((&(cpu_info))))); (typeof((typeof(*((&(cpu_info)))) *)((&(cpu_info))))) (__ptr + (((__per_cpu_offset[(i)])))); }); })).booted_cores++;\n   } else if (i != cpu && !c->booted_cores)\n    c->booted_cores = (*({ do { const void *__vpp_verify = (typeof((&(cpu_info)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_info)))) *)((&(cpu_info))))); (typeof((typeof(*((&(cpu_info)))) *)((&(cpu_info))))) (__ptr + (((__per_cpu_offset[(i)])))); }); })).booted_cores;\n  }\n }\n}",
+      "text_sha256": "8e94bd11b14e161b310b0b9b8e34a63f636e3d849f3af2c18506fc3b1886600d",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "image_sha256": "4c77948337c51ff37d976800d117131545ac1d8b2725fac3f4ceabd6b8075470",
+      "preprocessed_sha256": "994392feb49533bcaf11be76722862406ceb2bdba2e0747f51f25bb8635d053b",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_arch_x86_kernel_smpboot.c.regions.json",
+        "artifact_sha256": "81ab2b4fbd47def98d68e8a1070f53ccecba00f1ae604aad5e09bba4adfba791",
+        "json_pointer": "/functions/set_cpu_sibling_map/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D08",
+      "profile": "old_x86",
+      "kind": "configured_function",
+      "function": "start_secondary",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/arch/x86/kernel/smpboot.c",
+      "text": "static void __attribute__((no_instrument_function)) start_secondary(void *unused)\n{\n\n\n\n\n\n cr4_init();\n\n\n\n\n\n\n cpu_init_secondary();\n rcu_cpu_starting(({ typeof(cpu_number) pscr_ret__; do { const void *__vpp_verify = (typeof((&(cpu_number)) + 0))((void *)0); (void)__vpp_verify; } while (0); switch(sizeof(cpu_number)) { case 1: pscr_ret__ = ({ u8 pfo_val__; asm volatile (\"mov\" \"b \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"q\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 2: pscr_ret__ = ({ u16 pfo_val__; asm volatile (\"mov\" \"w \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 4: pscr_ret__ = ({ u32 pfo_val__; asm volatile (\"mov\" \"l \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 8: pscr_ret__ = ({ u64 pfo_val__; asm volatile (\"mov\" \"q \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; default: __bad_size_call_parameter(); break; } pscr_ret__; }));\n x86_cpuinit.early_percpu_clock_init();\n smp_callin();\n\n enable_start_cpu0 = 0;\n\n\n __asm__ __volatile__(\"\": : :\"memory\");\n\n\n\n check_tsc_sync_target();\n\n speculative_store_bypass_ht_init();\n\n\n\n\n\n\n\n lock_vector_lock();\n set_cpu_online(({ __this_cpu_preempt_check(\"read\"); ({ typeof(cpu_number) pscr_ret__; do { const void *__vpp_verify = (typeof((&(cpu_number)) + 0))((void *)0); (void)__vpp_verify; } while (0); switch(sizeof(cpu_number)) { case 1: pscr_ret__ = ({ u8 pfo_val__; asm (\"mov\" \"b \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"q\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 2: pscr_ret__ = ({ u16 pfo_val__; asm (\"mov\" \"w \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 4: pscr_ret__ = ({ u32 pfo_val__; asm (\"mov\" \"l \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 8: pscr_ret__ = ({ u64 pfo_val__; asm (\"mov\" \"q \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; default: __bad_size_call_parameter(); break; } pscr_ret__; }); }), true);\n lapic_online();\n unlock_vector_lock();\n cpu_set_state_online(({ __this_cpu_preempt_check(\"read\"); ({ typeof(cpu_number) pscr_ret__; do { const void *__vpp_verify = (typeof((&(cpu_number)) + 0))((void *)0); (void)__vpp_verify; } while (0); switch(sizeof(cpu_number)) { case 1: pscr_ret__ = ({ u8 pfo_val__; asm (\"mov\" \"b \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"q\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 2: pscr_ret__ = ({ u16 pfo_val__; asm (\"mov\" \"w \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 4: pscr_ret__ = ({ u32 pfo_val__; asm (\"mov\" \"l \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 8: pscr_ret__ = ({ u64 pfo_val__; asm (\"mov\" \"q \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; default: __bad_size_call_parameter(); break; } pscr_ret__; }); }));\n x86_platform.nmi_init();\n\n\n do { arch_local_irq_enable(); } while (0);\n\n x86_cpuinit.setup_percpu_clockev();\n\n asm volatile(\"sfence\" ::: \"memory\");\n cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n}",
+      "text_sha256": "8210fdaec2a430b5dd306b8fddb4dfe82539c3f1028176ee727c919411e39a28",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "image_sha256": "4c77948337c51ff37d976800d117131545ac1d8b2725fac3f4ceabd6b8075470",
+      "preprocessed_sha256": "994392feb49533bcaf11be76722862406ceb2bdba2e0747f51f25bb8635d053b",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_arch_x86_kernel_smpboot.c.regions.json",
+        "artifact_sha256": "81ab2b4fbd47def98d68e8a1070f53ccecba00f1ae604aad5e09bba4adfba791",
+        "json_pointer": "/functions/start_secondary/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D09",
+      "profile": "old_x86",
+      "kind": "configured_function",
+      "function": "cpu_smt_mask",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/include/linux/topology.h",
+      "text": "static inline __attribute__((__gnu_inline__)) __attribute__((__unused__)) __attribute__((no_instrument_function)) const struct cpumask *cpu_smt_mask(int cpu)\n{\n return ((*({ do { const void *__vpp_verify = (typeof((&(cpu_sibling_map)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))); (typeof((typeof(*((&(cpu_sibling_map)))) *)((&(cpu_sibling_map))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); })));\n}",
+      "text_sha256": "b0b8f9fe39da428270bb55c994a851699a68b43570cd7272a38c37686b1a1f0e",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "image_sha256": "4c77948337c51ff37d976800d117131545ac1d8b2725fac3f4ceabd6b8075470",
+      "preprocessed_sha256": "bd8d0cae19d0673aa2bd7686ed22e50afc61a745816ad6f379f8d3e12692814d",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_kernel_sched_core.c.regions.json",
+        "artifact_sha256": "afb33d959c4590b23fda3522e76e1eee83f48aad4653d0c52ff3abe86be9b1f5",
+        "json_pointer": "/functions/cpu_smt_mask/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D10",
+      "profile": "old_x86",
+      "kind": "configured_function",
+      "function": "sched_core_cpu_starting",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/kernel/sched/core.c",
+      "text": "static void sched_core_cpu_starting(unsigned int cpu)\n{\n const struct cpumask *smt_mask = cpu_smt_mask(cpu);\n struct rq *rq = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((cpu))])))); }); }))), *core_rq = ((void *)0);\n unsigned long flags;\n int t;\n\n (*({ do { const void *__vpp_verify = (typeof((&(r4_lock_observation)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))); (typeof((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); })).active = true;\n r4_note(\"core_enter\", cpu, 0, -1, -1, -1, 0);\n sched_core_lock(cpu, &flags);\n\n ({ int __ret_warn_on = !!(rq->core != rq); if (__builtin_expect(!!(__ret_warn_on), 0)) do { do { } while(0); do { asm __inline volatile(\"1:\\t\" \".byte 0x0f, 0x0b\" \"\\n\" \".pushsection __bug_table,\\\"aw\\\"\\n\" \"2:\\t\" \".long \" \"1b\" \" - 2b\" \"\\t# bug_entry::bug_addr\\n\" \"\\t\" \".long \" \"%c0\" \" - 2b\" \"\\t# bug_entry::file\\n\" \"\\t.word %c1\" \"\\t# bug_entry::line\\n\" \"\\t.word %c2\" \"\\t# bug_entry::flags\\n\" \"\\t.org 2b+%c3\\n\" \".popsection\" : : \"i\" (\"kernel/sched/core.c\"), \"i\" (5786), \"i\" ((1 << 0)|((1 << 1) | ((9) << 8))), \"i\" (sizeof(struct bug_entry))); } while (0); ({ asm volatile(\"492\" \":\\n\\t\" \".pushsection .discard.reachable\\n\\t\" \".long \" \"492\" \"b - .\\n\\t\" \".popsection\\n\\t\"); }); do { } while(0); } while (0); __builtin_expect(!!(__ret_warn_on), 0); });\n\n\n if (cpumask_weight(smt_mask) == 1)\n  goto unlock;\n\n\n for ((t) = -1; (t) = cpumask_next((t), (smt_mask)), (t) < nr_cpu_ids;) {\n  if (t == cpu)\n   continue;\n  rq = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((t))])))); }); })));\n  if (rq->core == rq) {\n   core_rq = rq;\n   break;\n  }\n }\n\n if (({ int __ret_warn_on = !!(!core_rq); if (__builtin_expect(!!(__ret_warn_on), 0)) do { do { } while(0); do { asm __inline volatile(\"1:\\t\" \".byte 0x0f, 0x0b\" \"\\n\" \".pushsection __bug_table,\\\"aw\\\"\\n\" \"2:\\t\" \".long \" \"1b\" \" - 2b\" \"\\t# bug_entry::bug_addr\\n\" \"\\t\" \".long \" \"%c0\" \" - 2b\" \"\\t# bug_entry::file\\n\" \"\\t.word %c1\" \"\\t# bug_entry::line\\n\" \"\\t.word %c2\" \"\\t# bug_entry::flags\\n\" \"\\t.org 2b+%c3\\n\" \".popsection\" : : \"i\" (\"kernel/sched/core.c\"), \"i\" (5803), \"i\" ((1 << 0)|((1 << 1) | ((9) << 8))), \"i\" (sizeof(struct bug_entry))); } while (0); ({ asm volatile(\"493\" \":\\n\\t\" \".pushsection .discard.reachable\\n\\t\" \".long \" \"493\" \"b - .\\n\\t\" \".popsection\\n\\t\"); }); do { } while(0); } while (0); __builtin_expect(!!(__ret_warn_on), 0); }))\n  goto unlock;\n\n\n for ((t) = -1; (t) = cpumask_next((t), (smt_mask)), (t) < nr_cpu_ids;) {\n  rq = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((t))])))); }); })));\n\n  if (t == cpu)\n   rq->core = core_rq;\n\n  ({ int __ret_warn_on = !!(rq->core != core_rq); if (__builtin_expect(!!(__ret_warn_on), 0)) do { do { } while(0); do { asm __inline volatile(\"1:\\t\" \".byte 0x0f, 0x0b\" \"\\n\" \".pushsection __bug_table,\\\"aw\\\"\\n\" \"2:\\t\" \".long \" \"1b\" \" - 2b\" \"\\t# bug_entry::bug_addr\\n\" \"\\t\" \".long \" \"%c0\" \" - 2b\" \"\\t# bug_entry::file\\n\" \"\\t.word %c1\" \"\\t# bug_entry::line\\n\" \"\\t.word %c2\" \"\\t# bug_entry::flags\\n\" \"\\t.org 2b+%c3\\n\" \".popsection\" : : \"i\" (\"kernel/sched/core.c\"), \"i\" (5813), \"i\" ((1 << 0)|((1 << 1) | ((9) << 8))), \"i\" (sizeof(struct bug_entry))); } while (0); ({ asm volatile(\"494\" \":\\n\\t\" \".pushsection .discard.reachable\\n\\t\" \".long \" \"494\" \"b - .\\n\\t\" \".popsection\\n\\t\"); }); do { } while(0); } while (0); __builtin_expect(!!(__ret_warn_on), 0); });\n }\n\nunlock:\n sched_core_unlock(cpu, &flags);\n {\n  struct r4_lock_observation *o = &(*({ do { const void *__vpp_verify = (typeof((&(r4_lock_observation)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))); (typeof((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }));\n  o->active = false;\n  printk(\"\\001\" \"6\" \"R4 phase=lock_snapshot cpu=%u current=%u seq=%u mask=%lx self=%u weight=%u locks=%u rq_self=%u online=%u printed_after_unlock=1\\n\", cpu, ({ typeof(cpu_number) pscr_ret__; do { const void *__vpp_verify = (typeof((&(cpu_number)) + 0))((void *)0); (void)__vpp_verify; } while (0); switch(sizeof(cpu_number)) { case 1: pscr_ret__ = ({ u8 pfo_val__; asm volatile (\"mov\" \"b \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"q\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 2: pscr_ret__ = ({ u16 pfo_val__; asm volatile (\"mov\" \"w \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 4: pscr_ret__ = ({ u32 pfo_val__; asm volatile (\"mov\" \"l \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 8: pscr_ret__ = ({ u64 pfo_val__; asm volatile (\"mov\" \"q \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; default: __bad_size_call_parameter(); break; } pscr_ret__; }), o->seq, o->mask, o->self, o->weight, o->count, o->rq_self, o->online)\n                                                                                                     ;\n }\n r4_note(\"core_exit\", cpu, 0, -1, -1, -1, 0);\n}",
+      "text_sha256": "37d9791e843eda296a98cb70c1cb59c03f34cdee9e56150d45329a46817756b9",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "image_sha256": "4c77948337c51ff37d976800d117131545ac1d8b2725fac3f4ceabd6b8075470",
+      "preprocessed_sha256": "bd8d0cae19d0673aa2bd7686ed22e50afc61a745816ad6f379f8d3e12692814d",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_kernel_sched_core.c.regions.json",
+        "artifact_sha256": "afb33d959c4590b23fda3522e76e1eee83f48aad4653d0c52ff3abe86be9b1f5",
+        "json_pointer": "/functions/sched_core_cpu_starting/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D11",
+      "profile": "old_x86",
+      "kind": "configured_function",
+      "function": "sched_core_lock",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/kernel/sched/core.c",
+      "text": "static void sched_core_lock(int cpu, unsigned long *flags)\n{\n const struct cpumask *smt_mask = cpu_smt_mask(cpu);\n int t, i = 0;\n struct r4_lock_observation *o = &(*({ do { const void *__vpp_verify = (typeof((&(r4_lock_observation)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))); (typeof((typeof(*((&(r4_lock_observation)))) *)((&(r4_lock_observation))))) (__ptr + (((__per_cpu_offset[(cpu)])))); }); }));\n\n if (o->active) {\n  o->seq = r4_next_seq(cpu);\n  o->mask = ((smt_mask)->bits)[0];\n  o->self = cpumask_test_cpu(cpu, smt_mask);\n  o->weight = cpumask_weight(smt_mask);\n  o->rq_self = (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((cpu))])))); }); })))->core == (&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((cpu))])))); }); })));\n  o->online = cpu_online(cpu);\n  o->count = 0;\n }\n do { do { ({ unsigned long __dummy; typeof(*flags) __dummy2; (void)(&__dummy == &__dummy2); 1; }); *flags = arch_local_irq_save(); } while (0); } while (0);\n for ((t) = -1; (t) = cpumask_next((t), (smt_mask)), (t) < nr_cpu_ids;) {\n  _raw_spin_lock(((void)(i++), (&(&(*({ do { const void *__vpp_verify = (typeof((&(runqueues)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(runqueues)))) *)((&(runqueues))))); (typeof((typeof(*((&(runqueues)))) *)((&(runqueues))))) (__ptr + (((__per_cpu_offset[((t))])))); }); })))->__lock)));\n  if (o->active)\n   o->count++;\n }\n}",
+      "text_sha256": "0ccfbbbcaec5baf5a24df3e0e5fff5d6fb33e0e0d6a5404756b3cc1cb1ce3db4",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "image_sha256": "4c77948337c51ff37d976800d117131545ac1d8b2725fac3f4ceabd6b8075470",
+      "preprocessed_sha256": "bd8d0cae19d0673aa2bd7686ed22e50afc61a745816ad6f379f8d3e12692814d",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_kernel_sched_core.c.regions.json",
+        "artifact_sha256": "afb33d959c4590b23fda3522e76e1eee83f48aad4653d0c52ff3abe86be9b1f5",
+        "json_pointer": "/functions/sched_core_lock/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": false
+    },
+    {
+      "id": "D12",
+      "profile": "old_x86",
+      "kind": "configured_function",
+      "function": "smp_callin",
+      "path": "/root/.cache/linux-bug-analyze/s390-contract-20261013/runtime/old/linux/arch/x86/kernel/smpboot.c",
+      "text": "static void smp_callin(void)\n{\n int cpuid;\n\n\n\n\n\n\n\n cpuid = ({ __this_cpu_preempt_check(\"read\"); ({ typeof(cpu_number) pscr_ret__; do { const void *__vpp_verify = (typeof((&(cpu_number)) + 0))((void *)0); (void)__vpp_verify; } while (0); switch(sizeof(cpu_number)) { case 1: pscr_ret__ = ({ u8 pfo_val__; asm (\"mov\" \"b \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"q\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 2: pscr_ret__ = ({ u16 pfo_val__; asm (\"mov\" \"w \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 4: pscr_ret__ = ({ u32 pfo_val__; asm (\"mov\" \"l \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 8: pscr_ret__ = ({ u64 pfo_val__; asm (\"mov\" \"q \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; default: __bad_size_call_parameter(); break; } pscr_ret__; }); });\n\n\n\n\n\n\n\n apic_ap_setup();\n\n\n\n\n\n smp_store_cpu_info(cpuid);\n\n\n\n\n\n set_cpu_sibling_map(({ typeof(cpu_number) pscr_ret__; do { const void *__vpp_verify = (typeof((&(cpu_number)) + 0))((void *)0); (void)__vpp_verify; } while (0); switch(sizeof(cpu_number)) { case 1: pscr_ret__ = ({ u8 pfo_val__; asm volatile (\"mov\" \"b \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"q\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 2: pscr_ret__ = ({ u16 pfo_val__; asm volatile (\"mov\" \"w \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 4: pscr_ret__ = ({ u32 pfo_val__; asm volatile (\"mov\" \"l \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; case 8: pscr_ret__ = ({ u64 pfo_val__; asm volatile (\"mov\" \"q \" \"%%\"\"gs\"\":\" \"%\" \"[var]\" \", \" \"%[val]\" : [val] \"=\" \"r\" (pfo_val__) : [var] \"m\" (cpu_number)); (typeof(cpu_number))(unsigned long) pfo_val__; }); break; default: __bad_size_call_parameter(); break; } pscr_ret__; }));\n\n init_freq_invariance(true, false);\n\n\n\n\n\n\n\n calibrate_delay();\n (*({ do { const void *__vpp_verify = (typeof((&(cpu_info)) + 0))((void *)0); (void)__vpp_verify; } while (0); ({ unsigned long __ptr; __asm__ (\"\" : \"=r\"(__ptr) : \"0\"((typeof(*((&(cpu_info)))) *)((&(cpu_info))))); (typeof((typeof(*((&(cpu_info)))) *)((&(cpu_info))))) (__ptr + (((__per_cpu_offset[(cpuid)])))); }); })).loops_per_jiffy = loops_per_jiffy;\n ({ if (0) printk(\"\\001\" \"7\" \"smpboot\" \": \" \"Stack at about %p\\n\", &cpuid); 0; });\n\n asm volatile(\"sfence\" ::: \"memory\");\n\n r4_note(\"arch_before_notify\", cpuid, 1, cpumask_test_cpu(cpuid, cpu_sibling_setup_mask), -1, -1, 0);\n notify_cpu_starting(cpuid);\n r4_note(\"arch_after_notify\", cpuid, 1, cpumask_test_cpu(cpuid, cpu_sibling_setup_mask), -1, -1, 0);\n\n\n\n\n cpumask_set_cpu(cpuid, cpu_callin_mask);\n}",
+      "text_sha256": "c5d6e49103ecf9e425b4d5bb1c92e4cc089b35d4a297bb6513cbbd85979729d3",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "image_sha256": "4c77948337c51ff37d976800d117131545ac1d8b2725fac3f4ceabd6b8075470",
+      "preprocessed_sha256": "994392feb49533bcaf11be76722862406ceb2bdba2e0747f51f25bb8635d053b",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_smp_callin.supplementary.json",
+        "artifact_sha256": "4a8dd82e792674c5c89e1692a9ea3fe3ee5a68c05560cf461fcc6e2cf4eb35a0",
+        "json_pointer": "/functions/smp_callin/text"
+      },
+      "source_identity_note": "instrumented current preprocessing; local packet lines are not original C lines",
+      "supplementary_region": true
+    },
+    {
+      "id": "D13",
+      "profile": "old_s390",
+      "kind": "selected_config_facts",
+      "function": null,
+      "path": "experiments/case_taxonomy/s390_arch_contract_20261013/runtime/profiles/old_s390/kernel.config",
+      "text": "CONFIG_SCHED_CORE=y\nCONFIG_S390=y\nCONFIG_64BIT=y\nCONFIG_SMP=y\nCONFIG_NR_CPUS=4\nCONFIG_HOTPLUG_CPU=y\nCONFIG_SCHED_SMT=y\nCONFIG_SCHED_TOPOLOGY=y\nCONFIG_SYSFS=y",
+      "text_sha256": "6835a247c279e8d00f806e3d57a20ccfbb9fb786452364a848bf50b87fc9555b",
+      "configuration_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/s390_arch_contract_20261013/runtime/profiles/old_s390/kernel.config",
+        "artifact_sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+        "projection": "selected_lines",
+        "source_lines": [
+          85,
+          204,
+          237,
+          239,
+          240,
+          241,
+          243,
+          247,
+          928
+        ]
+      },
+      "source_identity_note": "only selected explicit config records; missing keys are unknown"
+    },
+    {
+      "id": "D14",
+      "profile": "old_x86",
+      "kind": "selected_config_facts",
+      "function": null,
+      "path": "experiments/case_taxonomy/s390_arch_contract_20261013/runtime/profiles/old_x86/kernel.config",
+      "text": "CONFIG_SCHED_CORE=y\nCONFIG_64BIT=y\nCONFIG_X86_64=y\nCONFIG_SMP=y\nCONFIG_NR_CPUS=4\nCONFIG_SCHED_SMT=y\nCONFIG_HOTPLUG_CPU=y\nCONFIG_SYSFS=y",
+      "text_sha256": "7c1644a31bb080a8c5077a51a04b83a604639f0664da20c5abb2f466769c8c16",
+      "configuration_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "source_binding": {
+        "artifact": "experiments/case_taxonomy/s390_arch_contract_20261013/runtime/profiles/old_x86/kernel.config",
+        "artifact_sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+        "projection": "selected_lines",
+        "source_lines": [
+          105,
+          224,
+          225,
+          259,
+          296,
+          297,
+          354,
+          1396
+        ]
+      },
+      "source_identity_note": "only selected explicit config records; missing keys are unknown"
+    }
+  ],
+  "input_manifest": [
+    {
+      "path": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_arch_s390_kernel_smp.c.regions.json",
+      "sha256": "10ecfb3ca53cff383f0e5ece1caf3fe1fc5ee4475d0bd68917dc81adcc422504"
+    },
+    {
+      "path": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_arch_s390_kernel_topology.c.regions.json",
+      "sha256": "bb5dd76c1413ad35f03b60bde946a396946c2f42d43f67c73e3513dcc27a3823"
+    },
+    {
+      "path": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_s390_kernel_sched_core.c.regions.json",
+      "sha256": "60f0d1da5ddbbe0adb5623048ad566b3e11ea11c47688a336b79e96dd1389c16"
+    },
+    {
+      "path": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_arch_x86_kernel_smpboot.c.regions.json",
+      "sha256": "81ab2b4fbd47def98d68e8a1070f53ccecba00f1ae604aad5e09bba4adfba791"
+    },
+    {
+      "path": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_kernel_sched_core.c.regions.json",
+      "sha256": "afb33d959c4590b23fda3522e76e1eee83f48aad4653d0c52ff3abe86be9b1f5"
+    },
+    {
+      "path": "experiments/case_taxonomy/runtime_evidence_alignment_20261017/old_x86_smp_callin.supplementary.json",
+      "sha256": "4a8dd82e792674c5c89e1692a9ea3fe3ee5a68c05560cf461fcc6e2cf4eb35a0"
+    },
+    {
+      "path": "experiments/case_taxonomy/s390_arch_contract_20261013/runtime/profiles/old_s390/kernel.config",
+      "sha256": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e"
+    },
+    {
+      "path": "experiments/case_taxonomy/s390_arch_contract_20261013/runtime/profiles/old_x86/kernel.config",
+      "sha256": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318"
+    }
+  ],
+  "limits": [
+    "Known-case development; not independent or blinded",
+    "Instrumented source is preserved; probe reads are not original content-use events",
+    "Current preprocessing is not an exact historical compiler/header replay",
+    "No old runtime results, repair, manual provider feature values, or source oracle included",
+    "No complete external notify-to-public-callback chain is supplied; missing evidence remains unknown"
+  ]
+}

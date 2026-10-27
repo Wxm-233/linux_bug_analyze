@@ -1,0 +1,1635 @@
+{
+  "date": "2026-10-15",
+  "model_source_gates": {
+    "startup_target_pair": {
+      "original_scope": "cross_arch_candidate",
+      "status": "candidate_only",
+      "classification": "cross_arch_source_candidate",
+      "findings": [
+        {
+          "classification": "cross_arch_source_candidate",
+          "status": "candidate_only",
+          "candidate_cited": {
+            "provider_architectures": [
+              "s390",
+              "x86"
+            ],
+            "configuration": {
+              "x86": {
+                "status": "missing",
+                "sources": []
+              },
+              "s390": {
+                "status": "missing",
+                "sources": []
+              }
+            },
+            "common_consumer": true
+          },
+          "extracted_evidence": [
+            {
+              "document": "S_core",
+              "path": "kernel/sched/core.c",
+              "kind": "source",
+              "start_line": 5753,
+              "end_line": 5766,
+              "source_text": "static void sched_core_cpu_starting(unsigned int cpu)\n{\n\tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n\tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n\tunsigned long flags;\n\tint t;\n\n\tsched_core_lock(cpu, &flags);\n\n\tWARN_ON_ONCE(rq->core != rq);\n\n\t/* if we're the first, we'll be our own leader */\n\tif (cpumask_weight(smt_mask) == 1)\n\t\tgoto unlock;"
+            },
+            {
+              "document": "S_x86_callin",
+              "path": "arch/x86/kernel/smpboot.c",
+              "kind": "source",
+              "start_line": 186,
+              "end_line": 208,
+              "source_text": "\tsmp_store_cpu_info(cpuid);\n\n\t/*\n\t * The topology information must be up to date before\n\t * calibrate_delay() and notify_cpu_starting().\n\t */\n\tset_cpu_sibling_map(raw_smp_processor_id());\n\n\tinit_freq_invariance(true, false);\n\n\t/*\n\t * Get our bogomips.\n\t * Update loops_per_jiffy in cpu_data. Previous call to\n\t * smp_store_cpu_info() stored a value that is close but not as\n\t * accurate as the value just calculated.\n\t */\n\tcalibrate_delay();\n\tcpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;\n\tpr_debug(\"Stack at about %p\\n\", &cpuid);\n\n\twmb();\n\n\tnotify_cpu_starting(cpuid);"
+            },
+            {
+              "document": "S_s390_start",
+              "path": "arch/s390/kernel/smp.c",
+              "kind": "source",
+              "start_line": 888,
+              "end_line": 911,
+              "source_text": "static void smp_start_secondary(void *cpuvoid)\n{\n\tint cpu = raw_smp_processor_id();\n\n\tS390_lowcore.last_update_clock = get_tod_clock();\n\tS390_lowcore.restart_stack = (unsigned long)restart_stack;\n\tS390_lowcore.restart_fn = (unsigned long)do_restart;\n\tS390_lowcore.restart_data = 0;\n\tS390_lowcore.restart_source = -1U;\n\tS390_lowcore.restart_flags = 0;\n\trestore_access_regs(S390_lowcore.access_regs_save_area);\n\tcpu_init();\n\trcu_cpu_starting(cpu);\n\tinit_cpu_timer();\n\tvtime_init();\n\tvdso_getcpu_init();\n\tpfault_init();\n\tnotify_cpu_starting(cpu);\n\tif (topology_cpu_dedicated(cpu))\n\t\tset_cpu_flag(CIF_DEDICATED_CPU);\n\telse\n\t\tclear_cpu_flag(CIF_DEDICATED_CPU);\n\tset_cpu_online(cpu, true);\n\tupdate_cpu_masks();"
+            },
+            {
+              "document": "S_s390_map",
+              "path": "arch/s390/kernel/topology.c",
+              "kind": "source",
+              "start_line": 96,
+              "end_line": 114,
+              "source_text": "static void cpu_thread_map(cpumask_t *dst, unsigned int cpu)\n{\n\tstatic cpumask_t mask;\n\tint i;\n\n\tcpumask_clear(&mask);\n\tif (!cpu_online(cpu))\n\t\tgoto out;\n\tcpumask_set_cpu(cpu, &mask);\n\tif (topology_mode != TOPOLOGY_MODE_HW)\n\t\tgoto out;\n\tcpu -= cpu % (smp_cpu_mtid + 1);\n\tfor (i = 0; i <= smp_cpu_mtid; i++)\n\t\tif (cpu_present(cpu + i))\n\t\t\tcpumask_set_cpu(cpu + i, &mask);\n\tcpumask_and(&mask, &mask, cpu_online_mask);\nout:\n\tcpumask_copy(dst, &mask);\n}"
+            }
+          ],
+          "missing": [
+            "candidate.configuration.x86",
+            "candidate.configuration.s390"
+          ],
+          "conditional_configuration_not_cited": true,
+          "structured_predicate_supplied": false,
+          "validated_detector": false,
+          "semantic_review_required": true
+        }
+      ],
+      "validated_detector": false,
+      "predicate_origin": "not_inferred_from_prose",
+      "material_available": {
+        "provider_architectures": [
+          "s390",
+          "x86"
+        ],
+        "configuration": {
+          "x86": {
+            "status": "enabled",
+            "sources": [
+              {
+                "document": "C_x86",
+                "path": "../arch_witness_checks_20261014/generated/config/startup_x86.txt",
+                "status": "enabled",
+                "values": {
+                  "CONFIG_X86_64": "y",
+                  "CONFIG_SMP": "y",
+                  "CONFIG_SYSFS": "y",
+                  "CONFIG_NR_CPUS": "4",
+                  "CONFIG_SCHED_SMT": "y",
+                  "CONFIG_SCHED_CORE": "y",
+                  "CONFIG_HOTPLUG_CPU": "y"
+                }
+              }
+            ]
+          },
+          "s390": {
+            "status": "enabled",
+            "sources": [
+              {
+                "document": "C_s390",
+                "path": "../arch_witness_checks_20261014/generated/config/startup_s390.txt",
+                "status": "enabled",
+                "values": {
+                  "CONFIG_S390": "y",
+                  "CONFIG_SMP": "y",
+                  "CONFIG_SYSFS": "y",
+                  "CONFIG_NR_CPUS": "4",
+                  "CONFIG_SCHED_SMT": "y",
+                  "CONFIG_SCHED_CORE": "y",
+                  "CONFIG_SCHED_TOPOLOGY": "y",
+                  "CONFIG_HOTPLUG_CPU": "y"
+                }
+              }
+            ]
+          }
+        },
+        "common_consumer": true
+      }
+    },
+    "startup_target_ablated": {
+      "original_scope": "cross_arch_candidate",
+      "status": "candidate_only",
+      "classification": "local_candidate",
+      "findings": [
+        {
+          "classification": "local_candidate",
+          "status": "candidate_only",
+          "candidate_cited": {
+            "provider_architectures": [],
+            "configuration": {
+              "x86": {
+                "status": "missing",
+                "sources": []
+              },
+              "s390": {
+                "status": "missing",
+                "sources": []
+              }
+            },
+            "common_consumer": true
+          },
+          "extracted_evidence": [
+            {
+              "document": "S_interface",
+              "path": "include/linux/topology.h",
+              "kind": "source",
+              "start_line": 202,
+              "end_line": 206,
+              "source_text": "#if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)\nstatic inline const struct cpumask *cpu_smt_mask(int cpu)\n{\n\treturn topology_sibling_cpumask(cpu);\n}"
+            },
+            {
+              "document": "S_notify",
+              "path": "kernel/cpu.c",
+              "kind": "source",
+              "start_line": 1254,
+              "end_line": 1265,
+              "source_text": " * It must be called by the arch code on the new cpu, before the new cpu\n * enables interrupts and before the \"boot\" cpu returns from __cpu_up().\n */\nvoid notify_cpu_starting(unsigned int cpu)\n{\n\tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n\tenum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);\n\tint ret;\n\n\trcu_cpu_starting(cpu);\t/* Enables RCU usage on this CPU. */\n\tcpumask_set_cpu(cpu, &cpus_booted_once_mask);\n\tret = cpuhp_invoke_callback_range(true, cpu, st, target);"
+            },
+            {
+              "document": "S_table",
+              "path": "kernel/cpu.c",
+              "kind": "source",
+              "start_line": 1692,
+              "end_line": 1696,
+              "source_text": "\t[CPUHP_AP_SCHED_STARTING] = {\n\t\t.name\t\t\t= \"sched:starting\",\n\t\t.startup.single\t\t= sched_cpu_starting,\n\t\t.teardown.single\t= sched_cpu_dying,\n\t},"
+            },
+            {
+              "document": "S_starting",
+              "path": "kernel/sched/core.c",
+              "kind": "source",
+              "start_line": 8834,
+              "end_line": 8840,
+              "source_text": "int sched_cpu_starting(unsigned int cpu)\n{\n\tsched_core_cpu_starting(cpu);\n\tsched_rq_cpu_starting(cpu);\n\tsched_tick_start(cpu);\n\treturn 0;\n}"
+            },
+            {
+              "document": "S_core",
+              "path": "kernel/sched/core.c",
+              "kind": "source",
+              "start_line": 5753,
+              "end_line": 5766,
+              "source_text": "static void sched_core_cpu_starting(unsigned int cpu)\n{\n\tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n\tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n\tunsigned long flags;\n\tint t;\n\n\tsched_core_lock(cpu, &flags);\n\n\tWARN_ON_ONCE(rq->core != rq);\n\n\t/* if we're the first, we'll be our own leader */\n\tif (cpumask_weight(smt_mask) == 1)\n\t\tgoto unlock;"
+            },
+            {
+              "document": "S_locks",
+              "path": "kernel/sched/core.c",
+              "kind": "source",
+              "start_line": 240,
+              "end_line": 248,
+              "source_text": "static void sched_core_lock(int cpu, unsigned long *flags)\n{\n\tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n\tint t, i = 0;\n\n\tlocal_irq_save(*flags);\n\tfor_each_cpu(t, smt_mask)\n\t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n}"
+            }
+          ],
+          "missing": [
+            "candidate.provider.x86",
+            "material.configuration.x86",
+            "candidate.configuration.x86",
+            "candidate.provider.s390",
+            "material.configuration.s390",
+            "candidate.configuration.s390"
+          ],
+          "conditional_configuration_not_cited": false,
+          "structured_predicate_supplied": false,
+          "validated_detector": false,
+          "semantic_review_required": true
+        }
+      ],
+      "validated_detector": false,
+      "predicate_origin": "not_inferred_from_prose",
+      "material_available": {
+        "provider_architectures": [],
+        "configuration": {
+          "x86": {
+            "status": "missing",
+            "sources": []
+          },
+          "s390": {
+            "status": "missing",
+            "sources": []
+          }
+        },
+        "common_consumer": true
+      }
+    }
+  },
+  "researcher_card_gate": {
+    "status": "eligible_for_archived_replay",
+    "eligible_for_archived_replay": true,
+    "origin": "researcher_synthesis",
+    "validated_detector": false,
+    "missing": [],
+    "evidence_layers": {
+      "providers": {
+        "x86": [
+          {
+            "document": "S_x86_header",
+            "path": "arch/x86/include/asm/topology.h",
+            "kind": "source",
+            "start_line": 118,
+            "end_line": 122,
+            "source_text": "#define topology_sibling_cpumask(cpu)\t\t(per_cpu(cpu_sibling_map, cpu))\n\nextern unsigned int __max_logical_packages;\n#define topology_max_packages()\t\t\t(__max_logical_packages)\n"
+          },
+          {
+            "document": "S_x86_callin_entry",
+            "path": "arch/x86/kernel/smpboot.c",
+            "kind": "source",
+            "start_line": 162,
+            "end_line": 165,
+            "source_text": "static void smp_callin(void)\n{\n\tint cpuid;\n"
+          },
+          {
+            "document": "S_x86_id",
+            "path": "arch/x86/kernel/smpboot.c",
+            "kind": "source",
+            "start_line": 172,
+            "end_line": 173,
+            "source_text": "\tcpuid = smp_processor_id();\n"
+          },
+          {
+            "document": "S_x86_callin",
+            "path": "arch/x86/kernel/smpboot.c",
+            "kind": "source",
+            "start_line": 186,
+            "end_line": 214,
+            "source_text": "\tsmp_store_cpu_info(cpuid);\n\n\t/*\n\t * The topology information must be up to date before\n\t * calibrate_delay() and notify_cpu_starting().\n\t */\n\tset_cpu_sibling_map(raw_smp_processor_id());\n\n\tinit_freq_invariance(true, false);\n\n\t/*\n\t * Get our bogomips.\n\t * Update loops_per_jiffy in cpu_data. Previous call to\n\t * smp_store_cpu_info() stored a value that is close but not as\n\t * accurate as the value just calculated.\n\t */\n\tcalibrate_delay();\n\tcpu_data(cpuid).loops_per_jiffy = loops_per_jiffy;\n\tpr_debug(\"Stack at about %p\\n\", &cpuid);\n\n\twmb();\n\n\tnotify_cpu_starting(cpuid);\n\n\t/*\n\t * Allow the master to continue.\n\t */\n\tcpumask_set_cpu(cpuid, cpu_callin_mask);\n}"
+          },
+          {
+            "document": "S_x86_start",
+            "path": "arch/x86/kernel/smpboot.c",
+            "kind": "source",
+            "start_line": 229,
+            "end_line": 264,
+            "source_text": "\n#ifdef CONFIG_X86_32\n\t/* switch away from the initial page table */\n\tload_cr3(swapper_pg_dir);\n\t__flush_tlb_all();\n#endif\n\tcpu_init_secondary();\n\trcu_cpu_starting(raw_smp_processor_id());\n\tx86_cpuinit.early_percpu_clock_init();\n\tsmp_callin();\n\n\tenable_start_cpu0 = 0;\n\n\t/* otherwise gcc will move up smp_processor_id before the cpu_init */\n\tbarrier();\n\t/*\n\t * Check TSC synchronization with the boot CPU:\n\t */\n\tcheck_tsc_sync_target();\n\n\tspeculative_store_bypass_ht_init();\n\n\t/*\n\t * Lock vector_lock, set CPU online and bring the vector\n\t * allocator online. Online must be set with vector_lock held\n\t * to prevent a concurrent irq setup/teardown from seeing a\n\t * half valid vector space.\n\t */\n\tlock_vector_lock();\n\tset_cpu_online(smp_processor_id(), true);\n\tlapic_online();\n\tunlock_vector_lock();\n\tcpu_set_state_online(smp_processor_id());\n\tx86_platform.nmi_init();\n\n\t/* enable local interrupts */"
+          },
+          {
+            "document": "S_x86_prepare",
+            "path": "arch/x86/kernel/smpboot.c",
+            "kind": "source",
+            "start_line": 574,
+            "end_line": 611,
+            "source_text": "void set_cpu_sibling_map(int cpu)\n{\n\tbool has_smt = smp_num_siblings > 1;\n\tbool has_mp = has_smt || boot_cpu_data.x86_max_cores > 1;\n\tstruct cpuinfo_x86 *c = &cpu_data(cpu);\n\tstruct cpuinfo_x86 *o;\n\tint i, threads;\n\n\tcpumask_set_cpu(cpu, cpu_sibling_setup_mask);\n\n\tif (!has_mp) {\n\t\tcpumask_set_cpu(cpu, topology_sibling_cpumask(cpu));\n\t\tcpumask_set_cpu(cpu, cpu_llc_shared_mask(cpu));\n\t\tcpumask_set_cpu(cpu, topology_core_cpumask(cpu));\n\t\tcpumask_set_cpu(cpu, topology_die_cpumask(cpu));\n\t\tc->booted_cores = 1;\n\t\treturn;\n\t}\n\n\tfor_each_cpu(i, cpu_sibling_setup_mask) {\n\t\to = &cpu_data(i);\n\n\t\tif (match_pkg(c, o) && !topology_same_node(c, o))\n\t\t\tx86_has_numa_in_package = true;\n\n\t\tif ((i == cpu) || (has_smt && match_smt(c, o)))\n\t\t\tlink_mask(topology_sibling_cpumask, cpu, i);\n\n\t\tif ((i == cpu) || (has_mp && match_llc(c, o)))\n\t\t\tlink_mask(cpu_llc_shared_mask, cpu, i);\n\n\t\tif ((i == cpu) || (has_mp && match_die(c, o)))\n\t\t\tlink_mask(topology_die_cpumask, cpu, i);\n\t}\n\n\tthreads = cpumask_weight(topology_sibling_cpumask(cpu));\n\tif (threads > __max_smt_threads)\n\t\t__max_smt_threads = threads;"
+          },
+          {
+            "document": "S_x86_link",
+            "path": "arch/x86/kernel/smpboot.c",
+            "kind": "source",
+            "start_line": 427,
+            "end_line": 434,
+            "source_text": "#define link_mask(mfunc, c1, c2)\t\t\t\t\t\\\ndo {\t\t\t\t\t\t\t\t\t\\\n\tcpumask_set_cpu((c1), mfunc(c2));\t\t\t\t\\\n\tcpumask_set_cpu((c2), mfunc(c1));\t\t\t\t\\\n} while (0)\n\nstatic bool match_smt(struct cpuinfo_x86 *c, struct cpuinfo_x86 *o)\n{"
+          }
+        ],
+        "s390": [
+          {
+            "document": "S_s390_guard",
+            "path": "arch/s390/include/asm/topology.h",
+            "kind": "source",
+            "start_line": 11,
+            "end_line": 12,
+            "source_text": "#ifdef CONFIG_SCHED_TOPOLOGY\n"
+          },
+          {
+            "document": "S_s390_header",
+            "path": "arch/s390/include/asm/topology.h",
+            "kind": "source",
+            "start_line": 27,
+            "end_line": 33,
+            "source_text": "extern struct cpu_topology_s390 cpu_topology[NR_CPUS];\n\n#define topology_physical_package_id(cpu) (cpu_topology[cpu].socket_id)\n#define topology_thread_id(cpu)\t\t  (cpu_topology[cpu].thread_id)\n#define topology_sibling_cpumask(cpu)\t  (&cpu_topology[cpu].thread_mask)\n#define topology_core_id(cpu)\t\t  (cpu_topology[cpu].core_id)\n#define topology_core_cpumask(cpu)\t  (&cpu_topology[cpu].core_mask)"
+          },
+          {
+            "document": "S_s390_start",
+            "path": "arch/s390/kernel/smp.c",
+            "kind": "source",
+            "start_line": 888,
+            "end_line": 915,
+            "source_text": "static void smp_start_secondary(void *cpuvoid)\n{\n\tint cpu = raw_smp_processor_id();\n\n\tS390_lowcore.last_update_clock = get_tod_clock();\n\tS390_lowcore.restart_stack = (unsigned long)restart_stack;\n\tS390_lowcore.restart_fn = (unsigned long)do_restart;\n\tS390_lowcore.restart_data = 0;\n\tS390_lowcore.restart_source = -1U;\n\tS390_lowcore.restart_flags = 0;\n\trestore_access_regs(S390_lowcore.access_regs_save_area);\n\tcpu_init();\n\trcu_cpu_starting(cpu);\n\tinit_cpu_timer();\n\tvtime_init();\n\tvdso_getcpu_init();\n\tpfault_init();\n\tnotify_cpu_starting(cpu);\n\tif (topology_cpu_dedicated(cpu))\n\t\tset_cpu_flag(CIF_DEDICATED_CPU);\n\telse\n\t\tclear_cpu_flag(CIF_DEDICATED_CPU);\n\tset_cpu_online(cpu, true);\n\tupdate_cpu_masks();\n\tinc_irq_stat(CPU_RST);\n\tlocal_irq_enable();\n\tcpu_startup_entry(CPUHP_AP_ONLINE_IDLE);\n}"
+          },
+          {
+            "document": "S_s390_map",
+            "path": "arch/s390/kernel/topology.c",
+            "kind": "source",
+            "start_line": 96,
+            "end_line": 114,
+            "source_text": "static void cpu_thread_map(cpumask_t *dst, unsigned int cpu)\n{\n\tstatic cpumask_t mask;\n\tint i;\n\n\tcpumask_clear(&mask);\n\tif (!cpu_online(cpu))\n\t\tgoto out;\n\tcpumask_set_cpu(cpu, &mask);\n\tif (topology_mode != TOPOLOGY_MODE_HW)\n\t\tgoto out;\n\tcpu -= cpu % (smp_cpu_mtid + 1);\n\tfor (i = 0; i <= smp_cpu_mtid; i++)\n\t\tif (cpu_present(cpu + i))\n\t\t\tcpumask_set_cpu(cpu + i, &mask);\n\tcpumask_and(&mask, &mask, cpu_online_mask);\nout:\n\tcpumask_copy(dst, &mask);\n}"
+          },
+          {
+            "document": "S_s390_update",
+            "path": "arch/s390/kernel/topology.c",
+            "kind": "source",
+            "start_line": 251,
+            "end_line": 271,
+            "source_text": "void update_cpu_masks(void)\n{\n\tstruct cpu_topology_s390 *topo, *topo_package, *topo_sibling;\n\tint cpu, sibling, pkg_first, smt_first, id;\n\n\tfor_each_possible_cpu(cpu) {\n\t\ttopo = &cpu_topology[cpu];\n\t\tcpu_thread_map(&topo->thread_mask, cpu);\n\t\tcpu_group_map(&topo->core_mask, &socket_info, cpu);\n\t\tcpu_group_map(&topo->book_mask, &book_info, cpu);\n\t\tcpu_group_map(&topo->drawer_mask, &drawer_info, cpu);\n\t\ttopo->booted_cores = 0;\n\t\tif (topology_mode != TOPOLOGY_MODE_HW) {\n\t\t\tid = topology_mode == TOPOLOGY_MODE_PACKAGE ? 0 : cpu;\n\t\t\ttopo->thread_id = cpu;\n\t\t\ttopo->core_id = cpu;\n\t\t\ttopo->socket_id = id;\n\t\t\ttopo->book_id = id;\n\t\t\ttopo->drawer_id = id;\n\t\t}\n\t}"
+          }
+        ]
+      },
+      "configuration": {
+        "x86": [
+          {
+            "document": "C_x86",
+            "path": "../arch_witness_checks_20261014/generated/config/startup_x86.txt",
+            "kind": "configuration",
+            "start_line": 1,
+            "end_line": 7,
+            "source_text": "CONFIG_X86_64=y\nCONFIG_SMP=y\nCONFIG_SYSFS=y\nCONFIG_NR_CPUS=4\nCONFIG_SCHED_SMT=y\nCONFIG_SCHED_CORE=y\nCONFIG_HOTPLUG_CPU=y"
+          }
+        ],
+        "s390": [
+          {
+            "document": "C_s390",
+            "path": "../arch_witness_checks_20261014/generated/config/startup_s390.txt",
+            "kind": "configuration",
+            "start_line": 1,
+            "end_line": 8,
+            "source_text": "CONFIG_S390=y\nCONFIG_SMP=y\nCONFIG_SYSFS=y\nCONFIG_NR_CPUS=4\nCONFIG_SCHED_SMT=y\nCONFIG_SCHED_CORE=y\nCONFIG_SCHED_TOPOLOGY=y\nCONFIG_HOTPLUG_CPU=y"
+          }
+        ]
+      },
+      "common_consumer": [
+        {
+          "document": "S_interface",
+          "path": "include/linux/topology.h",
+          "kind": "source",
+          "start_line": 197,
+          "end_line": 208,
+          "source_text": "#endif\n#ifndef topology_die_cpumask\n#define topology_die_cpumask(cpu)\t\tcpumask_of(cpu)\n#endif\n\n#if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)\nstatic inline const struct cpumask *cpu_smt_mask(int cpu)\n{\n\treturn topology_sibling_cpumask(cpu);\n}\n#endif\n"
+        },
+        {
+          "document": "S_notify",
+          "path": "kernel/cpu.c",
+          "kind": "source",
+          "start_line": 1251,
+          "end_line": 1271,
+          "source_text": " * notify_cpu_starting(cpu) - Invoke the callbacks on the starting CPU\n * @cpu: cpu that just started\n *\n * It must be called by the arch code on the new cpu, before the new cpu\n * enables interrupts and before the \"boot\" cpu returns from __cpu_up().\n */\nvoid notify_cpu_starting(unsigned int cpu)\n{\n\tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n\tenum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);\n\tint ret;\n\n\trcu_cpu_starting(cpu);\t/* Enables RCU usage on this CPU. */\n\tcpumask_set_cpu(cpu, &cpus_booted_once_mask);\n\tret = cpuhp_invoke_callback_range(true, cpu, st, target);\n\n\t/*\n\t * STARTING must not fail!\n\t */\n\tWARN_ON_ONCE(ret);\n}"
+        },
+        {
+          "document": "S_range",
+          "path": "kernel/cpu.c",
+          "kind": "source",
+          "start_line": 646,
+          "end_line": 661,
+          "source_text": "static int cpuhp_invoke_callback_range(bool bringup,\n\t\t\t\t       unsigned int cpu,\n\t\t\t\t       struct cpuhp_cpu_state *st,\n\t\t\t\t       enum cpuhp_state target)\n{\n\tenum cpuhp_state state;\n\tint err = 0;\n\n\twhile (cpuhp_next_state(bringup, &state, st, target)) {\n\t\terr = cpuhp_invoke_callback(cpu, state, bringup, NULL, NULL);\n\t\tif (err)\n\t\t\tbreak;\n\t}\n\n\treturn err;\n}"
+        },
+        {
+          "document": "S_dispatch",
+          "path": "kernel/cpu.c",
+          "kind": "source",
+          "start_line": 155,
+          "end_line": 190,
+          "source_text": "static int cpuhp_invoke_callback(unsigned int cpu, enum cpuhp_state state,\n\t\t\t\t bool bringup, struct hlist_node *node,\n\t\t\t\t struct hlist_node **lastp)\n{\n\tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n\tstruct cpuhp_step *step = cpuhp_get_step(state);\n\tint (*cbm)(unsigned int cpu, struct hlist_node *node);\n\tint (*cb)(unsigned int cpu);\n\tint ret, cnt;\n\n\tif (st->fail == state) {\n\t\tst->fail = CPUHP_INVALID;\n\t\treturn -EAGAIN;\n\t}\n\n\tif (cpuhp_step_empty(bringup, step)) {\n\t\tWARN_ON_ONCE(1);\n\t\treturn 0;\n\t}\n\n\tif (!step->multi_instance) {\n\t\tWARN_ON_ONCE(lastp && *lastp);\n\t\tcb = bringup ? step->startup.single : step->teardown.single;\n\n\t\ttrace_cpuhp_enter(cpu, st->target, state, cb);\n\t\tret = cb(cpu);\n\t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n\t\treturn ret;\n\t}\n\tcbm = bringup ? step->startup.multi : step->teardown.multi;\n\n\t/* Single invocation for instance add/remove */\n\tif (node) {\n\t\tWARN_ON_ONCE(lastp && *lastp);\n\t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n\t\tret = cbm(cpu, node);"
+        },
+        {
+          "document": "S_table",
+          "path": "kernel/cpu.c",
+          "kind": "source",
+          "start_line": 1692,
+          "end_line": 1697,
+          "source_text": "\t[CPUHP_AP_SCHED_STARTING] = {\n\t\t.name\t\t\t= \"sched:starting\",\n\t\t.startup.single\t\t= sched_cpu_starting,\n\t\t.teardown.single\t= sched_cpu_dying,\n\t},\n\t[CPUHP_AP_RCUTREE_DYING] = {"
+        },
+        {
+          "document": "S_starting",
+          "path": "kernel/sched/core.c",
+          "kind": "source",
+          "start_line": 8834,
+          "end_line": 8840,
+          "source_text": "int sched_cpu_starting(unsigned int cpu)\n{\n\tsched_core_cpu_starting(cpu);\n\tsched_rq_cpu_starting(cpu);\n\tsched_tick_start(cpu);\n\treturn 0;\n}"
+        }
+      ],
+      "predicate": [
+        {
+          "document": "S_core",
+          "path": "kernel/sched/core.c",
+          "kind": "source",
+          "start_line": 5753,
+          "end_line": 5794,
+          "source_text": "static void sched_core_cpu_starting(unsigned int cpu)\n{\n\tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n\tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n\tunsigned long flags;\n\tint t;\n\n\tsched_core_lock(cpu, &flags);\n\n\tWARN_ON_ONCE(rq->core != rq);\n\n\t/* if we're the first, we'll be our own leader */\n\tif (cpumask_weight(smt_mask) == 1)\n\t\tgoto unlock;\n\n\t/* find the leader */\n\tfor_each_cpu(t, smt_mask) {\n\t\tif (t == cpu)\n\t\t\tcontinue;\n\t\trq = cpu_rq(t);\n\t\tif (rq->core == rq) {\n\t\t\tcore_rq = rq;\n\t\t\tbreak;\n\t\t}\n\t}\n\n\tif (WARN_ON_ONCE(!core_rq)) /* whoopsie */\n\t\tgoto unlock;\n\n\t/* install and validate core_rq */\n\tfor_each_cpu(t, smt_mask) {\n\t\trq = cpu_rq(t);\n\n\t\tif (t == cpu)\n\t\t\trq->core = core_rq;\n\n\t\tWARN_ON_ONCE(rq->core != core_rq);\n\t}\n\nunlock:\n\tsched_core_unlock(cpu, &flags);\n}"
+        },
+        {
+          "document": "S_locks",
+          "path": "kernel/sched/core.c",
+          "kind": "source",
+          "start_line": 240,
+          "end_line": 248,
+          "source_text": "static void sched_core_lock(int cpu, unsigned long *flags)\n{\n\tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n\tint t, i = 0;\n\n\tlocal_irq_save(*flags);\n\tfor_each_cpu(t, smt_mask)\n\t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n}"
+        }
+      ]
+    },
+    "predicate": {
+      "operator": "set_contains",
+      "container": "cpu_smt_mask",
+      "member": "target_cpu",
+      "object": "same_target_cpu",
+      "phase": "lock_snapshot"
+    },
+    "scope": {
+      "boot": "initial",
+      "cpus": 2,
+      "target_cpu": 1,
+      "s390_mode": "SINGLE",
+      "real_smt_coverage": "not_established"
+    },
+    "semantic_review_required": true,
+    "limitation": "Registered known-case researcher bridge, not automatically inferred or a validated general detector"
+  },
+  "archived_replay": {
+    "profiles": [
+      {
+        "profile": "old_s390",
+        "status": "violation",
+        "foundation": {
+          "record_identity": true,
+          "config_digest": true,
+          "config_and_autoconf": true,
+          "successful_single_boot": true,
+          "actual_arch_config": true,
+          "actual_topology_config": true,
+          "build_effective_config": true,
+          "boot_image_initrd_binding": true,
+          "ordinary_two_cpu_command": true,
+          "simulator_arch": true,
+          "source_revision_binding": true,
+          "source_digest:kernel/cpu.c": true,
+          "source_digest:kernel/sched/core.c": true,
+          "source_digest:arch/s390/kernel/smp.c": true,
+          "source_digest:arch/s390/kernel/topology.c": true,
+          "source_digest:arch/x86/kernel/smpboot.c": true,
+          "source_digest:include/linux/r4_observe.h": true,
+          "source_material_complete": true,
+          "source_same_public_callback": true,
+          "source_actual_state_observation": true,
+          "source_actual_mask_lock_count": true,
+          "source_snapshot_before_lock_print_after_unlock": true,
+          "source_singleton_or_leader_constraint": true,
+          "source_arch_observation": true,
+          "source_provider_gate_and_preparation_order": true,
+          "source_single_mode_definition": true,
+          "source_single_mode_self_rule": true,
+          "registered_runtime_revision": true,
+          "paired_config_only_localversion_differs": true,
+          "shared_original_sources_agree": true,
+          "nine_target_events_exactly_once": true,
+          "pid1_release_machine": true,
+          "mounts_and_end": true,
+          "user_fields_complete": true,
+          "user_no_read_errors": true,
+          "both_cpus_finally_online": true,
+          "cmdline_matches_boot_receipt": true,
+          "mode_within_frozen_single_scope": true,
+          "same_target_cpu": true,
+          "event_sequence_and_position": true,
+          "actual_cpuhp_sched_stage": true,
+          "notify_covers_actual_stage": true,
+          "mask_self_weight_are_consistent": true,
+          "actual_locks_match_members": true,
+          "same_mask_until_first_consumer": true,
+          "first_online_snapshot_matches_entry": true,
+          "snapshot_output_after_unlock": true,
+          "provider_expression_matches_record": true,
+          "registered_target_cpu_and_phase": true,
+          "registered_predicate_matches_archived_replay_and_self": true
+        },
+        "provenance": {
+          "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+          "arch": "s390",
+          "source_binding_scope": "Archived observer digests and existing build/boot receipts; no fresh ELF/cache certification",
+          "provider_preparation_expression": "r4_note(\"arch_before_notify\", cpu, 0, -1, -1, -1, 0);",
+          "prepared_known_from_source": 0,
+          "provider_membership_gate": "cpu_online",
+          "provider_update_position": "after shared notify and online"
+        },
+        "predicates": {
+          "first_use_contains_target": {
+            "satisfied": false,
+            "definition": "target CPU bit present at actual sched_core_lock mask snapshot",
+            "actual_locks": 0,
+            "source_constraint": "original loop locks every mask member; singleton/leader path follows"
+          },
+          "final_only_contains_target": {
+            "satisfied": true,
+            "definition": "target belongs to final decimal thread_siblings_list",
+            "misses_first_use_violation": true
+          },
+          "online_before_first_consumption": {
+            "satisfied": false,
+            "definition": "require online=1 at first use (deliberately wrong simplification)",
+            "false_alarm_relative_to_narrow_contract": false
+          }
+        },
+        "final_lists": {
+          "online": [
+            0,
+            1
+          ],
+          "cpu1_thread_siblings": [
+            1
+          ],
+          "decimal_list_not_hex": true
+        },
+        "observed_s390_mode": [
+          [
+            "1",
+            "0",
+            "0"
+          ]
+        ],
+        "first_consumption": {
+          "phase": "lock_snapshot",
+          "line": 149,
+          "cpu": 1,
+          "current": 1,
+          "seq": 5,
+          "mask": 0,
+          "self": 0,
+          "weight": 0,
+          "locks": 0,
+          "rq_self": 1,
+          "online": 0,
+          "printed_after_unlock": 1
+        },
+        "cpu1_events": [
+          {
+            "phase": "arch_before_notify",
+            "line": 79,
+            "cpu": 1,
+            "current": 1,
+            "seq": 1,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_enter",
+            "line": 81,
+            "cpu": 1,
+            "current": 1,
+            "seq": 2,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 87,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_before",
+            "line": 83,
+            "cpu": 1,
+            "current": 1,
+            "seq": 3,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "core_enter",
+            "line": 85,
+            "cpu": 1,
+            "current": 1,
+            "seq": 4,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "lock_snapshot",
+            "line": 149,
+            "cpu": 1,
+            "current": 1,
+            "seq": 5,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "locks": 0,
+            "rq_self": 1,
+            "online": 0,
+            "printed_after_unlock": 1
+          },
+          {
+            "phase": "core_exit",
+            "line": 151,
+            "cpu": 1,
+            "current": 1,
+            "seq": 6,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_after",
+            "line": 153,
+            "cpu": 1,
+            "current": 1,
+            "seq": 7,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_exit",
+            "line": 155,
+            "cpu": 1,
+            "current": 1,
+            "seq": 8,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 145,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "arch_after_notify",
+            "line": 157,
+            "cpu": 1,
+            "current": 1,
+            "seq": 9,
+            "online": 0,
+            "mask": 0,
+            "self": 0,
+            "weight": 0,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          }
+        ],
+        "architecture_preparation": {
+          "prepared_known": 0,
+          "prepared": -1,
+          "online": 0,
+          "mask": 0,
+          "self": 0
+        },
+        "failed_foundation": [],
+        "registered_predicate_recomputed": false
+      },
+      {
+        "profile": "fixed_s390",
+        "status": "satisfied",
+        "foundation": {
+          "record_identity": true,
+          "config_digest": true,
+          "config_and_autoconf": true,
+          "successful_single_boot": true,
+          "actual_arch_config": true,
+          "actual_topology_config": true,
+          "build_effective_config": true,
+          "boot_image_initrd_binding": true,
+          "ordinary_two_cpu_command": true,
+          "simulator_arch": true,
+          "source_revision_binding": true,
+          "source_digest:kernel/cpu.c": true,
+          "source_digest:kernel/sched/core.c": true,
+          "source_digest:arch/s390/kernel/smp.c": true,
+          "source_digest:arch/s390/kernel/topology.c": true,
+          "source_digest:arch/x86/kernel/smpboot.c": true,
+          "source_digest:include/linux/r4_observe.h": true,
+          "source_material_complete": true,
+          "source_same_public_callback": true,
+          "source_actual_state_observation": true,
+          "source_actual_mask_lock_count": true,
+          "source_snapshot_before_lock_print_after_unlock": true,
+          "source_singleton_or_leader_constraint": true,
+          "source_arch_observation": true,
+          "source_provider_gate_and_preparation_order": true,
+          "source_single_mode_definition": true,
+          "source_single_mode_self_rule": true,
+          "registered_runtime_revision": true,
+          "paired_config_only_localversion_differs": true,
+          "shared_original_sources_agree": true,
+          "nine_target_events_exactly_once": true,
+          "pid1_release_machine": true,
+          "mounts_and_end": true,
+          "user_fields_complete": true,
+          "user_no_read_errors": true,
+          "both_cpus_finally_online": true,
+          "cmdline_matches_boot_receipt": true,
+          "mode_within_frozen_single_scope": true,
+          "same_target_cpu": true,
+          "event_sequence_and_position": true,
+          "actual_cpuhp_sched_stage": true,
+          "notify_covers_actual_stage": true,
+          "mask_self_weight_are_consistent": true,
+          "actual_locks_match_members": true,
+          "same_mask_until_first_consumer": true,
+          "first_online_snapshot_matches_entry": true,
+          "snapshot_output_after_unlock": true,
+          "provider_expression_matches_record": true,
+          "registered_target_cpu_and_phase": true,
+          "registered_predicate_matches_archived_replay_and_self": true
+        },
+        "provenance": {
+          "revision": "a052096bdd6809eeab809202726634d1ac975aa1",
+          "arch": "s390",
+          "source_binding_scope": "Archived observer digests and existing build/boot receipts; no fresh ELF/cache certification",
+          "provider_preparation_expression": "r4_note(\"arch_before_notify\", cpu, 1, cpumask_test_cpu(cpu, &cpu_setup_mask), -1, -1, 0);",
+          "prepared_known_from_source": 1,
+          "provider_membership_gate": "cpu_setup_mask",
+          "provider_update_position": "setup membership and masks before shared notify"
+        },
+        "predicates": {
+          "first_use_contains_target": {
+            "satisfied": true,
+            "definition": "target CPU bit present at actual sched_core_lock mask snapshot",
+            "actual_locks": 1,
+            "source_constraint": "original loop locks every mask member; singleton/leader path follows"
+          },
+          "final_only_contains_target": {
+            "satisfied": true,
+            "definition": "target belongs to final decimal thread_siblings_list",
+            "misses_first_use_violation": false
+          },
+          "online_before_first_consumption": {
+            "satisfied": false,
+            "definition": "require online=1 at first use (deliberately wrong simplification)",
+            "false_alarm_relative_to_narrow_contract": true
+          }
+        },
+        "final_lists": {
+          "online": [
+            0,
+            1
+          ],
+          "cpu1_thread_siblings": [
+            1
+          ],
+          "decimal_list_not_hex": true
+        },
+        "observed_s390_mode": [
+          [
+            "1",
+            "0",
+            "0"
+          ]
+        ],
+        "first_consumption": {
+          "phase": "lock_snapshot",
+          "line": 87,
+          "cpu": 1,
+          "current": 1,
+          "seq": 5,
+          "mask": 2,
+          "self": 1,
+          "weight": 1,
+          "locks": 1,
+          "rq_self": 1,
+          "online": 0,
+          "printed_after_unlock": 1
+        },
+        "cpu1_events": [
+          {
+            "phase": "arch_before_notify",
+            "line": 79,
+            "cpu": 1,
+            "current": 1,
+            "seq": 1,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 1,
+            "prepared": 1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_enter",
+            "line": 81,
+            "cpu": 1,
+            "current": 1,
+            "seq": 2,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 87,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_before",
+            "line": 83,
+            "cpu": 1,
+            "current": 1,
+            "seq": 3,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "core_enter",
+            "line": 85,
+            "cpu": 1,
+            "current": 1,
+            "seq": 4,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "lock_snapshot",
+            "line": 87,
+            "cpu": 1,
+            "current": 1,
+            "seq": 5,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "locks": 1,
+            "rq_self": 1,
+            "online": 0,
+            "printed_after_unlock": 1
+          },
+          {
+            "phase": "core_exit",
+            "line": 89,
+            "cpu": 1,
+            "current": 1,
+            "seq": 6,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_after",
+            "line": 91,
+            "cpu": 1,
+            "current": 1,
+            "seq": 7,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_exit",
+            "line": 93,
+            "cpu": 1,
+            "current": 1,
+            "seq": 8,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 145,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "arch_after_notify",
+            "line": 95,
+            "cpu": 1,
+            "current": 1,
+            "seq": 9,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 1,
+            "prepared": 1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          }
+        ],
+        "architecture_preparation": {
+          "prepared_known": 1,
+          "prepared": 1,
+          "online": 0,
+          "mask": 2,
+          "self": 1
+        },
+        "failed_foundation": [],
+        "registered_predicate_recomputed": true
+      },
+      {
+        "profile": "old_x86",
+        "status": "satisfied",
+        "foundation": {
+          "record_identity": true,
+          "config_digest": true,
+          "config_and_autoconf": true,
+          "successful_single_boot": true,
+          "actual_arch_config": true,
+          "build_effective_config": true,
+          "boot_image_initrd_binding": true,
+          "ordinary_two_cpu_command": true,
+          "simulator_arch": true,
+          "source_revision_binding": true,
+          "source_digest:kernel/cpu.c": true,
+          "source_digest:kernel/sched/core.c": true,
+          "source_digest:arch/s390/kernel/smp.c": true,
+          "source_digest:arch/s390/kernel/topology.c": true,
+          "source_digest:arch/x86/kernel/smpboot.c": true,
+          "source_digest:include/linux/r4_observe.h": true,
+          "source_material_complete": true,
+          "source_same_public_callback": true,
+          "source_actual_state_observation": true,
+          "source_actual_mask_lock_count": true,
+          "source_snapshot_before_lock_print_after_unlock": true,
+          "source_singleton_or_leader_constraint": true,
+          "source_arch_observation": true,
+          "source_provider_gate_and_preparation_order": true,
+          "source_provider_self_construction": true,
+          "registered_runtime_revision": true,
+          "paired_config_only_localversion_differs": true,
+          "shared_original_sources_agree": true,
+          "nine_target_events_exactly_once": true,
+          "pid1_release_machine": true,
+          "mounts_and_end": true,
+          "user_fields_complete": true,
+          "user_no_read_errors": true,
+          "both_cpus_finally_online": true,
+          "cmdline_matches_boot_receipt": true,
+          "same_target_cpu": true,
+          "event_sequence_and_position": true,
+          "actual_cpuhp_sched_stage": true,
+          "notify_covers_actual_stage": true,
+          "mask_self_weight_are_consistent": true,
+          "actual_locks_match_members": true,
+          "same_mask_until_first_consumer": true,
+          "first_online_snapshot_matches_entry": true,
+          "snapshot_output_after_unlock": true,
+          "provider_expression_matches_record": true,
+          "registered_target_cpu_and_phase": true,
+          "registered_predicate_matches_archived_replay_and_self": true
+        },
+        "provenance": {
+          "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+          "arch": "x86",
+          "source_binding_scope": "Archived observer digests and existing build/boot receipts; no fresh ELF/cache certification",
+          "provider_preparation_expression": "r4_note(\"arch_before_notify\", cpuid, 1, cpumask_test_cpu(cpuid, cpu_sibling_setup_mask), -1, -1, 0);",
+          "prepared_known_from_source": 1,
+          "provider_membership_gate": "cpu_sibling_setup_mask",
+          "provider_update_position": "set_cpu_sibling_map before shared notify"
+        },
+        "predicates": {
+          "first_use_contains_target": {
+            "satisfied": true,
+            "definition": "target CPU bit present at actual sched_core_lock mask snapshot",
+            "actual_locks": 1,
+            "source_constraint": "original loop locks every mask member; singleton/leader path follows"
+          },
+          "final_only_contains_target": {
+            "satisfied": true,
+            "definition": "target belongs to final decimal thread_siblings_list",
+            "misses_first_use_violation": false
+          },
+          "online_before_first_consumption": {
+            "satisfied": false,
+            "definition": "require online=1 at first use (deliberately wrong simplification)",
+            "false_alarm_relative_to_narrow_contract": true
+          }
+        },
+        "final_lists": {
+          "online": [
+            0,
+            1
+          ],
+          "cpu1_thread_siblings": [
+            1
+          ],
+          "decimal_list_not_hex": true
+        },
+        "first_consumption": {
+          "phase": "lock_snapshot",
+          "line": 109,
+          "cpu": 1,
+          "current": 1,
+          "seq": 5,
+          "mask": 2,
+          "self": 1,
+          "weight": 1,
+          "locks": 1,
+          "rq_self": 1,
+          "online": 0,
+          "printed_after_unlock": 1
+        },
+        "cpu1_events": [
+          {
+            "phase": "arch_before_notify",
+            "line": 105,
+            "cpu": 1,
+            "current": 1,
+            "seq": 1,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 1,
+            "prepared": 1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_enter",
+            "line": 106,
+            "cpu": 1,
+            "current": 1,
+            "seq": 2,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 87,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_before",
+            "line": 107,
+            "cpu": 1,
+            "current": 1,
+            "seq": 3,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "core_enter",
+            "line": 108,
+            "cpu": 1,
+            "current": 1,
+            "seq": 4,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "lock_snapshot",
+            "line": 109,
+            "cpu": 1,
+            "current": 1,
+            "seq": 5,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "locks": 1,
+            "rq_self": 1,
+            "online": 0,
+            "printed_after_unlock": 1
+          },
+          {
+            "phase": "core_exit",
+            "line": 110,
+            "cpu": 1,
+            "current": 1,
+            "seq": 6,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_after",
+            "line": 111,
+            "cpu": 1,
+            "current": 1,
+            "seq": 7,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_exit",
+            "line": 112,
+            "cpu": 1,
+            "current": 1,
+            "seq": 8,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 145,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "arch_after_notify",
+            "line": 113,
+            "cpu": 1,
+            "current": 1,
+            "seq": 9,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 1,
+            "prepared": 1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          }
+        ],
+        "architecture_preparation": {
+          "prepared_known": 1,
+          "prepared": 1,
+          "online": 0,
+          "mask": 2,
+          "self": 1
+        },
+        "failed_foundation": [],
+        "registered_predicate_recomputed": true
+      },
+      {
+        "profile": "fixed_x86",
+        "status": "satisfied",
+        "foundation": {
+          "record_identity": true,
+          "config_digest": true,
+          "config_and_autoconf": true,
+          "successful_single_boot": true,
+          "actual_arch_config": true,
+          "build_effective_config": true,
+          "boot_image_initrd_binding": true,
+          "ordinary_two_cpu_command": true,
+          "simulator_arch": true,
+          "source_revision_binding": true,
+          "source_digest:kernel/cpu.c": true,
+          "source_digest:kernel/sched/core.c": true,
+          "source_digest:arch/s390/kernel/smp.c": true,
+          "source_digest:arch/s390/kernel/topology.c": true,
+          "source_digest:arch/x86/kernel/smpboot.c": true,
+          "source_digest:include/linux/r4_observe.h": true,
+          "source_material_complete": true,
+          "source_same_public_callback": true,
+          "source_actual_state_observation": true,
+          "source_actual_mask_lock_count": true,
+          "source_snapshot_before_lock_print_after_unlock": true,
+          "source_singleton_or_leader_constraint": true,
+          "source_arch_observation": true,
+          "source_provider_gate_and_preparation_order": true,
+          "source_provider_self_construction": true,
+          "registered_runtime_revision": true,
+          "paired_config_only_localversion_differs": true,
+          "shared_original_sources_agree": true,
+          "nine_target_events_exactly_once": true,
+          "pid1_release_machine": true,
+          "mounts_and_end": true,
+          "user_fields_complete": true,
+          "user_no_read_errors": true,
+          "both_cpus_finally_online": true,
+          "cmdline_matches_boot_receipt": true,
+          "same_target_cpu": true,
+          "event_sequence_and_position": true,
+          "actual_cpuhp_sched_stage": true,
+          "notify_covers_actual_stage": true,
+          "mask_self_weight_are_consistent": true,
+          "actual_locks_match_members": true,
+          "same_mask_until_first_consumer": true,
+          "first_online_snapshot_matches_entry": true,
+          "snapshot_output_after_unlock": true,
+          "provider_expression_matches_record": true,
+          "registered_target_cpu_and_phase": true,
+          "registered_predicate_matches_archived_replay_and_self": true
+        },
+        "provenance": {
+          "revision": "a052096bdd6809eeab809202726634d1ac975aa1",
+          "arch": "x86",
+          "source_binding_scope": "Archived observer digests and existing build/boot receipts; no fresh ELF/cache certification",
+          "provider_preparation_expression": "r4_note(\"arch_before_notify\", cpuid, 1, cpumask_test_cpu(cpuid, cpu_sibling_setup_mask), -1, -1, 0);",
+          "prepared_known_from_source": 1,
+          "provider_membership_gate": "cpu_sibling_setup_mask",
+          "provider_update_position": "set_cpu_sibling_map before shared notify"
+        },
+        "predicates": {
+          "first_use_contains_target": {
+            "satisfied": true,
+            "definition": "target CPU bit present at actual sched_core_lock mask snapshot",
+            "actual_locks": 1,
+            "source_constraint": "original loop locks every mask member; singleton/leader path follows"
+          },
+          "final_only_contains_target": {
+            "satisfied": true,
+            "definition": "target belongs to final decimal thread_siblings_list",
+            "misses_first_use_violation": false
+          },
+          "online_before_first_consumption": {
+            "satisfied": false,
+            "definition": "require online=1 at first use (deliberately wrong simplification)",
+            "false_alarm_relative_to_narrow_contract": true
+          }
+        },
+        "final_lists": {
+          "online": [
+            0,
+            1
+          ],
+          "cpu1_thread_siblings": [
+            1
+          ],
+          "decimal_list_not_hex": true
+        },
+        "first_consumption": {
+          "phase": "lock_snapshot",
+          "line": 109,
+          "cpu": 1,
+          "current": 1,
+          "seq": 5,
+          "mask": 2,
+          "self": 1,
+          "weight": 1,
+          "locks": 1,
+          "rq_self": 1,
+          "online": 0,
+          "printed_after_unlock": 1
+        },
+        "cpu1_events": [
+          {
+            "phase": "arch_before_notify",
+            "line": 105,
+            "cpu": 1,
+            "current": 1,
+            "seq": 1,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 1,
+            "prepared": 1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_enter",
+            "line": 106,
+            "cpu": 1,
+            "current": 1,
+            "seq": 2,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 87,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_before",
+            "line": 107,
+            "cpu": 1,
+            "current": 1,
+            "seq": 3,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "core_enter",
+            "line": 108,
+            "cpu": 1,
+            "current": 1,
+            "seq": 4,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "lock_snapshot",
+            "line": 109,
+            "cpu": 1,
+            "current": 1,
+            "seq": 5,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "locks": 1,
+            "rq_self": 1,
+            "online": 0,
+            "printed_after_unlock": 1
+          },
+          {
+            "phase": "core_exit",
+            "line": 110,
+            "cpu": 1,
+            "current": 1,
+            "seq": 6,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "cpuhp_after",
+            "line": 111,
+            "cpu": 1,
+            "current": 1,
+            "seq": 7,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 90,
+            "target": 224,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "notify_exit",
+            "line": 112,
+            "cpu": 1,
+            "current": 1,
+            "seq": 8,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 0,
+            "prepared": -1,
+            "state": 145,
+            "target": 145,
+            "ret": 0,
+            "sched_state": 90
+          },
+          {
+            "phase": "arch_after_notify",
+            "line": 113,
+            "cpu": 1,
+            "current": 1,
+            "seq": 9,
+            "online": 0,
+            "mask": 2,
+            "self": 1,
+            "weight": 1,
+            "prepared_known": 1,
+            "prepared": 1,
+            "state": -1,
+            "target": -1,
+            "ret": 0,
+            "sched_state": 90
+          }
+        ],
+        "architecture_preparation": {
+          "prepared_known": 1,
+          "prepared": 1,
+          "online": 0,
+          "mask": 2,
+          "self": 1
+        },
+        "failed_foundation": [],
+        "registered_predicate_recomputed": true
+      }
+    ],
+    "paired_config": {
+      "x86": {
+        "valid": true,
+        "differences": {
+          "CONFIG_LOCALVERSION": [
+            "\"-r4-observe-old_x86\"",
+            "\"-r4-observe-fixed_x86\""
+          ]
+        }
+      },
+      "s390": {
+        "valid": true,
+        "differences": {
+          "CONFIG_LOCALVERSION": [
+            "\"-r4-observe-old_s390\"",
+            "\"-r4-observe-fixed_s390\""
+          ]
+        }
+      }
+    },
+    "common_original_source_hashes_agree": {
+      "kernel/cpu.c": true,
+      "kernel/sched/core.c": true,
+      "arch/x86/kernel/smpboot.c": true
+    },
+    "input_fingerprints": {
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_s390\\build.json": "489f01aa2cbe6fc25decb4a5084a7cab1b71f6bd8975eb165c78d3a6f3dfb230",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_s390\\boot.json": "836a22c71631ecde34dbb5862b83ee6964ca466adb7d519ee7fce36634d0e5f1",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_s390\\qemu_boot.stdout.log": "7be444563fa4d1b972daf5046c49c5fe665f127a74c2e18c14fe62fa0b8947c5",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_s390\\qemu_boot.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_s390\\kernel.config": "ba935721b43a3187db05c24b74f5694180be0e816368efbc0155a507ace1f11e",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_s390\\autoconf.h": "cce6e336349f811e3e43c9cc7af46d620f59b3d4260a745c3d94a0018206c2a5",
+      "s390_arch_contract_20261013\\runtime\\old_observer_sources.json": "d18f380ef57ed274b9bd473e025ac5afb9bb8cbc6c7f0c5880135dc7446df53f",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\old\\kernel\\cpu.c": "525310799abbbb1344566a16cd8e1ee4befb04c872f64b6d46e0d6f612bc8807",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\old\\kernel\\sched\\core.c": "745d08041c21426f83c242cfa2502e9c1c64abc1a728fd67403ee86aaf95847f",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\old\\arch\\s390\\kernel\\smp.c": "ec55bfd68b58e3fd4ad8cf38e538372418b0c822d723016857797bff82c527e6",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\old\\arch\\s390\\kernel\\topology.c": "19e5e6545a9a822f7c50e8bb1d9519f08dbe268539c5b82301507d58af712f6e",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\old\\arch\\x86\\kernel\\smpboot.c": "41cf8cf9b408e255dc25f299c2e19c755e6b01a97e0ca97c45c90d3cc1a01109",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\old\\include\\linux\\r4_observe.h": "ee1ae9126d8b9506e8da35bb41cd54e4b5d0aec15a810a0835421638135803f5",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_s390\\build.json": "4054bf34b72a912e0a505253691565a1b5dd8f61cf895db1c2ac5aa67515b4df",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_s390\\boot.json": "5ef4c19e0b247f240e578dfe54df7ad1cf6eeb53785a74a9872b28c0d2982353",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_s390\\qemu_boot.stdout.log": "3ae93c6661eedd6ab4f6b4f5bc9e2e17d582a9b6fc0e243a936af20eb8d4d7c1",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_s390\\qemu_boot.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_s390\\kernel.config": "a2b50968b902ea79606c0b566f7b151a10497d53f83ecb5231fcbe2de4253a1e",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_s390\\autoconf.h": "edf41bce30e9dd5606916c4a882bad097db5ffbe17aeec756b853f56480d9e5d",
+      "s390_arch_contract_20261013\\runtime\\fixed_observer_sources.json": "e4b50428d9983e8d84f0aea0da57e1f5a821c6961eb5dcd29c1bdb1340270acf",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\fixed\\kernel\\cpu.c": "525310799abbbb1344566a16cd8e1ee4befb04c872f64b6d46e0d6f612bc8807",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\fixed\\kernel\\sched\\core.c": "745d08041c21426f83c242cfa2502e9c1c64abc1a728fd67403ee86aaf95847f",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\fixed\\arch\\s390\\kernel\\smp.c": "9bcf6bde2dcc613a138c982b923a49cb386fc67caa73af3fc1f1612b85044a22",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\fixed\\arch\\s390\\kernel\\topology.c": "d9bf9cde0c8bc8102d3adc9dbc8b44bd619e23eb7b8ebbd398d2f2bc5cd6dfb0",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\fixed\\arch\\x86\\kernel\\smpboot.c": "41cf8cf9b408e255dc25f299c2e19c755e6b01a97e0ca97c45c90d3cc1a01109",
+      "s390_arch_contract_20261013\\runtime\\observer_sources\\fixed\\include\\linux\\r4_observe.h": "ee1ae9126d8b9506e8da35bb41cd54e4b5d0aec15a810a0835421638135803f5",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_x86\\build.json": "f7e2e7a810c4d4ec26c9cb403848073573a22e0c5f72693cf7478add6e940c8d",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_x86\\boot.json": "9db6037f4df0896bcb447f38e21f8959df88767f8d3366951f7ebcce78985b64",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_x86\\qemu_boot.stdout.log": "e98a1943d612e286b18022a068e6a9b021df1f57a642364c2c35219b836c22f1",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_x86\\qemu_boot.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_x86\\kernel.config": "a9264c98fd293799f8a3aced3642bd3bc8e5def1ed6f12884f96056695aba318",
+      "s390_arch_contract_20261013\\runtime\\profiles\\old_x86\\autoconf.h": "47348103b92b25941fef83012899121a254c22936e9c8d0181723f82b7c52446",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_x86\\build.json": "19bd74a5208f89ceb6ad688760e0a6bbd7129686352276671aa3659d934458e9",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_x86\\boot.json": "5f92a55279a068cd0689fefb3c57838e0ae6ed7651fe6158497f3b8c380dee3d",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_x86\\qemu_boot.stdout.log": "6a913906a7281966e94706b14d9a87b407371361afb53182db6c19711c2a5713",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_x86\\qemu_boot.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_x86\\kernel.config": "819f6b7a2762e9cb00b05307f7677934a10ab353bc1a4dbf64990607d3bc15bb",
+      "s390_arch_contract_20261013\\runtime\\profiles\\fixed_x86\\autoconf.h": "2defdade9cc6872b098eb2a21386ec1dd73179d12caaa897032bd21be4e778b6"
+    },
+    "input_files_unchanged": true,
+    "dependency_sha256": "1abb6695a43cb5f20c7c3da73260ca47a015d6c3ceedf851015a35dfb8c431c9",
+    "new_boots": 0,
+    "new_builds": 0,
+    "registered_binding": {
+      "target_cpu": 1,
+      "phase": "lock_snapshot",
+      "runtime_revisions": {
+        "old": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+        "fixed": "a052096bdd6809eeab809202726634d1ac975aa1"
+      }
+    },
+    "independent_cases": 0,
+    "external_calls": 0,
+    "logical_source_example": {
+      "kind": "source_logic_only_not_new_runtime",
+      "online": false,
+      "old_online_guard_allows_self_insertion": false,
+      "conclusion": "Moving the old update earlier does not by itself change its online eligibility guard"
+    },
+    "limits": "Known-case archived observer source/config/log and recorded build/boot binding only; no fresh ELF certification, SMT, hotplug or concurrency result"
+  },
+  "current_input_fingerprints": {
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_contract_gate_20261015\\contract_card.json": "00d90dd7ff5ce002c7e7014c37d3843d27b5c696d22e2db54a754ed15faab95c",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_contract_gate_20261015\\check_contract.py": "50b41cc07c18c15d4da1bd4305a028370bf6c93ef5c8109191bb3ac7536fb5c8",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_contract_gate_20261015\\input_manifest.json": "c47e4b673e2c314a58cb7bbe2c8612c099845746f6500ac3188946f3444499de",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_contract_gate_20261015\\protocol_pre.md": "b294f9434aa0f7abbd66830fb60baac7c06931ad9874f413192063774b0e7e99",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_witness_checks_20261014\\first_use_replay.py": "1abb6695a43cb5f20c7c3da73260ca47a015d6c3ceedf851015a35dfb8c431c9",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_witness_checks_20261014\\first_use_check_candidate.json": "ee22495238b99d81c9c483090a938e98235b446d0ca14f6bed3300422625d0e2",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_witness_claude_20261014\\compact_final\\requests\\startup_target_pair.json": "3572cb8dc9c5e77d11441b8c3843281f47e843863c6fdf704d107bef7ef037d8",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_witness_claude_20261014\\compact_final\\requests\\startup_target_ablated.json": "2f181f410f1ff15ed362de682102b13c634c01c85c8f72decf116029524c4bad",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_witness_claude_20261014\\compact_final\\proposals\\startup_target_pair.json": "693d959f69a4a84bb2441caf04c60ce682d58789bfb429fad590478efba106d5",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_witness_claude_20261014\\compact_final\\proposals\\startup_target_ablated.json": "73242aa0c7de01f53201fc28c5bb51c40249b15c8867679d7f8359e0f9495dd5",
+    "D:\\homework\\software\\linux_bug_analyze\\linux_bug_analyze\\experiments\\case_taxonomy\\arch_contract_gate_20261015\\test_contract_gate.py": "26267c98c3e8cd42447c12a8417458e7ff9521b988d3bda763ed9e462c7eca68"
+  },
+  "used_input_manifest_verified": true,
+  "model_original_outputs_modified": false,
+  "predicate_generated_by_model": false,
+  "external_model_calls": 0,
+  "new_cases": 0,
+  "validated_general_detector": false,
+  "current_used_inputs_unchanged_at_end": true
+}

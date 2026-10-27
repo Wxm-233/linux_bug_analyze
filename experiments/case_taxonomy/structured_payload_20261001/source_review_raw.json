@@ -1,0 +1,48 @@
+{
+  "saved_at_utc": "2026-10-01T03:16:28.135322+00:00",
+  "parent_manifest_sha256": "99f18d2f9a484c003452e5e9f76492bca883ba4343344f16891b61b71a8feac6",
+  "scope": "Post-preservation commit and bounded-path patch review, never developer training before freeze.",
+  "records": [
+    {
+      "target": {
+        "commit": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb",
+        "date": "2014-02-28",
+        "subject": "Bluetooth: Use __le64 type for LE random numbers",
+        "paths": [
+          "include/net/bluetooth/hci.h",
+          "include/net/bluetooth/hci_core.h",
+          "include/net/bluetooth/mgmt.h",
+          "net/bluetooth/hci_conn.c",
+          "net/bluetooth/hci_core.c",
+          "net/bluetooth/hci_event.c",
+          "net/bluetooth/mgmt.c",
+          "net/bluetooth/smp.c",
+          "net/bluetooth/smp.h"
+        ],
+        "old_revision": "a3172b7eb4a2719711187cfca12097d2326e85a7",
+        "source_path": "net/bluetooth/hci_core.c",
+        "role": "Endian-type change lead; whether command-field/copy shape is supported is unknown."
+      },
+      "commit_body_and_metadata": "commit fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb\nAuthor:     Marcel Holtmann <marcel@holtmann.org>\nAuthorDate: Thu Feb 27 16:00:28 2014 -0800\nCommit:     Johan Hedberg <johan.hedberg@intel.com>\nCommitDate: Fri Feb 28 12:36:04 2014 +0200\n\n    Bluetooth: Use __le64 type for LE random numbers\n    \n    The random numbers in Bluetooth Low Energy are 64-bit numbers and should\n    also be little endian since the HCI specification is little endian.\n    \n    Change the whole Low Energy pairing to use __le64 instead of a byte\n    array.\n    \n    Signed-off-by: Marcel Holtmann <marcel@holtmann.org>\n    Signed-off-by: Johan Hedberg <johan.hedberg@intel.com>\n",
+      "whole_commit_stat": " include/net/bluetooth/hci.h      |  4 ++--\n include/net/bluetooth/hci_core.h |  8 ++++----\n include/net/bluetooth/mgmt.h     |  2 +-\n net/bluetooth/hci_conn.c         |  6 +++---\n net/bluetooth/hci_core.c         | 13 ++++++-------\n net/bluetooth/hci_event.c        |  2 +-\n net/bluetooth/mgmt.c             |  2 +-\n net/bluetooth/smp.c              | 22 ++++++++++------------\n net/bluetooth/smp.h              |  2 +-\n 9 files changed, 29 insertions(+), 32 deletions(-)\n",
+      "bounded_path_patch": "diff --git a/include/net/bluetooth/hci.h b/include/net/bluetooth/hci.h\nindex 35ef60febd57..0740fee39c73 100644\n--- a/include/net/bluetooth/hci.h\n+++ b/include/net/bluetooth/hci.h\n@@ -1234,7 +1234,7 @@ struct hci_cp_le_conn_update {\n #define HCI_OP_LE_START_ENC\t\t0x2019\n struct hci_cp_le_start_enc {\n \t__le16\thandle;\n-\t__u8\trand[8];\n+\t__le64\trand;\n \t__le16\tediv;\n \t__u8\tltk[16];\n } __packed;\n@@ -1646,7 +1646,7 @@ struct hci_ev_le_conn_complete {\n #define HCI_EV_LE_LTK_REQ\t\t0x05\n struct hci_ev_le_ltk_req {\n \t__le16\thandle;\n-\t__u8\trandom[8];\n+\t__le64\trand;\n \t__le16\tediv;\n } __packed;\n \ndiff --git a/include/net/bluetooth/hci_core.h b/include/net/bluetooth/hci_core.h\nindex 571168811ecd..0c63a7e12d90 100644\n--- a/include/net/bluetooth/hci_core.h\n+++ b/include/net/bluetooth/hci_core.h\n@@ -99,7 +99,7 @@ struct smp_ltk {\n \tu8 type;\n \tu8 enc_size;\n \t__le16 ediv;\n-\tu8 rand[8];\n+\t__le64 rand;\n \tu8 val[16];\n };\n \n@@ -828,11 +828,11 @@ void hci_link_keys_clear(struct hci_dev *hdev);\n struct link_key *hci_find_link_key(struct hci_dev *hdev, bdaddr_t *bdaddr);\n int hci_add_link_key(struct hci_dev *hdev, struct hci_conn *conn, int new_key,\n \t\t     bdaddr_t *bdaddr, u8 *val, u8 type, u8 pin_len);\n-struct smp_ltk *hci_find_ltk(struct hci_dev *hdev, __le16 ediv, u8 rand[8],\n+struct smp_ltk *hci_find_ltk(struct hci_dev *hdev, __le16 ediv, __le64 rand,\n \t\t\t     bool master);\n struct smp_ltk *hci_add_ltk(struct hci_dev *hdev, bdaddr_t *bdaddr,\n \t\t\t    u8 addr_type, u8 type, u8 authenticated,\n-\t\t\t    u8 tk[16], u8 enc_size, __le16 ediv, u8 rand[8]);\n+\t\t\t    u8 tk[16], u8 enc_size, __le16 ediv, __le64 rand);\n struct smp_ltk *hci_find_ltk_by_addr(struct hci_dev *hdev, bdaddr_t *bdaddr,\n \t\t\t\t     u8 addr_type, bool master);\n int hci_remove_ltk(struct hci_dev *hdev, bdaddr_t *bdaddr, u8 bdaddr_type);\n@@ -1293,7 +1293,7 @@ struct hci_sec_filter {\n \n void hci_le_conn_update(struct hci_conn *conn, u16 min, u16 max,\n \t\t\t\t\tu16 latency, u16 to_multiplier);\n-void hci_le_start_enc(struct hci_conn *conn, __le16 ediv, __u8 rand[8],\n+void hci_le_start_enc(struct hci_conn *conn, __le16 ediv, __le64 rand,\n \t\t\t\t\t\t\t__u8 ltk[16]);\n \n int hci_update_random_address(struct hci_request *req, bool require_privacy,\ndiff --git a/net/bluetooth/hci_core.c b/net/bluetooth/hci_core.c\nindex a9ff1cbe2c41..32c0c2c58f66 100644\n--- a/net/bluetooth/hci_core.c\n+++ b/net/bluetooth/hci_core.c\n@@ -765,10 +765,10 @@ static int long_term_keys_show(struct seq_file *f, void *ptr)\n \thci_dev_lock(hdev);\n \tlist_for_each_safe(p, n, &hdev->long_term_keys) {\n \t\tstruct smp_ltk *ltk = list_entry(p, struct smp_ltk, list);\n-\t\tseq_printf(f, \"%pMR (type %u) %u 0x%02x %u %.4x %*phN %*phN\\n\",\n+\t\tseq_printf(f, \"%pMR (type %u) %u 0x%02x %u %.4x %.16llx %*phN\\n\",\n \t\t\t   &ltk->bdaddr, ltk->bdaddr_type, ltk->authenticated,\n \t\t\t   ltk->type, ltk->enc_size, __le16_to_cpu(ltk->ediv),\n-\t\t\t   8, ltk->rand, 16, ltk->val);\n+\t\t\t   __le64_to_cpu(ltk->rand), 16, ltk->val);\n \t}\n \thci_dev_unlock(hdev);\n \n@@ -2921,14 +2921,13 @@ static bool ltk_type_master(u8 type)\n \treturn false;\n }\n \n-struct smp_ltk *hci_find_ltk(struct hci_dev *hdev, __le16 ediv, u8 rand[8],\n+struct smp_ltk *hci_find_ltk(struct hci_dev *hdev, __le16 ediv, __le64 rand,\n \t\t\t     bool master)\n {\n \tstruct smp_ltk *k;\n \n \tlist_for_each_entry(k, &hdev->long_term_keys, list) {\n-\t\tif (k->ediv != ediv ||\n-\t\t    memcmp(rand, k->rand, sizeof(k->rand)))\n+\t\tif (k->ediv != ediv || k->rand != rand)\n \t\t\tcontinue;\n \n \t\tif (ltk_type_master(k->type) != master)\n@@ -3046,7 +3045,7 @@ int hci_add_link_key(struct hci_dev *hdev, struct hci_conn *conn, int new_key,\n \n struct smp_ltk *hci_add_ltk(struct hci_dev *hdev, bdaddr_t *bdaddr,\n \t\t\t    u8 addr_type, u8 type, u8 authenticated,\n-\t\t\t    u8 tk[16], u8 enc_size, __le16 ediv, u8 rand[8])\n+\t\t\t    u8 tk[16], u8 enc_size, __le16 ediv, __le64 rand)\n {\n \tstruct smp_ltk *key, *old_key;\n \tbool master = ltk_type_master(type);\n@@ -3066,9 +3065,9 @@ struct smp_ltk *hci_add_ltk(struct hci_dev *hdev, bdaddr_t *bdaddr,\n \tmemcpy(key->val, tk, sizeof(key->val));\n \tkey->authenticated = authenticated;\n \tkey->ediv = ediv;\n+\tkey->rand = rand;\n \tkey->enc_size = enc_size;\n \tkey->type = type;\n-\tmemcpy(key->rand, rand, sizeof(key->rand));\n \n \treturn key;\n }\n"
+    },
+    {
+      "target": {
+        "commit": "cc48dc0a996af6ae20e91c551d71e7f72768860f",
+        "date": "2012-02-13",
+        "subject": "Bluetooth: Remove magic number from ACL TO",
+        "paths": [
+          "include/net/bluetooth/hci.h",
+          "net/bluetooth/hci_core.c"
+        ],
+        "old_revision": "b83ddfe2ac670392c27a799371bb1a7e14a7e3d3",
+        "source_path": "net/bluetooth/hci_core.c",
+        "role": "Constant cleanup control lead, not presumed a defect; shape and copy entry remain unknown."
+      },
+      "commit_body_and_metadata": "commit cc48dc0a996af6ae20e91c551d71e7f72768860f\nAuthor:     Andrei Emeltchenko <andrei.emeltchenko@intel.com>\nAuthorDate: Wed Jan 4 16:42:26 2012 +0200\nCommit:     Johan Hedberg <johan.hedberg@intel.com>\nCommitDate: Mon Feb 13 17:01:21 2012 +0200\n\n    Bluetooth: Remove magic number from ACL TO\n    \n    Adds HCI_ACL_TX_TIMEOUT and clear conversion from msec to jiffies\n    \n    Signed-off-by: Andrei Emeltchenko <andrei.emeltchenko@intel.com>\n    Acked-by: Marcel Holtmann <marcel@holtmann.org>\n    Signed-off-by: Johan Hedberg <johan.hedberg@intel.com>\n",
+      "whole_commit_stat": " include/net/bluetooth/hci.h | 1 +\n net/bluetooth/hci_core.c    | 3 ++-\n 2 files changed, 3 insertions(+), 1 deletion(-)\n",
+      "bounded_path_patch": "diff --git a/include/net/bluetooth/hci.h b/include/net/bluetooth/hci.h\nindex 6a9d316fb977..4202c9cb497e 100644\n--- a/include/net/bluetooth/hci.h\n+++ b/include/net/bluetooth/hci.h\n@@ -130,6 +130,7 @@ enum {\n #define HCI_IDLE_TIMEOUT\t(6000)\t/* 6 seconds */\n #define HCI_INIT_TIMEOUT\t(10000)\t/* 10 seconds */\n #define HCI_CMD_TIMEOUT\t\t(1000)\t/* 1 seconds */\n+#define HCI_ACL_TX_TIMEOUT\t(45000)\t/* 45 seconds */\n \n /* HCI data types */\n #define HCI_COMMAND_PKT\t\t0x01\ndiff --git a/net/bluetooth/hci_core.c b/net/bluetooth/hci_core.c\nindex 546a42941477..f84935e5cbab 100644\n--- a/net/bluetooth/hci_core.c\n+++ b/net/bluetooth/hci_core.c\n@@ -2350,7 +2350,8 @@ static inline void hci_sched_acl(struct hci_dev *hdev)\n \tif (!test_bit(HCI_RAW, &hdev->flags)) {\n \t\t/* ACL tx timeout must be longer than maximum\n \t\t * link supervision timeout (40.9 seconds) */\n-\t\tif (!hdev->acl_cnt && time_after(jiffies, hdev->acl_last_tx + HZ * 45))\n+\t\tif (!hdev->acl_cnt && time_after(jiffies, hdev->acl_last_tx +\n+\t\t\t\t\tmsecs_to_jiffies(HCI_ACL_TX_TIMEOUT)))\n \t\t\thci_link_tx_to(hdev, ACL_LINK);\n \t}\n \n"
+    }
+  ]
+}

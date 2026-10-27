@@ -1,0 +1,81 @@
+{
+  "id": "startup_ablated",
+  "unit": "startup",
+  "view": "ablated",
+  "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+  "scope_note": "Manually selected old-version source regions and extracted actual config; no fix or runtime labels.",
+  "documents": [
+    {
+      "id": "S_interface",
+      "kind": "source",
+      "path": "include/linux/topology.h",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 203,
+      "end_line": 206,
+      "text": "203: static inline const struct cpumask *cpu_smt_mask(int cpu)\n204: {\n205: \treturn topology_sibling_cpumask(cpu);\n206: }"
+    },
+    {
+      "id": "S_notify",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 1251,
+      "end_line": 1271,
+      "text": "1251:  * notify_cpu_starting(cpu) - Invoke the callbacks on the starting CPU\n1252:  * @cpu: cpu that just started\n1253:  *\n1254:  * It must be called by the arch code on the new cpu, before the new cpu\n1255:  * enables interrupts and before the \"boot\" cpu returns from __cpu_up().\n1256:  */\n1257: void notify_cpu_starting(unsigned int cpu)\n1258: {\n1259: \tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n1260: \tenum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);\n1261: \tint ret;\n1262: \n1263: \trcu_cpu_starting(cpu);\t/* Enables RCU usage on this CPU. */\n1264: \tcpumask_set_cpu(cpu, &cpus_booted_once_mask);\n1265: \tret = cpuhp_invoke_callback_range(true, cpu, st, target);\n1266: \n1267: \t/*\n1268: \t * STARTING must not fail!\n1269: \t */\n1270: \tWARN_ON_ONCE(ret);\n1271: }"
+    },
+    {
+      "id": "S_range",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 646,
+      "end_line": 661,
+      "text": "646: static int cpuhp_invoke_callback_range(bool bringup,\n647: \t\t\t\t       unsigned int cpu,\n648: \t\t\t\t       struct cpuhp_cpu_state *st,\n649: \t\t\t\t       enum cpuhp_state target)\n650: {\n651: \tenum cpuhp_state state;\n652: \tint err = 0;\n653: \n654: \twhile (cpuhp_next_state(bringup, &state, st, target)) {\n655: \t\terr = cpuhp_invoke_callback(cpu, state, bringup, NULL, NULL);\n656: \t\tif (err)\n657: \t\t\tbreak;\n658: \t}\n659: \n660: \treturn err;\n661: }"
+    },
+    {
+      "id": "S_dispatch",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 155,
+      "end_line": 235,
+      "text": "155: static int cpuhp_invoke_callback(unsigned int cpu, enum cpuhp_state state,\n156: \t\t\t\t bool bringup, struct hlist_node *node,\n157: \t\t\t\t struct hlist_node **lastp)\n158: {\n159: \tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n160: \tstruct cpuhp_step *step = cpuhp_get_step(state);\n161: \tint (*cbm)(unsigned int cpu, struct hlist_node *node);\n162: \tint (*cb)(unsigned int cpu);\n163: \tint ret, cnt;\n164: \n165: \tif (st->fail == state) {\n166: \t\tst->fail = CPUHP_INVALID;\n167: \t\treturn -EAGAIN;\n168: \t}\n169: \n170: \tif (cpuhp_step_empty(bringup, step)) {\n171: \t\tWARN_ON_ONCE(1);\n172: \t\treturn 0;\n173: \t}\n174: \n175: \tif (!step->multi_instance) {\n176: \t\tWARN_ON_ONCE(lastp && *lastp);\n177: \t\tcb = bringup ? step->startup.single : step->teardown.single;\n178: \n179: \t\ttrace_cpuhp_enter(cpu, st->target, state, cb);\n180: \t\tret = cb(cpu);\n181: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n182: \t\treturn ret;\n183: \t}\n184: \tcbm = bringup ? step->startup.multi : step->teardown.multi;\n185: \n186: \t/* Single invocation for instance add/remove */\n187: \tif (node) {\n188: \t\tWARN_ON_ONCE(lastp && *lastp);\n189: \t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n190: \t\tret = cbm(cpu, node);\n191: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n192: \t\treturn ret;\n193: \t}\n194: \n195: \t/* State transition. Invoke on all instances */\n196: \tcnt = 0;\n197: \thlist_for_each(node, &step->list) {\n198: \t\tif (lastp && node == *lastp)\n199: \t\t\tbreak;\n200: \n201: \t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n202: \t\tret = cbm(cpu, node);\n203: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n204: \t\tif (ret) {\n205: \t\t\tif (!lastp)\n206: \t\t\t\tgoto err;\n207: \n208: \t\t\t*lastp = node;\n209: \t\t\treturn ret;\n210: \t\t}\n211: \t\tcnt++;\n212: \t}\n213: \tif (lastp)\n214: \t\t*lastp = NULL;\n215: \treturn 0;\n216: err:\n217: \t/* Rollback the instances if one failed */\n218: \tcbm = !bringup ? step->startup.multi : step->teardown.multi;\n219: \tif (!cbm)\n220: \t\treturn ret;\n221: \n222: \thlist_for_each(node, &step->list) {\n223: \t\tif (!cnt--)\n224: \t\t\tbreak;\n225: \n226: \t\ttrace_cpuhp_multi_enter(cpu, st->target, state, cbm, node);\n227: \t\tret = cbm(cpu, node);\n228: \t\ttrace_cpuhp_exit(cpu, st->state, state, ret);\n229: \t\t/*\n230: \t\t * Rollback must not fail,\n231: \t\t */\n232: \t\tWARN_ON_ONCE(ret);\n233: \t}\n234: \treturn ret;\n235: }"
+    },
+    {
+      "id": "S_table",
+      "kind": "source",
+      "path": "kernel/cpu.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 1692,
+      "end_line": 1697,
+      "text": "1692: \t[CPUHP_AP_SCHED_STARTING] = {\n1693: \t\t.name\t\t\t= \"sched:starting\",\n1694: \t\t.startup.single\t\t= sched_cpu_starting,\n1695: \t\t.teardown.single\t= sched_cpu_dying,\n1696: \t},\n1697: \t[CPUHP_AP_RCUTREE_DYING] = {"
+    },
+    {
+      "id": "S_starting",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 8834,
+      "end_line": 8840,
+      "text": "8834: int sched_cpu_starting(unsigned int cpu)\n8835: {\n8836: \tsched_core_cpu_starting(cpu);\n8837: \tsched_rq_cpu_starting(cpu);\n8838: \tsched_tick_start(cpu);\n8839: \treturn 0;\n8840: }"
+    },
+    {
+      "id": "S_core",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 5753,
+      "end_line": 5794,
+      "text": "5753: static void sched_core_cpu_starting(unsigned int cpu)\n5754: {\n5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n5756: \tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n5757: \tunsigned long flags;\n5758: \tint t;\n5759: \n5760: \tsched_core_lock(cpu, &flags);\n5761: \n5762: \tWARN_ON_ONCE(rq->core != rq);\n5763: \n5764: \t/* if we're the first, we'll be our own leader */\n5765: \tif (cpumask_weight(smt_mask) == 1)\n5766: \t\tgoto unlock;\n5767: \n5768: \t/* find the leader */\n5769: \tfor_each_cpu(t, smt_mask) {\n5770: \t\tif (t == cpu)\n5771: \t\t\tcontinue;\n5772: \t\trq = cpu_rq(t);\n5773: \t\tif (rq->core == rq) {\n5774: \t\t\tcore_rq = rq;\n5775: \t\t\tbreak;\n5776: \t\t}\n5777: \t}\n5778: \n5779: \tif (WARN_ON_ONCE(!core_rq)) /* whoopsie */\n5780: \t\tgoto unlock;\n5781: \n5782: \t/* install and validate core_rq */\n5783: \tfor_each_cpu(t, smt_mask) {\n5784: \t\trq = cpu_rq(t);\n5785: \n5786: \t\tif (t == cpu)\n5787: \t\t\trq->core = core_rq;\n5788: \n5789: \t\tWARN_ON_ONCE(rq->core != core_rq);\n5790: \t}\n5791: \n5792: unlock:\n5793: \tsched_core_unlock(cpu, &flags);\n5794: }"
+    },
+    {
+      "id": "S_locks",
+      "kind": "source",
+      "path": "kernel/sched/core.c",
+      "revision": "88b604263f3d6eedae0b1c2c3bbd602d1e2e8775",
+      "start_line": 240,
+      "end_line": 248,
+      "text": "240: static void sched_core_lock(int cpu, unsigned long *flags)\n241: {\n242: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n243: \tint t, i = 0;\n244: \n245: \tlocal_irq_save(*flags);\n246: \tfor_each_cpu(t, smt_mask)\n247: \t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n248: }"
+    }
+  ]
+}

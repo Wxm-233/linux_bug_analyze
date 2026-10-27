@@ -1,0 +1,96 @@
+{
+  "parent_prediction_gates": [
+    {
+      "case": "E",
+      "receipt_sha256": "fd3bb54228e6ffc336139e0567fe5c574a04306f39ad1691e443a2e863c911f4",
+      "status": "complete_final_received",
+      "final_sha256": "1a689af97d1543e22447289262f6926c920045d3748f7344059a75a4953696b3"
+    },
+    {
+      "case": "F",
+      "receipt_sha256": "c1fda36ba43f5f3578b7f371b15cbb60f44e05dc736107b7c3948d089d54d05b",
+      "status": "complete_final_received",
+      "final_sha256": "e54d92d51b6db2a09f587eafcb5de24fbbaffa01b34e913a7293a8bc25412005"
+    }
+  ],
+  "cases": [
+    {
+      "case": "E",
+      "hash": "7a4dcb4a5de1214c4a59448a759e2e264c2c4473",
+      "parent": "6eaae198076080886b9e7d57f4ae06fa782f90ef",
+      "evidence": [
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "show",
+            "-s",
+            "--format=fuller",
+            "7a4dcb4a5de1214c4a59448a759e2e264c2c4473"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "7480a64ec6b4b1bdc7b7ee6f8c332dc8bf2b27a3674d6d42baaa1470fd8c7c86",
+          "text": "commit 7a4dcb4a5de1214c4a59448a759e2e264c2c4473\nAuthor:     Laurent Dufour <ldufour@linux.ibm.com>\nAuthorDate: Wed Jul 5 16:51:34 2023 +0200\nCommit:     Thomas Gleixner <tglx@kernel.org>\nCommitDate: Fri Jul 28 09:53:36 2023 +0200\n\n    cpu/hotplug: Remove dependancy against cpu_primary_thread_mask\n    \n    The commit 18415f33e2ac (\"cpu/hotplug: Allow \"parallel\" bringup up to\n    CPUHP_BP_KICK_AP_STATE\") introduce a dependancy against a global variable\n    cpu_primary_thread_mask exported by the X86 code. This variable is only\n    used when CONFIG_HOTPLUG_PARALLEL is set.\n    \n    Since cpuhp_get_primary_thread_mask() and cpuhp_smt_aware() are only used\n    when CONFIG_HOTPLUG_PARALLEL is set, don't define them when it is not set.\n    \n    No functional change.\n    \n    Signed-off-by: Laurent Dufour <ldufour@linux.ibm.com>\n    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>\n    Tested-by: Zhang Rui <rui.zhang@intel.com>\n    Link: https://lore.kernel.org/r/20230705145143.40545-2-ldufour@linux.ibm.com\n"
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "6eaae198076080886b9e7d57f4ae06fa782f90ef",
+            "7a4dcb4a5de1214c4a59448a759e2e264c2c4473",
+            "--"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "52f253a2b75476745b272f1b4c4de77970dc45a45df2c30526cd0ba001f40cf2",
+          "text": "diff --git a/kernel/cpu.c b/kernel/cpu.c\nindex 88a7ede322bd..03309f2f35a4 100644\n--- a/kernel/cpu.c\n+++ b/kernel/cpu.c\n@@ -650,22 +650,8 @@ bool cpu_smt_possible(void)\n }\n EXPORT_SYMBOL_GPL(cpu_smt_possible);\n \n-static inline bool cpuhp_smt_aware(void)\n-{\n-\treturn topology_smt_supported();\n-}\n-\n-static inline const struct cpumask *cpuhp_get_primary_thread_mask(void)\n-{\n-\treturn cpu_primary_thread_mask;\n-}\n #else\n static inline bool cpu_smt_allowed(unsigned int cpu) { return true; }\n-static inline bool cpuhp_smt_aware(void) { return false; }\n-static inline const struct cpumask *cpuhp_get_primary_thread_mask(void)\n-{\n-\treturn cpu_present_mask;\n-}\n #endif\n \n static inline enum cpuhp_state\n@@ -1793,6 +1779,16 @@ static int __init parallel_bringup_parse_param(char *arg)\n }\n early_param(\"cpuhp.parallel\", parallel_bringup_parse_param);\n \n+static inline bool cpuhp_smt_aware(void)\n+{\n+\treturn topology_smt_supported();\n+}\n+\n+static inline const struct cpumask *cpuhp_get_primary_thread_mask(void)\n+{\n+\treturn cpu_primary_thread_mask;\n+}\n+\n /*\n  * On architectures which have enabled parallel bringup this invokes all BP\n  * prepare states for each of the to be onlined APs first. The last state\n"
+        }
+      ]
+    },
+    {
+      "case": "F",
+      "hash": "9942cb22ea458c34fa17b73d143ea32d4df1caca",
+      "parent": "d2e9f53ac5dd76dadc0b5f04f6c27640604ce2af",
+      "evidence": [
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "show",
+            "-s",
+            "--format=fuller",
+            "9942cb22ea458c34fa17b73d143ea32d4df1caca"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "4eeaeeebd42ee2d0df1dd4e285a5b95ae6136f2d61639df8fb3414cd0b510d06",
+          "text": "commit 9942cb22ea458c34fa17b73d143ea32d4df1caca\nAuthor:     Vincent Guittot <vincent.guittot@linaro.org>\nAuthorDate: Mon Dec 11 11:48:49 2023 +0100\nCommit:     Ingo Molnar <mingo@kernel.org>\nCommitDate: Sat Dec 23 15:52:34 2023 +0100\n\n    sched/topology: Add a new arch_scale_freq_ref() method\n    \n    Create a new method to get a unique and fixed max frequency. Currently\n    cpuinfo.max_freq or the highest (or last) state of performance domain are\n    used as the max frequency when computing the frequency for a level of\n    utilization, but:\n    \n      - cpuinfo_max_freq can change at runtime. boost is one example of\n        such change.\n    \n      - cpuinfo.max_freq and last item of the PD can be different leading to\n        different results between cpufreq and energy model.\n    \n    We need to save the reference frequency that has been used when computing\n    the CPUs capacity and use this fixed and coherent value to convert between\n    frequency and CPU's capacity.\n    \n    In fact, we already save the frequency that has been used when computing\n    the capacity of each CPU. We extend the precision to save kHz instead of\n    MHz currently and we modify the type to be aligned with other variables\n    used when converting frequency to capacity and the other way.\n    \n    [ mingo: Minor edits. ]\n    \n    Signed-off-by: Vincent Guittot <vincent.guittot@linaro.org>\n    Signed-off-by: Ingo Molnar <mingo@kernel.org>\n    Tested-by: Lukasz Luba <lukasz.luba@arm.com>\n    Reviewed-by: Lukasz Luba <lukasz.luba@arm.com>\n    Acked-by: Sudeep Holla <sudeep.holla@arm.com>\n    Link: https://lore.kernel.org/r/20231211104855.558096-2-vincent.guittot@linaro.org\n"
+        },
+        {
+          "argv": [
+            "git",
+            "-C",
+            "/root/repos/linux",
+            "diff",
+            "--no-ext-diff",
+            "--no-renames",
+            "d2e9f53ac5dd76dadc0b5f04f6c27640604ce2af",
+            "9942cb22ea458c34fa17b73d143ea32d4df1caca",
+            "--"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "8f8993f19800b6f9a806230929d927f51b1c6a54a16902410d9aa80d8dedc129",
+          "text": "diff --git a/arch/arm/include/asm/topology.h b/arch/arm/include/asm/topology.h\nindex c7d2510e5a78..853c4f81ba4a 100644\n--- a/arch/arm/include/asm/topology.h\n+++ b/arch/arm/include/asm/topology.h\n@@ -13,6 +13,7 @@\n #define arch_set_freq_scale topology_set_freq_scale\n #define arch_scale_freq_capacity topology_get_freq_scale\n #define arch_scale_freq_invariant topology_scale_freq_invariant\n+#define arch_scale_freq_ref topology_get_freq_ref\n #endif\n \n /* Replace task scheduler's default cpu-invariant accounting */\ndiff --git a/arch/arm64/include/asm/topology.h b/arch/arm64/include/asm/topology.h\nindex 9fab663dd2de..a323b109b9c4 100644\n--- a/arch/arm64/include/asm/topology.h\n+++ b/arch/arm64/include/asm/topology.h\n@@ -23,6 +23,7 @@ void update_freq_counters_refs(void);\n #define arch_set_freq_scale topology_set_freq_scale\n #define arch_scale_freq_capacity topology_get_freq_scale\n #define arch_scale_freq_invariant topology_scale_freq_invariant\n+#define arch_scale_freq_ref topology_get_freq_ref\n \n #ifdef CONFIG_ACPI_CPPC_LIB\n #define arch_init_invariance_cppc topology_init_cpu_capacity_cppc\ndiff --git a/arch/riscv/include/asm/topology.h b/arch/riscv/include/asm/topology.h\nindex e316ab3b77f3..61183688bdd5 100644\n--- a/arch/riscv/include/asm/topology.h\n+++ b/arch/riscv/include/asm/topology.h\n@@ -9,6 +9,7 @@\n #define arch_set_freq_scale\t\ttopology_set_freq_scale\n #define arch_scale_freq_capacity\ttopology_get_freq_scale\n #define arch_scale_freq_invariant\ttopology_scale_freq_invariant\n+#define arch_scale_freq_ref\t\ttopology_get_freq_ref\n \n /* Replace task scheduler's default cpu-invariant accounting */\n #define arch_scale_cpu_capacity\ttopology_get_cpu_scale\ndiff --git a/drivers/base/arch_topology.c b/drivers/base/arch_topology.c\nindex b741b5ba82bd..0c9ae5b157b1 100644\n--- a/drivers/base/arch_topology.c\n+++ b/drivers/base/arch_topology.c\n@@ -19,6 +19,7 @@\n #include <linux/init.h>\n #include <linux/rcupdate.h>\n #include <linux/sched.h>\n+#include <linux/units.h>\n \n #define CREATE_TRACE_POINTS\n #include <trace/events/thermal_pressure.h>\n@@ -26,7 +27,8 @@\n static DEFINE_PER_CPU(struct scale_freq_data __rcu *, sft_data);\n static struct cpumask scale_freq_counters_mask;\n static bool scale_freq_invariant;\n-static DEFINE_PER_CPU(u32, freq_factor) = 1;\n+DEFINE_PER_CPU(unsigned long, capacity_freq_ref) = 1;\n+EXPORT_PER_CPU_SYMBOL_GPL(capacity_freq_ref);\n \n static bool supports_scale_freq_counters(const struct cpumask *cpus)\n {\n@@ -170,9 +172,9 @@ DEFINE_PER_CPU(unsigned long, thermal_pressure);\n  * operating on stale data when hot-plug is used for some CPUs. The\n  * @capped_freq reflects the currently allowed max CPUs frequency due to\n  * thermal capping. It might be also a boost frequency value, which is bigger\n- * than the internal 'freq_factor' max frequency. In such case the pressure\n- * value should simply be removed, since this is an indication that there is\n- * no thermal throttling. The @capped_freq must be provided in kHz.\n+ * than the internal 'capacity_freq_ref' max frequency. In such case the\n+ * pressure value should simply be removed, since this is an indication that\n+ * there is no thermal throttling. The @capped_freq must be provided in kHz.\n  */\n void topology_update_thermal_pressure(const struct cpumask *cpus,\n \t\t\t\t      unsigned long capped_freq)\n@@ -183,10 +185,7 @@ void topology_update_thermal_pressure(const struct cpumask *cpus,\n \n \tcpu = cpumask_first(cpus);\n \tmax_capacity = arch_scale_cpu_capacity(cpu);\n-\tmax_freq = per_cpu(freq_factor, cpu);\n-\n-\t/* Convert to MHz scale which is used in 'freq_factor' */\n-\tcapped_freq /= 1000;\n+\tmax_freq = arch_scale_freq_ref(cpu);\n \n \t/*\n \t * Handle properly the boost frequencies, which should simply clean\n@@ -279,13 +278,13 @@ void topology_normalize_cpu_scale(void)\n \n \tcapacity_scale = 1;\n \tfor_each_possible_cpu(cpu) {\n-\t\tcapacity = raw_capacity[cpu] * per_cpu(freq_factor, cpu);\n+\t\tcapacity = raw_capacity[cpu] * per_cpu(capacity_freq_ref, cpu);\n \t\tcapacity_scale = max(capacity, capacity_scale);\n \t}\n \n \tpr_debug(\"cpu_capacity: capacity_scale=%llu\\n\", capacity_scale);\n \tfor_each_possible_cpu(cpu) {\n-\t\tcapacity = raw_capacity[cpu] * per_cpu(freq_factor, cpu);\n+\t\tcapacity = raw_capacity[cpu] * per_cpu(capacity_freq_ref, cpu);\n \t\tcapacity = div64_u64(capacity << SCHED_CAPACITY_SHIFT,\n \t\t\tcapacity_scale);\n \t\ttopology_set_cpu_scale(cpu, capacity);\n@@ -321,15 +320,15 @@ bool __init topology_parse_cpu_capacity(struct device_node *cpu_node, int cpu)\n \t\t\tcpu_node, raw_capacity[cpu]);\n \n \t\t/*\n-\t\t * Update freq_factor for calculating early boot cpu capacities.\n+\t\t * Update capacity_freq_ref for calculating early boot CPU capacities.\n \t\t * For non-clk CPU DVFS mechanism, there's no way to get the\n \t\t * frequency value now, assuming they are running at the same\n-\t\t * frequency (by keeping the initial freq_factor value).\n+\t\t * frequency (by keeping the initial capacity_freq_ref value).\n \t\t */\n \t\tcpu_clk = of_clk_get(cpu_node, 0);\n \t\tif (!PTR_ERR_OR_ZERO(cpu_clk)) {\n-\t\t\tper_cpu(freq_factor, cpu) =\n-\t\t\t\tclk_get_rate(cpu_clk) / 1000;\n+\t\t\tper_cpu(capacity_freq_ref, cpu) =\n+\t\t\t\tclk_get_rate(cpu_clk) / HZ_PER_KHZ;\n \t\t\tclk_put(cpu_clk);\n \t\t}\n \t} else {\n@@ -411,7 +410,7 @@ init_cpu_capacity_callback(struct notifier_block *nb,\n \tcpumask_andnot(cpus_to_visit, cpus_to_visit, policy->related_cpus);\n \n \tfor_each_cpu(cpu, policy->related_cpus)\n-\t\tper_cpu(freq_factor, cpu) = policy->cpuinfo.max_freq / 1000;\n+\t\tper_cpu(capacity_freq_ref, cpu) = policy->cpuinfo.max_freq;\n \n \tif (cpumask_empty(cpus_to_visit)) {\n \t\ttopology_normalize_cpu_scale();\ndiff --git a/include/linux/arch_topology.h b/include/linux/arch_topology.h\nindex a07b510e7dc5..32c24ff4f2a8 100644\n--- a/include/linux/arch_topology.h\n+++ b/include/linux/arch_topology.h\n@@ -27,6 +27,13 @@ static inline unsigned long topology_get_cpu_scale(int cpu)\n \n void topology_set_cpu_scale(unsigned int cpu, unsigned long capacity);\n \n+DECLARE_PER_CPU(unsigned long, capacity_freq_ref);\n+\n+static inline unsigned long topology_get_freq_ref(int cpu)\n+{\n+\treturn per_cpu(capacity_freq_ref, cpu);\n+}\n+\n DECLARE_PER_CPU(unsigned long, arch_freq_scale);\n \n static inline unsigned long topology_get_freq_scale(int cpu)\ndiff --git a/include/linux/sched/topology.h b/include/linux/sched/topology.h\nindex de545ba85218..a6e04b4a21d7 100644\n--- a/include/linux/sched/topology.h\n+++ b/include/linux/sched/topology.h\n@@ -279,6 +279,14 @@ void arch_update_thermal_pressure(const struct cpumask *cpus,\n { }\n #endif\n \n+#ifndef arch_scale_freq_ref\n+static __always_inline\n+unsigned int arch_scale_freq_ref(int cpu)\n+{\n+\treturn 0;\n+}\n+#endif\n+\n static inline int task_node(const struct task_struct *p)\n {\n \treturn cpu_to_node(task_cpu(p));\n"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "Historical selected repairs, not new defects",
+    "Independent reviewer must save oracle before reading parent predictions"
+  ]
+}

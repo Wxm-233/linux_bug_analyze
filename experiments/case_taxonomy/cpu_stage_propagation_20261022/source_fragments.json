@@ -1,0 +1,98 @@
+{
+  "task": "N2.21",
+  "fragments": [
+    {
+      "id": "acpi_parent",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/kernel/acpi/boot.c",
+      "first_line": 1728,
+      "last_line": 1738,
+      "source_file_sha256": "834042fe319175607cf49d230c548e6d3a1fe9664c83c2e12edad12ef3047601",
+      "fragment_sha256": "69a7eb7b2596ced5bc43783fa3f547d34e39e25d56f6c225382c759aace0ccbe",
+      "text": "int __init acpi_mps_check(void)\n{\n#if defined(CONFIG_X86_LOCAL_APIC) && !defined(CONFIG_X86_MPPARSE)\n/* mptable code is not built-in*/\n\tif (acpi_disabled || acpi_noirq) {\n\t\tpr_warn(\"MPS support code is not built-in, using acpi=off or acpi=noirq or pci=noacpi may have problem\\n\");\n\t\treturn 1;\n\t}\n#endif\n\treturn 0;\n}\n"
+    },
+    {
+      "id": "acpi_fixed",
+      "revision": "8b37357a78d7fa13d88ea822b35b40137da1c85e",
+      "path": "arch/x86/kernel/acpi/boot.c",
+      "first_line": 1730,
+      "last_line": 1749,
+      "source_file_sha256": "ec86c6c53cae7947cbab2cfc4e28ea64b100532784c402be919b4e6584efe3c4",
+      "fragment_sha256": "e6d703dad999b684eabae922aba5bec8d52b3e753015497142e6f3ce377f27e6",
+      "text": "int __init acpi_mps_check(void)\n{\n#if defined(CONFIG_X86_LOCAL_APIC) && !defined(CONFIG_X86_MPPARSE)\n/* mptable code is not built-in*/\n\n\t/*\n\t * Xen disables ACPI in PV DomU guests but it still emulates APIC and\n\t * supports SMP. Returning early here ensures that APIC is not disabled\n\t * unnecessarily and the guest is not limited to a single vCPU.\n\t */\n\tif (xen_pv_domain() && !xen_initial_domain())\n\t\treturn 0;\n\n\tif (acpi_disabled || acpi_noirq) {\n\t\tpr_warn(\"MPS support code is not built-in, using acpi=off or acpi=noirq or pci=noacpi may have problem\\n\");\n\t\treturn 1;\n\t}\n#endif\n\treturn 0;\n}\n"
+    },
+    {
+      "id": "setter_and_binding",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "include/linux/cpumask.h",
+      "first_line": 27,
+      "last_line": 40,
+      "source_file_sha256": "df41d350f3d6723c4c6846916085c97224b5c8a06817e9b23d9cb1046b16954a",
+      "fragment_sha256": "1a8bfca808b13cc7d487ad5bd34346a27031ae9eb6a5e0f3d129a48cd2273026",
+      "text": "#if (NR_CPUS == 1) || defined(CONFIG_FORCE_NR_CPUS)\n#define nr_cpu_ids ((unsigned int)NR_CPUS)\n#else\nextern unsigned int nr_cpu_ids;\n#endif\n\nstatic __always_inline void set_nr_cpu_ids(unsigned int nr)\n{\n#if (NR_CPUS == 1) || defined(CONFIG_FORCE_NR_CPUS)\n\tWARN_ON(nr != nr_cpu_ids);\n#else\n\tnr_cpu_ids = nr;\n#endif\n}\n"
+    },
+    {
+      "id": "early",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/kernel/cpu/topology.c",
+      "first_line": 427,
+      "last_line": 442,
+      "source_file_sha256": "6b3fb6e6f16be5f1dfdb826c92b8e704b1ecdd2df65cdd54700a74a07f0bc299",
+      "fragment_sha256": "faa513aaa8f774dc76004bebcb2fef0287540a5cd64651405cc77e8e436dac7f",
+      "text": "void __init topology_apply_cmdline_limits_early(void)\n{\n\tunsigned int possible = nr_cpu_ids;\n\n\t/* 'maxcpus=0' 'nosmp' 'nolapic' */\n\tif (!setup_max_cpus || apic_is_disabled)\n\t\tpossible = 1;\n\n\t/* 'possible_cpus=N' */\n\tpossible = min_t(unsigned int, max_possible_cpus, possible);\n\n\tif (possible < nr_cpu_ids) {\n\t\tpr_info(\"Limiting to %u possible CPUs\\n\", possible);\n\t\tset_nr_cpu_ids(possible);\n\t}\n}\n"
+    },
+    {
+      "id": "late",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/kernel/cpu/topology.c",
+      "first_line": 444,
+      "last_line": 458,
+      "source_file_sha256": "6b3fb6e6f16be5f1dfdb826c92b8e704b1ecdd2df65cdd54700a74a07f0bc299",
+      "fragment_sha256": "f56953da182feaabb8845dc266b286d1288c6778cc0d89b9529e12951aa4ba4c",
+      "text": "static __init bool restrict_to_up(void)\n{\n\tif (!smp_found_config)\n\t\treturn true;\n\t/*\n\t * XEN PV is special as it does not advertise the local APIC\n\t * properly, but provides a fake topology for it so that the\n\t * infrastructure works. So don't apply the restrictions vs. APIC\n\t * here.\n\t */\n\tif (xen_pv_domain())\n\t\treturn false;\n\n\treturn apic_is_disabled;\n}\n"
+    },
+    {
+      "id": "provider",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/xen/smp_pv.c",
+      "first_line": 149,
+      "last_line": 161,
+      "source_file_sha256": "897df66a59dd2135da26d9bbfb74956545b39c1243f6837e7bb58895cd736642",
+      "fragment_sha256": "f1986d47a79b96221282b8230626745f090b8f329f30e57ae27107e63fd9d467",
+      "text": "static void __init xen_pv_smp_config(void)\n{\n\tu32 apicid = 0;\n\tint i;\n\n\ttopology_register_boot_apic(apicid);\n\n\tfor (i = 0; i < nr_cpu_ids; i++)\n\t\ttopology_register_apic(apicid++, CPU_ACPIID_INVALID, true);\n\n\t/* Pretend to be a proper enumerated system */\n\tsmp_found_config = 1;\n}\n"
+    },
+    {
+      "id": "setup_acpi_fragment",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/kernel/setup.c",
+      "first_line": 955,
+      "last_line": 960,
+      "source_file_sha256": "ad8b8b483d427eafb559499e756166b95407702ba016ec75ac2bd7d261f0abfe",
+      "fragment_sha256": "cddd3b1194dd88533c8a707bcbbe34a7c5db6df1cf16b2021b4d40ef49f0a71f",
+      "text": "\tif (acpi_mps_check()) {\n#ifdef CONFIG_X86_LOCAL_APIC\n\t\tapic_is_disabled = true;\n#endif\n\t\tsetup_clear_cpu_cap(X86_FEATURE_APIC);\n\t}\n"
+    },
+    {
+      "id": "setup_order_witness",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/kernel/setup.c",
+      "first_line": 1199,
+      "last_line": 1211,
+      "source_file_sha256": "ad8b8b483d427eafb559499e756166b95407702ba016ec75ac2bd7d261f0abfe",
+      "fragment_sha256": "dd9323bb0843d1c5e0e76f8f1de78b812f9f23a367b661eb36ea76424608a0ec",
+      "text": "\ttopology_apply_cmdline_limits_early();\n\n\t/*\n\t * Parse SMP configuration. Try ACPI first and then the platform\n\t * specific parser.\n\t */\n\tacpi_boot_init();\n\tx86_init.mpparse.parse_smp_cfg();\n\n\t/* Last opportunity to detect and map the local APIC */\n\tinit_apic_mappings();\n\n\ttopology_init_possible_cpus();\n"
+    },
+    {
+      "id": "provider_hook_witness",
+      "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+      "path": "arch/x86/xen/smp_pv.c",
+      "first_line": 443,
+      "last_line": 456,
+      "source_file_sha256": "897df66a59dd2135da26d9bbfb74956545b39c1243f6837e7bb58895cd736642",
+      "fragment_sha256": "3c76ee0eac5b54d92d4ddc48709bec3c4ae06267065ffef306ae000a63cf65c4",
+      "text": "void __init xen_smp_init(void)\n{\n\tsmp_ops = xen_smp_ops;\n\n\t/* Avoid searching for BIOS MP tables */\n\tx86_init.mpparse.find_mptable\t\t= x86_init_noop;\n\tx86_init.mpparse.early_parse_smp_cfg\t= x86_init_noop;\n\n\t/* XEN/PV Dom0 has halfways sane topology information via CPUID/MADT */\n\tif (xen_initial_domain())\n\t\tx86_init.mpparse.parse_smp_cfg\t= x86_init_noop;\n\telse\n\t\tx86_init.mpparse.parse_smp_cfg\t= xen_pv_smp_config;\n}\n"
+    }
+  ],
+  "locator_scope": "fixed named functions only, no generic C claim",
+  "parent_documents_sha256": "25201ff8b05213bd85585665bcaa8ab9be26545c72a89b52f99614599d42ab54",
+  "instrumentation": "setter and ACPI-return observers call original functions once; WARN counted; setup fragment wrapped; Xen predicates explicit; APIC registration stubs record attempts"
+}

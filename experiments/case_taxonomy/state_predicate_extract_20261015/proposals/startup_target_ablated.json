@@ -1,0 +1,139 @@
+{
+  "scope": "local_candidate",
+  "checks": [
+    {
+      "id": "smt_self_member",
+      "title": "cpu_smt_mask(cpu)读取时该cpu应已属于自身SMT掩码",
+      "providers": [
+        {
+          "architecture": "generic(CONFIG_SCHED_SMT)",
+          "value": "cpu_smt_mask(cpu) 返回 topology_sibling_cpumask(cpu)",
+          "eligibility": "仅当定义CONFIG_SCHED_SMT且架构未自定义cpu_smt_mask宏时适用；topology_sibling_cpumask在何时被填充由arch早期启动代码决定，本材料未给出该填充点",
+          "evidence": [
+            {
+              "document": "S_interface",
+              "start_line": 202,
+              "end_line": 206
+            }
+          ],
+          "program_extracted_evidence": [
+            {
+              "document": "S_interface",
+              "path": "include/linux/topology.h",
+              "start_line": 202,
+              "end_line": 206,
+              "source_text": "202: #if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)\n203: static inline const struct cpumask *cpu_smt_mask(int cpu)\n204: {\n205: \treturn topology_sibling_cpumask(cpu);\n206: }"
+            }
+          ]
+        }
+      ],
+      "configuration": [
+        {
+          "architecture": "generic",
+          "requires": [
+            "CONFIG_SCHED_SMT=y",
+            "!defined(cpu_smt_mask)"
+          ],
+          "evidence": [
+            {
+              "document": "S_interface",
+              "start_line": 202,
+              "end_line": 202
+            }
+          ],
+          "program_extracted_evidence": [
+            {
+              "document": "S_interface",
+              "path": "include/linux/topology.h",
+              "start_line": 202,
+              "end_line": 202,
+              "source_text": "202: #if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)"
+            }
+          ]
+        }
+      ],
+      "consumer": {
+        "function": "sched_core_cpu_starting",
+        "event": "first_read",
+        "anchor": "const struct cpumask *smt_mask = cpu_smt_mask(cpu);",
+        "evidence": [
+          {
+            "document": "S_core",
+            "start_line": 5755,
+            "end_line": 5755
+          }
+        ],
+        "program_extracted_evidence": [
+          {
+            "document": "S_core",
+            "path": "kernel/sched/core.c",
+            "start_line": 5755,
+            "end_line": 5755,
+            "source_text": "5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);"
+          }
+        ]
+      },
+      "predicate": {
+        "op": "contains",
+        "args": [
+          {
+            "symbol": "smt_mask"
+          },
+          {
+            "symbol": "cpu"
+          }
+        ]
+      },
+      "polarity": "must_hold",
+      "authority_status": "policy_proposal",
+      "basis": "sched_core_cpu_starting随后以for_each_cpu(t, smt_mask)遍历并多次使用t==cpu分支（如5770-5771、5786-5787行）为cpu自身赋值core_rq，若cpu不在smt_mask中，该特判逻辑永不触发，leader查找与core_rq安装将出现逻辑缺口；这要求smt_mask在被读取使用时已含cpu自身，但该填充时机的证据不在本材料范围内",
+      "evidence": [
+        {
+          "document": "S_core",
+          "start_line": 5755,
+          "end_line": 5755
+        },
+        {
+          "document": "S_core",
+          "start_line": 5769,
+          "end_line": 5777
+        },
+        {
+          "document": "S_core",
+          "start_line": 5783,
+          "end_line": 5789
+        }
+      ],
+      "unknown": [
+        "arch早期启动代码（如set_cpu_sibling_map等）填充topology_sibling_cpumask的时机未在材料中出现，无法确认其先于CPUHP_AP_SCHED_STARTING阶段完成"
+      ],
+      "program_extracted_evidence": [
+        {
+          "document": "S_core",
+          "path": "kernel/sched/core.c",
+          "start_line": 5755,
+          "end_line": 5755,
+          "source_text": "5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);"
+        },
+        {
+          "document": "S_core",
+          "path": "kernel/sched/core.c",
+          "start_line": 5769,
+          "end_line": 5777,
+          "source_text": "5769: \tfor_each_cpu(t, smt_mask) {\n5770: \t\tif (t == cpu)\n5771: \t\t\tcontinue;\n5772: \t\trq = cpu_rq(t);\n5773: \t\tif (rq->core == rq) {\n5774: \t\t\tcore_rq = rq;\n5775: \t\t\tbreak;\n5776: \t\t}\n5777: \t}"
+        },
+        {
+          "document": "S_core",
+          "path": "kernel/sched/core.c",
+          "start_line": 5783,
+          "end_line": 5789,
+          "source_text": "5783: \tfor_each_cpu(t, smt_mask) {\n5784: \t\trq = cpu_rq(t);\n5785: \n5786: \t\tif (t == cpu)\n5787: \t\t\trq->core = core_rq;\n5788: \n5789: \t\tWARN_ON_ONCE(rq->core != core_rq);"
+        }
+      ]
+    }
+  ],
+  "unknown": [
+    "未提供architecture特定的topology_sibling_cpumask填充源码，无法判定跨架构是否满足该条件",
+    "未见对cpu_smt_mask返回值非空/含自身的显式断言或WARN"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "rule_version": 1,
+  "known_candidate_commits": [
+    {"id": "btrfs", "hash": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7", "expected": "flagged"},
+    {"id": "s390_topology", "hash": "a052096bdd6809eeab809202726634d1ac975aa1", "expected": "flagged"},
+    {"id": "riscv_topology", "hash": "c1d6105869464635d8a2bcf87a43c05f4c0cfca4", "expected": "flagged"},
+    {"id": "x86_name_only", "hash": "bdb1b1f03b9b1cc1cde7d54f8b5b2f9a6bdda782", "expected": "not_flagged"}
+  ],
+  "known_order_contracts": [
+    {
+      "id": "btrfs_max_inline_real_sectorsize",
+      "fix_commit": "6f93e834fa7c5faa0372e46828b4b2a966ac61d7",
+      "file": "fs/btrfs/disk-io.c",
+      "function": "open_ctree",
+      "producer_regex": "\\bfs_info->sectorsize\\s*=\\s*sectorsize\\s*;",
+      "consumer_regex": "\\bbtrfs_parse_options\\s*\\(",
+      "condition_A": "sectorsize from superblock exceeds temporary 4K and user specifies max_inline",
+      "failure_handling": "source-order only; mount error and later use require separate review"
+    },
+    {
+      "id": "s390_smt_mask_before_notification",
+      "fix_commit": "a052096bdd6809eeab809202726634d1ac975aa1",
+      "file": "arch/s390/kernel/smp.c",
+      "function": "smp_start_secondary",
+      "producer_regex": "\\bupdate_cpu_masks\\s*\\(\\s*\\)\\s*;",
+      "consumer_regex": "\\bnotify_cpu_starting\\s*\\(",
+      "condition_A": "CPU hotplug with SCHED_CORE/SMT path; notify reaches sched_core_cpu_starting",
+      "failure_handling": "source-order only; cpu_setup_mask and notifier reachability need separate review"
+    }
+  ]
+}

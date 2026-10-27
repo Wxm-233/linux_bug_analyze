@@ -1,0 +1,13 @@
+# 当前停点
+
+2026-10-09。本轮mechanism_body_path_20261009完成后封存只读。
+
+原500表示层33–64项32元数据，标题REP3项，既有源码曝光2项（bnxt_re/PWM），唯一取证i3c7a2bccd1a27f0c8fc87e4ed56abd6ea9fa7314a6。独立范围752文件/222引用；metadata SHA187f2d7d289cf715d54fb985cb353103ce30c7838a2cc149433b0f47acbc69f9，曝光审计SHA57939acd9913e63b6ab4bd03b3740f793942bcbdb69ee00b0ac897aed82e2ebc，首锁ac769b7f92e8f5e6f33a2d74323728cf371c87d4a46291376b9af585ddd17d2e。
+
+唯一取证2Git/均退出0，真实parent7ff730ca458e841dbcdc87f264d7afe3eaed525e，changed path=drivers/i3c/master/mipi-i3c-hci/core.c。message正文3/4/6行描述BIG_ENDIAN与CPU_BIG_ENDIAN配置名；COUNT0、selected_path=null，stop=no_body_count_and_implementation_in_fixed_queue。原物含完整提交说明/trailers，不是盲封；未取C、Kconfig、patch或运行旧规则/门控。新确认/独立阳性0，原12条6/5/1不变。
+
+本轮不追加第65项、其他标题或标准头，不放宽COUNT追样；结束编码长度的标题选例路线。独立表示/计数阳性仍未解决，不由本轮metadata结果替代。
+
+下一项：另立有限源码特征协议，使用本轮已读说明作为开发线索，核查I3C端序配置引用及同版Kconfig定义/相关分支。先冻结父版C与配置声明取证额度；分别保存机器可提取的符号/条件/操作、人工属性契约、生成宏/构建定义与实际配置未知。缺声明是候选来源不足，不自动当运行错误。说明知情开发不算独立盲测，支持后才规划局部对照或新独立验证；不要再继续扩大标题样本池。
+
+更新今日唯一日志和Windows/WSL待办。C1–C4、D2整体、D3全部裁定、D4/NUMA保持未完成，不恢复付费筛选、不查余额、不改Word或推送GitHub。

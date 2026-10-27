@@ -1,0 +1,98 @@
+{
+  "scope": "cross_arch_candidate",
+  "findings": [
+    {
+      "title": "cpu_smt_mask于sched_cpu_starting消费时依赖架构事先填充sibling mask，时序未见保证",
+      "contract": "CONFIG_SCHED_SMT开启且架构未覆盖cpu_smt_mask时，通用实现返回topology_sibling_cpumask(cpu)；sched_core_cpu_starting/sched_core_lock在CPUHP_AP_SCHED_STARTING阶段据此分组并按序加锁，要求该cpu的sibling mask此时已被架构代码正确填充",
+      "architecture_difference": "材料仅含!defined(cpu_smt_mask)时生效的通用回退，未提供任何架构自定义cpu_smt_mask或sibling mask填充时序源码，具体架构差异未知",
+      "propagation": "topology.h定义cpu_smt_mask→kernel/cpu.c notify_cpu_starting按cpuhp表在CPUHP_AP_SCHED_STARTING调用sched_cpu_starting→sched_core_cpu_starting/sched_core_lock消费该mask做core分组与多rq加锁",
+      "exposure_difference": "notify_cpu_starting文档仅要求arch在新cpu使能中断前调用，未声明sibling mask已就绪；若某架构在此调用前未设置sibling cpumask则mask可能不完整，是否满足未知",
+      "authority_status": "existing_requirement",
+      "check_candidate": "检查目标架构start_secondary路径中sibling cpumask设置是否先于notify_cpu_starting完成；weight==1(单核无sibling)分支合法应排除误报",
+      "evidence": [
+        {
+          "document": "S_interface",
+          "start_line": 202,
+          "end_line": 206
+        },
+        {
+          "document": "S_notify",
+          "start_line": 1254,
+          "end_line": 1265
+        },
+        {
+          "document": "S_table",
+          "start_line": 1692,
+          "end_line": 1696
+        },
+        {
+          "document": "S_starting",
+          "start_line": 8834,
+          "end_line": 8840
+        },
+        {
+          "document": "S_core",
+          "start_line": 5753,
+          "end_line": 5766
+        },
+        {
+          "document": "S_locks",
+          "start_line": 240,
+          "end_line": 248
+        }
+      ],
+      "unknown": [
+        "各架构sibling mask相对notify_cpu_starting调用的填充时序未提供",
+        "cpu_smt_mask是否被具体架构覆盖为宏/函数未见材料"
+      ],
+      "program_extracted_evidence": [
+        {
+          "document": "S_interface",
+          "path": "include/linux/topology.h",
+          "start_line": 202,
+          "end_line": 206,
+          "source_text": "202: #if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)\n203: static inline const struct cpumask *cpu_smt_mask(int cpu)\n204: {\n205: \treturn topology_sibling_cpumask(cpu);\n206: }"
+        },
+        {
+          "document": "S_notify",
+          "path": "kernel/cpu.c",
+          "start_line": 1254,
+          "end_line": 1265,
+          "source_text": "1254:  * It must be called by the arch code on the new cpu, before the new cpu\n1255:  * enables interrupts and before the \"boot\" cpu returns from __cpu_up().\n1256:  */\n1257: void notify_cpu_starting(unsigned int cpu)\n1258: {\n1259: \tstruct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);\n1260: \tenum cpuhp_state target = min((int)st->target, CPUHP_AP_ONLINE);\n1261: \tint ret;\n1262: \n1263: \trcu_cpu_starting(cpu);\t/* Enables RCU usage on this CPU. */\n1264: \tcpumask_set_cpu(cpu, &cpus_booted_once_mask);\n1265: \tret = cpuhp_invoke_callback_range(true, cpu, st, target);"
+        },
+        {
+          "document": "S_table",
+          "path": "kernel/cpu.c",
+          "start_line": 1692,
+          "end_line": 1696,
+          "source_text": "1692: \t[CPUHP_AP_SCHED_STARTING] = {\n1693: \t\t.name\t\t\t= \"sched:starting\",\n1694: \t\t.startup.single\t\t= sched_cpu_starting,\n1695: \t\t.teardown.single\t= sched_cpu_dying,\n1696: \t},"
+        },
+        {
+          "document": "S_starting",
+          "path": "kernel/sched/core.c",
+          "start_line": 8834,
+          "end_line": 8840,
+          "source_text": "8834: int sched_cpu_starting(unsigned int cpu)\n8835: {\n8836: \tsched_core_cpu_starting(cpu);\n8837: \tsched_rq_cpu_starting(cpu);\n8838: \tsched_tick_start(cpu);\n8839: \treturn 0;\n8840: }"
+        },
+        {
+          "document": "S_core",
+          "path": "kernel/sched/core.c",
+          "start_line": 5753,
+          "end_line": 5766,
+          "source_text": "5753: static void sched_core_cpu_starting(unsigned int cpu)\n5754: {\n5755: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n5756: \tstruct rq *rq = cpu_rq(cpu), *core_rq = NULL;\n5757: \tunsigned long flags;\n5758: \tint t;\n5759: \n5760: \tsched_core_lock(cpu, &flags);\n5761: \n5762: \tWARN_ON_ONCE(rq->core != rq);\n5763: \n5764: \t/* if we're the first, we'll be our own leader */\n5765: \tif (cpumask_weight(smt_mask) == 1)\n5766: \t\tgoto unlock;"
+        },
+        {
+          "document": "S_locks",
+          "path": "kernel/sched/core.c",
+          "start_line": 240,
+          "end_line": 248,
+          "source_text": "240: static void sched_core_lock(int cpu, unsigned long *flags)\n241: {\n242: \tconst struct cpumask *smt_mask = cpu_smt_mask(cpu);\n243: \tint t, i = 0;\n244: \n245: \tlocal_irq_save(*flags);\n246: \tfor_each_cpu(t, smt_mask)\n247: \t\traw_spin_lock_nested(&cpu_rq(t)->__lock, i++);\n248: }"
+        }
+      ]
+    }
+  ],
+  "unknown": [
+    "材料未覆盖任一具体架构的start_secondary/拓扑初始化代码",
+    "cpu_smt_mask运行时动态状态(如热插拔中途)未知"
+  ]
+}

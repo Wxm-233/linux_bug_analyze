@@ -1,0 +1,130 @@
+{
+  "reviewer": "assistant_source_review",
+  "expert_confirmed": false,
+  "scope": "message_informed_development",
+  "required_property": "初始化代码声明希望控制器数据顺序适配host；是否能用CPU配置代表所有相关路径尚须核查",
+  "original_property_reference": "CONFIG_BIG_ENDIAN",
+  "full_definition_example": {
+    "symbol": "CPU_BIG_ENDIAN",
+    "path": "arch/arm64/Kconfig",
+    "property_text": "choice help描述CPU数据访问端序；条目为Build big-endian kernel"
+  },
+  "arm_definition_status": "根Kconfig的source行已核对；arch/arm/mm/Kconfig:740只有检索行，条目与上下文未取得",
+  "observed_control_relation": "then词法块设置HC_CONTROL_DATA_BIG_ENDIAN并回读，else块清除并回读；回读不符合分别返回-EOPNOTSUPP",
+  "property_contract_status": "conditional_source_interpretation",
+  "check_candidate": "选择架构相关模式的配置引用应能关联到同版、表达所需属性的来源；来源不足或属性未经核实则请求复核",
+  "candidate_disposition": "source_insufficient_review_required",
+  "not_certified": [
+    "IS_ENABLED同版展开语义",
+    "完整Kconfig语法不存在证明",
+    "有效.config与生成autoconf宏",
+    "外部编译-D与动态生成",
+    "全部Kconfig include/depends约束求解",
+    "初始化真实路径到达",
+    "HC_CONTROL_DATA_BIG_ENDIAN硬件规范及设备响应",
+    "真实内核或设备错误",
+    "所有架构统一属性覆盖"
+  ],
+  "query_limitations": [
+    "声明查询锚定行首config/menuconfig，未涵盖有前导空白的所有语法形式",
+    "直接define查询不覆盖动态宏名/编译-D/生成结果",
+    "全树CONFIG_BIG_ENDIAN字面引用查询只找到该C行，不等于语义全部定义来源已排除"
+  ],
+  "pattern_note": "表示与模式选择的属性来源候选；既有四类框架不增加第五类，也不把P2/P4重叠当两个缺陷",
+  "five_dimensions": {
+    "subsystem": "I3C master / MIPI HCI",
+    "trigger_architecture": "unknown; arm64 is only a source-property example",
+    "direction": "conditional_vertical_candidate; no horizontal A/shared/B chain established",
+    "error_origin_side": "unknown; suspicious reference is present in shared driver source",
+    "first_introduction": "unknown",
+    "first_discovery": "unknown",
+    "fix_commit_metadata": "2022-01-05 committer timestamp from prior saved message, not discovery or verified first mainline integration",
+    "introduction_to_discovery": "unknown",
+    "discovery_to_fix": "unknown"
+  },
+  "new_confirmed_cases": 0,
+  "independent_positive_cases": 0,
+  "evidence": {
+    "control_bit": {
+      "source_path": "drivers/i3c/master/mipi-i3c-hci/core.c",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "1b73647cc3b1a658ab94804bdbf6b35aed310a18",
+      "source_sha256": "c3f534d1da90a4d13a75d841523b296d1bf54fb1183e135ff0511fd3693603bd",
+      "line_start": 37,
+      "line_end": 46,
+      "text": "#define HC_CONTROL\t\t\t0x04\n#define HC_CONTROL_BUS_ENABLE\t\tBIT(31)\n#define HC_CONTROL_RESUME\t\tBIT(30)\n#define HC_CONTROL_ABORT\t\tBIT(29)\n#define HC_CONTROL_HALT_ON_CMD_TIMEOUT\tBIT(12)\n#define HC_CONTROL_HOT_JOIN_CTRL\tBIT(8)\t/* Hot-Join ACK/NACK Control */\n#define HC_CONTROL_I2C_TARGET_PRESENT\tBIT(7)\n#define HC_CONTROL_PIO_MODE\t\tBIT(6)\t/* DMA/PIO Mode Selector */\n#define HC_CONTROL_DATA_BIG_ENDIAN\tBIT(4)\n#define HC_CONTROL_IBA_INCLUDE\t\tBIT(0)\t/* Include I3C Broadcast Address */"
+    },
+    "host_ordering_comment_and_guard": {
+      "source_path": "drivers/i3c/master/mipi-i3c-hci/core.c",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "1b73647cc3b1a658ab94804bdbf6b35aed310a18",
+      "source_sha256": "c3f534d1da90a4d13a75d841523b296d1bf54fb1183e135ff0511fd3693603bd",
+      "line_start": 663,
+      "line_end": 665,
+      "text": "\t/* Make sure our data ordering fits the host's */\n\tregval = reg_read(HC_CONTROL);\n\tif (IS_ENABLED(CONFIG_BIG_ENDIAN)) {"
+    },
+    "big_endian_mode_branch": {
+      "source_path": "drivers/i3c/master/mipi-i3c-hci/core.c",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "1b73647cc3b1a658ab94804bdbf6b35aed310a18",
+      "source_sha256": "c3f534d1da90a4d13a75d841523b296d1bf54fb1183e135ff0511fd3693603bd",
+      "line_start": 666,
+      "line_end": 674,
+      "text": "\t\tif (!(regval & HC_CONTROL_DATA_BIG_ENDIAN)) {\n\t\t\tregval |= HC_CONTROL_DATA_BIG_ENDIAN;\n\t\t\treg_write(HC_CONTROL, regval);\n\t\t\tregval = reg_read(HC_CONTROL);\n\t\t\tif (!(regval & HC_CONTROL_DATA_BIG_ENDIAN)) {\n\t\t\t\tdev_err(&hci->master.dev, \"cannot set BE mode\\n\");\n\t\t\t\treturn -EOPNOTSUPP;\n\t\t\t}\n\t\t}"
+    },
+    "other_mode_branch": {
+      "source_path": "drivers/i3c/master/mipi-i3c-hci/core.c",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "1b73647cc3b1a658ab94804bdbf6b35aed310a18",
+      "source_sha256": "c3f534d1da90a4d13a75d841523b296d1bf54fb1183e135ff0511fd3693603bd",
+      "line_start": 675,
+      "line_end": 685,
+      "text": "\t} else {\n\t\tif (regval & HC_CONTROL_DATA_BIG_ENDIAN) {\n\t\t\tregval &= ~HC_CONTROL_DATA_BIG_ENDIAN;\n\t\t\treg_write(HC_CONTROL, regval);\n\t\t\tregval = reg_read(HC_CONTROL);\n\t\t\tif (regval & HC_CONTROL_DATA_BIG_ENDIAN) {\n\t\t\t\tdev_err(&hci->master.dev, \"cannot clear BE mode\\n\");\n\t\t\t\treturn -EOPNOTSUPP;\n\t\t\t}\n\t\t}\n\t}"
+    },
+    "cpu_endianness_choice": {
+      "source_path": "arch/arm64/Kconfig",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "c4207cf9bb17ffb28147c51ce6a38ed54c01c4ff",
+      "source_sha256": "95b39fe5206ccc3c8654a510720af97b9de59a2854d1ba633958c641f412b6ff",
+      "line_start": 1075,
+      "line_end": 1095,
+      "text": "choice\n\tprompt \"Endianness\"\n\tdefault CPU_LITTLE_ENDIAN\n\thelp\n\t  Select the endianness of data accesses performed by the CPU. Userspace\n\t  applications will need to be compiled and linked for the endianness\n\t  that is selected here.\n\nconfig CPU_BIG_ENDIAN\n\tbool \"Build big-endian kernel\"\n\tdepends on !LD_IS_LLD || LLD_VERSION >= 130000\n\thelp\n\t  Say Y if you plan on running a kernel with a big-endian userspace.\n\nconfig CPU_LITTLE_ENDIAN\n\tbool \"Build little-endian kernel\"\n\thelp\n\t  Say Y if you plan on running a kernel with a little-endian userspace.\n\t  This is usually the case for distributions targeting arm64.\n\nendchoice"
+    },
+    "arm_nested_source": {
+      "source_path": "arch/arm/Kconfig",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "f0f9e8bec83acfa6ca3108664f8f815e0715bd34",
+      "source_sha256": "110c2fc293e01e2dfe1c885c2c8aac7cb3f00d4540d2fd6907434988d3183c5c",
+      "line_start": 760,
+      "line_end": 760,
+      "text": "source \"arch/arm/mm/Kconfig\""
+    },
+    "driver_declaration": {
+      "source_path": "drivers/i3c/master/Kconfig",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "3b8f95916f46a934f28432cdb77f249d7ff54f4d",
+      "source_sha256": "aab073e9edaeb11d0dc9b30660995ff5cf11e0e6ba3ae22a70ef3d2229d49485",
+      "line_start": 33,
+      "line_end": 45,
+      "text": "config MIPI_I3C_HCI\n\ttristate \"MIPI I3C Host Controller Interface driver (EXPERIMENTAL)\"\n\tdepends on I3C\n\tdepends on HAS_IOMEM\n\thelp\n\t  Support for hardware following the MIPI Aliance's I3C Host Controller\n\t  Interface specification.\n\n\t  For details please see:\n\t  https://www.mipi.org/specifications/i3c-hci\n\n\t  This driver can also be built as a module.  If so, the module will be\n\t  called mipi-i3c-hci."
+    },
+    "i3c_parent_condition": {
+      "source_path": "drivers/i3c/Kconfig",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "30a441506f61c580c35d11e39b8229160dc74ecf",
+      "source_sha256": "9473ea0d5471840b742a898d8a2f84d105b0d7aa0426feba3a69c994806f2565",
+      "line_start": 22,
+      "line_end": 24,
+      "text": "if I3C\nsource \"drivers/i3c/master/Kconfig\"\nendif # I3C"
+    },
+    "object_build_line": {
+      "source_path": "drivers/i3c/master/mipi-i3c-hci/Makefile",
+      "revision": "7ff730ca458e841dbcdc87f264d7afe3eaed525e",
+      "blob": "a658e7b8262c5d91f2eb7611373bfd02e08ec06b",
+      "source_sha256": "87d2c4a44908afcd4a31b2cc6e4172037afe0929dded1527d596fa4eaf7741e2",
+      "line_start": 3,
+      "line_end": 6,
+      "text": "obj-$(CONFIG_MIPI_I3C_HCI)\t\t+= mipi-i3c-hci.o\nmipi-i3c-hci-y\t\t\t\t:= core.o ext_caps.o pio.o dma.o \\\n\t\t\t\t\t   cmd_v1.o cmd_v2.o \\\n\t\t\t\t\t   dat_v1.o dct_v1.o"
+    }
+  }
+}

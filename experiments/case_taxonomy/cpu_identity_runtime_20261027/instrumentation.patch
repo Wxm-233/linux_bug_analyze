@@ -1,0 +1,129 @@
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -249,6 +249,8 @@
+ 	 * the CPU migration code to notice that the CPU is online
+ 	 * before we continue.
+ 	 */
++	pr_info("LBA_CPU_HW logical=%u mapped=0x%llx actual=0x%llx boot=0\n",
++		cpu, (unsigned long long)cpu_logical_map(cpu), (unsigned long long)mpidr);
+ 	pr_info("CPU%u: Booted secondary processor 0x%010lx [0x%08x]\n",
+ 					 cpu, (unsigned long)mpidr,
+ 					 read_cpuid_id());
+@@ -463,6 +465,9 @@
+ 	kasan_init_hw_tags();
+ 	/* Init percpu seeds for random tags after cpus are set up. */
+ 	kasan_init_sw_tags();
++	pr_info("LBA_CPU_HW logical=%u mapped=0x%llx actual=0x%llx boot=1\n",
++		smp_processor_id(), (unsigned long long)cpu_logical_map(smp_processor_id()),
++		(unsigned long long)(read_cpuid_mpidr() & MPIDR_HWID_BITMASK));
+ }
+ 
+ /*
+@@ -736,6 +741,28 @@
+  * cpu logical map array containing MPIDR values related to logical
+  * cpus. Assumes that cpu_logical_map(0) has already been initialized.
+  */
++
++/* Read-only experiment observer; no CPU state or mapping writes. */
++static void __init lba_arch_cpu_snapshot(const char *stage)
++{
++	unsigned int i;
++
++	pr_info("LBA_CPU_SNAPSHOT stage=%s nr=%u max=%u possible=%*pbl present=%*pbl online=%*pbl\n",
++		stage, nr_cpu_ids, setup_max_cpus,
++		cpumask_pr_args(cpu_possible_mask), cpumask_pr_args(cpu_present_mask),
++		cpumask_pr_args(cpu_online_mask));
++	for (i = 0; i < 32 && i < NR_CPUS; i++) {
++		u64 hwid = cpu_logical_map(i);
++		bool domain = i < nr_cpu_ids;
++
++		pr_info("LBA_CPU_MAP stage=%s logical=%u hardware=0x%llx valid=%u domain=%u possible=%d present=%d online=%d\n",
++			stage, i, (unsigned long long)hwid, hwid != INVALID_HWID, domain,
++			domain ? cpumask_test_cpu(i, cpu_possible_mask) : -1,
++			domain ? cpumask_test_cpu(i, cpu_present_mask) : -1,
++			domain ? cpumask_test_cpu(i, cpu_online_mask) : -1);
++	}
++}
++
+ void __init smp_init_cpus(void)
+ {
+ 	int i;
+@@ -767,6 +794,7 @@
+ 				set_cpu_logical_map(i, INVALID_HWID);
+ 		}
+ 	}
++	lba_arch_cpu_snapshot("arch_after_enumeration");
+ }
+ 
+ void __init smp_prepare_cpus(unsigned int max_cpus)
+@@ -776,6 +804,7 @@
+ 	unsigned int cpu;
+ 	unsigned int this_cpu;
+ 
++	lba_arch_cpu_snapshot("arch_before_prepare");
+ 	init_cpu_topology();
+ 
+ 	this_cpu = smp_processor_id();
+@@ -811,6 +840,7 @@
+ 		set_cpu_present(cpu, true);
+ 		numa_store_cpu_info(cpu);
+ 	}
++	lba_arch_cpu_snapshot("arch_after_prepare");
+ }
+ 
+ static const char *ipi_types[MAX_IPI] __tracepoint_string = {
+--- a/kernel/smp.c
++++ b/kernel/smp.c
+@@ -952,6 +952,16 @@
+ 
+ early_param("nosmp", nosmp);
+ 
++
++/* Sample only; preserves all original parameter/selection operations. */
++static void __init lba_scope_snapshot(const char *stage)
++{
++	pr_info("LBA_CPU_SNAPSHOT stage=%s nr=%u max=%u possible=%*pbl present=%*pbl online=%*pbl\n",
++		stage, nr_cpu_ids, setup_max_cpus,
++		cpumask_pr_args(cpu_possible_mask), cpumask_pr_args(cpu_present_mask),
++		cpumask_pr_args(cpu_online_mask));
++}
++
+ /* this is hard limit */
+ static int __init nrcpus(char *str)
+ {
+@@ -960,6 +970,7 @@
+ 	if (get_option(&str, &nr_cpus) && nr_cpus > 0 && nr_cpus < nr_cpu_ids)
+ 		set_nr_cpu_ids(nr_cpus);
+ 
++	lba_scope_snapshot("early_nr_cpus");
+ 	return 0;
+ }
+ 
+@@ -971,6 +982,7 @@
+ 	if (setup_max_cpus == 0)
+ 		arch_disable_smp_support();
+ 
++	lba_scope_snapshot("early_maxcpus");
+ 	return 0;
+ }
+ 
+@@ -985,7 +997,9 @@
+ /* An arch may set nr_cpu_ids earlier if needed, so this would be redundant */
+ void __init setup_nr_cpu_ids(void)
+ {
++	lba_scope_snapshot("common_before_rebound");
+ 	set_nr_cpu_ids(find_last_bit(cpumask_bits(cpu_possible_mask), NR_CPUS) + 1);
++	lba_scope_snapshot("common_after_rebound");
+ }
+ 
+ /* Called by boot processor to activate the rest. */
+@@ -998,7 +1012,9 @@
+ 
+ 	pr_info("Bringing up secondary CPUs ...\n");
+ 
++	lba_scope_snapshot("common_before_bringup");
+ 	bringup_nonboot_cpus(setup_max_cpus);
++	lba_scope_snapshot("common_after_bringup");
+ 
+ 	num_nodes = num_online_nodes();
+ 	num_cpus  = num_online_cpus();

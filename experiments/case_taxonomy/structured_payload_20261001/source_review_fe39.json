@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-01",
+  "target": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb",
+  "parent": "a3172b7eb4a2719711187cfca12097d2326e85a7",
+  "subject": "Bluetooth: Use __le64 type for LE random numbers",
+  "stage": "source review after frozen parent outputs preserved",
+  "scope": "Related Bluetooth rand field declarations, generation/storage, HCI command copy and event equality only; no rule changes, hardware execution or replacement selection",
+  "applicability_A": {
+    "source_path": "Historical Bluetooth LE pairing/storage/send/event query",
+    "configuration_reachability": "unproven",
+    "triggering_architecture": "none established"
+  },
+  "provider_P": {
+    "parent_representation": "8-byte arrays filled by get_random_bytes, memset, received packet data or exact byte copying; no host-u64 numeric interpretation shown",
+    "new_representation": "__le64 annotations and corresponding encoded-value assignment/equality",
+    "authority": "same-revision source declarations and actual copying/equality; commit author states HCI format is little endian",
+    "external_specification": "not independently checked; controller opcode applicability remains unproven"
+  },
+  "consumer_C": {
+    "send_chain": "hci_le_start_enc -> hci_send_cmd -> hci_prepare_cmd -> memcpy(skb_put(...),param,plen)",
+    "equality_chain": "hci_le_ltk_request_evt -> hci_find_ltk; parent memcmp on encoded arrays, new direct equality of same-representation __le64 values",
+    "observation": "bounded old/new paths preserve encoded bytes and equality; no missing host-to-endian conversion demonstrated",
+    "defect_verdict": "not established"
+  },
+  "evidence": [
+    {"revision": "a3172b7eb4a2719711187cfca12097d2326e85a7", "path": "include/net/bluetooth/hci.h", "blob": "35ef60febd5795f93e050363236418a878ba3169", "lines": [[1235,1240],[1647,1651]], "fact": "command rand[8] and event random[8] are byte arrays"},
+    {"revision": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb", "path": "include/net/bluetooth/hci.h", "blob": "0740fee39c7382c3691fa89e1e5ad0060502c25d", "lines": [[1235,1240],[1647,1651]], "fact": "both changed to __le64 rand; packed command and event declarations"},
+    {"revision": "a3172b7eb4a2719711187cfca12097d2326e85a7", "path": "include/net/bluetooth/hci_core.h", "blob": "571168811ecd5f745652901f2fd3997cb3a6a6a8", "lines": [[94,104],[1296,1297]], "fact": "stored rand[8] and old send argument are encoded byte arrays"},
+    {"revision": "a3172b7eb4a2719711187cfca12097d2326e85a7", "path": "net/bluetooth/hci_conn.c", "blob": "7d6f05e3cae8a6e4a9e8ab88d09c237ede4b7e25", "lines": [[234,249]], "fact": "memcpy cp.rand then hci_send_cmd exact sizeof(cp), &cp"},
+    {"revision": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb", "path": "net/bluetooth/hci_conn.c", "blob": "5b0802994cbb40c27ba374d483ffdd6802690f6b", "lines": [[234,249]], "fact": "__le64 rand parameter assigned to __le64 cp.rand then same send entry"},
+    {"revision": "a3172b7eb4a2719711187cfca12097d2326e85a7", "path": "net/bluetooth/hci_core.c", "blob": "a9ff1cbe2c41bb4be8ade7c19d742be4a2724561", "lines": [[2924,2932],[3047,3073],[4285,4307],[4311,4318],[4366,4369]], "fact": "memcmp encoded bytes, storage memcpy, direct payload memcpy and hci_req_add located in hci_core.c"},
+    {"revision": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb", "path": "net/bluetooth/hci_core.c", "blob": "32c0c2c58f66daaf98b957a4541a1688a23ccb07", "lines": [[2924,2930],[3046,3071],[4284,4306],[4310,4317],[4365,4368]], "fact": "same-representation equality/storage assignment, same payload memcpy route"},
+    {"revision": "a3172b7eb4a2719711187cfca12097d2326e85a7", "path": "net/bluetooth/hci_event.c", "blob": "674bfdc3ecc38fd4a1bf66c932b92407ec2e522a", "lines": [[3830,3848]], "fact": "received event random[8] forwarded to lookup"},
+    {"revision": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb", "path": "net/bluetooth/hci_event.c", "blob": "e3d7151e808edb88ce5495e1d448ae9cc1006426", "lines": [[3830,3848]], "fact": "received __le64 event rand forwarded to lookup"},
+    {"revision": "a3172b7eb4a2719711187cfca12097d2326e85a7", "path": "net/bluetooth/smp.c", "blob": "0de98fe23330c90936e7d0d4cb3c16e70814c8f6", "lines": [[520,524],[1211,1223]], "fact": "zero/random bytes placed in array and passed/stored without host numeric conversion"},
+    {"revision": "fe39c7b2dacf7fd4dcddc26704d01315ab92b7cb", "path": "net/bluetooth/smp.c", "blob": "99abffcaf16b84ef459f5f9ef67f8da9d9b36a1b", "lines": [[519,522],[1204,1221]], "fact": "zero/random bytes now occupy __le64 scalar and are assigned to __le64 ident.rand"}
+  ],
+  "frozen_parent_result": {
+    "file": "holdout/fe39c7b2dacf_parent_raw.json",
+    "sha256": "e61a211d31cb818c64896c33da84de8ae570760e9b2f86662564e1944d75ff8c",
+    "sites": 22,
+    "counts": {"candidate": 0, "matched_conversion": 0, "insufficient": 16},
+    "insufficient_reasons": {"missing_same_revision_hci_request_c": 15, "different_lexical_block": 1},
+    "interpretation": "scope/consumer-version mismatch, never a clean verdict or 16 confirmed errors"
+  },
+  "consumer_version_mismatch": {
+    "net_bluetooth_hci_request_c_exists_at_parent": false,
+    "net_bluetooth_hci_request_c_exists_at_target": false,
+    "real_hci_req_add_parent": "net/bluetooth/hci_core.c:4366-4369",
+    "real_prepare_cmd_parent": "net/bluetooth/hci_core.c:4285-4307",
+    "relevance": "frozen rule hardcodes later hci_request.c and skb_put_data organization; actual changed rand send is hci_send_cmd in hci_conn.c, not the preselected hci_core.c entry"
+  },
+  "five_dimensions": {
+    "trigger_architecture": "not established",
+    "subsystem": "Bluetooth LE/HCI/SMP and management field representation",
+    "horizontal_or_vertical": "vertical representation boundaries present, defect across them not established; no horizontal regression evidence",
+    "origin_side": "changes in common Bluetooth code/headers; error origin not applicable without demonstrated error",
+    "times": {
+      "author_date": "2014-02-27T16:00:28-08:00",
+      "integration_date": "2014-02-28T12:36:04+02:00",
+      "error_introduction_date": null,
+      "discovery_date": null,
+      "verified_defect_fix_date": null,
+      "qualification": "type-refactor integration must not be presented as a demonstrated error-fix time or exposure duration"
+    }
+  },
+  "classification": "representation_annotation_refactor_control",
+  "confirmed_defect_count_increment": 0,
+  "independent_positive_count_increment": 0,
+  "unknowns": ["actual historical configuration and runtime path", "external HCI specification version/opcode requirements", "controller behavior", "complete pairing implementation correctness", "first error/discovery times because error not established"],
+  "next_use": "normal/annotation-preserving counterexample for conditional representation checks; do not automatically insert host-to-endian conversion on already encoded values",
+  "patch_or_rule_changed": false,
+  "new_selection_or_pool_expansion": false
+}

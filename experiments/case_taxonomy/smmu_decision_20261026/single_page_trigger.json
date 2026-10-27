@@ -1,0 +1,24 @@
+{
+  "source": "linux_bug_analyze\\experiments\\case_taxonomy\\smmu_range_bounds_20261026\\source\\mm__memory.c",
+  "sha256": "71d00ad14b07841e16decf315c97e80289ec8649cca23f4bf1f7770a7d377a81",
+  "line": 3335,
+  "excerpt": "static vm_fault_t do_wp_page(struct vm_fault *vmf)\n\t__releases(vmf->ptl)\n{\n\tconst bool unshare = vmf->flags & FAULT_FLAG_UNSHARE;\n\tstruct vm_area_struct *vma = vmf->vma;\n\tstruct folio *folio = NULL;\n\n\tif (likely(!unshare)) {\n\t\tif (userfaultfd_pte_wp(vma, ptep_get(vmf->pte))) {\n\t\t\tpte_unmap_unlock(vmf->pte, vmf->ptl);\n\t\t\treturn handle_userfault(vmf, VM_UFFD_WP);\n\t\t}\n\n\t\t/*\n\t\t * Userfaultfd write-protect can defer flushes. Ensure the TLB\n\t\t * is flushed in this case before copying.\n\t\t */\n\t\tif (unlikely(userfaultfd_wp(vmf->vma) &&\n\t\t\t     mm_tlb_flush_pending(vmf->vma->vm_mm)))\n\t\t\tflush_tlb_page(vmf->vma, vmf->address);\n\t}\n",
+  "conditions": [
+    "entered do_wp_page under caller protection and lock assumptions",
+    "!unshare",
+    "userfaultfd_pte_wp branch did not return handle_userfault",
+    "userfaultfd_wp(vma)",
+    "mm_tlb_flush_pending(mm)"
+  ],
+  "manual": true,
+  "not_exhaustive_callsites": true,
+  "runtime": "not observed",
+  "downstream": "flush_tlb_page -> page_nosync -> __flush_tlb_page_nosync -> arch notifier; prior original-function probe covers latter only",
+  "additional_conditions": [
+    "same mm registered notifier",
+    "successful SVA/CD binding",
+    "BTM0 for explicit SMMU TLBI",
+    "RIL1 for range encoding",
+    "supported translation domain and granule"
+  ]
+}

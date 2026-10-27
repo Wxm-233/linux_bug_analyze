@@ -1,0 +1,66 @@
+{
+  "task": "N2.22",
+  "date": "2026-10-23",
+  "purpose": "source-bound direct scalar write facts under selected compile-time branches",
+  "prior_source_packet_sha256": "a4d5dca0dab0a985cc283261ca0543bf03a13cc226583c0e8e9c2a16855816b0",
+  "fragment": {
+    "id": "setter_and_binding",
+    "revision": "0af2f6be1b4281385b618cb86ad946eded089ac8",
+    "path": "include/linux/cpumask.h",
+    "first_line": 27,
+    "last_line": 40,
+    "source_file_sha256": "df41d350f3d6723c4c6846916085c97224b5c8a06817e9b23d9cb1046b16954a",
+    "fragment_sha256": "1a8bfca808b13cc7d487ad5bd34346a27031ae9eb6a5e0f3d129a48cd2273026",
+    "text": "#if (NR_CPUS == 1) || defined(CONFIG_FORCE_NR_CPUS)\n#define nr_cpu_ids ((unsigned int)NR_CPUS)\n#else\nextern unsigned int nr_cpu_ids;\n#endif\n\nstatic __always_inline void set_nr_cpu_ids(unsigned int nr)\n{\n#if (NR_CPUS == 1) || defined(CONFIG_FORCE_NR_CPUS)\n\tWARN_ON(nr != nr_cpu_ids);\n#else\n\tnr_cpu_ids = nr;\n#endif\n}\n"
+  },
+  "profiles": [
+    {
+      "id": "dynamic4",
+      "defines": [
+        "NR_CPUS=4"
+      ],
+      "binding_expected": "extern_object",
+      "direct_write_expected": true
+    },
+    {
+      "id": "force4",
+      "defines": [
+        "NR_CPUS=4",
+        "CONFIG_FORCE_NR_CPUS=1"
+      ],
+      "binding_expected": "macro_constant",
+      "direct_write_expected": false
+    },
+    {
+      "id": "single1",
+      "defines": [
+        "NR_CPUS=1"
+      ],
+      "binding_expected": "macro_constant",
+      "direct_write_expected": false
+    }
+  ],
+  "query_function": "set_nr_cpu_ids",
+  "query_scalar": "nr_cpu_ids",
+  "human_inputs": [
+    "selected source range",
+    "three compile-time profiles",
+    "query function and scalar",
+    "expected binding and direct-write facts",
+    "diagnostic macro replacement"
+  ],
+  "diagnostic_replacement": "WARN_ON conditionally increments an observable warning counter; not the historical kernel WARN_ON implementation",
+  "scope": "host GCC early compiler representation only; no Kconfig legality or original diagnostic-effects proof",
+  "stop": [
+    "first compiler failure",
+    "nonunique function or missing original source locus",
+    "unsupported CFG/alias/cross-procedure fact remains insufficient"
+  ],
+  "no_prior_matrix_rerun": true,
+  "new_kernel_material": false,
+  "paid_model_requests": 0,
+  "kernel_builds": 0,
+  "kernel_boots": 0,
+  "independent_positive": 0,
+  "independent_normal": 0
+}
