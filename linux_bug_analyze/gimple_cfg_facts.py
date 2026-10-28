@@ -57,11 +57,13 @@ def _view(text):
     return "".join(mask), spans, locations, asms
 
 
-def _metadata(prefix):
+def _metadata(prefix, notes=None):
     function, declared_count, successors, loops, current = None, None, {}, {}, None
     for number, raw in enumerate(prefix.splitlines(), 1):
         line = raw.strip()
         if not line or line == ";;": continue
+        if notes is not None and CLEANUP_NOTE.fullmatch(line):
+            notes.append({"dump_line": number, "raw": raw, "semantics": "compiler_cfg_cleanup_note_only"}); continue
         match = re.fullmatch(r";; Function ([A-Za-z_]\w*) \([^\r\n]*\)", line)
         if match:
             need(function is None, "multiple_function_records"); function = match[1]; continue
@@ -235,7 +237,16 @@ def _relations(blocks, loops):
     return relations, arms
 
 
-def analyze_cfg(document, local_analysis=None):
+REAL_KERNEL_ATTRIBUTE = re.compile(  # matched on the masked view, where string literals are blanked
+    r'(?m)^[ \t]*__attribute__\(\((?:cold|hot|noinline|always_inline|section \([^()\r\n]*\))'
+    r'(?:, (?:cold|hot|noinline|always_inline|section \([^()\r\n]*\)))*\)\)[ \t]*\r?\n\Z')
+CLEANUP_NOTE = re.compile(r"(?:Merging blocks \d+ and \d+|Removing basic block \d+)")
+
+
+def analyze_cfg(document, local_analysis=None, *, real_kernel=False):
+    """``real_kernel`` (off by default, so earlier results are unchanged) also accepts GCC CFG cleanup
+    notes and one complete pre-signature attribute line limited to cold/hot/noinline/always_inline/
+    section("..."); both are recorded as annotations only, with no effect or must-return meaning."""
     result = {"status": "insufficient_cfg_input", "document": document.get("id"), "path": document.get("path"), "revision": document.get("revision"),
               "source_sha256": None, "blocks": [], "edges": [], "branch_polarity": [], "loops": [], "event_bindings": [],
               "relations": [], "branch_arms": [], "declaration_attributes": [], "unknowns": [], "runtime_reachability_proved": False,
@@ -252,6 +263,8 @@ def analyze_cfg(document, local_analysis=None):
         # it is neither a metadata record nor a statement/effect summary.
         prefix = mask[:signature.start()]
         attribute = re.search(r"(?m)^[ \t]*__attribute__\(\(always_inline\)\)[ \t]*\r?\n\Z", prefix)
+        if real_kernel and attribute is None:
+            attribute = REAL_KERNEL_ATTRIBUTE.search(prefix)
         attribute_tokens = list(re.finditer(r"\b__attribute__\b", mask))
         attributes, metadata_end = [], signature.start()
         if attribute_tokens:
@@ -259,12 +272,17 @@ def analyze_cfg(document, local_analysis=None):
                  attribute.start() <= attribute_tokens[0].start() < attribute.end(),
                  "unsupported_attribute_position_or_shape")
             metadata_end = attribute.start()
-            attributes.append({"name": "always_inline", "raw": text[attribute.start():attribute.end()],
+            raw_attribute = text[attribute.start():attribute.end()]
+            attributes.append({"name": "always_inline" if "((always_inline))" in raw_attribute else "declaration_attributes",
+                               "raw": raw_attribute,
                                "start_offset": attribute.start(), "end_offset": attribute.end(),
                                "dump_line_start": text.count("\n", 0, attribute.start()) + 1,
                                "dump_line_end": text.count("\n", 0, attribute.end() - 1) + 1,
                                "semantics": "declaration_annotation_only_no_effect_or_must_return_proof"})
-        function, successors, loop_map = _metadata(text[:metadata_end])
+        notes = [] if real_kernel else None
+        function, successors, loop_map = _metadata(text[:metadata_end], notes)
+        if notes:
+            result["compiler_notes"] = notes
         need(re.search(r"\b" + re.escape(function) + r"\s*\([^;{}]*\)\s*$", signature[1]) is not None, "function_signature_mismatch")
         opening = signature.end() - 1
         last = len(mask.rstrip()) - 1

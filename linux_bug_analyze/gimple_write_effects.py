@@ -36,7 +36,7 @@ def _shadow_facts(text, function, target):
     return facts
 
 
-def analyze_write_effects(document, *, function, target, expected_sha256=None):
+def analyze_write_effects(document, *, function, target, expected_sha256=None, real_kernel=False):
     """Observe supported direct assignments, retaining CFG and unknown effects.
 
     ``document`` must contain exactly one complete compiler early-CFG function,
@@ -65,7 +65,7 @@ def analyze_write_effects(document, *, function, target, expected_sha256=None):
                                          or expected_sha256 != result["source_sha256"]):
         result["unknowns"].append({"reason": "source_sha256_binding_mismatch"})
         return result
-    cfg = analyze_cfg(document)
+    cfg = analyze_cfg(document, real_kernel=real_kernel)
     if cfg["status"] != "compiler_normal_graph_facts":
         result["unknowns"] = cfg["unknowns"]
         return result
