@@ -1,0 +1,55 @@
+To: "Rafael J. Wysocki" <rafael@kernel.org>, Len Brown <lenb@kernel.org>, Thomas Gleixner <tglx@kernel.org>, Ingo Molnar <mingo@redhat.com>, Borislav Petkov <bp@alien8.de>, Dave Hansen <dave.hansen@linux.intel.com>, "H. Peter Anvin" <hpa@zytor.com>
+Cc: x86@kernel.org, linux-acpi@vger.kernel.org, linux-kernel@vger.kernel.org
+Subject: [QUESTION] x86/acpi: legacy Enabled=0 LAPIC hotplug slots not usable under QEMU TCG or KVM with "nopv"
+
+Hi,
+
+A question about the intended scope of commit adbf61cc47cb
+("x86/acpi/boot: Correct acpi_is_processor_usable() check again").
+Mainline v7.3-rc2 has the same logic:
+
+  arch/x86/kernel/acpi/boot.c, acpi_is_processor_usable():
+        if (lapic_flags & ACPI_MADT_ENABLED)
+                return true;
+        if (acpi_support_online_capable)
+                return lapic_flags & ACPI_MADT_ONLINE_CAPABLE;
+        /*
+         * QEMU expects legacy "Enabled=0" LAPIC entries to be counted as
+         * usable in order to support CPU hotplug in guests.
+         */
+        return !hypervisor_is_type(X86_HYPER_NATIVE);
+
+The "guest" condition is implemented as "a known hypervisor was
+detected". That differs for QEMU guests that are not detected as one:
+TCG (no hypervisor signature) and KVM booted with "nopv".
+
+Test: one x86_64_defconfig build of adbf61cc47cb (6.19.0-rc1 based,
+KVM_GUEST=y, ACPI_HOTPLUG_CPU=y, NR_CPUS=64), the same image and
+initramfs in four QEMU 8.2.2 environments:
+  qemu-system-x86_64 -machine q35 -m 512 -smp 1,maxcpus=4 -nodefaults ...
+then QMP device_add of the first empty hotpluggable slot and writing 1
+to /sys/devices/system/cpu/cpuN/online. All four runs see the same MADT
+(APIC rev 3, length 0x90) and FADT rev 3, i.e. no online-capable bit.
+
+  env              detected     boot report               possible  hot-add
+  KVM              KVM          1 present plus 3 hotplug  0-3       CPU1 added and onlined
+  KVM, nopv        (native)     1 present plus 0 hotplug  0         "ACPI: Unable to map lapic to logical cpu number"
+  TCG              (native)     1 present plus 0 hotplug  0         same
+  TCG, -cpu max    (native)     1 present plus 0 hotplug  0         same
+
+In the last three cases QEMU accepts device_add, but the kernel cannot
+assign a logical CPU number, so CPU hotplug does not work.
+
+This may well be an accepted trade-off (the commit had to stop
+counting Enabled=0 entries on bare metal, and TCG/nopv may be outside
+what is meant to be supported). I am asking whether that is intended.
+If it is not, one possible direction would be to also treat
+X86_FEATURE_HYPERVISOR as "guest" here; I have not checked whether
+that is appropriate for all of the cases the original fix was for, and
+I have not tested it.
+
+I have not re-run this on v7.3-rc2 itself; the function body is
+identical there.
+
+Thanks,
+<name>

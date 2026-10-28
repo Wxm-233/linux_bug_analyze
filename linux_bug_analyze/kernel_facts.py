@@ -26,7 +26,7 @@ BUNDLE_SCHEMA = "kernel_fact_bundle_v1"
 QUERY_KINDS = {"defined", "references", "may_reference", "config", "expansion_contains", "direct_write",
                "writes", "reads", "escapes", "in_init", "initcall_level", "calls", "reachable",
                "writers_count", "all_writers_in_init", "any_reader_outside_init", "constant", "build_ok",
-               "macro_defined", "macro_from_arch", "object_defines_token"}
+               "macro_defined", "macro_from_arch", "object_defines_token", "macro_value", "returns_only_zero"}
 INIT_SECTIONS = (".init.text", ".head.text", ".ref.text.init", ".meminit.text", ".cpuinit.text")
 
 
@@ -184,29 +184,92 @@ def _accesses(body: str) -> dict[str, list[str]]:
     return {"writes": sorted(writes), "reads": sorted(reads), "escapes": sorted(escapes), "calls": sorted(calls)}
 
 
-def _macro_trace(text: str, names: list[str], roots: list[str]) -> dict[str, dict[str, Any]]:
-    """#define/#undef events of ``names`` in -dD preprocessed output, attributed via line markers."""
+def _macro_trace(text: str, names: list[str] | None, roots: list[str]) -> dict[str, dict[str, Any]]:
+    """#define/#undef events of ``names`` (every macro when None) in -dD preprocessed output, attributed via
+    line markers; ``line`` is the source line of the final definition, ``define`` its full directive."""
     def rel(path: str) -> str:
         for root in roots:
             if path.startswith(root.rstrip("/") + "/"):
                 return path[len(root.rstrip("/")) + 1:]
         return path
-    wanted = set(names)
-    out = {n: {"defined": False, "origin": None, "text": None, "events": []} for n in names}
-    current = None
+    wanted = set(names) if names is not None else None
+    out = {n: {"defined": False, "origin": None, "text": None, "events": []} for n in (names or [])}
+    current, lineno = None, 0
     for line in text.splitlines():
-        m = re.match(r'^# \d+ "([^"]*)"', line)
+        m = re.match(r'^# (\d+) "([^"]*)"', line)
         if m:
-            current = rel(m.group(1))
+            current, lineno = rel(m.group(2)), int(m.group(1))
             continue
         m = re.match(r"^#\s*(define|undef)\s+([A-Za-z_]\w*)(.*)$", line)
-        if m and m.group(2) in wanted:
+        if m and (wanted is None or m.group(2) in wanted):
             op, name = m.group(1), m.group(2)
-            rec = out[name]
+            rec = out.setdefault(name, {"defined": False, "origin": None, "text": None, "events": []})
             rec["events"].append([op, current])
-            rec.update({"defined": True, "origin": current, "text": m.group(3).strip()} if op == "define"
-                       else {"defined": False, "origin": None, "text": None})
+            rec.update({"defined": True, "origin": current, "text": m.group(3).strip(), "line": lineno, "define": line.strip()}
+                       if op == "define" else {"defined": False, "origin": None, "text": None, "line": None, "define": None})
+        lineno += 1
     return out
+
+
+def _compile_command(build: Path, stem: str) -> list[str] | None:
+    """The compiler invocation Kbuild saved for ``stem``.o (first command of the .cmd line)."""
+    import shlex
+    cmd_file = build / Path(stem).parent / (".%s.o.cmd" % Path(stem).name)
+    if not cmd_file.exists():
+        return None
+    m = re.match(r"^(?:saved)?cmd_\S+\s*:=\s*(.*)$", cmd_file.read_text(errors="replace").splitlines()[0])
+    return shlex.split(m.group(1).split(";")[0]) if m else None
+
+
+def _probe_value(build: Path, stem: str, source: Path, macro: str, cross: str) -> dict[str, Any]:
+    """Integer value of ``macro`` in the compilation unit: compile the saved command on a probe that includes the
+    source and returns (macro) from a function, then read the constant from that function's optimized GIMPLE
+    (architecture independent; works for statement-expression macros such as min())."""
+    argv = _compile_command(build, stem)
+    if not argv or "-o" not in argv:
+        return {"answered": False, "reason": "compile_command_unavailable"}
+    probe = build / (stem + ".lba_probe.c")
+    obj = build / (stem + ".lba_probe.o")
+    dump = build / (stem + ".lba_probe.optimized")
+    fn = "__lba_probe_" + macro
+    # Reserved-spelling attributes: the kernel defines plain `noinline`/`used` as macros.
+    # The prototype keeps -Werror=missing-prototypes builds (CONFIG_WERROR) compiling.
+    probe.write_text('#include "%s"\nlong long %s(void);\n__attribute__((__used__, __noinline__)) long long %s(void) { return (long long)(%s); }\n'
+                     % (source, fn, fn, macro))
+    dump.unlink(missing_ok=True)
+    out = []
+    for i, tok in enumerate(argv):
+        if tok.startswith(("-Wp,-MMD", "-Wp,-MD", "-fdump-tree")) or tok == "-dD":
+            continue
+        if i > 0 and argv[i - 1] == "-o":
+            out.append(str(obj))
+        elif i == len(argv) - 1:
+            out.append(str(probe))
+        else:
+            out.append(tok)
+    out.insert(-1, "-fdump-tree-optimized=" + str(dump))
+    done = subprocess.run(out, cwd=str(build), capture_output=True, env=dict(os.environ, LC_ALL="C"), timeout=600)
+    obj.unlink(missing_ok=True)
+    if done.returncode != 0 or not dump.exists():
+        return {"answered": False, "reason": "probe_compile_failed", "stderr_tail": done.stderr.decode("utf-8", "replace")[-300:]}
+    record = _cfg_record(dump.read_text(errors="replace"), fn)
+    stmts = _body_statements(record or "")
+    m = re.fullmatch(r"return (-?\d+);", stmts[0]) if len(stmts) == 1 else None
+    return {"answered": True, "value": int(m.group(1))} if m else {"answered": False, "reason": "not_an_integer_constant"}
+
+
+def _body_statements(record: str) -> list[str]:
+    """Statements of an optimized GIMPLE function record (no declarations, block labels or debug markers)."""
+    body = record[record.find("{") + 1:record.rfind("}")] if "{" in record else ""
+    lines = [l.strip() for l in body.splitlines() if l.strip()]
+    # Declarations precede the first block label.
+    first = next((i for i, l in enumerate(lines) if re.match(r"^<bb \d+>", l)), len(lines))
+    return [l for l in lines[first:] if not re.match(r"^<bb \d+>", l) and not l.startswith(("#", ";;"))]
+
+
+def _returns_only_zero(record: str) -> bool:
+    """Optimized GIMPLE body reduced to a single constant-zero return."""
+    return _body_statements(record) in (["return 0;"], ["return false;"])
 
 
 def _cfg_record(text: str, name: str) -> str | None:
@@ -275,9 +338,10 @@ def collect(spec: Mapping[str, Any], out: Path) -> dict[str, Any]:
             if traced.returncode == 0 and dd.exists():
                 dtext = dd.read_text(errors="replace")
                 entry["macro_trace_sha256"] = _sha_bytes(dd.read_bytes())
-                entry["macros"] = _macro_trace(dtext, list(spec["macros"]), [str(src), str(build)])
+                entry["macros"] = _macro_trace(dtext, None if spec["macros"] == "*" else list(spec["macros"]), [str(src), str(build)])
         started = time.time()
-        done = _run(make + [kc("-fdump-tree-cfg-lineno"), stem + ".o", stem + ".i"], log)
+        dumps_flags = "-fdump-tree-cfg-lineno" + (" -fdump-tree-optimized" if spec.get("optimized_functions") else "")
+        done = _run(make + [kc(dumps_flags), stem + ".o", stem + ".i"], log)
         entry["build_returncode"] = done.returncode
         obj, pre = build / (stem + ".o"), build / (stem + ".i")
         if done.returncode == 0 and obj.exists():
@@ -310,6 +374,19 @@ def collect(spec: Mapping[str, Any], out: Path) -> dict[str, Any]:
             ctext = dumps[-1].read_text(errors="replace")
             entry["cfg_dump"] = {"name": dumps[-1].name, "sha256": _sha_bytes(dumps[-1].read_bytes())}
             entry["cfg_records"] = {f: _cfg_record(ctext, f) for f in spec.get("functions", [])}
+        if spec.get("optimized_functions"):
+            # An unchanged command does not recompile, so the newest dump (not one newer than this run) is used.
+            opt = sorted(p for p in (build / Path(stem).parent).glob(Path(stem).name + ".*optimized"))
+            if opt:
+                otext = opt[-1].read_text(errors="replace")
+                entry["optimized_dump"] = {"name": opt[-1].name, "sha256": _sha_bytes(opt[-1].read_bytes())}
+                entry["optimized_records"] = {f: _cfg_record(otext, f) for f in spec["optimized_functions"]}
+        if spec.get("macro_values") and done.returncode == 0:
+            traced_macros = entry.get("macros") or {}
+            # A name the -dD trace shows is never defined cannot be a macro value; skip its full-TU probe compile.
+            entry["macro_values"] = {m: ({"answered": False, "reason": "not_a_macro_in_trace"}
+                                         if m in traced_macros and not traced_macros[m]["defined"]
+                                         else _probe_value(build, stem, src / path, m, cross)) for m in spec["macro_values"]}
         files[path] = entry
     bundle = {"schema": BUNDLE_SCHEMA, "spec": dict(spec), "revision": rev, "build_profile": profile,
               "config_sha256": _sha_bytes(config_text.encode()), "config": config, "files": files, "commands": log}
@@ -438,6 +515,18 @@ def query(bundle: Mapping[str, Any], q: Mapping[str, Any]) -> tuple[bool, Any]:
                     return True, rec["defined"]
                 return True, bool(rec["defined"] and (rec["origin"] or "").startswith("arch/"))
         return False, "macro_not_traced"
+    if kind == "macro_value":
+        for entry in bundle["files"].values():
+            rec = (entry.get("macro_values") or {}).get(q["macro"])
+            if rec is not None:
+                return (True, rec["value"]) if rec.get("answered") else (False, rec.get("reason", "probe_failed"))
+        return False, "macro_value_not_probed"
+    if kind == "returns_only_zero":
+        for entry in bundle["files"].values():
+            rec = (entry.get("optimized_records") or {}).get(q["function"])
+            if rec:
+                return True, _returns_only_zero(rec)
+        return False, "no_optimized_record"
     if kind == "object_defines_token":
         pattern = re.compile(r"(?:^|_)" + re.escape(q["token"]) + r"(?:_|$)")
         for entry in bundle["files"].values():

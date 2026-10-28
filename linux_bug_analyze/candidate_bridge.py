@@ -220,19 +220,44 @@ def _wildcards(blob: str, names: set[str]) -> set[str]:
     return hits
 
 
-def tu_needs(candidates: list[Mapping[str, Any]], sources: Mapping[str, str]) -> dict[str, Any]:
-    """Macros to trace in the compilation unit: candidate/cited-line identifiers the sources use as macros."""
+VALUE_CAP, FUNCTION_CAP = 16, 12
+
+
+def tu_needs(candidates: list[Mapping[str, Any]], sources: Mapping[str, str], trace_all: bool = False) -> dict[str, Any]:
+    """Macros to trace in the compilation unit: candidate/cited-line identifiers the sources use as macros.
+    ``trace_all`` traces every such identifier instead (the caller keeps those the trace shows are macros), and
+    adds value probes (upper-case identifiers in the candidate text) and functions for optimized-body facts."""
     macro_like = set()
     for text in sources.values():
         macro_like |= set(re.findall(r"^\s*#\s*(?:define|ifdef|ifndef|undef)\s+([A-Za-z_]\w*)", text, re.M))
         macro_like |= set(re.findall(r"\bdefined\s*\(?\s*([A-Za-z_]\w*)", text))
-    macros, configs = set(), set()
+    spans = {path: function_spans(text) for path, text in sources.items()}
+    source_functions = {h for s in spans.values() for _, _, h in s if h}
+    macros, configs, values, functions = set(), set(), [], []
     for cand in candidates:
         blob, _ = _candidate_blob(cand, sources)
-        found = {t for t in re.findall(r"\b[A-Za-z_]\w*\b", blob) if t in macro_like} | _wildcards(blob, macro_like)
+        words = [t for t in re.findall(r"\b[A-Za-z_]\w*\b", blob) if t not in C_WORDS and len(t) > 2]
+        if trace_all:
+            found = set(words)
+        else:
+            found = {t for t in words if t in macro_like} | _wildcards(blob, macro_like)
         macros |= {t for t in found if not t.startswith("CONFIG_")}
         configs |= set(re.findall(r"\bCONFIG_([A-Z0-9_]+)\b", blob))
-    return {"macros": sorted(macros), "config_symbols": sorted(configs)}
+        if trace_all:
+            text = " ".join(str(cand.get(k, "")) for k in ("interface", "requirement", "conditions", "risk"))
+            values += [t for t in re.findall(r"\b[A-Z][A-Z0-9_]{2,}\b", text) if not t.startswith("CONFIG_")]
+            for role in ("provider", "consumer"):
+                ref = cand.get(role) or {}
+                if ref.get("file") in spans and type(ref.get("line")) is int:
+                    fn = enclosing(spans[ref["file"]], ref["line"])
+                    if fn:
+                        functions.append(fn)
+            functions += [t for t in re.findall(r"\b[a-z_]\w*\b", text) if t in source_functions]
+    out = {"macros": sorted(macros), "config_symbols": sorted(configs)}
+    if trace_all:
+        out["values"] = list(dict.fromkeys(values))[:VALUE_CAP]
+        out["functions"] = list(dict.fromkeys(functions))[:FUNCTION_CAP]
+    return out
 
 
 def build_tu_queries(candidates: list[Mapping[str, Any]], sources: Mapping[str, str], needs: Mapping[str, Any],
@@ -257,6 +282,19 @@ def build_tu_queries(candidates: list[Mapping[str, Any]], sources: Mapping[str, 
                 f"{macro} is defined at the end of {built_file}'s compilation unit (any source, including generic fallbacks)")
             add(f"arch_provides_{macro}", {"kind": "macro_from_arch", "macro": macro},
                 f"the final definition of {macro} in that compilation unit comes from an arch/ header (not a generic fallback)")
+        for macro in needs.get("values", []):
+            if macro in words:
+                add(f"value_{macro}", {"kind": "macro_value", "macro": macro},
+                    f"integer value of {macro} in {built_file}'s compilation unit for this build context (unanswered if not an integer constant)")
+        role_fns = set()
+        for role in ("provider", "consumer"):
+            ref = cand.get(role) or {}
+            if ref.get("file") in sources and type(ref.get("line")) is int:
+                role_fns.add(enclosing(function_spans(sources[ref["file"]]), ref["line"]))
+        for fn in needs.get("functions", []):
+            if fn in words or fn in role_fns:
+                add(f"{fn}_returns_only_zero", {"kind": "returns_only_zero", "function": fn},
+                    f"after optimization in this build context, {fn} is reduced to `return 0`/`return false` (the compiler proved it constant)")
         for line in cited:
             if line.lstrip().startswith("#"):
                 continue  # directives name macros and headers, not object symbols
@@ -327,7 +365,10 @@ def evaluate_candidate(formal: Mapping[str, Any], facts: Mapping[str, Any], *, c
     except (TypeError, AttributeError):
         return {"status": "invalid_formalization", "reason": "malformed expression"}
     missing = sorted(n for n in names if n not in facts)
-    symbols = {n: {"type": symbol_type(facts[n]) if n in facts else "bool", "role": "configuration" if n in config else "observation"}
+    if missing:
+        # Types of unanswered facts are unknown here; guessing one would turn a missing fact into a type error.
+        return {"status": "facts_unavailable", "missing": missing}
+    symbols = {n: {"type": symbol_type(facts[n]), "role": "configuration" if n in config else "observation"}
                for n in sorted(names)}
     origins = {k: ("researcher_authored" if reviewed else "model_proposal") for k in ("scope", "relation", "symbols", "required_claims", "authority_kind")}
     probe = {"schema": "architecture_contract_v2", "id": "probe", "revision": revision, "authority_kind": "consumer_inferred",
@@ -337,8 +378,6 @@ def evaluate_candidate(formal: Mapping[str, Any], facts: Mapping[str, Any], *, c
         validate_contract(probe)
     except ContractError as exc:
         return {"status": "invalid_formalization", "reason": str(exc)}
-    if missing:
-        return {"status": "facts_unavailable", "missing": missing}
     origin = "researcher_review" if reviewed else "model_proposal"
     roles = {r: {"statement": "Candidate requirement formalized over generated facts" + ("; reviewed." if reviewed else "; NOT reviewed."),
                  "references": whole(documents, "evidence"), "origin": origin if r in ("authority", "consumer_requirement") else "researcher_review"}

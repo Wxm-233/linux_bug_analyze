@@ -1,0 +1,62 @@
+To: "David S. Miller" <davem@davemloft.net>, Andreas Larsson <andreas@gaisler.com>
+Cc: sparclinux@vger.kernel.org, linux-kernel@vger.kernel.org
+Subject: [QUESTION] sparc64: record_one_cpu() possible-count check with nr_cpus= and sparse cpuids
+
+Hi,
+
+While reading commit 98937707fea8 ("sparc64: Fix number of online CPUs")
+I noticed something in the large-NR_CPUS configuration that I could not
+verify on hardware, so I am asking rather than sending a patch.
+
+Current mainline (v7.3-rc2, unchanged since 98937707fea8):
+
+  arch/sparc/kernel/prom_64.c, record_one_cpu():
+        set_cpu_present(cpuid, true);
+        if (num_possible_cpus() < nr_cpu_ids)
+                set_cpu_possible(cpuid, true);
+
+record_one_cpu() runs from setup_arch() after parse_early_param(), so
+with "nr_cpus=L" on the command line nr_cpu_ids is already L. With the
+sparc64 defconfig (CONFIG_NR_CPUS=4096, i.e. NR_CPUS > BITS_PER_LONG),
+num_possible_cpus() is cpumask_weight() over the first nr_cpu_ids bits
+only. If the firmware cpuids are sparse (the original report for
+98937707fea8 was an Ultra 60 with cpuids 0 and 2), a cpuid >= L is not
+counted by that weight, so the check keeps passing and such cpuids are
+still marked possible. Example: cpuids {0, 2}, nr_cpus=2 -> possible
+becomes {0, 2}.
+
+Two consequences follow from the code as I read it:
+
+ 1. alloc_irqstack_bootmem() (end of setup_arch) iterates
+    for_each_possible_cpu(), which at that point is also bounded by
+    nr_cpu_ids = L, so cpuid 2 gets no softirq/hardirq stack.
+ 2. setup_nr_cpu_ids() later recomputes nr_cpu_ids from the highest
+    possible bit (3 in the example), so the CPU becomes usable for
+    bringup, and nr_cpus=2 is effectively not honoured.
+
+If that CPU is brought up and takes an interrupt, handler_irq() ->
+set_hardirq_stack() would use hardirq_stack[cpu] == NULL. I have not
+been able to run this: QEMU sparc64 machines are limited to one CPU and
+I have no multi-CPU SPARC64 hardware.
+
+What I did check:
+ - A host-side projection that compiles the exact record_one_cpu(),
+   alloc_irqstack_bootmem(), setup_nr_cpu_ids() and
+   cpuhp_bringup_mask() bodies against stub cpumask/memblock code,
+   for both NR_CPUS=64 and NR_CPUS=4096 bitmap branches.
+ - Real sparc64 objects (sparc64-linux-gnu-gcc 13.3, sparc64_defconfig,
+   and the same with NR_CPUS=64) of 95706e717c4f and 98937707fea8:
+   with NR_CPUS=4096, record_one_cpu() loads nr_cpu_ids and calls
+   __bitmap_weight(__cpu_possible_mask, nr_cpu_ids), and the IRQ-stack
+   loop inlined into setup_arch() is bounded by nr_cpu_ids. With
+   NR_CPUS=64 both use a whole-word hweight64 / constant bound instead,
+   which is why the small configuration does not show this.
+
+So the questions are: is nr_cpus= with sparse cpuids a supported
+combination on sparc64, and if so, would it be preferable to count
+with a local counter (or skip cpuid >= nr_cpu_ids) in
+record_one_cpu()? I am happy to test a patch at the object level, but
+I cannot test it at runtime.
+
+Thanks,
+<name>
