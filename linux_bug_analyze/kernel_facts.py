@@ -26,7 +26,8 @@ BUNDLE_SCHEMA = "kernel_fact_bundle_v1"
 QUERY_KINDS = {"defined", "references", "may_reference", "config", "expansion_contains", "direct_write",
                "writes", "reads", "escapes", "in_init", "initcall_level", "calls", "reachable",
                "writers_count", "all_writers_in_init", "any_reader_outside_init", "constant", "build_ok",
-               "macro_defined", "macro_from_arch", "object_defines_token", "macro_value", "returns_only_zero"}
+               "macro_defined", "macro_from_arch", "macro_provided", "object_defines_token", "macro_value", "returns_only_zero",
+               "kbuild_selected"}
 INIT_SECTIONS = (".init.text", ".head.text", ".ref.text.init", ".meminit.text", ".cpuinit.text")
 
 
@@ -211,6 +212,126 @@ def _macro_trace(text: str, names: list[str] | None, roots: list[str]) -> dict[s
     return out
 
 
+FALLBACK_LOOKBACK = 3
+
+
+def is_fallback_definition(lines: list[str], line: int, name: str) -> bool:
+    """``#define name`` at 1-based ``line`` is guarded by ``#ifndef name`` / ``#if !defined(name)`` within the
+    preceding FALLBACK_LOOKBACK non-blank lines (the guard must name the macro itself)."""
+    guard = re.compile(r"^\s*#\s*(?:ifndef\s+%s\b|if\s+!\s*defined\s*\(?\s*%s\b)" % (re.escape(name), re.escape(name)))
+    seen = 0
+    for n in range(line - 2, -1, -1):
+        if n >= len(lines) or not lines[n].strip():
+            continue
+        if guard.match(lines[n]):
+            return True
+        seen += 1
+        if seen >= FALLBACK_LOOKBACK:
+            break
+    return False
+
+
+def annotate_fallbacks(macros: dict[str, dict[str, Any]], roots: list[Path]) -> None:
+    """Add ``fallback`` to each defined trace record by reading its defining file under ``roots`` (first match);
+    files not found (e.g. generated headers outside the tree) are not fallbacks."""
+    cache: dict[str, list[str] | None] = {}
+    for name, rec in macros.items():
+        if not rec.get("defined") or not rec.get("line") or not rec.get("origin"):
+            continue
+        origin = rec["origin"]
+        if origin not in cache:
+            path = next((Path(r) / origin for r in roots if (Path(r) / origin).is_file()), None)
+            cache[origin] = path.read_text(errors="replace").splitlines() if path else None
+        lines = cache[origin]
+        rec["fallback"] = bool(lines) and "/generated/" not in "/" + origin and is_fallback_definition(lines, rec["line"], name)
+
+
+def _makefile_assignments(src: Path, directory: str) -> list[tuple[str, list[str], bool]]:
+    """(variable, values, inside_conditional) for every assignment in <directory>/Makefile and Kbuild."""
+    out = []
+    for name in ("Makefile", "Kbuild"):
+        path = src / directory / name
+        if not path.is_file():
+            continue
+        depth = 0
+        for line in path.read_text(errors="replace").replace("\\\n", " ").splitlines():
+            line = line.split("#", 1)[0]
+            if re.match(r"\s*(?:ifeq|ifneq|ifdef|ifndef)\b", line):
+                depth += 1
+                continue
+            if re.match(r"\s*endif\b", line):
+                depth = max(0, depth - 1)
+                continue
+            m = re.match(r"\s*([A-Za-z0-9_.\-]+(?:-\$\(CONFIG_\w+\))?)\s*[+:?]?=\s*(.*)$", line)
+            if m:
+                out.append((m.group(1), m.group(2).split(), depth > 0))
+    return out
+
+
+def _cond(cond: str, config: Mapping[str, Any]) -> bool:
+    if cond in ("y", "m", "objs"):
+        return True
+    m = re.fullmatch(r"\$\((CONFIG_\w+)\)", cond)
+    return bool(m) and config.get(m.group(1)) in (True, "m")
+
+
+def _combine(results: list[tuple[bool, bool]]) -> bool | None:
+    """results: (condition holds, inside_conditional) for each matching assignment."""
+    if any(ok and not conditional for ok, conditional in results):
+        return True
+    if not results or any(conditional for _, conditional in results):
+        return None
+    return False
+
+
+def kbuild_selected(src: Path, path: str, config: Mapping[str, Any], _depth: int = 0) -> dict[str, Any]:
+    """Whether Kbuild builds <path> (a .c file) under ``config``: True / False / None (unknown).
+    Object: listed in obj-/lib- of its directory (or in a selected composite object's parts); directory: added by
+    obj-/subdir- in its parent, recursively; one-component top-level directories count as selected."""
+    directory, base = (path.rsplit("/", 1) + [""])[:2] if "/" in path else ("", path)
+    trail: list[str] = []
+
+    def obj_selected(d: str, obj: str, depth: int) -> bool | None:
+        results = []
+        for var, values, conditional in _makefile_assignments(src, d):
+            if obj not in values:
+                continue
+            m = re.fullmatch(r"(obj|lib)-(.+)", var)
+            if m:
+                results.append((_cond(m.group(2), config), conditional))
+                trail.append("%s/Makefile: %s" % (d, var))
+                continue
+            m = re.fullmatch(r"([A-Za-z0-9_\-]+)-(y|m|objs|\$\(CONFIG_\w+\))", var)
+            if m and m.group(1) not in ("subdir", "always", "targets", "extra", "hostprogs") and depth < 4:
+                parent = obj_selected(d, m.group(1) + ".o", depth + 1)
+                trail.append("%s/Makefile: %s (part of %s.o)" % (d, var, m.group(1)))
+                results.append((bool(parent) and _cond(m.group(2), config), conditional or parent is None))
+        return _combine(results)
+
+    def dir_selected(d: str) -> bool | None:
+        if "/" not in d:
+            return True
+        parent, name = d.rsplit("/", 1)
+        results = []
+        for var, values, conditional in _makefile_assignments(src, parent):
+            if name + "/" not in values and name not in values:
+                continue
+            m = re.fullmatch(r"(obj|subdir)-(.+)", var)
+            if m:
+                results.append((_cond(m.group(2), config), conditional))
+                trail.append("%s/Makefile: %s += %s" % (parent, var, name))
+        here = _combine(results)
+        return here if not here else dir_selected(parent)
+
+    obj = obj_selected(directory, base[:-2] + ".o", 0) if base.endswith(".c") else None
+    if obj is False:
+        value = False
+    else:
+        d = dir_selected(directory)
+        value = False if d is False else (True if obj and d else None)
+    return {"value": value, "trail": trail}
+
+
 def _compile_command(build: Path, stem: str) -> list[str] | None:
     """The compiler invocation Kbuild saved for ``stem``.o (first command of the .cmd line)."""
     import shlex
@@ -339,6 +460,7 @@ def collect(spec: Mapping[str, Any], out: Path) -> dict[str, Any]:
                 dtext = dd.read_text(errors="replace")
                 entry["macro_trace_sha256"] = _sha_bytes(dd.read_bytes())
                 entry["macros"] = _macro_trace(dtext, None if spec["macros"] == "*" else list(spec["macros"]), [str(src), str(build)])
+                annotate_fallbacks(entry["macros"], [src, build])
         started = time.time()
         dumps_flags = "-fdump-tree-cfg-lineno" + (" -fdump-tree-optimized" if spec.get("optimized_functions") else "")
         done = _run(make + [kc(dumps_flags), stem + ".o", stem + ".i"], log)
@@ -381,6 +503,7 @@ def collect(spec: Mapping[str, Any], out: Path) -> dict[str, Any]:
                 otext = opt[-1].read_text(errors="replace")
                 entry["optimized_dump"] = {"name": opt[-1].name, "sha256": _sha_bytes(opt[-1].read_bytes())}
                 entry["optimized_records"] = {f: _cfg_record(otext, f) for f in spec["optimized_functions"]}
+        entry["kbuild_selected"] = kbuild_selected(src, path, config)
         if spec.get("macro_values") and done.returncode == 0:
             traced_macros = entry.get("macros") or {}
             # A name the -dD trace shows is never defined cannot be a macro value; skip its full-TU probe compile.
@@ -507,14 +630,23 @@ def query(bundle: Mapping[str, Any], q: Mapping[str, Any]) -> tuple[bool, Any]:
         return (True, bundle["config"][opt]) if opt in bundle["config"] else (True, False) if q.get("absent_is_false") else (False, "option_absent")
     if kind == "defined":
         return True, q["function"] in funcs
-    if kind in ("macro_defined", "macro_from_arch"):
+    if kind in ("macro_defined", "macro_from_arch", "macro_provided"):
         for entry in bundle["files"].values():
             rec = (entry.get("macros") or {}).get(q["macro"])
             if rec is not None:
                 if kind == "macro_defined":
                     return True, rec["defined"]
+                if kind == "macro_provided":
+                    if rec["defined"] and "fallback" not in rec:
+                        return False, "fallback_not_annotated"
+                    return True, bool(rec["defined"] and not rec["fallback"])
                 return True, bool(rec["defined"] and (rec["origin"] or "").startswith("arch/"))
         return False, "macro_not_traced"
+    if kind == "kbuild_selected":
+        rec = (bundle["files"].get(q["file"]) or {}).get("kbuild_selected")
+        if rec is None:
+            return False, "kbuild_not_computed"
+        return (True, rec["value"]) if rec["value"] is not None else (False, "kbuild_unknown")
     if kind == "macro_value":
         for entry in bundle["files"].values():
             rec = (entry.get("macro_values") or {}).get(q["macro"])

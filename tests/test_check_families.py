@@ -68,6 +68,68 @@ class CheckFamiliesTest(unittest.TestCase):
         self.assertEqual(evaluate_candidate(c, facts, **kw)["relation_at_observation"], "violated")
         self.assertEqual(evaluate_candidate(c, dict(facts, shmem_is_huge_returns_only_zero=True), **kw)["relation_at_observation"], "satisfied")
 
+    def test_m2b_switches(self):
+        direct_c = TOPOLOGY_C + "void f(void)\n{\n\tg(topology_die_id(0));\n}\n"
+        self.assertIn("direct", {i["kind"] for i in f1_instances(direct_c, traces(X86, S390))})
+        self.assertEqual({i["kind"] for i in f1_instances(direct_c, traces(X86, S390), direct=False)}, {"pasted"})
+        x86 = '# 1 "/s/arch/x86/include/asm/pgtable_64_types.h" 1\n#define PMD_SHIFT 21\n#define PAGE_SHIFT 12\n' + HUGE
+        arm = '# 1 "/s/arch/arm64/include/asm/pgtable-hwdef.h" 1\n#define PMD_SHIFT 29\n#define PAGE_SHIFT 16\n' + HUGE
+        side = '#define MAX_OTHER_ORDER (PAGE_SHIFT + 1)\n'
+        loose = {(i["geometry"], i["limit"]) for i in f2_instances(SHMEM_C, traces(x86 + side, arm + side))}
+        tight = {(i["geometry"], i["limit"]) for i in f2_instances(SHMEM_C, traces(x86 + side, arm + side), limit_contains_g=True)}
+        self.assertIn(("HPAGE_PMD_ORDER", "MAX_OTHER_ORDER"), loose)  # chains meet only at PAGE_SHIFT
+        self.assertNotIn(("HPAGE_PMD_ORDER", "MAX_OTHER_ORDER"), tight)
+        self.assertIn(("HPAGE_PMD_ORDER", "MAX_PAGECACHE_ORDER"), tight)
+
+    def test_m2c_fallback_criterion(self):
+        from linux_bug_analyze.kernel_facts import annotate_fallbacks, is_fallback_definition
+        header = ["#ifndef topology_die_id", "#define topology_die_id(cpu) ((void)(cpu), -1)", "#endif",
+                  "#ifndef topology_x", "#define topology_x 1", "#define topology_y 2", "#endif"]
+        self.assertTrue(is_fallback_definition(header, 2, "topology_die_id"))
+        self.assertTrue(is_fallback_definition(header, 5, "topology_x"))
+        self.assertFalse(is_fallback_definition(header, 6, "topology_y"))  # guard names another macro
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as root:
+            os.makedirs(os.path.join(root, "include/linux"))
+            with open(os.path.join(root, "include/linux/topology.h"), "w") as fh:
+                fh.write("\n" * 28 + "#ifndef topology_die_id\n#define topology_die_id(cpu) ((void)(cpu), -1)\n#endif\n")
+            with open(os.path.join(root, "include/linux/arch_topology.h"), "w") as fh:
+                fh.write("#ifdef CONFIG_GENERIC_ARCH_TOPOLOGY\n#define topology_die_id(cpu) (cpu_topology[cpu].die_id)\n#endif\n")
+            gen = _macro_trace(S390, None, ["/s"])  # final definition at include/linux/topology.h:30
+            shared = _macro_trace('# 1 "/s/include/linux/arch_topology.h" 1\n\n#define topology_die_id(cpu) (cpu_topology[cpu].die_id)\n', None, ["/s"])
+            annotate_fallbacks(gen, [root])
+            annotate_fallbacks(shared, [root])
+        self.assertTrue(gen["topology_die_id"]["fallback"])
+        self.assertFalse(shared["topology_die_id"]["fallback"])
+        tr = {"a": gen, "b": shared}
+        self.assertTrue(f1_instances(TOPOLOGY_C, tr, direct=False, provided="fallback"))   # fallback vs shared provider
+        self.assertFalse(f1_instances(TOPOLOGY_C, {"a": shared, "b": shared}, direct=False, provided="fallback"))
+        inst = f1_instances(TOPOLOGY_C, tr, direct=False, provided="fallback")[0]
+        self.assertEqual({q["kind"] for q in queries(inst)} - {"constant", "object_defines_token"}, {"macro_provided"})
+
+    def test_m3_f3_and_f1d(self):
+        from linux_bug_analyze.check_families import f1d_instances, f3_instances, placeholder_fallback
+        src = ("#ifndef __HAVE_ARCH_STRNCMP\n/* local */\nint strncmp(const char *a, const char *b, size_t n)\n{\n\treturn 0;\n}\n#endif\n"
+               "#ifndef FOO_H\nint notfeature(void)\n{\n\treturn 1;\n}\n#endif\n"
+               "#ifndef __HAVE_ARCH_STRSTR\n#else\nchar *strstr(const char *a, const char *b)\n{\n\treturn 0;\n}\n#endif\n")
+        inst = f3_instances(src, "drivers/firmware/efi/libstub/string.c")
+        self.assertEqual([(i["macro"], i["functions"], i["isolated"]) for i in inst], [("__HAVE_ARCH_STRNCMP", ["strncmp"], True)])
+        c = contract(inst[0])
+        kw = dict(context="t", revision="r", basis="compiled_object", documents=DOCS, reviewed=True)
+        self.assertEqual(evaluate_candidate(c, {"build_context": True, "defined___HAVE_ARCH_STRNCMP": True, "emits_strncmp": False}, **kw)["relation_at_observation"], "violated")
+        self.assertEqual(evaluate_candidate(c, {"build_context": True, "defined___HAVE_ARCH_STRNCMP": True, "emits_strncmp": True}, **kw)["relation_at_observation"], "satisfied")
+        self.assertEqual(evaluate_candidate(c, {"build_context": True, "defined___HAVE_ARCH_STRNCMP": False, "emits_strncmp": False}, **kw)["relation_at_observation"], "satisfied")
+        self.assertEqual({q["kind"] for q in queries(inst[0])}, {"constant", "macro_defined", "object_defines_token"})
+        ph = {"a": {"topology_die_id": {"defined": True, "fallback": True, "text": "(cpu) ((void)(cpu), -1)", "define": "#define topology_die_id(cpu) ((void)(cpu), -1)"},
+                    "flush_x": {"defined": True, "fallback": True, "text": "(p) do { } while (0)", "define": "#define flush_x(p) do { } while (0)"},
+                    "mask_x": {"defined": True, "fallback": True, "text": "(cpu) cpumask_of(cpu)", "define": "#define mask_x(cpu) cpumask_of(cpu)"}},
+              "b": {"topology_die_id": {"defined": True, "fallback": False}, "flush_x": {"defined": True, "fallback": False}, "mask_x": {"defined": True, "fallback": False}}}
+        self.assertTrue(placeholder_fallback("topology_die_id", ph))
+        self.assertFalse(placeholder_fallback("flush_x", ph))
+        self.assertFalse(placeholder_fallback("mask_x", ph))
+        body = "int show(int cpu)\n{\n\treturn topology_die_id(cpu) + mask_x(cpu) + flush_x(0);\n}\n"
+        self.assertEqual([(i["site"], i["macros"]) for i in f1d_instances(body, ph)], [("show", ["topology_die_id"])])
+
     def test_many_gates_stay_within_core_arity(self):
         gates = ["f%d" % n for n in range(17)]
         c = contract({"family": "F2", "geometry": "G_SIZE", "limit": "MAX_G_SIZE", "gates": gates})
