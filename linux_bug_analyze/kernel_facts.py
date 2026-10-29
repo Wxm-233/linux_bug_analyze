@@ -27,7 +27,7 @@ QUERY_KINDS = {"defined", "references", "may_reference", "config", "expansion_co
                "writes", "reads", "escapes", "in_init", "initcall_level", "calls", "reachable",
                "writers_count", "all_writers_in_init", "any_reader_outside_init", "constant", "build_ok",
                "macro_defined", "macro_from_arch", "macro_provided", "object_defines_token", "macro_value", "returns_only_zero",
-               "kbuild_selected"}
+               "kbuild_selected", "expr_value"}
 INIT_SECTIONS = (".init.text", ".head.text", ".ref.text.init", ".meminit.text", ".cpuinit.text")
 
 
@@ -352,7 +352,8 @@ def _probe_value(build: Path, stem: str, source: Path, macro: str, cross: str) -
     probe = build / (stem + ".lba_probe.c")
     obj = build / (stem + ".lba_probe.o")
     dump = build / (stem + ".lba_probe.optimized")
-    fn = "__lba_probe_" + macro
+    # Identifiers keep their readable probe name; other expressions (expr_value) get a hashed one.
+    fn = "__lba_probe_" + (macro if re.fullmatch(r"[A-Za-z_]\w*", macro) else "e" + hashlib.sha1(macro.encode()).hexdigest()[:12])
     # Reserved-spelling attributes: the kernel defines plain `noinline`/`used` as macros.
     # The prototype keeps -Werror=missing-prototypes builds (CONFIG_WERROR) compiling.
     probe.write_text('#include "%s"\nlong long %s(void);\n__attribute__((__used__, __noinline__)) long long %s(void) { return (long long)(%s); }\n'
@@ -504,6 +505,8 @@ def collect(spec: Mapping[str, Any], out: Path) -> dict[str, Any]:
                 entry["optimized_dump"] = {"name": opt[-1].name, "sha256": _sha_bytes(opt[-1].read_bytes())}
                 entry["optimized_records"] = {f: _cfg_record(otext, f) for f in spec["optimized_functions"]}
         entry["kbuild_selected"] = kbuild_selected(src, path, config)
+        if spec.get("expr_values") and done.returncode == 0:
+            entry["expr_values"] = {e: _probe_value(build, stem, src / path, e, cross) for e in spec["expr_values"]}
         if spec.get("macro_values") and done.returncode == 0:
             traced_macros = entry.get("macros") or {}
             # A name the -dD trace shows is never defined cannot be a macro value; skip its full-TU probe compile.
@@ -642,6 +645,12 @@ def query(bundle: Mapping[str, Any], q: Mapping[str, Any]) -> tuple[bool, Any]:
                     return True, bool(rec["defined"] and not rec["fallback"])
                 return True, bool(rec["defined"] and (rec["origin"] or "").startswith("arch/"))
         return False, "macro_not_traced"
+    if kind == "expr_value":
+        for entry in bundle["files"].values():
+            rec = (entry.get("expr_values") or {}).get(q["expr"])
+            if rec is not None:
+                return (True, rec["value"]) if rec.get("answered") else (False, rec.get("reason", "probe_failed"))
+        return False, "expr_not_probed"
     if kind == "kbuild_selected":
         rec = (bundle["files"].get(q["file"]) or {}).get("kbuild_selected")
         if rec is None:
