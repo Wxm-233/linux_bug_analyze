@@ -124,6 +124,15 @@ async function refresh() {
       const n = document.createElement('strong'); n.textContent=number; card.append(title,n); el('cards').append(card);
     }
     el('training-hint').textContent = `训练目标 ${s.training_target} 条；相关 ${s.labels.train.related} / 不相关 ${s.labels.train.unrelated} / 不确定 ${s.labels.train.uncertain}。${s.frozen ? '模型已冻结。' : '尚未冻结。'} 阈值检查 ${Object.values(s.labels.validation).reduce((a,b)=>a+b,0)}/${s.validation_total}。`;
+    const validationLabeled = Object.values(s.labels.validation).reduce((a,b)=>a+b,0);
+    const validationComplete = s.validation_total > 0 && validationLabeled === s.validation_total;
+    el('validation-hint').textContent = !s.frozen ? '请先冻结模型并抽取阈值检查集。' :
+      !s.validation_total ? '阈值检查集为空，无法评价阈值；请增加候选范围并使用新的实验目录。' :
+      `阈值检查已标注 ${validationLabeled}/${s.validation_total} 条。` + (validationComplete ?
+        '可以预览阈值两侧统计并确认清单。' : '冻结模型只抽取样本，不会自动标注。请点击“继续阈值检查标注”；未标注时的 0 不代表没有相关提交。');
+    el('preview').disabled = busy || !s.frozen;
+    el('select').disabled = busy || !s.frozen || !validationComplete || s.selected !== null;
+    el('validation-next').disabled = busy || !s.frozen || !s.validation_total || validationComplete;
     const llm = r.live_llm?.counts || s.llm;
     el('llm-status').textContent = `相关 ${llm.related} · 不相关 ${llm.unrelated} · 不确定 ${llm.uncertain}\n` +
       `未处理 ${r.live_llm?.unprocessed ?? s.llm.pending} · 调用/格式失败 ${r.live_llm?.failed ?? s.llm.failed}\n` +
@@ -160,6 +169,11 @@ el('auto-summary').onchange=async()=>{
   try { await syncReading(); await refresh(); } catch(e) { el('auto-summary').checked=false; error(e); }
 };
 el('role').onchange=()=>{ el('history-results').replaceChildren(); el('search-results').replaceChildren(); showRecord(null); next(); refresh(); };
+el('validation-next').onclick=()=>{
+  el('role').value='validation';
+  el('role').onchange();
+  el('role').scrollIntoView({behavior:'smooth',block:'center'});
+};
 el('preview').onclick=async()=>{try{el('preview-result').textContent=JSON.stringify(await api('/api/preview?threshold='+encodeURIComponent(el('threshold').value)),null,2);}catch(e){error(e);}};
 el('select').onclick=()=>{if(confirm('冻结后本轮不能修改阈值。确认使用当前阈值？'))action('select',{threshold:Number(el('threshold').value)});};
 el('screen').onclick=()=>{if(!el('approve-api').checked)return error(new Error('请先勾选模型调用确认。')); action('screen');};

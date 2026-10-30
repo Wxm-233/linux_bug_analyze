@@ -181,12 +181,26 @@ class ReviewWorkflow:
         records = self.store.records(True)
         selected = [r['hash'] for r in records if r['score'] >= threshold
                     and human.get(r['hash'], {}).get('label') not in ('related', 'unrelated')]
-        validation = self.store.labels('validation')
+        pool = self.store.get('validation', [])
+        labels = self.store.labels('validation')
+        validation = {h: labels[h] for h in pool if h in labels}
+        pending = len(pool) - len(validation)
+        complete = bool(pool) and pending == 0
+        if not pool:
+            warning = '阈值检查集为空，无法评价阈值；请增加候选范围并使用新的实验目录。'
+        elif pending:
+            warning = (f'阈值检查尚未完成：已标注 {len(validation)}/{len(pool)} 条，'
+                       f'剩余 {pending} 条。两侧统计只包含已标注样本，0 不代表没有相关提交。'
+                       '请在“阈值检查”队列完成标注后再确认清单。')
+        else:
+            warning = None
         above = [validation[r['hash']]['label'] for r in records
                  if r['score'] >= threshold and r['hash'] in validation]
         below = [validation[r['hash']]['label'] for r in records
                  if r['score'] < threshold and r['hash'] in validation]
         return dict(threshold=threshold, hashes=selected, count=len(selected),
+                    validation_total=len(pool), validation_labeled=len(validation),
+                    validation_pending=pending, validation_complete=complete, warning=warning,
                     validation_above={k: above.count(k) for k in ('related','unrelated','uncertain')},
                     validation_below={k: below.count(k) for k in ('related','unrelated','uncertain')})
 
@@ -194,7 +208,8 @@ class ReviewWorkflow:
         if self.store.get('selection') is not None:
             raise ValueError('本轮清单已冻结；如需改变阈值，请另建实验目录。')
         validation = self.store.get('validation', [])
-        if not validation or any(h not in self.store.labels('validation') for h in validation):
+        labels = self.store.labels('validation')
+        if not validation or any(h not in labels for h in validation):
             raise ValueError('请先完成阈值检查集的标注；若候选全部用于训练，请增加候选范围。')
         preview = self.threshold_preview(threshold)
         selection = dict(created=now(), **preview)

@@ -248,6 +248,76 @@ class ReviewWorkflowTests(TestCase):
         self.assertIsNotNone(self.w.next_record('train'))
 
 
+class ReviewThresholdTests(TestCase):
+    """Exercise frozen scores and persisted labels without optional ML dependencies."""
+
+    def setUp(self):
+        self.tmp = TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name).resolve()
+        self.settings = FileSettings(linux_dir=root, review=ReviewSettings(output_dir=root/'work'))
+        self.w = ReviewWorkflow(self.settings)
+        with self.w.store.connect() as db:
+            for h, score in [('train', .9), ('a', .1), ('b', .2), ('c', .3),
+                             ('d', .5), ('e', .7), ('f', .9)]:
+                db.execute('INSERT INTO commits VALUES (?,?,?,?,?,?,?,?)',
+                           (h, h, '', '[]', '', 1, '{}', score))
+        self.w.store.put('dataset', dict(linux_dir=str(root), scanned=7, candidates=7))
+        self.w.store.put('frozen', {'created': 'test'})
+        self.w.store.put('validation', list('abcdef'))
+        self.w.store.label('train', 'train', 'related')
+
+    def test_unlabeled_preview_reports_missing_evidence_and_blocks_selection(self):
+        preview = self.w.threshold_preview(.1)
+        self.assertEqual(preview['count'], 6)
+        self.assertEqual(preview['validation_total'], 6)
+        self.assertEqual(preview['validation_labeled'], 0)
+        self.assertEqual(preview['validation_pending'], 6)
+        self.assertFalse(preview['validation_complete'])
+        self.assertIn('0 不代表没有相关提交', preview['warning'])
+        self.assertEqual(preview['validation_above'], dict(related=0, unrelated=0, uncertain=0))
+        self.assertEqual(preview['validation_below'], preview['validation_above'])
+        with self.assertRaisesRegex(ValueError, '请先完成阈值检查'):
+            self.w.select(.1)
+        self.assertIsNone(self.w.store.get('selection'))
+
+    def test_partial_complete_relabel_and_resume(self):
+        self.w.label('a', 'validation', 'related')
+        self.w.label('d', 'validation', 'unrelated')
+        self.w = ReviewWorkflow(self.settings)
+        preview = self.w.threshold_preview(.5)
+        self.assertEqual(preview['validation_labeled'], 2)
+        self.assertEqual(preview['validation_pending'], 4)
+        self.assertFalse(preview['validation_complete'])
+        self.assertEqual(preview['validation_above'], dict(related=0, unrelated=1, uncertain=0))
+        self.assertEqual(preview['validation_below'], dict(related=1, unrelated=0, uncertain=0))
+        with self.assertRaisesRegex(ValueError, '请先完成阈值检查'):
+            self.w.select(.5)
+        for h, label in zip('abcdef', ['related', 'unrelated', 'uncertain'] * 2):
+            self.w.label(h, 'validation', label)
+        preview = self.w.threshold_preview(.5)
+        self.assertTrue(preview['validation_complete'])
+        self.assertEqual(preview['validation_labeled'], 6)
+        self.assertEqual(preview['validation_pending'], 0)
+        self.assertIsNone(preview['warning'])
+        self.assertEqual(preview['validation_above'], dict(related=1, unrelated=1, uncertain=1))
+        self.assertEqual(preview['validation_below'], preview['validation_above'])
+        self.assertEqual(preview['hashes'], ['f'])  # Human uncertain remains eligible.
+        self.w.select(.5)
+        self.assertEqual(self.w.store.get('selection')['hashes'], ['f'])
+        with self.assertRaisesRegex(ValueError, '不在可编辑'):
+            self.w.label('d', 'validation', 'unrelated')
+
+    def test_empty_validation_cannot_be_mistaken_for_complete(self):
+        self.w.store.put('validation', [])
+        preview = self.w.threshold_preview(.5)
+        self.assertEqual(preview['validation_total'], 0)
+        self.assertEqual(preview['validation_pending'], 0)
+        self.assertFalse(preview['validation_complete'])
+        self.assertIn('检查集为空', preview['warning'])
+        with self.assertRaises(ValueError):
+            self.w.select(.5)
+
+
 class ReviewWebTests(TestCase):
     def setUp(self):
         self.tmp=TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -289,3 +359,17 @@ class ReviewWebTests(TestCase):
                 with self.assertRaises(ValueError):self.app.dispatch('freeze',{})
             finally:release.set();self.app.thread.join(5)
         self.assertFalse(self.app.busy)
+
+    def test_preview_api_exposes_incomplete_validation(self):
+        self.w.store.put('frozen', {'created': 'test'})
+        self.w.store.put('validation', ['a'])
+        with self.w.store.connect() as db:
+            db.execute('INSERT INTO commits VALUES (?,?,?,?,?,?,?,?)',
+                       ('a', 'subject', '', '[]', '', 1, '{}', .5))
+        with self.request('/api/preview?threshold=0.1', {'X-Review-Token': self.app.token}) as r:
+            preview = json.load(r)
+        self.assertEqual(preview['count'], 1)
+        self.assertEqual(preview['validation_pending'], 1)
+        self.assertFalse(preview['validation_complete'])
+        self.assertIn('尚未完成', preview['warning'])
+        self.assertNotIn('hashes', preview)
