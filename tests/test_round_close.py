@@ -84,6 +84,22 @@ class RoundCloseTest(unittest.TestCase):
             rc.sync(self.round, str(self.mirror))
         self.assertEqual((self.mirror / rc.NOTES[1]).read_text(encoding="utf-8"), "someone else edited\n")
 
+    def test_notes_in_subfolder(self):
+        sub = self.ws / "md files"
+        sub.mkdir()
+        for n in rc.NOTES + (rc.PLAN,):
+            (self.ws / n).rename(sub / n)
+        self.assertEqual(rc.workspace_of(self.round), self.ws.resolve())
+        self.assertEqual(rc.notes_dir(self.ws), sub)
+        rc.prepare(self.round)
+        rc.apply(self.round, self.spec)
+        self.assertTrue((sub / rc.NOTES[0]).read_text(encoding="utf-8").startswith("# " + rc.NOTES[0] + "\n\n## 10月27日"))
+        self.assertIn("| d2 | r2 |", (sub / rc.PLAN).read_text(encoding="utf-8"))
+        self.assertTrue((self.ws / "日志" / "2026-10-27.md").read_text(encoding="utf-8").endswith("正文。\n"))
+        self.assertFalse(any((self.ws / n).exists() for n in rc.NOTES))
+        self.assertEqual(rc.sync(self.round, str(self.mirror))["status"], "synced")
+        self.assertTrue(rc.verify(self.ws, str(self.mirror))["consistent"])
+
     def test_bad_spec(self):
         rc.prepare(self.round)
         bad = dict(self.spec, plan_replacements=[["missing", "x"]])

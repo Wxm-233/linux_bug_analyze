@@ -22,6 +22,7 @@ from typing import Any, Mapping
 
 NOTES = ("当前代办.md", "当前研究方向与进展.md", "项目研究与文档写作交接说明.md")
 PLAN = "接口验证后续规划.md"
+NOTES_SUBDIRS = ("", "md files")  # notes and family plan live in the workspace root or in this subfolder; logs stay in 日志/
 HISTORY_LINE = "以下为历史记录，以本节及用户最新指示为准。"
 ORDER_HEADING = "\n## 当前执行顺序\n"
 WSL_ROOT = "/root"
@@ -41,12 +42,35 @@ def need(value: Any, reason: str) -> None:
         raise CloseError(reason)
 
 
+def _holds_notes(folder: Path) -> bool:
+    return all((folder / n).is_file() for n in NOTES)
+
+
+def notes_dir(workspace: Path) -> Path:
+    """Folder holding the three working notes and the family plan: the workspace itself or one of NOTES_SUBDIRS."""
+    for sub in NOTES_SUBDIRS:
+        folder = Path(workspace) / sub if sub else Path(workspace)
+        if _holds_notes(folder) and (folder / PLAN).is_file():
+            return folder
+    raise CloseError("three working notes and family plan not found in " + str(workspace))
+
+
 def workspace_of(round_dir: Path) -> Path:
-    """Outer workspace: the directory holding the three working notes above the round directory."""
+    """Outer workspace: the directory above the round directory holding the three working notes, directly or in
+    one of NOTES_SUBDIRS."""
     for parent in Path(round_dir).resolve().parents:
-        if all((parent / n).is_file() for n in NOTES):
+        if any(_holds_notes(parent / sub if sub else parent) for sub in NOTES_SUBDIRS):
             return parent
     raise CloseError("workspace with the three working notes not found")
+
+
+def _source(ws: Path, target: str) -> str:
+    """Where the mirror script reads the updated notes: the WSL mount of the notes folder, or the folder itself."""
+    nd = notes_dir(ws)
+    if target != "wsl":
+        return str(nd)
+    rel = nd.relative_to(ws).as_posix()
+    return WSL_SOURCE if rel == "." else WSL_SOURCE + "/" + rel
 
 
 def write_json_once(path: Path, value: Any) -> None:
@@ -68,10 +92,11 @@ def manifest(round_dir: Path, statistics: Mapping[str, Any] | None = None, **ext
 def prepare(round_dir: Path, workspace: Path | None = None) -> dict[str, Any]:
     round_dir = Path(round_dir)
     ws = Path(workspace) if workspace else workspace_of(round_dir)
-    before = {"before_sha256": {n: sha(ws / n) for n in NOTES}, "plan_before_sha256": sha(ws / PLAN)}
+    nd = notes_dir(ws)
+    before = {"before_sha256": {n: sha(nd / n) for n in NOTES}, "plan_before_sha256": sha(nd / PLAN)}
     write_json_once(round_dir / "notes_before.json", before)
     need(not (round_dir / "plan_before.md").exists(), "preserve existing plan_before.md")
-    shutil.copyfile(ws / PLAN, round_dir / "plan_before.md")
+    shutil.copyfile(nd / PLAN, round_dir / "plan_before.md")
     return before
 
 
@@ -80,11 +105,12 @@ def apply(round_dir: Path, spec: Mapping[str, Any], workspace: Path | None = Non
     plan_row (one table row or ''), order_paragraph (replaces the first paragraph under 当前执行顺序 or '')."""
     round_dir = Path(round_dir)
     ws = Path(workspace) if workspace else workspace_of(round_dir)
+    nd = notes_dir(ws)
     need(not (round_dir / "notes_update.json").exists(), "preserve existing notes_update.json")
     before = json.loads((round_dir / "notes_before.json").read_text(encoding="utf-8"))
     for name, digest in before["before_sha256"].items():
-        need(sha(ws / name) == digest, "work note changed during round: " + name)
-    plan_path = ws / PLAN
+        need(sha(nd / name) == digest, "work note changed during round: " + name)
+    plan_path = nd / PLAN
     need(sha(plan_path) == before["plan_before_sha256"] == sha(round_dir / "plan_before.md"), "family plan changed during round")
     section = spec["section"].rstrip("\n") + "\n"
     need(section.startswith("## ") and HISTORY_LINE not in section, "section must be one '## ' block without the history line")
@@ -105,14 +131,14 @@ def apply(round_dir: Path, spec: Mapping[str, Any], workspace: Path | None = Non
         text = text[:start] + spec["order_paragraph"].strip() + text[end:]
     block = section + "\n" + HISTORY_LINE + "\n\n"
     for name in NOTES:
-        path = ws / name
+        path = nd / name
         title, rest = path.read_text(encoding="utf-8").split("\n", 1)
         path.write_text(title + "\n\n" + block + rest.lstrip("\n"), encoding="utf-8")
     plan_path.write_text(text, encoding="utf-8")
     log = ws / "日志" / (spec["log_date"] + ".md")
     with log.open("a", encoding="utf-8") as f:
         f.write("\n\n" + section)
-    update = {"before_sha256": before["before_sha256"], "after_sha256": {n: sha(ws / n) for n in NOTES},
+    update = {"before_sha256": before["before_sha256"], "after_sha256": {n: sha(nd / n) for n in NOTES},
               "family_plan_sha256": sha(plan_path), "daily_log_sha256": sha(log)}
     write_json_once(round_dir / "notes_update.json", update)
     return update
@@ -152,11 +178,12 @@ def sync(round_dir: Path, target: str = "wsl", workspace: Path | None = None) ->
     ws = Path(workspace) if workspace else workspace_of(round_dir)
     need(not (round_dir / "notes_sync.json").exists(), "preserve existing notes_sync.json")
     update = json.loads((round_dir / "notes_update.json").read_text(encoding="utf-8"))
+    nd = notes_dir(ws)
     rows = []
     for name, before in update["before_sha256"].items():
-        need(sha(ws / name) == update["after_sha256"][name], "workspace note changed after apply: " + name)
+        need(sha(nd / name) == update["after_sha256"][name], "workspace note changed after apply: " + name)
         rows.append({"name": name, "before": before, "after": update["after_sha256"][name]})
-    root, source = (WSL_ROOT, WSL_SOURCE) if target == "wsl" else (str(Path(target)), str(ws))
+    root, source = (WSL_ROOT if target == "wsl" else str(Path(target))), _source(ws, target)
     result = _run_remote({"mode": "sync", "root": root, "source": source, "rows": rows}, target)
     receipt = {"status": result["status"], "files": result["files"]}
     write_json_once(round_dir / "notes_sync.json", receipt)
@@ -166,9 +193,9 @@ def sync(round_dir: Path, target: str = "wsl", workspace: Path | None = None) ->
 def verify(workspace: Path, target: str = "wsl") -> dict[str, Any]:
     ws = Path(workspace)
     rows = [{"name": n} for n in NOTES]
-    root, source = (WSL_ROOT, WSL_SOURCE) if target == "wsl" else (str(Path(target)), str(ws))
+    root, source = (WSL_ROOT if target == "wsl" else str(Path(target))), _source(ws, target)
     result = _run_remote({"mode": "read", "root": root, "source": source, "rows": rows}, target)
-    local = {n: sha(ws / n) for n in NOTES}
+    local = {n: sha(notes_dir(ws) / n) for n in NOTES}
     return {"consistent": local == result["mirror"], "workspace": local, "mirror": result["mirror"]}
 
 
