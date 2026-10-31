@@ -55,6 +55,26 @@ class SpansTest(unittest.TestCase):
         spans = function_spans_strict("int g(void)\n{\n\treturn 0;\n}\n")
         self.assertEqual(spans, [(2, 4, "g")])
 
+    def test_long_header_and_brace_in_comment_above(self):
+        src = ("/*\n * Handle {get,set,swap}_context operations\n */\n"
+               "SYSCALL_DEFINE3(swapcontext, struct ucontext __user *, old_ctx,\n"
+               "\t\tstruct ucontext __user *, new_ctx,\n\t\tlong, ctx_size)\n{\n\treturn 0;\n}\n"
+               "void set_huge_pte_at(struct mm_struct *mm,\n\t\t     unsigned long addr,\n"
+               "\t\t     pte_t *ptep,\n\t\t     pte_t pte,\n\t\t     unsigned long sz)\n{\n}\n")
+        self.assertEqual([h for _, _, h in named_spans(src)], ["SYSCALL_DEFINE3", "set_huge_pte_at"])
+        self.assertEqual([h for _, _, h in named_spans(src, window=4)], ["SYSCALL_DEFINE3"])
+
+    def test_line_comment_and_blank_line_before_brace(self):
+        src = ("//#if 0\nstatic int usb_get_report(struct usb_device *dev,\n\t\tstruct usb_host_interface *inter,\n"
+               "\t\tunsigned char id, void *buf, int size)\n{\n\treturn 0;\n}\n"
+               "static int set_gic_ap0r(struct kvm_vcpu *vcpu,\n\t\t\tu64 val)\n\n{\n\treturn 0;\n}\n")
+        self.assertEqual([h for _, _, h in named_spans(src)], ["usb_get_report", "set_gic_ap0r"])
+
+    def test_comment_line_inside_parameter_list(self):
+        src = ("int x;\n\nstatic void inputfifo_send_data(\n    /* static inline void inputfifo_send_data( */\n"
+               "    unsigned int a,\n    unsigned int b)\n{\n}\n")
+        self.assertEqual([h for _, _, h in named_spans(src)], ["inputfifo_send_data"])
+
 
 if __name__ == "__main__":
     unittest.main()

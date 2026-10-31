@@ -1,0 +1,114 @@
+{
+ "annotator": "Claude",
+ "note": "读取修复内容后、运行检查前写定",
+ "cases": [
+  {
+   "commit": "83d78ac677b9",
+   "class": "riscv_logic",
+   "hook": "",
+   "reason": "NAPOT读出并清空的辅助函数在表项不在内存（swap项）时取错了表项个数；属RISC-V自身NAPOT实现的错误"
+  },
+  {
+   "commit": "02410ac72ac3",
+   "class": "contract_change",
+   "hook": "huge_ptep_get_and_clear",
+   "reason": "公共修复给huge_ptep_get_and_clear加页大小参数，各架构同步改签名"
+  },
+  {
+   "commit": "fc325b1a915f",
+   "class": "other",
+   "hook": "",
+   "reason": "未开启大页迁移时的编译错误，修的是ce68c035"
+  },
+  {
+   "commit": "ce68c035457b",
+   "class": "multi_entry_default",
+   "hook": "arch_hugetlb_migration_supported",
+   "reason": "默认实现只认PMD/PUD大小，不认NAPOT大小；RISC-V需覆盖"
+  },
+  {
+   "commit": "a179a4bfb694",
+   "class": "multi_entry_default",
+   "hook": "hugetlb_mask_last_page",
+   "reason": "__weak默认实现不知道NAPOT大小；RISC-V需覆盖"
+  },
+  {
+   "commit": "1458eb2c9d88",
+   "class": "riscv_logic",
+   "hook": "",
+   "reason": "RISC-V的set_huge_pte_at在改NAPOT表项前没有先清空并刷新TLB（规范要求，相当于arm64的break-before-make）"
+  },
+  {
+   "commit": "1de195dd0e05",
+   "class": "riscv_logic",
+   "hook": "",
+   "reason": "RISC-V的set_huge_pte_at在写入swap项时按NAPOT阶数取表项个数，结果不对"
+  },
+  {
+   "commit": "935d4f0c6dc8",
+   "class": "contract_change",
+   "hook": "set_huge_pte_at",
+   "reason": "公共修复给set_huge_pte_at加页大小参数，各架构同步改签名"
+  },
+  {
+   "commit": "6966d7988c4f",
+   "class": "multi_entry_default",
+   "hook": "huge_ptep_get",
+   "reason": "默认实现只读一个表项，NAPOT需要合并整组表项的脏位和访问位；RISC-V需覆盖"
+  },
+  {
+   "commit": "835e5ac3f98e",
+   "class": "riscv_logic",
+   "hook": "",
+   "reason": "RISC-V的huge_ptep_set_wrprotect对NAPOT逐项改写，应先整体清空刷新再写回"
+  },
+  {
+   "commit": "d8bf77a1dc30",
+   "class": "other",
+   "hook": "arch_clear_hugepage_flags",
+   "reason": "缺少钩子覆盖但原因不是多表项：RISC-V用PG_dcache_clean管理指令缓存，大页分配时需清除该标志"
+  },
+  {
+   "commit": "546e42c8c6d9",
+   "class": "atomicity",
+   "hook": "pudp_huge_get_and_clear",
+   "reason": "默认实现先读后清，非原子；改用原子交换"
+  },
+  {
+   "commit": "2bb7e0c49302",
+   "class": "other",
+   "hook": "",
+   "reason": "rv32下的编译错误，修的是e0fe5ab4"
+  },
+  {
+   "commit": "e0fe5ab4192c",
+   "class": "multi_entry_default",
+   "hook": "pte_leaf_size",
+   "reason": "默认pte_leaf_size返回PAGE_SIZE，NAPOT表项实际覆盖更大范围；RISC-V需覆盖（该钩子在include/linux/pgtable.h，不在大页头文件中）"
+  },
+  {
+   "commit": "f0293cd1f4fc",
+   "class": "other",
+   "hook": "pmdp_collapse_flush",
+   "reason": "默认实现按地址刷新TLB，RISC-V的按地址sfence.vma只作用于叶子表项，合并大页时需全局刷新；属TLB语义差异"
+  },
+  {
+   "commit": "88573389aaa3",
+   "class": "riscv_logic",
+   "hook": "",
+   "reason": "RISC-V从高层页表项取页框号时没用掩码"
+  },
+  {
+   "commit": "2c8a81dc0cc5",
+   "class": "riscv_logic",
+   "hook": "",
+   "reason": "RISC-V页表检查相关的pud_user实现错误"
+  },
+  {
+   "commit": "ff76e3d7c3c9",
+   "class": "other",
+   "hook": "",
+   "reason": "未开启SMP时的编译错误"
+  }
+ ]
+}

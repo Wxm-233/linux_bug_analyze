@@ -24,15 +24,49 @@ C_WORDS = {"if", "else", "for", "while", "do", "return", "switch", "case", "brea
            "s64", "extern", "typeof", "default", "register", "auto", "restrict", "float", "double"}
 
 
-def function_spans(text: str) -> list[tuple[int, int, str | None]]:
-    """Top-level brace spans (first line, last line, identifier before the header's '(')."""
+HEADER_LOOKBACK = 15
+
+
+def header_window(lines: list[str], n: int, window: int | None = None) -> str:
+    """Header text before the ``{`` on 1-based line ``n``.
+
+    By default the header reaches back to the previous line that ends a statement or block, or is blank, a
+    preprocessor line or a whole comment line (at most HEADER_LOOKBACK lines), and comments are removed, so
+    long parameter lists keep their name. Blank lines between the header and the ``{`` are skipped, and inside an
+    unfinished parameter list no line stops the walk. ``window=k``
+    reproduces the earlier fixed k-line window (k=4 before 2026-10-31, which dropped functions whose header
+    spans four or more lines before the ``{``)."""
+    if window:
+        return " ".join(lines[max(0, n - window):n]).split("{")[0]
+    def text(h: int) -> str:
+        parts = [re.sub(r"//.*", "", l) for l in lines[h - 1:n - 1] + [lines[n - 1].split("{")[0]]]
+        return re.sub(r"/\*.*?\*/", " ", " ".join(parts))
+
+    h = n
+    while h > 1 and n - h < HEADER_LOOKBACK:
+        prev, so_far = lines[h - 2].strip(), text(h)
+        # Inside a parameter list (more ')' than '(' so far) nothing stops the walk.
+        if so_far.count("(") >= so_far.count(")"):
+            if not prev and not so_far.strip():
+                h -= 1
+                continue
+            if (not prev or prev.endswith((";", "}")) or prev.startswith(("#", "//"))
+                    or (prev.endswith("*/") and prev.startswith(("*", "/*")))):
+                break
+        h -= 1
+    return text(h)
+
+
+def function_spans(text: str, window: int | None = None) -> list[tuple[int, int, str | None]]:
+    """Top-level brace spans (first line, last line, identifier before the header's '('); ``window`` as in
+    header_window."""
     out, depth, start, header = [], 0, None, None
     lines = text.splitlines()
     for n, line in enumerate(lines, 1):
         code = re.sub(r"//.*|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'", "", line)
         if depth == 0 and "{" in code:
-            window = " ".join(lines[max(0, n - 4):n]).split("{")[0]
-            names = re.findall(r"\b([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:__\w+\s*)*$", window)
+            window_text = header_window(lines, n, window)
+            names = re.findall(r"\b([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:__\w+\s*)*$", window_text)
             start, header = n, (names[-1] if names else None)
         depth += code.count("{") - code.count("}")
         if depth == 0 and start is not None:

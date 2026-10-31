@@ -21,7 +21,32 @@ void consumer(void)
 """
 
 
+LONG = """int done;
+/*
+ * Handle {get,set}_context operations
+ */
+static pte_t get_clear_contig(struct mm_struct *mm,
+\t\t\t     unsigned long addr,
+\t\t\t     pte_t *ptep,
+\t\t\t     unsigned long pgsize,
+\t\t\t     unsigned long ncontig)
+{
+\treturn 0;
+}
+int foo(int a, /* count */
+\tint b)
+{
+\treturn a;
+}
+"""
+
+
 class BridgeTest(unittest.TestCase):
+    def test_long_header_and_comments(self):
+        self.assertEqual([h for _, _, h in function_spans(LONG) if h], ["get_clear_contig", "foo"])
+        # the fixed four-line window of earlier rounds drops the long header
+        self.assertEqual([h for _, _, h in function_spans(LONG, window=4) if h], ["foo"])
+
     def test_spans_and_identifiers(self):
         spans = function_spans(SRC)
         self.assertEqual(enclosing(spans, 3), "helper")

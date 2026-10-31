@@ -4,14 +4,17 @@
 statement fragment before ``{`` is read, names are identifiers directly before ``(`` at parenthesis depth 0,
 control keywords and attribute-like words are skipped, and the fragment must end with ``)`` (trailing
 qualifiers allowed). Anything else gets ``None``. ``named_spans`` keeps only the first branch of each
-conditional so braces split across ``#if``/``#else`` stay balanced. ``candidate_bridge.function_spans`` is left
-unchanged because frozen methods reference it.
+conditional so braces split across ``#if``/``#else`` stay balanced. Both recognisers take the header from
+``candidate_bridge.header_window``; ``window=4`` reproduces the fixed four-line window used before 2026-10-31
+(frozen methods and earlier rounds were run with it).
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+
+from .candidate_bridge import header_window
 
 NOT_FUNCTION_NAMES = frozenset({
     "if", "for", "while", "switch", "return", "sizeof", "do", "else", "case", "typeof", "__typeof__", "__typeof",
@@ -40,15 +43,15 @@ def header_name(window: str) -> str | None:
     return names[-1]
 
 
-def function_spans_strict(text: str) -> list[tuple[int, int, str | None]]:
-    """Top-level brace spans (first line, last line, header name or None), counted on the text as given."""
+def function_spans_strict(text: str, window: int | None = None) -> list[tuple[int, int, str | None]]:
+    """Top-level brace spans (first line, last line, header name or None), counted on the text as given;
+    ``window`` as in candidate_bridge.header_window."""
     out, depth, start, header = [], 0, None, None
     lines = text.splitlines()
     for n, line in enumerate(lines, 1):
         code = _STRING.sub("", line)
         if depth == 0 and "{" in code:
-            window = " ".join(lines[max(0, n - 4):n]).split("{")[0]
-            start, header = n, header_name(window)
+            start, header = n, header_name(header_window(lines, n, window))
         depth += code.count("{") - code.count("}")
         if depth == 0 and start is not None:
             out.append((start, n, header))
@@ -75,9 +78,9 @@ def first_branch_only(c_text: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def named_spans(text: str) -> list[tuple[int, int, str]]:
+def named_spans(text: str, window: int | None = None) -> list[tuple[int, int, str]]:
     """Strict spans with a name, on the first branch of every conditional (line numbers kept)."""
-    return [(s, e, h) for s, e, h in function_spans_strict(first_branch_only(text)) if h]
+    return [(s, e, h) for s, e, h in function_spans_strict(first_branch_only(text), window) if h]
 
 
 def patch_id(repo: str, commit: str) -> str | None:
