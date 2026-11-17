@@ -1,0 +1,49 @@
+########## 第1条  编号 A360  提交 c42458fcf54b  日期 2025-10-27
+
+【提交说明】
+riscv: Fix memory leak in module_frob_arch_sections()
+
+The current code directly overwrites the scratch pointer with the
+return value of kvrealloc(). If kvrealloc() fails and returns NULL,
+the original buffer becomes unreachable, causing a memory leak.
+
+Fix this by using a temporary variable to store kvrealloc()'s return
+value and only update the scratch pointer on success.
+
+Found via static anlaysis and this is similar to commit 42378a9ca553
+("bpf, verifier: Fix memory leak in array reallocation for stack state")
+
+Fixes: be17c0df6795 ("riscv: module: Optimize PLT/GOT entry counting")
+
+【改动统计】
+ arch/riscv/kernel/module-sections.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/module-sections.c b/arch/riscv/kernel/module-sections.c
+index 75551ac6504c..1675cbad8619 100644
+--- a/arch/riscv/kernel/module-sections.c
++++ b/arch/riscv/kernel/module-sections.c
+@@ -119,6 +119,7 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
+ 	unsigned int num_plts = 0;
+ 	unsigned int num_gots = 0;
+ 	Elf_Rela *scratch = NULL;
++	Elf_Rela *new_scratch;
+ 	size_t scratch_size = 0;
+ 	int i;
+ 
+@@ -168,9 +169,12 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
+ 		scratch_size_needed = (num_scratch_relas + num_relas) * sizeof(*scratch);
+ 		if (scratch_size_needed > scratch_size) {
+ 			scratch_size = scratch_size_needed;
+-			scratch = kvrealloc(scratch, scratch_size, GFP_KERNEL);
+-			if (!scratch)
++			new_scratch = kvrealloc(scratch, scratch_size, GFP_KERNEL);
++			if (!new_scratch) {
++				kvfree(scratch);
+ 				return -ENOMEM;
++			}
++			scratch = new_scratch;
+ 		}
+ 
+ 		for (size_t j = 0; j < num_relas; j++)

@@ -1,0 +1,951 @@
+[
+ {
+  "case": "P_A143",
+  "dir": "V2_P_A143",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的pfn递增/pfn_pte重建只服务于其contiguous-PTE机制，RISC-V的NAPOT每项写同一pte是正确的，且set_ptes调用均满足nr==1约定、调用上下文无冲突。"
+  }
+ },
+ {
+  "case": "P_A281",
+  "dir": "V2_P_A281",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "材料中没有其他架构的参照实现，无法对比；仅从该函数本身看，kbuf 只部分初始化（未设置 kbuf.buffer、bufsz、random、cma 等字段，也未 memset 清零），但 arch_kexec_locate_mem_hole 只读取 buf_min/buf_max/memsz/buf_align/top_down/mem 等字段，实际上不违反调用约定。",
+   "lines": [
+    81,
+    98,
+    105
+   ],
+   "why": "没有参照实现可比较；调用上下文（非关中断、无持锁）正常，接口约定也被满足，找不到明确违反的要求。"
+  }
+ },
+ {
+  "case": "P_A288",
+  "dir": "V2_P_A288",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "module_alloc分配成功后没有调用kasan_alloc_module_shadow为模块区域建立KASAN影子内存，直接返回；x86和arm64都做了此步并在失败时vfree返回NULL",
+   "lines": [
+    895,
+    896,
+    897,
+    898
+   ],
+   "why": "KASAN是架构无关功能，RISC-V启用KASAN时模块内存缺少影子映射，访问会出错；该函数直接返回__vmalloc_node_range的结果而未做这一步"
+  }
+ },
+ {
+  "case": "P_A292",
+  "dir": "V2_P_A292",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "没有参照实现可对照；函数在普通上下文调用，对齐越界读取已用__no_sanitize_address加kasan_check_read(142行)处理，ror32/ror64的用法符合约定。"
+  }
+ },
+ {
+  "case": "P_A299",
+  "dir": "V2_P_A299",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86的xstate魔数/大小校验是XSAVE布局特有的；RISC-V的大小检查已在调用者restore_sigcontext中完成，datap使用内核分配的缓冲区，且调用状态（可睡眠、无锁）与copy_from_user一致。"
+  }
+ },
+ {
+  "case": "P_A301",
+  "dir": "V2_P_A301",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现中的cookie设置、enter/exit调用、跳过分支回填、返回值保存等要求RISC-V均已满足，其余差异只是各架构寄存器和指令编码的不同。"
+  }
+ },
+ {
+  "case": "P_A303",
+  "dir": "V2_P_A303",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "程序没有找到参照实现，无从比较；仅看上下文，该函数在 paging_init 中无条件调用，非关中断、无持锁，且 early_init_fdt_scan_reserved_mem（281行）与 dma_contiguous_reserve（292行）都在 memblock 激活后、其他保留完成后调用，符合接口约定，未发现违反调用者状态或接口约定之处。"
+  }
+ },
+ {
+  "case": "P_A305",
+  "dir": "V2_P_A305",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的只是对未知原子操作码的防御性报错，而校验器已在加载时拒绝这类操作码；调用状态方面（无关中断、无持锁）也没有违反约定。"
+  }
+ },
+ {
+  "case": "P_A306",
+  "dir": "V2_P_A306",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "没有参照实现可对比；该函数是纯计算的__init辅助函数，在早期启动路径中被调用，未违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "P_A309",
+  "dir": "V2_P_A309",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V函数与arm64参照实现逐行一致（遍历IRQ描述符、尝试清除active状态、必要时EOI、mask、disable），没有参照实现中存在而RISC-V缺失的要求；在crash shutdown关中断的调用状态下，也没有违反调用者状态或irq_set_irqchip_state/irq_disable的接口约定。"
+  }
+ },
+ {
+  "case": "P_A310",
+  "dir": "V2_P_A310",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 在329-332行用else分支设置-ENOSYS，与LoongArch预设-ENOSYS等效；其余差异（重启用regs[0]、向量状态丢弃、随机源）均属架构自身机制，且进出系统调用的接口调用顺序一致。"
+  }
+ },
+ {
+  "case": "P_A313",
+  "dir": "V2_P_A313",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V的OOM分支（第64-74行）与LoongArch参照实现逻辑一致：内核态走no_context，用户态调用pagefault_out_of_memory()。SIGBUS/HWPOISON分支是RISC-V自己的处理，参照函数中没有对应的缺失要求。调用时未关中断、未持锁，也不违反调用约定。"
+  }
+ },
+ {
+  "case": "P_A321",
+  "dir": "V2_P_A321",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86多出的default报错分支只是防御性处理，非法atomic操作码已被verifier在加载时拒绝，RISC-V函数在被调用状态下没有违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "P_A327",
+  "dir": "V2_P_A327",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86的SYSTEM_BOOTING分支只与其text_poke批处理机制有关；RISC-V在持有text_mutex下直接打补丁，早期启动时mutex无竞争可正常使用，未违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "P_A328",
+  "dir": "V2_P_A328",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的部分（fixmap重映射、memblock_reserve、失败死循环）属于架构自身的映射机制或策略差异，RISC-V在别处处理DTB保留，且dump_stack_set_arch_desc已按要求在早期调用，未违反调用状态或接口约定。"
+  }
+ },
+ {
+  "case": "P_A336",
+  "dir": "V2_P_A336",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "SKIP_MATCH分支对ctr_mask调用__ffs，若ctr_mask为0则结果未定义；是否已被kvm_pmu_validate_counter_mask拦截材料中无法确认",
+   "lines": [
+    697,
+    701
+   ],
+   "why": "没有参照实现；__ffs要求参数非0，而本函数在该处没有自己的非零检查，只能依赖前面的校验函数，其行为材料未给出。"
+  }
+ },
+ {
+  "case": "P_A339",
+  "dir": "V2_P_A339",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "没有找到参照实现和调用上下文，teardown先于kvm_exit的顺序虽与初始化相反，但材料不足以断定违反任何约定。"
+  }
+ },
+ {
+  "case": "P_A344",
+  "dir": "V2_P_A344",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "RISC-V在irqentry_enter与exit之间(228-230行)没有instrumentation_begin()/end()包围，而x86有",
+   "lines": [
+    228,
+    229,
+    230
+   ],
+   "why": "该函数未标noinstr，缺少标注是否构成违规取决于函数属性与objtool检查，材料不足以确定，故无法判定"
+  }
+ },
+ {
+  "case": "P_A350",
+  "dir": "V2_P_A350",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V已与arm64一样用get_online_mems/put_online_mems包住ptdump_walk，参照实现多出的部分只是取m->private的局部变量，没有RISC-V缺失的要求。"
+  }
+ },
+ {
+  "case": "P_A359",
+  "dir": "V2_P_A359",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（MTE、cacheable PFNMAP、guest_memfd、x86 的页跟踪与元数据）都是各架构自身功能；RISC-V 第241行的 goto 跳过清理是其自身缺陷，并非参照实现所要求。"
+  }
+ },
+ {
+  "case": "P_A368",
+  "dir": "V2_P_A368",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "没有参照实现；该函数在进程上下文、未持锁下调用，topup 与 faultin 都在 mmu_lock 之外，锁与 mmap 锁的获取释放配对，未发现违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "P_A379",
+  "dir": "V2_P_A379",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的只有__kprobes标注，而RISC-V的该函数是always_inline，没有独立的探测点；其余逻辑（取页、BUG_ON、fixmap映射）一致，非STRICT_MODULE_RWX时直接返回addr是RISC-V自己的设计差异。"
+  }
+ },
+ {
+  "case": "P_A380",
+  "dir": "V2_P_A380",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "没有找到其他架构的参照实现，无法对照出RISC-V遗漏的要求；从上下文看，调用者一处持有mmu_lock（spin_lock），另一处无锁类调用但本函数不睡眠、不依赖关中断，未发现违反调用者状态或接口约定的情形。"
+  }
+ },
+ {
+  "case": "P_A387",
+  "dir": "V2_P_A387",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "未校验dbg->control中的未知/不支持标志位，arm64会对这类位返回-EINVAL，RISC-V直接全部接受",
+   "lines": [
+    536,
+    537
+   ],
+   "why": "KVM_SET_GUEST_DEBUG接口应拒绝不支持的控制位，而RISC-V把dbg->control原样存入vcpu->guest_debug，静默接受RISC-V并不支持的标志"
+  }
+ },
+ {
+  "case": "P_A392",
+  "dir": "V2_P_A392",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 只排除 crashkernel 一个区域，nr_ranges 初值 1 保证 max_nr_ranges == nr_ranges+1，满足 crash_exclude_mem_range 的约定；arm64 多出的 crashk_low_res 处理属于其自身功能。"
+  }
+ },
+ {
+  "case": "P_A393",
+  "dir": "V2_P_A393",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分均为架构特有：arm64 的 cpus_are_stuck_in_kernel() 检查针对 CPU 停在内核中无法下线的 arm64 情形，x86 的页表、调试 IDT 和 swap page 设置针对 x86 的重定位机制。RISC-V 函数在非 crash 类型下已检查重定位代码是否放得进控制页，并拷贝代码、将页设为可执行。调用者在进程上下文中，未关中断也未持自旋锁，只持有 kexec 互斥锁（kexec_trylock），所以 memcpy、copy_from_user 和 set_memory_x 的使用都合法，没有违反调用状态或接口约定。"
+  }
+ },
+ {
+  "case": "P_A398",
+  "dir": "V2_P_A398",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（pKVM、MTE、可缓存PFNMAP、gmem、x86 metadata/page track）都只与各自架构的功能有关；RISC-V的mmap锁在所有路径上都正确配对释放，find_vma_intersection的前置条件也满足。"
+  }
+ },
+ {
+  "case": "N_000",
+  "dir": "V2_N_000",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 函数已做大小检查、寄存器范围检查、default 分支和 copy_to_user 失败处理；arm64 多出的偏移检查只与其 kvm_regs 布局有关，且调用上下文（ioctl 进程上下文，无锁、未关中断）合法。"
+  }
+ },
+ {
+  "case": "N_001",
+  "dir": "V2_N_001",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "RISC-V 缺少参照实现开头的 perf_guest_state() 检查(guest 状态下应直接返回)，但该检查是否在此内核版本对 RISC-V 有实际意义取决于 KVM 是否注册了 perf guest 回调",
+   "lines": [
+    61,
+    62
+   ],
+   "why": "arm64/loongarch 在 guest 状态下直接返回，RISC-V 直接用 regs 回溯；若该版本 RISC-V 无 guest 回调则无影响，材料无法确认"
+  }
+ },
+ {
+  "case": "N_002",
+  "dir": "V2_N_002",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的 case 都是 arm64 MTE 或 x86 专有的寄存器/调试寄存器/thread area 功能，RISC-V 将通用请求交给 ptrace_request 处理，且调用上下文（系统调用路径、未关中断、未持锁）无违约。"
+  }
+ },
+ {
+  "case": "N_003",
+  "dir": "V2_N_003",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "LoongArch多出的preempt_enable_no_resched()对应其pre handler中的preempt_disable()；RISC-V该版本的pre handler不禁抢占，所以这里无需配对；其余逻辑（restore、REENTER、状态更新、reset）与参照一致。"
+  }
+ },
+ {
+  "case": "N_004",
+  "dir": "V2_N_004",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64的nregs检查和x86的临时缓冲区都是各自架构的需要；RISC-V用insns=NULL做只计数的试运行，调用上下文也没有关中断或持锁的限制，没有发现缺失的要求。"
+  }
+ },
+ {
+  "case": "N_005",
+  "dir": "V2_N_005",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "与LoongArch实现完全一致；x86的kmmio函数只涉及x86自身的present位处理，TLB刷新由调用方__set_memory统一完成，该回调没有违反调用约定。"
+  }
+ },
+ {
+  "case": "N_006",
+  "dir": "V2_N_006",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现只做用户空间拷贝并转调设置函数，RISC-V 版本已有大小检查和 copy_from_user 错误处理，调用上下文（ioctl 进程上下文、无锁、未关中断）也不存在状态冲突。"
+  }
+ },
+ {
+  "case": "N_007",
+  "dir": "V2_N_007",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64 版本返回错误码而 RISC-V 在 __init 启动阶段直接 panic，这只是错误处理方式不同；RISC-V 的调用者 vdso_init 为 __init，不在关中断或持锁状态，GFP_KERNEL 的 kcalloc 可以睡眠，用法合法，panic 也符合其约定，没有违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "N_008",
+  "dir": "V2_N_008",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 在持有 text_mutex 的情况下调用 patch_text_set_nosync，用全 0（非法指令）填充，对应 arm64 的 BRK 和 x86 的 int3，加解锁成对且处于可睡眠的上下文，没有违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "N_009",
+  "dir": "V2_N_009",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "两者结构和先刷新后置位的顺序一致；arm64 多出的按 folio 地址范围同步只与其 icache 别名机制有关，RISC-V 的 flush_icache_mm 以 mm 为粒度，且未违反 page_folio/set_bit 的约定。"
+  }
+ },
+ {
+  "case": "N_010",
+  "dir": "V2_N_010",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V已恢复bad_cause并设置PC；arm64的关单步和x86的TF/SIGTRAP/post_xol回调都是各自架构硬件特有，RISC-V不使用单步，无需对应处理。"
+  }
+ },
+ {
+  "case": "N_011",
+  "dir": "V2_N_011",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V同样在172/175行配对获取和释放任务栈，调度函数过滤在save_wchan回调中完成，与参照实现等价，且未违反调用者状态约定。"
+  }
+ },
+ {
+  "case": "N_012",
+  "dir": "V2_N_012",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（x86 的 KVM_MEMORY_ENCRYPT_OP）只与 x86 自身的机密计算功能有关，RISC-V 函数在无锁、可睡眠的调用状态下处理 KVM_INTERRUPT 没有违反约定。"
+  }
+ },
+ {
+  "case": "N_013",
+  "dir": "V2_N_013",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V按NAPOT阶数逐项清除全部连续PTE，与arm64按sz逐项清除等价；loongarch的差异只与其自身的invalid_pte_table机制有关，且调用上下文（不关中断、仅持自旋锁）下pte_clear不会违反约定。"
+  }
+ },
+ {
+  "case": "N_014",
+  "dir": "V2_N_014",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现之间的差异只是各架构自己的指令与字节序处理方式，RISC-V 版本按 32 位字累加 64 位 sum，再折叠进位，逻辑正确；各调用点也都不在关中断或持锁的特殊状态下，没有违反调用约定。"
+  }
+ },
+ {
+  "case": "N_015",
+  "dir": "V2_N_015",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现local_flush_tlb_mm只做preempt_disable/enable并操作本CPU的mask，RISC-V函数同样用preempt_disable(第49行)和preempt_enable(第81行)包住smp_processor_id及后续操作；参照中多出的asid_valid/drop_mmu_context是LoongArch自身的MMU上下文机制。调用者(syscall、flush_icache_pte)均不在关中断区间且未持锁，满足on_each_cpu_mask不得在关中断下调用的约定，因此没有违反。"
+  }
+ },
+ {
+  "case": "N_016",
+  "dir": "V2_N_016",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的偏移越界检查和地址解析只与 arm64 的 kvm_regs 布局有关；RISC-V 已在783行检查大小、801行处理未知子类型、806行用copy_to_user，且在普通ioctl上下文中调用，没有违反调用者状态。"
+  }
+ },
+ {
+  "case": "N_017",
+  "dir": "V2_N_017",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 同样写入原指令和单步断点指令并设置 restore 地址，patch_text_nosync 自带 icache 刷新；arm64 多出的部分只涉及 ARM 自身的 ISB/上下文同步，调用状态也无冲突。"
+  }
+ },
+ {
+  "case": "N_018",
+  "dir": "V2_N_018",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的寄存器数量检查是arm64自身的ABI限制，x86多出的临时缓冲区只因其实现需要真实image；RISC-V用insns=NULL干跑统计大小，调用上下文也无冲突。"
+  }
+ },
+ {
+  "case": "N_019",
+  "dir": "V2_N_019",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的cpu_number初始化和cpu_ops->cpu_prepare都是arm64自身机制，RISC-V对应的拓扑、NUMA、nosmp返回、设置present均已具备，且调用状态下无违约。"
+  }
+ },
+ {
+  "case": "N_020",
+  "dir": "V2_N_020",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86 参照实现多出的部分（e820 检查、after_bootmem、Xen 复用映射、update_page_count、set_pte_init）都只与 x86 自身的内存布局和功能有关。RISC-V 该函数只在 pte 为空时写入单个页表项，行为与 x86 保留已有映射的逻辑一致。调用者状态（非关中断区间、无持锁、早期启动路径）也与它没有冲突。"
+  }
+ },
+ {
+  "case": "N_021",
+  "dir": "V2_N_021",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的BTI/GP位是该架构特有功能；RISC-V已分别处理RO(清写置读)与XP(清执行)，且调用上下文未显示违反任何状态或接口约定。"
+  }
+ },
+ {
+  "case": "N_022",
+  "dir": "V2_N_022",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（arm64的Spectre v4缓解、loongarch的LBT/LSX/LASX及PLV处理）都是各架构自己的硬件功能；RISC-V已通过SR_PIE（147行）回到用户态，并在148-155行恢复FPU初始状态，调用上下文（exec路径、进程上下文）也无冲突。"
+  }
+ },
+ {
+  "case": "N_023",
+  "dir": "V2_N_023",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "与arm64实现逐行一致，x86参照多出的部分仅涉及其嵌套VMX定时器；在持自旋锁的上下文中调用kvm_make_request和kvm_vcpu_kick是安全的，不违反调用约定。"
+  }
+ },
+ {
+  "case": "N_024",
+  "dir": "V2_N_024",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（x86的pci_iommu_alloc、highmem初始化、after_bootmem、test_wp_bit，arm64的BUILD_BUG_ON和小内存overcommit设置）都只与各自架构的硬件或功能有关，不是RISC-V同样必须满足的要求。RISC-V已有swiotlb_init在memblock_free_all之前的顺序，并且FLATMEM下有mem_map检查。调用者mm_core_init在启动早期以开中断、无锁的状态调用，没有违反调用约定。"
+  }
+ },
+ {
+  "case": "N_025",
+  "dir": "V2_N_025",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V已具备与参照实现一致的kvmalloc、生成、text_copy、icache刷新和kvfree流程，参照中多出的部分（arm64的nregs限制、jit_fill_hole、validate_code）仅与该架构自身相关，且调用上下文（可睡眠、无持锁）符合GFP_KERNEL与kvfree约定。"
+  }
+ },
+ {
+  "case": "N_026",
+  "dir": "V2_N_026",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V已在179-183行先检查当前调用指令再写入，满足钩子说明的要求；arm64多出的ops设置和可调用地址检查只与其CALL_OPS及分支范围限制有关，x86只是不支持的桩实现。"
+  }
+ },
+ {
+  "case": "N_027",
+  "dir": "V2_N_027",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "memblock_alloc 的返回值未检查是否为NULL（x86的early_alloc在失败时会panic），分配失败时会把__pa(NULL)写入p4d页表项",
+   "lines": [
+    88,
+    89
+   ],
+   "why": "早期页表分配失败未被检测或报错，参照实现通过early_alloc在失败时panic来保证这一点，RISC-V直接使用返回值构造页表项。"
+  }
+ },
+ {
+  "case": "N_028",
+  "dir": "V2_N_028",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 函数同样在到期时调用 kvm_vcpu_kick，x86 多出的 preemption_timer_expired 标志和 KVM_REQ_EVENT 只与 VMX 嵌套抢占定时器相关，hrtimer 重启用法也符合约定。"
+  }
+ },
+ {
+  "case": "N_029",
+  "dir": "V2_N_029",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64 多出的 done 段（SPCR earlycon、BGRT 解析、DT stdout 扫描）属于 arm64 自身的功能；x86 多出的 DMI 检查和表保留同样是 x86 特有的。RISC-V 函数在 setup_arch 中无条件调用，不在关中断区间、不持锁，也没有违反所调用接口（pr_err）的约定。"
+  }
+ },
+ {
+  "case": "N_030",
+  "dir": "V2_N_030",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 的 reenter_kprobe 与 arm64 实现逐行一致；与 x86 的差异（KPROBE_HIT_SS 的处理方式）只属于各架构自身的单步实现，并不是 RISC-V 同样必须满足的要求。调用上下文也没有违反关中断、持锁或接口约定的情况。"
+  }
+ },
+ {
+  "case": "N_031",
+  "dir": "V2_N_031",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "set_irq_regs 的保存/恢复在 RISC-V 的 handle_riscv_irq 中完成，do_irq 已配对调用 irqentry_enter/exit，参照实现的差异只是结构不同。"
+  }
+ },
+ {
+  "case": "N_032",
+  "dir": "V2_N_032",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 函数已包含与 arm64 相同的 WARN_ON(smp_processor_id() != 0) 检查（第200行）；arm64 多出的 pr_info 只是日志，并非必须满足的要求；x86 的 GDT/percpu 切换和 pv lock 初始化属于 x86 自身功能。调用者 setup_arch 在 __init 早期启动路径上、未关中断也未持锁，该函数运行在启动 CPU 上，没有违反调用者状态或接口约定。"
+  }
+ },
+ {
+  "case": "N_033",
+  "dir": "V2_N_033",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V先校验旧调用指令（179-183行）再写入新指令（185行），符合接口约定；arm64多出的ops设置和可达地址检查属于该架构特有，x86只是占位实现，调用上下文也无冲突。"
+  }
+ },
+ {
+  "case": "N_034",
+  "dir": "V2_N_034",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 已在 halt 前后释放并重新获取 SRCU 读锁（196、198行），与 x86 一致；参照实现多出的统计、trace、LAPIC定时器和 mp_state 处理属于各架构自身特性或可选项，且调用上下文（未关中断、未持锁）没有被违反。"
+  }
+ },
+ {
+  "case": "N_035",
+  "dir": "V2_N_035",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86参照实现只是依赖x86 io_delay的实模式忙等待循环，与硬件相关；RISC-V函数已处理溢出且do_div用法符合约定，调用上下文无冲突。"
+  }
+ },
+ {
+  "case": "N_036",
+  "dir": "V2_N_036",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（loongarch 的 regs[0]=0 与 sig 处理、x86 的 shadow stack 和 uc_flags）都是各架构自身特性；RISC-V 已设置 restart_block.fn 为 do_no_restart_syscall，并检查了 sigcontext 和 altstack 的恢复结果，没有违反调用约定。"
+  }
+ },
+ {
+  "case": "N_037",
+  "dir": "V2_N_037",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V在持有text_mutex下用patch_text_set_nosync填0（非法指令），调用上下文可睡眠且无锁冲突，参照实现多出的部分只是架构特有的陷阱指令与修补机制。"
+  }
+ },
+ {
+  "case": "N_038",
+  "dir": "V2_N_038",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 在217行已拒绝非零flags，default分支也返回-EINVAL；参照实现多出的加锁、protected VM检查等只服务于各自架构特有的功能，对RISC-V的单个bool写入不是必需，且调用上下文（未关中断、未持锁）也没有被违反。"
+  }
+ },
+ {
+  "case": "N_039",
+  "dir": "V2_N_039",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V函数与arm64一样在mp_state_lock保护下调用__kvm_riscv_vcpu_power_off，加解锁配对正确，调用上下文（非关中断、无其他持锁）下无违约；x86参照只涉及Hyper-V特有逻辑。"
+  }
+ },
+ {
+  "case": "N_040",
+  "dir": "V2_N_040",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（PAE下的set_pte_atomic、由调用者完成的TLB刷新）要么是x86专属，要么RISC-V在__set_memory的调用方统一刷新，回调本身没有违反约定。"
+  }
+ },
+ {
+  "case": "N_041",
+  "dir": "V2_N_041",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（x86写status、arm64解析IRQ编码）与各自架构的功能有关；RISC-V未声明KVM_CAP_IRQ_LINE_STATUS，且调用路径（ioctl、未关中断、未持锁）下没有违反约定。"
+  }
+ },
+ {
+  "case": "N_042",
+  "dir": "V2_N_042",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64 的 preempt_disable 是为了满足其 cpu_hyp_init、vgic、timer 辅助函数对禁抢占的要求，属于该架构自身的实现需要；x86 多出的 TSC 补偿和兼容性检查也只与 x86 硬件相关。RISC-V 的 40-52 行只写本 CPU 的 CSR，并调用 kvm_riscv_nacl_enable 和 kvm_riscv_aia_enable，这些调用不依赖调用者的禁抢占、关中断或持锁状态，因此没有违反调用者的状态或接口约定（我对这些辅助函数内部是否要求禁抢占没有逐一核实，但上游 RISC-V 的实现与此一致）。"
+  }
+ },
+ {
+  "case": "N_043",
+  "dir": "V2_N_043",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V函数与loongarch参照实现完全一致，x86的alloc_pmd_page是页表分配逻辑，与walk回调无对应要求；TLB刷新由调用者统一完成，调用状态下无违约。"
+  }
+ },
+ {
+  "case": "N_044",
+  "dir": "V2_N_044",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86的kvm_pmu_init只是初始化时清零pmu结构并调用厂商init钩子，对应的是初始化而非销毁；RISC-V的deinit已经释放perf事件、清空位图和固件事件并清理快照区，调用上下文（非关中断、无持锁）也没有违反任何约定，参照多出的部分属于x86自身的初始化逻辑。"
+  }
+ },
+ {
+  "case": "N_045",
+  "dir": "V2_N_045",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的 pgd_cache 创建只服务于 arm64/x86 各自的 pgd 对齐或大小要求，RISC-V 的 pgd 是整页，不需要；调用上下文也未违反约定。"
+  }
+ },
+ {
+  "case": "N_046",
+  "dir": "V2_N_046",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "与arm64的差异只是num_other_online_cpus写法不同以及arm64专有的sdei_mask_local_cpu，RISC-V无对应要求，调用上下文也无违约。"
+  }
+ },
+ {
+  "case": "N_047",
+  "dir": "V2_N_047",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V的vvar_fault与arm64的实现逐行一致，处理了VVAR数据页、timens页和default的SIGBUS，并在最后返回vmf_insert_pfn的结果，符合其只能在fault回调中调用并返回其结果的约定。x86多出的image检查、pvclock和hvclock页处理、预填充等只与x86自己的vdso布局和虚拟化时钟有关，RISC-V不需要。"
+  }
+ },
+ {
+  "case": "N_048",
+  "dir": "V2_N_048",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的差异只与各架构自己的调用约定和指令编码有关；RISC-V 函数已处理参数栈、TCC 保存恢复、固定指令数和返回值，未发现违反调用上下文或接口约定。"
+  }
+ },
+ {
+  "case": "N_049",
+  "dir": "V2_N_049",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V函数已用raw_spin_lock_irqsave/irqrestore保护irqd->target的读取（87-89行），与arm64、x86参照中的加锁方式一致；调用时不在关中断区间、不持锁，也未违反接口约定，参照实现没有RISC-V遗漏的要求。"
+  }
+ }
+]

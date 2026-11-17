@@ -1,0 +1,968 @@
+[
+ {
+  "src": "ctx",
+  "rule": "CTX",
+  "label": "a",
+  "basis": "qemu",
+  "path": "arch/riscv/kernel/machine_kexec.c",
+  "name": "machine_shutdown",
+  "reason": "sleep A:irq: line 113 smp_shutdown_nonboot_cpus -> smp_shutdown_nonboot_cpus",
+  "chain": [],
+  "key": [
+   "CTX",
+   "machine_shutdown",
+   "smp_shutdown_nonboot_cpus",
+   "smp_shutdown_nonboot_cpus"
+  ],
+  "note": "irqs-off call to smp_shutdown_nonboot_cpus, confirmed in QEMU by riscv_kexec_shutdown_verify_20261102; not fixed upstream",
+  "dir": "Q_00"
+ },
+ {
+  "src": "ctx",
+  "rule": "CTX",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/traps.c",
+  "name": "die",
+  "reason": "sleep A:spin: line 86 bust_spinlocks -> might_sleep",
+  "chain": [
+   [
+    "lib/bust_spinlocks.c",
+    "bust_spinlocks",
+    25,
+    "console_unblank",
+    null
+   ],
+   [
+    "kernel/printk/printk.c",
+    "console_unblank",
+    3345,
+    "console_lock",
+    null
+   ],
+   [
+    "kernel/printk/printk.c",
+    "console_lock",
+    2802,
+    "might_sleep",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "die",
+   "might_sleep",
+   "bust_spinlocks"
+  ],
+  "note": "console_unblank does not take console_lock when oops_in_progress is set, and bust_spinlocks(1) sets it before",
+  "dir": "Q_01"
+ },
+ {
+  "src": "ctx",
+  "rule": "CTX",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kernel/traps.c",
+  "name": "do_trap_insn_illegal",
+  "reason": "rt A:irq: line 184 do_trap_error -> spin_lock_irqsave",
+  "chain": [
+   [
+    "arch/riscv/kernel/traps.c",
+    "do_trap_error",
+    140,
+    "die",
+    null
+   ],
+   [
+    "arch/riscv/kernel/traps.c",
+    "die",
+    84,
+    "spin_lock_irqsave",
+    "rt"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "do_trap_insn_illegal",
+   "spin_lock_irqsave",
+   "do_trap_error"
+  ],
+  "note": "die() takes spinlock_t with irqs off in trap handling, which sleeps on PREEMPT_RT; fixed later by 6a97f4118ac0 (A118)",
+  "dir": "Q_02"
+ },
+ {
+  "src": "ctx",
+  "rule": "CTX",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kernel/traps.c",
+  "name": "do_trap_load_misaligned",
+  "reason": "sleep B:trap: line 206 handle_misaligned_load -> copy_from_user",
+  "chain": [
+   [
+    "arch/riscv/kernel/traps_misaligned.c",
+    "handle_misaligned_load",
+    418,
+    "copy_from_user",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "do_trap_load_misaligned",
+   "copy_from_user",
+   "handle_misaligned_load"
+  ],
+  "note": "user memory access with irqs off in misaligned trap handling; fixed upstream (453805f0a28f, 2025-04; A158/A344)",
+  "dir": "Q_03"
+ },
+ {
+  "src": "ctx",
+  "rule": "CTX",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/ftrace.c",
+  "name": "__ftrace_modify_code",
+  "reason": "sleep C:callback: line 144 ftrace_modify_all_code -> cond_resched",
+  "chain": [
+   [
+    "kernel/trace/ftrace.c",
+    "ftrace_modify_all_code",
+    2889,
+    "ftrace_replace_code",
+    null
+   ],
+   [
+    "kernel/trace/ftrace.c",
+    "ftrace_replace_code",
+    2741,
+    "cond_resched",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "__ftrace_modify_code",
+   "cond_resched",
+   "ftrace_modify_all_code"
+  ],
+  "note": "ftrace_replace_code calls cond_resched only with FTRACE_MODIFY_MAY_SLEEP_FL, which is not set under stop_machine",
+  "dir": "Q_04"
+ },
+ {
+  "src": "ctx",
+  "rule": "CTX",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/hibernate.c",
+  "name": "swsusp_arch_suspend",
+  "reason": "sleep D:hook: line 155 flush_tlb_all -> on_each_cpu",
+  "chain": [
+   [
+    "arch/riscv/mm/tlbflush.c",
+    "flush_tlb_all",
+    64,
+    "on_each_cpu",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "swsusp_arch_suspend",
+   "on_each_cpu",
+   "flush_tlb_all"
+  ],
+  "note": "flush_tlb_all takes the local path when fewer than two CPUs are online, as during create_image",
+  "dir": "Q_05"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "kernel/trace/ftrace.c",
+  "name": "arch_ftrace_update_code",
+  "start": 2943,
+  "end": 2945,
+  "reason": "weak default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/kernel/ftrace.c"
+   ],
+   "x86": [
+    "arch/x86/kernel/ftrace.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/kernel/ftrace_dyn.c"
+   ]
+  },
+  "key": [
+   "R1",
+   "arch_ftrace_update_code"
+  ],
+  "note": "RISC-V later defined its own arch_ftrace_update_code in c97bf629963e \"Fix text patching when IPI are used\" (2024-02, no Fixes tag): the stop_machine default did not suit RISC-V patching",
+  "dir": "Q_06"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "include/asm-generic/io.h",
+  "name": "memcpy_fromio",
+  "start": 1183,
+  "end": 1185,
+  "reason": "ifndef default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/include/asm/io.h"
+   ],
+   "x86": [
+    "arch/x86/include/asm/io.h",
+    "arch/x86/lib/iomem.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/include/asm/io.h"
+   ]
+  },
+  "key": [
+   "R1",
+   "memcpy_fromio"
+  ],
+  "note": "generic memcpy_fromio is functionally correct; arch versions are optimisations",
+  "dir": "Q_07"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "include/linux/ftrace.h",
+  "name": "ftrace_graph_func",
+  "start": 907,
+  "end": 912,
+  "reason": "ifndef default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/include/asm/ftrace.h",
+    "arch/arm64/kernel/ftrace.c"
+   ],
+   "x86": [
+    "arch/x86/include/asm/ftrace.h",
+    "arch/x86/kernel/ftrace.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/include/asm/ftrace.h",
+    "arch/loongarch/kernel/ftrace_dyn.c"
+   ]
+  },
+  "key": [
+   "R1",
+   "ftrace_graph_func"
+  ],
+  "note": "ftrace_graph_func is a feature hook (RISC-V added it later as a feature)",
+  "dir": "Q_08"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "include/asm-generic/io.h",
+  "name": "memcpy_toio",
+  "start": 1200,
+  "end": 1202,
+  "reason": "ifndef default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/include/asm/io.h"
+   ],
+   "x86": [
+    "arch/x86/include/asm/io.h",
+    "arch/x86/lib/iomem.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/include/asm/io.h"
+   ]
+  },
+  "key": [
+   "R1",
+   "memcpy_toio"
+  ],
+  "note": "same as 2",
+  "dir": "Q_09"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "mm/sparse-vmemmap.c",
+  "name": "vmemmap_set_pmd",
+  "start": 300,
+  "end": 301,
+  "reason": "weak default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/mm/mmu.c"
+   ],
+   "x86": [
+    "arch/x86/mm/init_64.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/mm/init.c"
+   ]
+  },
+  "key": [
+   "R1",
+   "vmemmap_set_pmd"
+  ],
+  "note": "hugepage vmemmap is a feature RISC-V added later (ff172d4818ad)",
+  "dir": "Q_10"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "include/asm-generic/pci.h",
+  "name": "pcibios_assign_all_busses",
+  "start": 14,
+  "end": 17,
+  "reason": "ifndef default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/include/asm/pci.h"
+   ],
+   "x86": [
+    "arch/x86/include/asm/pci.h",
+    "arch/x86/pci/common.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/include/asm/pci.h"
+   ]
+  },
+  "key": [
+   "R1",
+   "pcibios_assign_all_busses"
+  ],
+  "note": "default policy is fine",
+  "dir": "Q_11"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "include/asm-generic/io.h",
+  "name": "ioremap_wc",
+  "start": 1068,
+  "end": 1070,
+  "reason": "ifndef default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/include/asm/io.h"
+   ],
+   "x86": [
+    "arch/x86/include/asm/io.h",
+    "arch/x86/mm/ioremap.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/include/asm/io.h"
+   ]
+  },
+  "key": [
+   "R1",
+   "ioremap_wc"
+  ],
+  "note": "default ioremap_wc maps uncached, functionally correct; RISC-V added a WC version later as an improvement",
+  "dir": "Q_12"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "mm/sparse-vmemmap.c",
+  "name": "vmemmap_check_pmd",
+  "start": 305,
+  "end": 307,
+  "reason": "weak default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/mm/mmu.c"
+   ],
+   "x86": [
+    "arch/x86/mm/init_64.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/mm/init.c"
+   ]
+  },
+  "key": [
+   "R1",
+   "vmemmap_check_pmd"
+  ],
+  "note": "same as 6",
+  "dir": "Q_13"
+ },
+ {
+  "src": "mech",
+  "rule": "R1",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "include/asm-generic/mmu_context.h",
+  "name": "enter_lazy_tlb",
+  "start": 23,
+  "end": 24,
+  "reason": "ifndef default overridden by arm64, x86 and loongarch, not by riscv",
+  "refs": {
+   "arm64": [
+    "arch/arm64/include/asm/mmu_context.h"
+   ],
+   "x86": [
+    "arch/x86/include/asm/mmu_context.h",
+    "arch/x86/mm/tlb.c"
+   ],
+   "loongarch": [
+    "arch/loongarch/include/asm/mmu_context.h"
+   ]
+  },
+  "key": [
+   "R1",
+   "enter_lazy_tlb"
+  ],
+  "note": "empty default is correct for RISC-V",
+  "dir": "Q_14"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/aia_aplic.c",
+  "name": "aplic_write_target",
+  "start": 94,
+  "end": 109,
+  "reason": "line 100: [irq] after bound check at line 98, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "aplic_write_target"
+  ],
+  "note": "guest-controlled irq index after a bound check without array_index_nospec; fixed later by 8565617a8599 \"KVM: riscv: Fix Spectre-v1 in APLIC interrupt handling\"",
+  "dir": "Q_15"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kvm/vcpu_pmu.c",
+  "name": "kvm_riscv_vcpu_pmu_incr_fw",
+  "start": 264,
+  "end": 276,
+  "reason": "line 271: [fid] after bound check at line 268, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "kvm_riscv_vcpu_pmu_incr_fw"
+  ],
+  "note": "fid comes from KVM itself (firmware event id constants), not from the guest",
+  "dir": "Q_16"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/vcpu_pmu.c",
+  "name": "kvm_riscv_vcpu_pmu_ctr_cfg_match",
+  "start": 460,
+  "end": 531,
+  "reason": "line 512: [ctr_idx] after bound check at line 506, no array_index_nospec; line 517: [event_code] after bound check at line 489, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "kvm_riscv_vcpu_pmu_ctr_cfg_match"
+  ],
+  "note": "guest-controlled counter/event index; fixed later by 2dda6a9e09ee \"Fix Spectre-v1 in PMU counter access\" (touches ctr_cfg_match)",
+  "dir": "Q_17"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/aia_aplic.c",
+  "name": "aplic_read_input",
+  "start": 189,
+  "end": 203,
+  "reason": "line 196: [irq] after bound check at line 194, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "aplic_read_input"
+  ],
+  "note": "same as 12",
+  "dir": "Q_18"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/aia_aplic.c",
+  "name": "aplic_read_target",
+  "start": 77,
+  "end": 91,
+  "reason": "line 84: [irq] after bound check at line 82, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "aplic_read_target"
+  ],
+  "note": "same as 12",
+  "dir": "Q_19"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "b",
+  "basis": "first_annotator_corrected",
+  "path": "arch/riscv/kvm/vcpu_pmu.c",
+  "name": "kvm_riscv_vcpu_pmu_ctr_stop",
+  "start": 397,
+  "end": 454,
+  "reason": "line 422: [fevent_code] after bound check at line 417, no array_index_nospec; line 425: [fevent_code] after bound check at line 417, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "kvm_riscv_vcpu_pmu_ctr_stop"
+  ],
+  "note": "same as 14 (ctr_stop)",
+  "dir": "Q_20"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/aia_aplic.c",
+  "name": "aplic_write_enabled",
+  "start": 172,
+  "end": 186,
+  "reason": "line 178: [irq] after bound check at line 176, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "aplic_write_enabled"
+  ],
+  "note": "same as 12",
+  "dir": "Q_21"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/aia_aplic.c",
+  "name": "aplic_write_sourcecfg",
+  "start": 58,
+  "end": 74,
+  "reason": "line 64: [irq] after bound check at line 62, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "aplic_write_sourcecfg"
+  ],
+  "note": "same as 12",
+  "dir": "Q_22"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/kgdb.c",
+  "name": "dbg_set_reg",
+  "start": 221,
+  "end": 229,
+  "reason": "line 225: [regno] after bound check at line 222, no array_index_nospec; line 226: [regno] after bound check at line 222, no array_index_nospec; line 227: [regno] after bound check at line 222, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "dbg_set_reg"
+  ],
+  "note": "kgdb register numbers come from the privileged debugger, not an untrusted party",
+  "dir": "Q_23"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/vcpu_onereg.c",
+  "name": "riscv_vcpu_set_isa_ext_single",
+  "start": 477,
+  "end": 510,
+  "reason": "line 484: [reg_num] after bound check at line 480, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "riscv_vcpu_set_isa_ext_single"
+  ],
+  "note": "VMM-controlled ONE_REG index into the ISA extension array; fixed later by f9e26fc32541 \"Fix Spectre-v1 in ONE_REG register access\" (array_index_nospec in kvm_riscv_vcpu_isa_check_host)",
+  "dir": "Q_24"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "b",
+  "basis": "first_annotator_corrected",
+  "path": "arch/riscv/kvm/vcpu_pmu.c",
+  "name": "kvm_riscv_vcpu_pmu_ctr_start",
+  "start": 341,
+  "end": 392,
+  "reason": "line 368: [fevent_code] after bound check at line 362, no array_index_nospec; line 373: [fevent_code] after bound check at line 362, no array_index_nospec; line 374: [fevent_code] after bound check at line 362, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "kvm_riscv_vcpu_pmu_ctr_start"
+  ],
+  "note": "same as 14 (ctr_start)",
+  "dir": "Q_25"
+ },
+ {
+  "src": "mech",
+  "rule": "R7",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kvm/aia_aplic.c",
+  "name": "aplic_read_enabled",
+  "start": 155,
+  "end": 169,
+  "reason": "line 162: [irq] after bound check at line 160, no array_index_nospec",
+  "refs": null,
+  "key": [
+   "R7",
+   "aplic_read_enabled"
+  ],
+  "note": "same as 12",
+  "dir": "Q_26"
+ },
+ {
+  "src": "mech",
+  "rule": "R8",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kvm/mmu.c",
+  "name": "kvm_age_gfn",
+  "start": 574,
+  "end": 589,
+  "reason": "df6556adf27b in arch/arm64/kvm/mmu.c removed \"WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);\", still in riscv; added ['kvm_pgtable_stage2_test_clear_young', 'mmu', 'pgt']",
+  "refs": null,
+  "key": [
+   "R8",
+   "kvm_age_gfn"
+  ],
+  "note": "arm64 dropped the WARN_ON in a refactor to its own page-table API; no requirement for RISC-V",
+  "dir": "Q_27"
+ },
+ {
+  "src": "mech",
+  "rule": "R8",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/net/bpf_jit_core.c",
+  "name": "bpf_jit_alloc_exec",
+  "start": 222,
+  "end": 227,
+  "reason": "b89ddf4cca43 in arch/arm64/net/bpf_jit_comp.c removed \"return __vmalloc_node_range(size, PAGE_SIZE, BPF_JIT_REGION_START,\", still in riscv; added ['vmalloc']",
+  "refs": null,
+  "key": [
+   "R8",
+   "bpf_jit_alloc_exec"
+  ],
+  "note": "arm64 changed its JIT region allocator; unrelated to RISC-V",
+  "dir": "Q_28"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kernel/acpi.c",
+  "name": "__acpi_map_table",
+  "start": 203,
+  "end": 208,
+  "reason": "all three references call ['early_memremap'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/kernel/acpi.c",
+   "x86": "arch/x86/kernel/acpi/boot.c",
+   "loongarch": "arch/loongarch/kernel/acpi.c"
+  },
+  "key": [
+   "R10",
+   "__acpi_map_table"
+  ],
+  "note": "early_ioremap maps ACPI tables with IO attributes under Svpbmt; fixed by 1966db682f06 (A112, an evaluation positive)",
+  "dir": "Q_29"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "path": "arch/riscv/kernel/acpi.c",
+  "name": "__acpi_unmap_table",
+  "start": 211,
+  "end": 216,
+  "reason": "all three references call ['early_memunmap'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/kernel/acpi.c",
+   "x86": "arch/x86/kernel/acpi/boot.c",
+   "loongarch": "arch/loongarch/kernel/acpi.c"
+  },
+  "key": [
+   "R10",
+   "__acpi_unmap_table"
+  ],
+  "note": "same as 27 for unmap",
+  "dir": "Q_30"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/process.c",
+  "name": "flush_thread",
+  "start": 140,
+  "end": 157,
+  "reason": "all three references call ['flush_ptrace_hw_breakpoint'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/kernel/process.c",
+   "x86": "arch/x86/kernel/process.c",
+   "loongarch": "arch/loongarch/kernel/process.c"
+  },
+  "key": [
+   "R10",
+   "flush_thread"
+  ],
+  "note": "RISC-V had no hardware breakpoint support at v6.6",
+  "dir": "Q_31"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/acpi.c",
+  "name": "pci_acpi_scan_root",
+  "start": 248,
+  "end": 250,
+  "reason": "all three references call ['acpi_pci_root_create', 'pcie_bus_configure_settings'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/kernel/pci.c",
+   "x86": "arch/x86/pci/acpi.c",
+   "loongarch": "arch/loongarch/pci/acpi.c"
+  },
+  "key": [
+   "R10",
+   "pci_acpi_scan_root"
+  ],
+  "note": "RISC-V ACPI PCI support did not exist yet at v6.6 (stub); missing feature, not a broken contract",
+  "dir": "Q_32"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/acpi.c",
+  "name": "raw_pci_read",
+  "start": 232,
+  "end": 234,
+  "reason": "all three references call ['read'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/kernel/pci.c",
+   "x86": "arch/x86/pci/common.c",
+   "loongarch": "arch/loongarch/pci/pci.c"
+  },
+  "key": [
+   "R10",
+   "raw_pci_read"
+  ],
+  "note": "same as 30",
+  "dir": "Q_33"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/acpi.c",
+  "name": "raw_pci_write",
+  "start": 238,
+  "end": 240,
+  "reason": "all three references call ['write'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/kernel/pci.c",
+   "x86": "arch/x86/pci/common.c",
+   "loongarch": "arch/loongarch/pci/pci.c"
+  },
+  "key": [
+   "R10",
+   "raw_pci_write"
+  ],
+  "note": "same as 30",
+  "dir": "Q_34"
+ },
+ {
+  "src": "mech",
+  "rule": "R10",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/mm/init.c",
+  "name": "vmemmap_populate",
+  "start": 1505,
+  "end": 1507,
+  "reason": "all three references call ['vmemmap_populate_hugepages'], riscv does not",
+  "refs": {
+   "arm64": "arch/arm64/mm/mmu.c",
+   "x86": "arch/x86/mm/init_64.c",
+   "loongarch": "arch/loongarch/mm/init.c"
+  },
+  "key": [
+   "R10",
+   "vmemmap_populate"
+  ],
+  "note": "hugepage vmemmap is a feature, base-page vmemmap is correct",
+  "dir": "Q_35"
+ },
+ {
+  "src": "end",
+  "rule": "CTX",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kvm/mmu.c",
+  "name": "mmu_split_memory_region",
+  "reason": "sleep A:spin: line 232 mmu_split_huge_pages -> cond_resched",
+  "chain": [
+   [
+    "arch/riscv/kvm/mmu.c",
+    "mmu_split_huge_pages",
+    138,
+    "cond_resched",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "mmu_split_memory_region",
+   "cond_resched",
+   "mmu_split_huge_pages"
+  ],
+  "note": "mmu_split_huge_pages drops mmu_lock (write_unlock) before cond_resched; the any-path closure missed the release inside the callee",
+  "dir": "Q_36"
+ },
+ {
+  "src": "end",
+  "rule": "CTX",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/traps.c",
+  "name": "do_page_fault",
+  "reason": "sleep B:trap: line 415 handle_page_fault -> mutex_lock",
+  "chain": [
+   [
+    "arch/riscv/mm/fault.c",
+    "handle_page_fault",
+    362,
+    "handle_mm_fault",
+    null
+   ],
+   [
+    "mm/memory.c",
+    "handle_mm_fault",
+    6874,
+    "hugetlb_fault",
+    null
+   ],
+   [
+    "mm/hugetlb.c",
+    "hugetlb_fault",
+    6032,
+    "mutex_lock",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "do_page_fault",
+   "mutex_lock",
+   "handle_page_fault"
+  ],
+  "note": "handle_page_fault itself enables interrupts (line 319) before handle_mm_fault when the faulting context had them on",
+  "dir": "Q_37"
+ },
+ {
+  "src": "end",
+  "rule": "CTX",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kernel/hibernate.c",
+  "name": "swsusp_arch_suspend",
+  "reason": "sleep D:hook: line 156 flush_icache_all -> on_each_cpu",
+  "chain": [
+   [
+    "arch/riscv/mm/cacheflush.c",
+    "flush_icache_all",
+    43,
+    "on_each_cpu",
+    "sleep"
+   ]
+  ],
+  "key": [
+   "CTX",
+   "swsusp_arch_suspend",
+   "on_each_cpu",
+   "flush_icache_all"
+  ],
+  "note": "flush_icache_all returns after the local flush when fewer than two CPUs are online",
+  "dir": "Q_38"
+ },
+ {
+  "src": "end",
+  "rule": "R7",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kvm/vcpu_pmu.c",
+  "name": "pmu_fw_ctr_read_hi",
+  "reason": "line 240: [fevent_code] after bound check at line 236, no array_index_nospec",
+  "chain": [],
+  "key": [
+   "R7",
+   "pmu_fw_ctr_read_hi"
+  ],
+  "note": "fevent_code comes from pmc->event_idx, validated and stored at configuration time; the guest cannot supply an out-of-range value here",
+  "dir": "Q_39"
+ },
+ {
+  "src": "end",
+  "rule": "R7",
+  "label": "b",
+  "basis": "first_annotator",
+  "path": "arch/riscv/kvm/vcpu_pmu.c",
+  "name": "pmu_ctr_read",
+  "reason": "line 272: [fevent_code] after bound check at line 268, no array_index_nospec",
+  "chain": [],
+  "key": [
+   "R7",
+   "pmu_ctr_read"
+  ],
+  "note": "same as 14",
+  "dir": "Q_40"
+ }
+]

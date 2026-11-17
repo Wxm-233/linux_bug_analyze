@@ -1,0 +1,36 @@
+commit 8c347042527058976e8a1cb10c0ae31e55145f76
+Subject: LoongArch: KVM: Add dirty bitmap initially all set support
+
+
+diff --git a/arch/loongarch/include/asm/kvm_host.h b/arch/loongarch/include/asm/kvm_host.h
+index 32c4948f534f..309ce329b747 100644
+--- a/arch/loongarch/include/asm/kvm_host.h
++++ b/arch/loongarch/include/asm/kvm_host.h
+@@ -37,6 +37,9 @@
+ #define KVM_GUESTDBG_VALID_MASK		\
+ 	(KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP | KVM_GUESTDBG_SINGLESTEP)
+ 
++#define KVM_DIRTY_LOG_MANUAL_CAPS	\
++	(KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE | KVM_DIRTY_LOG_INITIALLY_SET)
++
+ struct kvm_vm_stat {
+ 	struct kvm_vm_stat_generic generic;
+ 	u64 pages;
+diff --git a/arch/loongarch/kvm/mmu.c b/arch/loongarch/kvm/mmu.c
+index f1ed1c5296cf..1057bb984ba0 100644
+--- a/arch/loongarch/kvm/mmu.c
++++ b/arch/loongarch/kvm/mmu.c
+@@ -467,6 +467,13 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
+ 	 *		kvm_arch_flush_shadow_memslot()
+ 	 */
+ 	if (!(old_flags & KVM_MEM_LOG_DIRTY_PAGES) && log_dirty_pages) {
++		/*
++		 * Initially-all-set does not require write protecting any page
++		 * because they're all assumed to be dirty.
++		 */
++		if (kvm_dirty_log_manual_protect_and_init_set(kvm))
++			return;
++
+ 		spin_lock(&kvm->mmu_lock);
+ 		/* Write protect GPA page table entries */
+ 		needs_flush = kvm_mkclean_gpa_pt(kvm, new->base_gfn,

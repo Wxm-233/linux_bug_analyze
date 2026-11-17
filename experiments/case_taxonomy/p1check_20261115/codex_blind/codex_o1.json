@@ -1,0 +1,182 @@
+[
+  {
+    "k": 1,
+    "loc": "fs/proc/task_mmu.c:1129",
+    "verdict": "可能",
+    "why": "smaps_pte_range() 的 pmd_trans_huge_lock() 也接受非 present 的软件叶子项，并不排除 PMD 迁移项。开启 THP 迁移支持时，迁移项可经 softleaf_has_pfn()、softleaf_to_page() 取得有效 page，随后在 present 仍为 false 的情况下执行 pmd_young(*pmd)。"
+  },
+  {
+    "k": 2,
+    "loc": "fs/proc/task_mmu.c:1129",
+    "verdict": "可能",
+    "why": "当 *pmd 是带有效 PFN 的 PMD 迁移项且 thp_migration_supported() 为真时，非 present 分支仍能取得 page 并通过 IS_ERR_OR_NULL() 检查。1129 行无条件计算 pmd_dirty(*pmd) 作为实参，传入 smaps_account() 的 present=false 并不会阻止这次接口调用。"
+  },
+  {
+    "k": 3,
+    "loc": "fs/proc/task_mmu.c:3440",
+    "verdict": "不可能",
+    "why": "can_gather_numa_stats_pmd() 在 3406 行对 !pmd_present(pmd) 直接返回 NULL，只有 present 项才可能返回 page。gather_pte_stats() 仅在 page 非空时调用 pmd_dirty()，且整个检查和调用过程持有同一个 PMD 锁，条目不会在两者之间被软件改成非 present。"
+  },
+  {
+    "k": 4,
+    "loc": "fs/proc/task_mmu.c:3456",
+    "verdict": "不可能",
+    "why": "can_gather_numa_stats() 在 3381 行先检查 pte_present(pte)，非 present 时返回 NULL。调用者对 NULL 执行 continue，而 pte_dirty() 使用的正是传给该辅助函数的同一个局部快照 ptent。"
+  },
+  {
+    "k": 5,
+    "loc": "include/linux/mm.h:3864",
+    "verdict": "不可能",
+    "why": "pte_offset_map_lock() 及两个 nolock 变体把 __pte_offset_map() 已验证为 present、非大页、非 bad 的 PMD 快照传入 pte_lockptr()，不是重新读取可能变化的页表槽。另一处 khugepaged 调用在持有 PMD 锁时先要求 check_pmd_state()==SCAN_SUCCEED，该检查同样排除了 none、迁移和非 present 项。"
+  },
+  {
+    "k": 6,
+    "loc": "include/linux/pgtable.h:534",
+    "verdict": "可能",
+    "why": "make_device_exclusive() 可把普通匿名页的 PTE 改成非 present 的 device-exclusive 项，设备编程结束后调用者释放 folio 锁而保留该项。回收路径 folio_referenced_one() 经 clear_flush_young_ptes_notify()、ptep_clear_flush_young() 调到本函数，没有先排除非 present，而 page_vma_mapped_walk() 明确接受 device-exclusive 项。启用 DEVICE_PRIVATE 的 LoongArch 使用这里的通用实现，因此可令 pte_young(pte) 收到这种编码。"
+  },
+  {
+    "k": 7,
+    "loc": "include/linux/pgtable.h:550",
+    "verdict": "不可能",
+    "why": "clear_refs、DAMON、page_idle 和 vmscan 的 PMD 老化调用在锁内检查 present，调试测试则自行安装 present 项。回收的 rmap 路径遍历普通 LRU folio，非 PVMW_MIGRATION 模式拒绝 PMD 迁移项，device-private PMD 指向的 ZONE_DEVICE folio 不进入该 LRU 回收路径。device-exclusive 只按 PTE 构造，不能把第 6 条的路径直接推广到这里。"
+  },
+  {
+    "k": 8,
+    "loc": "include/linux/pgtable.h:884",
+    "verdict": "不可能",
+    "why": "zap_present_folio_ptes() 只在 present 分支处理经 folio_pte_batch() 确认的整批 present PTE，且持有页表锁。经 get_and_clear_ptes() 进入的 rmap 路径也只批处理 present 项；mremap 对非 present 项固定 nr=1，不会执行包含 pte_dirty(tmp_pte) 的 while 循环。"
+  },
+  {
+    "k": 9,
+    "loc": "include/linux/pgtable.h:886",
+    "verdict": "不可能",
+    "why": "这次 pte_young(tmp_pte) 只在 nr>1 的批量清除循环中执行，批次由持锁调用者从同一 folio 的连续 present 映射中确定。mremap 虽可把单个交换项传入外层函数，但此时 nr=1，跳过整个循环，不能到达本报告的调用。"
+  },
+  {
+    "k": 10,
+    "loc": "include/linux/pgtable.h:1679",
+    "verdict": "不可能",
+    "why": "唯一公共调用链是 change_pte_range() 的 pte_present(oldpte) 分支进入 change_present_ptes()，整批范围由 mprotect_folio_pte_batch() 选择且全程持有 PTE 锁。ptep_modify_prot_start() 返回的是清除前的旧 present 值，因此 tmp_pte 不会因页表槽被临时清空而变成非 present。"
+  },
+  {
+    "k": 11,
+    "loc": "include/linux/pgtable.h:1681",
+    "verdict": "不可能",
+    "why": "change_pte_range() 只对已检查 present 的 PTE 调用 change_present_ptes()，批处理要求各项除允许差异的状态位外一致，因而不会混入交换项或空项。当前 PTE 锁一直持有，循环取得的 tmp_pte 是事务开始前的旧 present 项，pte_young() 的实参满足要求。"
+  },
+  {
+    "k": 12,
+    "loc": "kernel/bpf/arena.c:185",
+    "verdict": "不可能",
+    "why": "这里操作的是 arena 在 init_mm 中的内核 vmalloc 映射，写入者只安装 mk_pte(page, PAGE_KERNEL) 构造的真实页或 scratch 页，清除操作把槽变成 none，不存放用户页表的交换、迁移或 uffd 标记编码。重读到 none 会在 183 行继续重试，因此到达 pte_page(old) 的 old 按构造为 present。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/damon/vaddr.c:301",
+    "verdict": "不可能",
+    "why": "唯一调用者 damon_mkold_hugetlb_entry() 在 331 行取得 huge PTE 锁，332 至 334 行读取条目并对 !pte_present(entry) 跳出。它在释放该锁前才调用 damon_hugetlb_mkold()，所以被调函数的再次读取仍是 present 项。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/damon/vaddr.c:306",
+    "verdict": "不可能",
+    "why": "damon_mkold_hugetlb_entry() 在 huge PTE 锁内完成 present 检查，并持锁调用本函数。entry 在 pte_young(entry) 前没有被改写，故它仍是调用者已经确认 present 的条目。"
+  },
+  {
+    "k": 15,
+    "loc": "mm/damon/vaddr.c:530",
+    "verdict": "不可能",
+    "why": "经 damos_va_filter_out() 进入的两个 PTE 调用者分别是 migrate 和 stat 页表遍历，它们都在 PTE 锁内用 pte_none(ptent) || !pte_present(ptent) 跳过不合格项。调用过滤器期间没有释放该锁，传入的 ptep 因此仍指向已检查的 present 项。"
+  },
+  {
+    "k": 16,
+    "loc": "mm/damon/vaddr.c:532",
+    "verdict": "不可能",
+    "why": "damos_va_migrate_pmd_entry() 和 damos_va_stat_pmd_entry() 都在持有 PMD 锁时读取 pmde，并在 !pmd_present(pmde) 时跳到解锁出口。只有通过该检查才把 pmd 经 damos_va_filter_out() 传入本函数，期间没有解锁或改写为非 present。"
+  },
+  {
+    "k": 17,
+    "loc": "mm/debug_vm_pgtable.c:143",
+    "verdict": "不可能",
+    "why": "init_args() 用 vm_get_page_prot(VM_ACCESS_FLAGS) 初始化 page_prot，138 至 139 行据此构造并安装 present PTE。之后只执行写保护，未清除 present 属性，且测试使用独立 mm 并持有 PTE 锁。"
+  },
+  {
+    "k": 18,
+    "loc": "mm/debug_vm_pgtable.c:157",
+    "verdict": "不可能",
+    "why": "148 至 151 行重新用有效 PFN 和 page_prot 构造、安装 present PTE，先前的清除不会影响这次新构造。随后 mkwrite、mkdirty 和 set_access_flags 只更新该 present 项的权限及状态，157 行读取的就是该项。"
+  },
+  {
+    "k": 19,
+    "loc": "mm/debug_vm_pgtable.c:157",
+    "verdict": "不可能",
+    "why": "传给 pte_dirty() 的 pte 来自 151 行安装的 present 映射，随后测试把它标成可写、脏并用 ptep_set_access_flags() 更新。当前测试持有 PTE 锁，158 行的清除发生在本次检查之后，不能成为非 present 来源。"
+  },
+  {
+    "k": 20,
+    "loc": "mm/debug_vm_pgtable.c:168",
+    "verdict": "不可能",
+    "why": "162 至 164 行重新构造并安装 present PTE，然后 ptep_test_and_clear_young() 只将其变老，不会把它转换成非 present 编码。167 行重新读出的条目仍是此测试映射，真正的清除在 170 行。"
+  },
+  {
+    "k": 21,
+    "loc": "mm/debug_vm_pgtable.c:250",
+    "verdict": "不可能",
+    "why": "245 至 246 行用已分配页的 PFN 和 init_args() 初始化的可访问 page_prot 构造、安装 present PMD。随后 pmdp_set_wrprotect() 保留 present 属性，调用者还持有该测试 mm 的 PMD 锁。"
+  },
+  {
+    "k": 22,
+    "loc": "mm/debug_vm_pgtable.c:264",
+    "verdict": "不可能",
+    "why": "255 至 258 行在此前清除后重新安装 present PMD，随后将同一构造值标为可写、脏并更新访问属性。263 行持锁读回该项后才检查 pmd_write()，下一次清除尚未发生。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/debug_vm_pgtable.c:264",
+    "verdict": "不可能",
+    "why": "pmd_dirty() 使用的是 263 行读回的测试 PMD，该项由有效 PFN、可访问 page_prot 构造并在 258 行安装。其间的写保护、清脏、置可写和置脏操作均不移除 present 属性，265 行才会清除该项。"
+  },
+  {
+    "k": 24,
+    "loc": "mm/debug_vm_pgtable.c:275",
+    "verdict": "不可能",
+    "why": "269 至 271 行以 pfn_pmd()、pmd_mkhuge() 和 pmd_mkyoung() 自行构造并安装 present 大页 PMD。pmdp_test_and_clear_young() 只清访问位，274 行持锁读回时没有把该映射改成非 present 的路径。"
+  },
+  {
+    "k": 25,
+    "loc": "mm/debug_vm_pgtable.c:370",
+    "verdict": "不可能",
+    "why": "365 至 366 行用有效 pud_pfn 和可访问 page_prot 安装 present PUD，随后只对它做写保护。调用者持有 PUD 锁，测试又使用独立 mm，因此 369 行读回的不是外部替换的非 present 项。"
+  },
+  {
+    "k": 26,
+    "loc": "mm/debug_vm_pgtable.c:386",
+    "verdict": "不可能",
+    "why": "377 至 380 行重新构造并安装 present PUD，此后将该值置可写、置脏并调用 pudp_set_access_flags()。385 行读回和 pud_write() 检查之间没有清除，页表锁也一直持有。"
+  },
+  {
+    "k": 27,
+    "loc": "mm/debug_vm_pgtable.c:386",
+    "verdict": "不可能",
+    "why": "本次 pud_dirty() 的输入是 380 行新安装、384 行更新访问属性的 present PUD。清脏、写保护、置可写和置脏都保留 present 属性，388 行之后才可能进入下一次清除。"
+  },
+  {
+    "k": 28,
+    "loc": "mm/debug_vm_pgtable.c:400",
+    "verdict": "不可能",
+    "why": "394 至 396 行重新以有效 PFN 和可访问 page_prot 安装 present PUD，并将其标为 young。398 行只清访问位，399 行读回时仍持有 PUD 锁，402 行才清除此映射。"
+  },
+  {
+    "k": 29,
+    "loc": "mm/gup.c:656",
+    "verdict": "可能",
+    "why": "follow_pud_mask() 的 present 检查在取得 PUD 锁之前，之后 follow_huge_pud() 会重新读取 *pudp。若另一线程在这段间隙经 zap_huge_pud() 或 __split_huge_pud() 清空该项并解锁，655 行可以读到非 present 的 none，656 行先计算 pud_pfn(pud)，661 行才检查并返回。"
+  },
+  {
+    "k": 30,
+    "loc": "mm/gup.c:713",
+    "verdict": "不可能",
+    "why": "唯一调用者 follow_pmd_mask() 在 920 行取得 PMD 锁后重新读取 pmdval，并在 922 行对 !pmd_present(pmdval) 退出。它还检查 leaf，随后持锁调用 follow_huge_pmd()，所以被调函数读取的同一 PMD 仍保证 present。"
+  }
+]

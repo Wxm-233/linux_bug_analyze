@@ -1,0 +1,730 @@
+##### A143 83d78ac677b9 riscv: Fix hugetlb retrieval of number of ptes in case of !present pte
+样本集标签：M2 K2 S1 掩盖4；对应物：arch/arm64/mm/hugetlbpage.c:huge_ptep_get_and_clear（按sz计算个数）；理由：不在内存的大页表项不能从内容推大小；arm64先修，同一修复适用于RISC-V
+--- 说明 ---
+riscv: Fix hugetlb retrieval of number of ptes in case of !present pte
+Ryan sent a fix [1] for arm64 that applies to riscv too: in some hugetlb
+functions, we must not use the pte value to get the size of a mapping
+because the pte may not be present.
+So use the already present size parameter for huge_pte_clear() and the
+newly introduced size parameter for huge_ptep_get_and_clear(). And make
+sure to gather A/D bits only on present ptes.
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+Link: https://lore.kernel.org/all/20250217140419.1702389-1-ryan.roberts@arm.com/ [1]
+Link: https://lore.kernel.org/r/20250317072551.572169-1-alexghiti@rivosinc.com
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index b4a78a4b35cf..375dd96bb4a0 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -148,22 +148,25 @@ unsigned long hugetlb_mask_last_page(struct hstate *h)
+ static pte_t get_clear_contig(struct mm_struct *mm,
+ 			      unsigned long addr,
+ 			      pte_t *ptep,
+-			      unsigned long pte_num)
++			      unsigned long ncontig)
+ {
+-	pte_t orig_pte = ptep_get(ptep);
+-	unsigned long i;
+-
+-	for (i = 0; i < pte_num; i++, addr += PAGE_SIZE, ptep++) {
+-		pte_t pte = ptep_get_and_clear(mm, addr, ptep);
+-
+-		if (pte_dirty(pte))
+-			orig_pte = pte_mkdirty(orig_pte);
+-
+-		if (pte_young(pte))
+-			orig_pte = pte_mkyoung(orig_pte);
++	pte_t pte, tmp_pte;
++	bool present;
++
++	pte = ptep_get_and_clear(mm, addr, ptep);
++	present = pte_present(pte);
++	while (--ncontig) {
++		ptep++;
++		addr += PAGE_SIZE;
++		tmp_pte = ptep_get_and_clear(mm, addr, ptep);
++		if (present) {
++			if (pte_dirty(tmp_pte))
++				pte = pte_mkdirty(pte);
++			if (pte_young(tmp_pte))
++				pte = pte_mkyoung(pte);
++		}
+ 	}
+-
+-	return orig_pte;
++	return pte;
+ }
+ 
+ static pte_t get_clear_contig_flush(struct mm_struct *mm,
+@@ -212,6 +215,26 @@ static void clear_flush(struct mm_struct *mm,
+ 	flush_tlb_range(&vma, saddr, addr);
+ }
+ 
++static int num_contig_ptes_from_size(unsigned long sz, size_t *pgsize)
++{
++	unsigned long hugepage_shift;
++
++	if (sz >= PGDIR_SIZE)
++		hugepage_shift = PGDIR_SHIFT;
++	else if (sz >= P4D_SIZE)
++		hugepage_shift = P4D_SHIFT;
++	else if (sz >= PUD_SIZE)
++		hugepage_shift = PUD_SHIFT;
++	else if (sz >= PMD_SIZE)
++		hugepage_shift = PMD_SHIFT;
++	else
++		hugepage_shift = PAGE_SHIFT;
++
++	*pgsize = 1 << hugepage_shift;
++
++	return sz >> hugepage_shift;
++}
++
+ /*
+  * When dealing with NAPOT mappings, the privileged specification indicates that
+  * "if an update needs to be made, the OS generally should first mark all of the
+@@ -226,22 +249,10 @@ void set_huge_pte_at(struct mm_struct *mm,
+ 		     pte_t pte,
+ 		     unsigned long sz)
+ {
+-	unsigned long hugepage_shift, pgsize;
++	size_t pgsize;
+ 	int i, pte_num;
+ 
+-	if (sz >= PGDIR_SIZE)
+-		hugepage_shift = PGDIR_SHIFT;
+-	else if (sz >= P4D_SIZE)
+-		hugepage_shift = P4D_SHIFT;
+-	else if (sz >= PUD_SIZE)
+-		hugepage_shift = PUD_SHIFT;
+-	else if (sz >= PMD_SIZE)
+-		hugepage_shift = PMD_SHIFT;
+-	else
+-		hugepage_shift = PAGE_SHIFT;
+-
+-	pte_num = sz >> hugepage_shift;
+-	pgsize = 1 << hugepage_shift;
++	pte_num = num_contig_ptes_from_size(sz, &pgsize);
+ 
+ 	if (!pte_present(pte)) {
+ 		for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
+@@ -295,13 +306,14 @@ pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+ 			      unsigned long addr,
+ 			      pte_t *ptep, unsigned long sz)
+ {
++	size_t pgsize;
+ 	pte_t orig_pte = ptep_get(ptep);
+ 	int pte_num;
+ 
+ 	if (!pte_napot(orig_pte))
+ 		return ptep_get_and_clear(mm, addr, ptep);
+ 
+-	pte_num = napot_pte_num(napot_cont_order(orig_pte));
++	pte_num = num_contig_ptes_from_size(sz, &pgsize);
+ 
+ 	return get_clear_contig(mm, addr, ptep, pte_num);
+ }
+@@ -351,6 +363,7 @@ void huge_pte_clear(struct mm_struct *mm,
+ 		    pte_t *ptep,
+ 		    unsigned long sz)
+ {
++	size_t pgsize;
+ 	pte_t pte = ptep_get(ptep);
+ 	int i, pte_num;
+ 
+@@ -359,8 +372,9 @@ void huge_pte_clear(struct mm_struct *mm,
+ 		return;
+ 	}
+ 
+-	pte_num = napot_pte_num(napot_cont_order(pte));
+-	for (i = 0; i < pte_num; i++, addr += PAGE_SIZE, ptep++)
++	pte_num = num_contig_ptes_from_size(sz, &pgsize);
++
++	for (i = 0; i < pte_num; i++, addr += pgsize, ptep++)
+ 		pte_clear(mm, addr, ptep);
+ }
+ 
+
+##### A281 767423658d53 riscv: kexec: Align the kexeced kernel entry
+样本集标签：M7 K2 S1 掩盖0；对应物：arch/arm64/kernel/kexec_image.c:image_load（buf_align = MIN_KIMG_ALIGN）；理由：kexec入口须按启动协议对齐（arm64同有）
+--- 说明 ---
+riscv: kexec: Align the kexeced kernel entry
+The current riscv boot protocol requires 2MB alignment for RV64
+and 4MB alignment for RV32.
+In KEXEC_FILE path, the elf_find_pbase() function should align
+the kexeced kernel entry according to the requirement, otherwise
+the kexeced kernel would silently BUG at the setup_vm().
+Fixes: 8acea455fafa ("RISC-V: Support for kexec_file on panic")
+Signed-off-by: Song Shuai <songshuaishuai@tinylab.org>
+Link: https://lore.kernel.org/r/20230907103304.590739-3-songshuaishuai@tinylab.org
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/elf_kexec.c b/arch/riscv/kernel/elf_kexec.c
+index 5372b708fae2..9a81d6926ac6 100644
+--- a/arch/riscv/kernel/elf_kexec.c
++++ b/arch/riscv/kernel/elf_kexec.c
+@@ -98,7 +98,13 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ 	kbuf.image = image;
+ 	kbuf.buf_min = lowest_paddr;
+ 	kbuf.buf_max = ULONG_MAX;
+-	kbuf.buf_align = PAGE_SIZE;
++
++	/*
++	 * Current riscv boot protocol requires 2MB alignment for
++	 * RV64 and 4MB alignment for RV32
++	 *
++	 */
++	kbuf.buf_align = PMD_SIZE;
+ 	kbuf.mem = KEXEC_BUF_MEM_UNKNOWN;
+ 	kbuf.memsz = ALIGN(kernel_len, PAGE_SIZE);
+ 	kbuf.top_down = false;
+
+##### A288 749b94b08005 riscv: Fix module_alloc() that did not reset the linear mapping permissions
+样本集标签：M6 K2 S1 掩盖0；对应物：arch/x86/kernel/module.c:module_alloc（VM_FLUSH_RESET_PERMS）；理由：卸载模块须恢复线性映射权限（x86、arm64同用VM_FLUSH_RESET_PERMS）
+--- 说明 ---
+riscv: Fix module_alloc() that did not reset the linear mapping permissions
+After unloading a module, we must reset the linear mapping permissions,
+see the example below:
+Before unloading a module:
+0xffffaf809d65d000-0xffffaf809d6dc000    0x000000011d65d000       508K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6dc000-0xffffaf809d6dd000    0x000000011d6dc000         4K PTE .   ..     ..   D A G . . . R V
+0xffffaf809d6dd000-0xffffaf809d6e1000    0x000000011d6dd000        16K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X . R V
+After unloading a module:
+0xffffaf809d65d000-0xffffaf809d6e1000    0x000000011d65d000       528K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X W R V
+The last mapping is not reset and we end up with WX mappings in the linear
+mapping.
+So add VM_FLUSH_RESET_PERMS to our module_alloc() definition.
+--- 改动 ---
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index aac019ed63b1..862834bb1d64 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -894,7 +894,8 @@ void *module_alloc(unsigned long size)
+ {
+ 	return __vmalloc_node_range(size, 1, MODULES_VADDR,
+ 				    MODULES_END, GFP_KERNEL,
+-				    PAGE_KERNEL, 0, NUMA_NO_NODE,
++				    PAGE_KERNEL, VM_FLUSH_RESET_PERMS,
++				    NUMA_NO_NODE,
+ 				    __builtin_return_address(0));
+ }
+ #endif
+
+##### A292 4525462dd0db riscv: lib: Check if output in asm goto supported
+样本集标签：M9 K1 S0 掩盖2；对应物：init/Kconfig:CC_HAS_ASM_GOTO_OUTPUT；理由：编译器asm goto输出支持
+--- 说明 ---
+riscv: lib: Check if output in asm goto supported
+The output field of an asm goto statement is not supported by all
+compilers. If it is not supported, fallback to the non-optimized code.
+Signed-off-by: Charlie Jenkins <charlie@rivosinc.com>
+Fixes: a04c192eabfb ("riscv: Add checksum library")
+Link: https://lore.kernel.org/r/20240118-csum_remove_output_operands_asm_goto-v2-1-5d1b73cf93d4@rivosinc.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/lib/csum.c b/arch/riscv/lib/csum.c
+index 06ce8e7250d9..af3df5274ccb 100644
+--- a/arch/riscv/lib/csum.c
++++ b/arch/riscv/lib/csum.c
+@@ -156,6 +156,7 @@ do_csum_with_alignment(const unsigned char *buff, int len)
+ 	end = (const unsigned long *)(buff + len);
+ 	csum = do_csum_common(ptr, end, data);
+ 
++#ifdef CC_HAS_ASM_GOTO_TIED_OUTPUT
+ 	/*
+ 	 * Zbb support saves 6 instructions, so not worth checking without
+ 	 * alternatives if supported
+@@ -214,6 +215,7 @@ do_csum_with_alignment(const unsigned char *buff, int len)
+ 		return csum >> 16;
+ 	}
+ no_zbb:
++#endif /* CC_HAS_ASM_GOTO_TIED_OUTPUT */
+ #ifndef CONFIG_32BIT
+ 	csum += ror64(csum, 32);
+ 	csum >>= 32;
+
+##### A299 c27fa53b858b riscv: Fix vector state restore in rt_sigreturn()
+样本集标签：M10 K2 S1 掩盖0；对应物：arch/arm64/kernel/signal.c（恢复FPSIMD/SVE状态的顺序）；理由：信号返回恢复向量状态的顺序（arm64 FPSIMD惰性状态有同类规则）
+--- 说明 ---
+riscv: Fix vector state restore in rt_sigreturn()
+The RISC-V Vector specification states in "Appendix D: Calling
+Convention for Vector State" [1] that "Executing a system call causes
+all caller-saved vector registers (v0-v31, vl, vtype) and vstart to
+become unspecified.". In the RISC-V kernel this is called "discarding
+the vstate".
+Returning from a signal handler via the rt_sigreturn() syscall, vector
+discard is also performed. However, this is not an issue since the
+vector state should be restored from the sigcontext, and therefore not
+care about the vector discard.
+The "live state" is the actual vector register in the running context,
+and the "vstate" is the vector state of the task. A dirty live state,
+means that the vstate and live state are not in synch.
+When vectorized user_from_copy() was introduced, an bug sneaked in at
+--- 改动 ---
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index 501e66debf69..5a2edd7f027e 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -119,6 +119,13 @@ static long __restore_v_state(struct pt_regs *regs, void __user *sc_vec)
+ 	struct __sc_riscv_v_state __user *state = sc_vec;
+ 	void __user *datap;
+ 
++	/*
++	 * Mark the vstate as clean prior performing the actual copy,
++	 * to avoid getting the vstate incorrectly clobbered by the
++	 *  discarded vector state.
++	 */
++	riscv_v_vstate_set_restore(current, regs);
++
+ 	/* Copy everything of __sc_riscv_v_state except datap. */
+ 	err = __copy_from_user(&current->thread.vstate, &state->v_state,
+ 			       offsetof(struct __riscv_v_ext_state, datap));
+@@ -133,13 +140,7 @@ static long __restore_v_state(struct pt_regs *regs, void __user *sc_vec)
+ 	 * Copy the whole vector content from user space datap. Use
+ 	 * copy_from_user to prevent information leak.
+ 	 */
+-	err = copy_from_user(current->thread.vstate.datap, datap, riscv_v_vsize);
+-	if (unlikely(err))
+-		return err;
+-
+-	riscv_v_vstate_set_restore(current, regs);
+-
+-	return err;
++	return copy_from_user(current->thread.vstate.datap, datap, riscv_v_vsize);
+ }
+ #else
+ #define save_v_state(task, regs) (0)
+
+##### A301 10541b374aa0 riscv, bpf: Fix incorrect runtime stats
+样本集标签：M10 K2 S2 掩盖0；对应物：arch/arm64/net/bpf_jit_comp.c:invoke_bpf_prog；理由：BPF trampoline运行统计（arm64 JIT同类修复）
+--- 说明 ---
+riscv, bpf: Fix incorrect runtime stats
+When __bpf_prog_enter() returns zero, the s1 register is not set to zero,
+resulting in incorrect runtime stats. Fix it by setting s1 immediately upon
+the return of __bpf_prog_enter().
+Fixes: 49b5e77ae3e2 ("riscv, bpf: Add bpf trampoline support for RV64")
+Signed-off-by: Xu Kuohai <xukuohai@huawei.com>
+Signed-off-by: Daniel Borkmann <daniel@iogearbox.net>
+Reviewed-by: Pu Lehui <pulehui@huawei.com>
+Acked-by: Björn Töpel <bjorn@kernel.org>
+Link: https://lore.kernel.org/bpf/20240416064208.2919073-3-xukuohai@huaweicloud.com
+--- 改动 ---
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 1adf2f39ce59..ec9d692838fc 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -722,6 +722,9 @@ static int invoke_bpf_prog(struct bpf_tramp_link *l, int args_off, int retval_of
+ 	if (ret)
+ 		return ret;
+ 
++	/* store prog start time */
++	emit_mv(RV_REG_S1, RV_REG_A0, ctx);
++
+ 	/* if (__bpf_prog_enter(prog) == 0)
+ 	 *	goto skip_exec_of_prog;
+ 	 */
+@@ -729,9 +732,6 @@ static int invoke_bpf_prog(struct bpf_tramp_link *l, int args_off, int retval_of
+ 	/* nop reserved for conditional jump */
+ 	emit(rv_nop(), ctx);
+ 
+-	/* store prog start time */
+-	emit_mv(RV_REG_S1, RV_REG_A0, ctx);
+-
+ 	/* arg1: &args_off */
+ 	emit_addi(RV_REG_A0, RV_REG_FP, -args_off, ctx);
+ 	if (!p->jited)
+
+##### A303 994af1825a2a riscv: fix overlap of allocated page and PTR_ERR
+样本集标签：M7 K1 S0 掩盖2；对应物：include/linux/err.h:IS_ERR_VALUE（最后一页地址与错误码重叠）；理由：32位末页与ERR_PTR重叠（公共约定）
+--- 说明 ---
+riscv: fix overlap of allocated page and PTR_ERR
+On riscv32, it is possible for the last page in virtual address space
+(0xfffff000) to be allocated. This page overlaps with PTR_ERR, so that
+shouldn't happen.
+There is already some code to ensure memblock won't allocate the last page.
+However, buddy allocator is left unchecked.
+Fix this by reserving physical memory that would be mapped at virtual
+addresses greater than 0xfffff000.
+Reported-by: Björn Töpel <bjorn@kernel.org>
+Closes: https://lore.kernel.org/linux-riscv/878r1ibpdn.fsf@all.your.base.are.belong.to.us
+Fixes: 76d2a0493a17 ("RISC-V: Init and Halt Code")
+Signed-off-by: Nam Cao <namcao@linutronix.de>
+Cc: <stable@vger.kernel.org>
+Tested-by: Björn Töpel <bjorn@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index e3218d65f21d..e3405e4b99af 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -250,18 +250,19 @@ static void __init setup_bootmem(void)
+ 		kernel_map.va_pa_offset = PAGE_OFFSET - phys_ram_base;
+ 
+ 	/*
+-	 * memblock allocator is not aware of the fact that last 4K bytes of
+-	 * the addressable memory can not be mapped because of IS_ERR_VALUE
+-	 * macro. Make sure that last 4k bytes are not usable by memblock
+-	 * if end of dram is equal to maximum addressable memory.  For 64-bit
+-	 * kernel, this problem can't happen here as the end of the virtual
+-	 * address space is occupied by the kernel mapping then this check must
+-	 * be done as soon as the kernel mapping base address is determined.
++	 * Reserve physical address space that would be mapped to virtual
++	 * addresses greater than (void *)(-PAGE_SIZE) because:
++	 *  - This memory would overlap with ERR_PTR
++	 *  - This memory belongs to high memory, which is not supported
++	 *
++	 * This is not applicable to 64-bit kernel, because virtual addresses
++	 * after (void *)(-PAGE_SIZE) are not linearly mapped: they are
++	 * occupied by kernel mapping. Also it is unrealistic for high memory
++	 * to exist on 64-bit platforms.
+ 	 */
+ 	if (!IS_ENABLED(CONFIG_64BIT)) {
+-		max_mapped_addr = __pa(~(ulong)0);
+-		if (max_mapped_addr == (phys_ram_end - 1))
+-			memblock_set_current_limit(max_mapped_addr - 4096);
++		max_mapped_addr = __va_to_pa_nodebug(-PAGE_SIZE);
++		memblock_reserve(max_mapped_addr, (phys_addr_t)-max_mapped_addr);
+ 	}
+ 
+ 	min_low_pfn = PFN_UP(phys_ram_base);
+
+##### A305 20a759df3bba riscv, bpf: make some atomic operations fully ordered
+样本集标签：M4 K2 S1 掩盖3；对应物：arch/arm64/net/bpf_jit_comp.c:emit_lse_atomic（带acquire-release）；理由：BPF原子操作须完全有序
+--- 说明 ---
+riscv, bpf: make some atomic operations fully ordered
+The BPF atomic operations with the BPF_FETCH modifier along with
+BPF_XCHG and BPF_CMPXCHG are fully ordered but the RISC-V JIT implements
+all atomic operations except BPF_CMPXCHG with relaxed ordering.
+Section 8.1 of the "The RISC-V Instruction Set Manual Volume I:
+Unprivileged ISA" [1], titled, "Specifying Ordering of Atomic
+Instructions" says:
+| To provide more efficient support for release consistency [5], each
+| atomic instruction has two bits, aq and rl, used to specify additional
+| memory ordering constraints as viewed by other RISC-V harts.
+and
+| If only the aq bit is set, the atomic memory operation is treated as
+| an acquire access.
+| If only the rl bit is set, the atomic memory operation is treated as a
+--- 改动 ---
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index a46ec7fb4489..e51b291b5baa 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -504,33 +504,33 @@ static void emit_atomic(u8 rd, u8 rs, s16 off, s32 imm, bool is64,
+ 		break;
+ 	/* src_reg = atomic_fetch_<op>(dst_reg + off16, src_reg) */
+ 	case BPF_ADD | BPF_FETCH:
+-		emit(is64 ? rv_amoadd_d(rs, rs, rd, 0, 0) :
+-		     rv_amoadd_w(rs, rs, rd, 0, 0), ctx);
++		emit(is64 ? rv_amoadd_d(rs, rs, rd, 1, 1) :
++		     rv_amoadd_w(rs, rs, rd, 1, 1), ctx);
+ 		if (!is64)
+ 			emit_zextw(rs, rs, ctx);
+ 		break;
+ 	case BPF_AND | BPF_FETCH:
+-		emit(is64 ? rv_amoand_d(rs, rs, rd, 0, 0) :
+-		     rv_amoand_w(rs, rs, rd, 0, 0), ctx);
++		emit(is64 ? rv_amoand_d(rs, rs, rd, 1, 1) :
++		     rv_amoand_w(rs, rs, rd, 1, 1), ctx);
+ 		if (!is64)
+ 			emit_zextw(rs, rs, ctx);
+ 		break;
+ 	case BPF_OR | BPF_FETCH:
+-		emit(is64 ? rv_amoor_d(rs, rs, rd, 0, 0) :
+-		     rv_amoor_w(rs, rs, rd, 0, 0), ctx);
++		emit(is64 ? rv_amoor_d(rs, rs, rd, 1, 1) :
++		     rv_amoor_w(rs, rs, rd, 1, 1), ctx);
+ 		if (!is64)
+ 			emit_zextw(rs, rs, ctx);
+ 		break;
+ 	case BPF_XOR | BPF_FETCH:
+-		emit(is64 ? rv_amoxor_d(rs, rs, rd, 0, 0) :
+-		     rv_amoxor_w(rs, rs, rd, 0, 0), ctx);
++		emit(is64 ? rv_amoxor_d(rs, rs, rd, 1, 1) :
++		     rv_amoxor_w(rs, rs, rd, 1, 1), ctx);
+ 		if (!is64)
+ 			emit_zextw(rs, rs, ctx);
+ 		break;
+ 	/* src_reg = atomic_xchg(dst_reg + off16, src_reg); */
+ 	case BPF_XCHG:
+-		emit(is64 ? rv_amoswap_d(rs, rs, rd, 0, 0) :
+-		     rv_amoswap_w(rs, rs, rd, 0, 0), ctx);
++		emit(is64 ? rv_amoswap_d(rs, rs, rd, 1, 1) :
++		     rv_amoswap_w(rs, rs, rd, 1, 1), ctx);
+ 		if (!is64)
+ 			emit_zextw(rs, rs, ctx);
+ 		break;
+
+##### A306 c67ddf59ac44 riscv: force PAGE_SIZE linear mapping if debug_pagealloc is enabled
+样本集标签：M9 K2 S1 掩盖2；对应物：arch/arm64/mm/mmu.c（can_set_direct_map时不用块映射）；理由：debug_pagealloc须页粒度线性映射（arm64同）
+--- 说明 ---
+riscv: force PAGE_SIZE linear mapping if debug_pagealloc is enabled
+debug_pagealloc is a debug feature which clears the valid bit in page table
+entry for freed pages to detect illegal accesses to freed memory.
+For this feature to work, virtual mapping must have PAGE_SIZE resolution.
+(No, we cannot map with huge pages and split them only when needed; because
+pages can be allocated/freed in atomic context and page splitting cannot be
+done in atomic context)
+Force linear mapping to use small pages if debug_pagealloc is enabled.
+Note that it is not necessary to force the entire linear mapping, but only
+those that are given to memory allocator. Some parts of memory can keep
+using huge page mapping (for example, kernel's executable code). But these
+parts are minority, so keep it simple. This is just a debug feature, some
+extra overhead should be acceptable.
+Fixes: 5fde3db5eb02 ("riscv: add ARCH_SUPPORTS_DEBUG_PAGEALLOC support")
+--- 改动 ---
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index fe8e159394d8..9020844f5189 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -668,6 +668,9 @@ void __init create_pgd_mapping(pgd_t *pgdp,
+ static uintptr_t __init best_map_size(phys_addr_t pa, uintptr_t va,
+ 				      phys_addr_t size)
+ {
++	if (debug_pagealloc_enabled())
++		return PAGE_SIZE;
++
+ 	if (pgtable_l5_enabled &&
+ 	    !(pa & (P4D_SIZE - 1)) && !(va & (P4D_SIZE - 1)) && size >= P4D_SIZE)
+ 		return P4D_SIZE;
+
+##### A309 c562ba719df5 riscv: kexec: Avoid deadlock in kexec crash path
+样本集标签：M5 K2 S1 掩盖2；对应物：arch/arm64/kernel/machine_kexec.c:machine_kexec_mask_interrupts；理由：中断上下文中kexec崩溃路径死锁（说明中对比arm64）
+--- 说明 ---
+riscv: kexec: Avoid deadlock in kexec crash path
+If the kexec crash code is called in the interrupt context, the
+machine_kexec_mask_interrupts() function will trigger a deadlock while
+trying to acquire the irqdesc spinlock and then deactivate irqchip in
+irq_set_irqchip_state() function.
+Unlike arm64, riscv only requires irq_eoi handler to complete EOI and
+keeping irq_set_irqchip_state() will only leave this possible deadlock
+without any use. So we simply remove it.
+Link: https://lore.kernel.org/linux-riscv/20231208111015.173237-1-songshuaishuai@tinylab.org/
+Fixes: b17d19a5314a ("riscv: kexec: Fixup irq controller broken in kexec crash path")
+Signed-off-by: Song Shuai <songshuaishuai@tinylab.org>
+Reviewed-by: Ryo Takakura <takakura@valinux.co.jp>
+Link: https://lore.kernel.org/r/20240626023316.539971-1-songshuaishuai@tinylab.org
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/machine_kexec.c b/arch/riscv/kernel/machine_kexec.c
+index ed9cad20c039..3c830a6f7ef4 100644
+--- a/arch/riscv/kernel/machine_kexec.c
++++ b/arch/riscv/kernel/machine_kexec.c
+@@ -121,20 +121,12 @@ static void machine_kexec_mask_interrupts(void)
+ 
+ 	for_each_irq_desc(i, desc) {
+ 		struct irq_chip *chip;
+-		int ret;
+ 
+ 		chip = irq_desc_get_chip(desc);
+ 		if (!chip)
+ 			continue;
+ 
+-		/*
+-		 * First try to remove the active state. If this
+-		 * fails, try to EOI the interrupt.
+-		 */
+-		ret = irq_set_irqchip_state(i, IRQCHIP_STATE_ACTIVE, false);
+-
+-		if (ret && irqd_irq_inprogress(&desc->irq_data) &&
+-		    chip->irq_eoi)
++		if (chip->irq_eoi && irqd_irq_inprogress(&desc->irq_data))
+ 			chip->irq_eoi(&desc->irq_data);
+ 
+ 		if (chip->irq_mask)
+
+##### A310 61119394631f riscv: entry: always initialize regs->a0 to -ENOSYS
+样本集标签：M10 K2 S1 掩盖2；对应物：arch/arm64/kernel/syscall.c:el0_svc_common（x0置-ENOSYS）；理由：系统调用号为-1时a0须为-ENOSYS（公共ptrace约定）
+--- 说明 ---
+riscv: entry: always initialize regs->a0 to -ENOSYS
+Otherwise when the tracer changes syscall number to -1, the kernel fails
+to initialize a0 with -ENOSYS and subsequently fails to return the error
+code of the failed syscall to userspace. For example, it will break
+strace syscall tampering.
+Fixes: 52449c17bdd1 ("riscv: entry: set a0 = -ENOSYS only when syscall != -1")
+Reported-by: "Dmitry V. Levin" <ldv@strace.io>
+Reviewed-by: Björn Töpel <bjorn@rivosinc.com>
+Cc: stable@vger.kernel.org
+Signed-off-by: Celeste Liu <CoelacanthusHex@gmail.com>
+Link: https://lore.kernel.org/r/20240627142338.5114-2-CoelacanthusHex@gmail.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 05a16b1f0aee..51ebfd23e007 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -319,6 +319,7 @@ void do_trap_ecall_u(struct pt_regs *regs)
+ 
+ 		regs->epc += 4;
+ 		regs->orig_a0 = regs->a0;
++		regs->a0 = -ENOSYS;
+ 
+ 		riscv_v_vstate_discard(regs);
+ 
+@@ -328,8 +329,7 @@ void do_trap_ecall_u(struct pt_regs *regs)
+ 
+ 		if (syscall >= 0 && syscall < NR_syscalls)
+ 			syscall_handler(regs, syscall);
+-		else if (syscall != -1)
+-			regs->a0 = -ENOSYS;
++
+ 		/*
+ 		 * Ultimately, this value will get limited by KSTACK_OFFSET_MAX(),
+ 		 * so the maximum stack offset is 1k bytes (10 bits).
+
+##### A313 0c710050c47d riscv/mm: Add handling for VM_FAULT_SIGSEGV in mm_fault_error()
+样本集标签：M8 K1 S1 掩盖4；对应物：arch/x86/mm/fault.c:mm_fault_error（处理VM_FAULT_SIGSEGV）；理由：公共缺页代码返回VM_FAULT_SIGSEGV须由架构处理
+--- 说明 ---
+riscv/mm: Add handling for VM_FAULT_SIGSEGV in mm_fault_error()
+Handle VM_FAULT_SIGSEGV in the page fault path so that we correctly
+kill the process and we don't BUG() the kernel.
+Fixes: 07037db5d479 ("RISC-V: Paging and MMU")
+Signed-off-by: Zhe Qiao <qiaozhe@iscas.ac.cn>
+Reviewed-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/r/20240731084547.85380-1-qiaozhe@iscas.ac.cn
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/mm/fault.c b/arch/riscv/mm/fault.c
+index 5224f3733802..a9f2b4af8f3f 100644
+--- a/arch/riscv/mm/fault.c
++++ b/arch/riscv/mm/fault.c
+@@ -61,26 +61,27 @@ static inline void no_context(struct pt_regs *regs, unsigned long addr)
+ 
+ static inline void mm_fault_error(struct pt_regs *regs, unsigned long addr, vm_fault_t fault)
+ {
++	if (!user_mode(regs)) {
++		no_context(regs, addr);
++		return;
++	}
++
+ 	if (fault & VM_FAULT_OOM) {
+ 		/*
+ 		 * We ran out of memory, call the OOM killer, and return the userspace
+ 		 * (which will retry the fault, or kill us if we got oom-killed).
+ 		 */
+-		if (!user_mode(regs)) {
+-			no_context(regs, addr);
+-			return;
+-		}
+ 		pagefault_out_of_memory();
+ 		return;
+ 	} else if (fault & (VM_FAULT_SIGBUS | VM_FAULT_HWPOISON | VM_FAULT_HWPOISON_LARGE)) {
+ 		/* Kernel mode? Handle exceptions or die */
+-		if (!user_mode(regs)) {
+-			no_context(regs, addr);
+-			return;
+-		}
+ 		do_trap(regs, SIGBUS, BUS_ADRERR, addr);
+ 		return;
++	} else if (fault & VM_FAULT_SIGSEGV) {
++		do_trap(regs, SIGSEGV, SEGV_MAPERR, addr);
++		return;
+ 	}
++
+ 	BUG();
+ }
+ 
+
+##### A321 e59db0623f69 riscv, bpf: Make BPF_CMPXCHG fully ordered
+样本集标签：M4 K2 S1 掩盖3；对应物：arch/arm64/net/bpf_jit_comp.c:emit_lse_atomic；理由：BPF CMPXCHG须完全有序
+--- 说明 ---
+riscv, bpf: Make BPF_CMPXCHG fully ordered
+According to the prototype formal BPF memory consistency model
+discussed e.g. in [1] and following the ordering properties of
+the C/in-kernel macro atomic_cmpxchg(), a BPF atomic operation
+with the BPF_CMPXCHG modifier is fully ordered.  However, the
+current RISC-V JIT lowerings fail to meet such memory ordering
+property.  This is illustrated by the following litmus test:
+BPF BPF__MP+success_cmpxchg+fence
+{
+ 0:r1=x; 0:r3=y; 0:r5=1;
+ 1:r2=y; 1:r4=f; 1:r7=x;
+}
+ P0                               | P1                                         ;
+ *(u64 *)(r1 + 0) = 1             | r1 = *(u64 *)(r2 + 0)                      ;
+--- 改动 ---
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 91bd5082c4d8..4cc631fa7039 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -550,8 +550,8 @@ static void emit_atomic(u8 rd, u8 rs, s16 off, s32 imm, bool is64,
+ 		     rv_lr_w(r0, 0, rd, 0, 0), ctx);
+ 		jmp_offset = ninsns_rvoff(8);
+ 		emit(rv_bne(RV_REG_T2, r0, jmp_offset >> 1), ctx);
+-		emit(is64 ? rv_sc_d(RV_REG_T3, rs, rd, 0, 0) :
+-		     rv_sc_w(RV_REG_T3, rs, rd, 0, 0), ctx);
++		emit(is64 ? rv_sc_d(RV_REG_T3, rs, rd, 0, 1) :
++		     rv_sc_w(RV_REG_T3, rs, rd, 0, 1), ctx);
+ 		jmp_offset = ninsns_rvoff(-6);
+ 		emit(rv_bne(RV_REG_T3, 0, jmp_offset >> 1), ctx);
+ 		emit(rv_fence(0x3, 0x3), ctx);
+
+##### A327 b3134b8c1a1c riscv: Fixup boot failure when CONFIG_DEBUG_RT_MUTEXES=y
+样本集标签：M5 K2 S1 掩盖0；对应物：arch/arm64/kernel/jump_label.c（不取mutex）；理由：早期启动关中断时不能取mutex
+--- 说明 ---
+riscv: Fixup boot failure when CONFIG_DEBUG_RT_MUTEXES=y
+When CONFIG_DEBUG_RT_MUTEXES=y, mutex_lock->rt_mutex_try_acquire
+would change from rt_mutex_cmpxchg_acquire to
+rt_mutex_slowtrylock():
+	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+	ret = __rt_mutex_slowtrylock(lock);
+	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+Because queued_spin_#ops to ticket_#ops is changed one by one by
+jump_label, raw_spin_lock/unlock would cause a deadlock during the
+changing.
+That means in arch/riscv/kernel/jump_label.c:
+1.
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock  -> queued_spin_lock
+--- 改动 ---
+diff --git a/arch/riscv/kernel/jump_label.c b/arch/riscv/kernel/jump_label.c
+index 6eee6f736f68..654ed159c830 100644
+--- a/arch/riscv/kernel/jump_label.c
++++ b/arch/riscv/kernel/jump_label.c
+@@ -36,9 +36,15 @@ bool arch_jump_label_transform_queue(struct jump_entry *entry,
+ 		insn = RISCV_INSN_NOP;
+ 	}
+ 
+-	mutex_lock(&text_mutex);
+-	patch_insn_write(addr, &insn, sizeof(insn));
+-	mutex_unlock(&text_mutex);
++	if (early_boot_irqs_disabled) {
++		riscv_patch_in_stop_machine = 1;
++		patch_insn_write(addr, &insn, sizeof(insn));
++		riscv_patch_in_stop_machine = 0;
++	} else {
++		mutex_lock(&text_mutex);
++		patch_insn_write(addr, &insn, sizeof(insn));
++		mutex_unlock(&text_mutex);
++	}
+ 
+ 	return true;
+ }
+
+##### A328 c796e1872012 riscv: Fix wrong usage of __pa() on a fixmap address
+样本集标签：M1 K2 S1 掩盖0；对应物：arch/arm64/kernel/setup.c:setup_machine_fdt（DTB在fixmap，保留dt_phys）；理由：__pa只适用于线性映射（dtb在fixmap）
+--- 说明 ---
+riscv: Fix wrong usage of __pa() on a fixmap address
+riscv uses fixmap addresses to map the dtb so we can't use __pa() which
+is reserved for linear mapping addresses.
+Fixes: b2473a359763 ("of/fdt: add dt_phys arg to early_init_dt_scan and early_init_dt_verify")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/r/20241209074508.53037-1-alexghiti@rivosinc.com
+Cc: stable@vger.kernel.org
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index 016b48fcd6f2..45010e71df86 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -227,7 +227,7 @@ static void __init init_resources(void)
+ static void __init parse_dtb(void)
+ {
+ 	/* Early scan of device tree from init memory */
+-	if (early_init_dt_scan(dtb_early_va, __pa(dtb_early_va))) {
++	if (early_init_dt_scan(dtb_early_va, dtb_early_pa)) {
+ 		const char *name = of_flat_dt_get_machine_name();
+ 
+ 		if (name) {
+

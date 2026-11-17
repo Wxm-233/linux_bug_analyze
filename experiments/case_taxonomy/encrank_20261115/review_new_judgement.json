@@ -1,0 +1,165 @@
+{
+ "_note": "Claude's judgement before reading Codex",
+ "items": [
+  {
+   "k": 1,
+   "loc": "mm/memory.c:1787",
+   "verdict": "不可能",
+   "why": "zap_present_folio_ptes 处理的是一批 present 项，ptent 来自 get_and_clear_full_ptes。"
+  },
+  {
+   "k": 2,
+   "loc": "mm/hugetlb_vmemmap.c:76",
+   "verdict": "不可能",
+   "why": "vmemmap 是内核页表（init_mm），不会有交换项、迁移项。"
+  },
+  {
+   "k": 3,
+   "loc": "mm/hugetlb_vmemmap.c:110",
+   "verdict": "不可能",
+   "why": "同 2，vmemmap 内核页表。"
+  },
+  {
+   "k": 4,
+   "loc": "mm/kasan/shadow.c:207",
+   "verdict": "不可能",
+   "why": "KASAN shadow 是内核页表，不会有交换项、迁移项。"
+  },
+  {
+   "k": 5,
+   "loc": "mm/memory.c:3507",
+   "verdict": "说不清",
+   "why": "apply_to_pmd_range 也会走用户 mm（apply_to_existing_page_range）；若遇到 THP 迁移项，loongarch/powerpc 上 pmd_leaf 读成 1 走 WARN+EINVAL，其他架构走 pmd_bad 分支，差异存在但调用者是否会在用户 mm 上碰到迁移项没核实。"
+  },
+  {
+   "k": 6,
+   "loc": "mm/migrate_device.c:1023",
+   "verdict": "不可能",
+   "why": "非 present 的 PMD 在两条路径上最终都放弃（leaf 分支直接 abort，否则后面 pte_offset_map_lock 失败也 abort），结果相同。"
+  },
+  {
+   "k": 7,
+   "loc": "mm/page_table_check.c:281",
+   "verdict": "不可能",
+   "why": "传入的 pmd 指向一张页表（释放页表时调用），一定 present。"
+  },
+  {
+   "k": 8,
+   "loc": "mm/pagewalk.c:169",
+   "verdict": "不可能",
+   "why": "pmd_leaf || !pmd_present 两种情况都 continue，读错不影响结果。"
+  },
+  {
+   "k": 9,
+   "loc": "mm/ptdump.c:112",
+   "verdict": "不可能",
+   "why": "ptdump 在 loongarch/powerpc 上只遍历内核页表。"
+  },
+  {
+   "k": 10,
+   "loc": "mm/sparse-vmemmap.c:397",
+   "verdict": "不可能",
+   "why": "vmemmap 内核页表。"
+  },
+  {
+   "k": 11,
+   "loc": "mm/vmalloc.c:864",
+   "verdict": "不可能",
+   "why": "vmalloc 区域是内核页表。"
+  },
+  {
+   "k": 12,
+   "loc": "mm/huge_memory.c:2454",
+   "verdict": "不可能",
+   "why": "调用处已用 is_present 守卫（布尔参数，检查器不跨函数看不到）。"
+  },
+  {
+   "k": 13,
+   "loc": "mm/huge_memory.c:3185",
+   "verdict": "不可能",
+   "why": "非匿名分支前面已单独处理迁移项和大零页，这里是 present 的 PMD。"
+  },
+  {
+   "k": 14,
+   "loc": "mm/huge_memory.c:3289",
+   "verdict": "不可能",
+   "why": "前文已说明到此 pmd 一定 present，迁移项和 device-private 在更早的分支处理。"
+  },
+  {
+   "k": 15,
+   "loc": "mm/gup.c:2879",
+   "verdict": "不可能",
+   "why": "前面 pte_access_permitted() 已要求 present。"
+  },
+  {
+   "k": 16,
+   "loc": "mm/mapping_dirty_helpers.c:40",
+   "verdict": "说不清",
+   "why": "wp_pte 遍历共享文件映射，若遇到页缓存页的迁移项，x86 上 pte_write 会把软脏位读成可写，进而对非 present 项做 ptep_modify_prot_start；是否会遇到迁移项（使用方 vmwgfx 的页通常不迁移）没核实。"
+  },
+  {
+   "k": 17,
+   "loc": "mm/memory.c:1175",
+   "verdict": "不可能",
+   "why": "__copy_present_ptes 只处理 present 项。"
+  },
+  {
+   "k": 18,
+   "loc": "mm/page_table_check.c:223",
+   "verdict": "不可能",
+   "why": "pte_user_accessible_page() 先要求 present。"
+  },
+  {
+   "k": 19,
+   "loc": "mm/rmap.c:2627",
+   "verdict": "不可能",
+   "why": "hugetlb 分支里 pvmw 返回的是 present 的 hugetlb 项。"
+  },
+  {
+   "k": 20,
+   "loc": "mm/khugepaged.c:676",
+   "verdict": "不可能",
+   "why": "调用者在 khugepaged 扫描中先确认了 present。"
+  },
+  {
+   "k": 21,
+   "loc": "mm/debug_vm_pgtable.c:98",
+   "verdict": "不可能",
+   "why": "测试代码，项由 pfn_pte 现造，一定 present。"
+  },
+  {
+   "k": 22,
+   "loc": "mm/debug_vm_pgtable.c:101",
+   "verdict": "不可能",
+   "why": "同 21。"
+  },
+  {
+   "k": 23,
+   "loc": "mm/memory.c:3718",
+   "verdict": "不可能",
+   "why": "写保护缺页里 vmf->orig_pte 是 present 项。"
+  },
+  {
+   "k": 24,
+   "loc": "mm/gup.c:2857",
+   "verdict": "不可能",
+   "why": "同 15，pte_access_permitted() 已要求 present。"
+  },
+  {
+   "k": 25,
+   "loc": "mm/huge_memory.c:3290",
+   "verdict": "不可能",
+   "why": "同 14。"
+  },
+  {
+   "k": 26,
+   "loc": "mm/memory.c:829",
+   "verdict": "不可能",
+   "why": "vm_normal_page() 的约定是传入 present 项，调用者都先查过。"
+  }
+ ],
+ "summary": {
+  "不可能": 24,
+  "说不清": 2
+ }
+}

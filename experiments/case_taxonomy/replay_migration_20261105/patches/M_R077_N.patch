@@ -1,0 +1,191 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -xxx,6 +xxx,9 @@ config ARCH_SUPPORTS_KEXEC_PURGATORY
+ config ARCH_SUPPORTS_CRASH_DUMP
+ 	def_bool y
+ 
++config ARCH_HAS_GENERIC_CRASHKERNEL_RESERVATION
++	def_bool CRASH_CORE
++
+ config COMPAT
+ 	bool "Kernel support for 32-bit U-mode"
+ 	default 64BIT
+diff --git a/arch/riscv/include/asm/crash_core.h b/arch/riscv/include/asm/crash_core.h
+new file mode 100644
+--- /dev/null
++++ b/arch/riscv/include/asm/crash_core.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _RISCV_CRASH_CORE_H
++#define _RISCV_CRASH_CORE_H
++
++#include <linux/types.h>
++
++#define CRASH_ALIGN			PMD_SIZE
++
++extern phys_addr_t dma32_phys_limit;
++#define CRASH_ADDR_LOW_MAX		dma32_phys_limit
++#define CRASH_ADDR_HIGH_MAX		memblock_end_of_DRAM()
++#endif
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -66,7 +66,7 @@ extern char _start[];
+ void *_dtb_early_va __initdata;
+ uintptr_t _dtb_early_pa __initdata;
+ 
+-static phys_addr_t dma32_phys_limit __initdata;
++phys_addr_t dma32_phys_limit __initdata;
+ 
+ static void __init zone_sizes_init(void)
+ 
+@@ -1,160 +1,32 @@
+-static int __init reserve_crashkernel_low(unsigned long long low_size)  {
+-	unsigned long long low_base;
+-
+-	low_base = memblock_phys_alloc_range(low_size, PMD_SIZE, 0, dma32_phys_limit);
+-	if (!low_base) {
+-		pr_err("cannot allocate crashkernel low memory (size:0x%llx).\n", low_size);
+-		return -ENOMEM;
+-	}
+-
+-	pr_info("crashkernel low memory reserved: 0x%016llx - 0x%016llx (%lld MB)\n",
+-		low_base, low_base + low_size, low_size >> 20);
+-
+-	crashk_low_res.start = low_base;
+-	crashk_low_res.end = low_base + low_size - 1;
+-
+-	return 0;
+-}
+-
+-static void __init reserve_crashkernel(void)  {
+-	unsigned long long crash_base = 0;
+-	unsigned long long crash_size = 0;
+-	unsigned long long crash_low_size = 0;
+-	unsigned long search_start = memblock_start_of_DRAM();
+-	unsigned long search_end = (unsigned long)dma32_phys_limit;
++static void __init arch_reserve_crashkernel(void)  {
++	unsigned long long low_size = 0;
++	unsigned long long crash_base, crash_size;
+ 	char *cmdline = boot_command_line;
+-	bool fixed_base = false;
+ 	bool high = false;
+-
+-	int ret = 0;
++	int ret;
+ 
+ 	if (!IS_ENABLED(CONFIG_KEXEC_CORE))
+ 		return;
+@@ -165,125 +37,15 @@
+ 		return;
+ 	}
+ 
+ 	ret = parse_crashkernel(cmdline, memblock_phys_mem_size(),
+-				&crash_size, &crash_base);
+-	if (ret == -ENOENT) {
+-		/* Fallback to crashkernel=X,[high,low] */
+-		ret = parse_crashkernel_high(cmdline, 0, &crash_size, &crash_base);
+-		if (ret || !crash_size)
+-			return;
+-
+-		/*
+-		 * crashkernel=Y,low is valid only when crashkernel=X,high
+-		 * is passed.
+-		 */
+-		ret = parse_crashkernel_low(cmdline, 0, &crash_low_size, &crash_base);
+-		if (ret == -ENOENT)
+-			crash_low_size = DEFAULT_CRASH_KERNEL_LOW_SIZE;
+-		else if (ret)
+-			return;
+-
+-		search_start = (unsigned long)dma32_phys_limit;
+-		search_end = memblock_end_of_DRAM();
+-		high = true;
+-	} else if (ret || !crash_size) {
+-		/* Invalid argument value specified */
++				&crash_size, &crash_base,
++				&low_size, &high);
++	if (ret)
+ 		return;
+-	}
+-
+-	crash_size = PAGE_ALIGN(crash_size);
+-
+-	if (crash_base) {
+-		fixed_base = true;
+-		search_start = crash_base;
+-		search_end = crash_base + crash_size;
+-	}
+-
+-	/*
+-	 * Current riscv boot protocol requires 2MB alignment for
+-	 * RV64 and 4MB alignment for RV32 (hugepage size)
+-	 *
+-	 * Try to alloc from 32bit addressible physical memory so that
+-	 * swiotlb can work on the crash kernel.
+-	 */
+-	crash_base = memblock_phys_alloc_range(crash_size, PMD_SIZE,
+-					       search_start, search_end);
+-	if (crash_base == 0) {
+-		/*
+-		 * For crashkernel=size[KMG]@offset[KMG], print out failure
+-		 * message if can't reserve the specified region.
+-		 */
+-		if (fixed_base) {
+-			pr_warn("crashkernel: allocating failed with given size@offset\n");
+-			return;
+-		}
+-
+-		if (high) {
+-			/*
+-			 * For crashkernel=size[KMG],high, if the first attempt was
+-			 * for high memory, fall back to low memory.
+-			 */
+-			search_start = memblock_start_of_DRAM();
+-			search_end = (unsigned long)dma32_phys_limit;
+-		} else {
+-			/*
+-			 * For crashkernel=size[KMG], if the first attempt was for
+-			 * low memory, fall back to high memory, the minimum required
+-			 * low memory will be reserved later.
+-			 */
+-			search_start = (unsigned long)dma32_phys_limit;
+-			search_end = memblock_end_of_DRAM();
+-			crash_low_size = DEFAULT_CRASH_KERNEL_LOW_SIZE;
+-		}
+-
+-		crash_base = memblock_phys_alloc_range(crash_size, PMD_SIZE,
+-						       search_start, search_end);
+-		if (crash_base == 0) {
+-			pr_warn("crashkernel: couldn't allocate %lldKB\n",
+-				crash_size >> 10);
+-			return;
+-		}
+-	}
+-
+-	if ((crash_base >= dma32_phys_limit) && crash_low_size &&
+-	     reserve_crashkernel_low(crash_low_size)) {
+-		memblock_phys_free(crash_base, crash_size);
+-		return;
+-	}
+-
+-	pr_info("crashkernel: reserved 0x%016llx - 0x%016llx (%lld MB)\n",
+-		crash_base, crash_base + crash_size, crash_size >> 20);
+-
+-	crashk_res.start = crash_base;
+-	crashk_res.end = crash_base + crash_size - 1;
++
++	reserve_crashkernel_generic(cmdline, crash_size, crash_base,
++				    low_size, high);
+ }
+ 
+ void __init misc_mem_init(void)  {
+@@ -291,7 +53,7 @@
+ 	arch_numa_init();
+ 	sparse_init();
+ 	zone_sizes_init();
+-	reserve_crashkernel();
++	arch_reserve_crashkernel();
+ 	memblock_dump_all();
+ }

@@ -1,0 +1,182 @@
+[
+  {
+    "k": 1,
+    "loc": "mm/page_owner.c:102",
+    "verdict": "不可能",
+    "why": "ret 通过 return ret 交给 early_param 框架，init/main.c 的 do_early_param 会检查并警告解析错误。kstrtobool 失败不改出参，page_owner_enabled 保持初始化值或此前有效值，不存在丢弃错误后使用未初始化结果的问题。"
+  },
+  {
+    "k": 2,
+    "loc": "mm/madvise.c:1080",
+    "verdict": "不可能",
+    "why": "pudp_get 返回 PUD 内容而非错误码，下一步已用 pud_trans_huge(pudval) 判断是否为大页并返回判断结果。该返回值用于通知遍历过程终止并清除映射，并未忽略所读状态。"
+  },
+  {
+    "k": 3,
+    "loc": "include/linux/memcontrol.h:1277",
+    "verdict": "不可能",
+    "why": "folio_lruvec_lock_irqsave 的接口语义就是返回仍持锁的 lruvec，并通过 flagsp 带出中断状态。配对的 lruvec_unlock_irqrestore 在同一头文件中释放该锁及 RCU 读锁，不能要求加锁包装在返回前自行解锁。"
+  },
+  {
+    "k": 4,
+    "loc": "include/linux/memory_hotplug.h:242",
+    "verdict": "不可能",
+    "why": "这是 pgdat_resize_lock/pgdat_resize_unlock 的成对封装，后者在同一头文件第 247 行执行 spin_unlock_irqrestore。mm/mm_init.c 的调用者在受保护操作完成后调用解锁封装，锁需要跨越本函数返回。"
+  },
+  {
+    "k": 5,
+    "loc": "include/linux/serial_core.h:613",
+    "verdict": "不可能",
+    "why": "注释明确该函数供 console 的 device_lock 回调及内部锁封装使用，要求持锁返回。对应的 __uart_port_unlock_irqrestore 在第 622 行释放同一 up->lock 并恢复保存的中断状态。"
+  },
+  {
+    "k": 6,
+    "loc": "include/linux/serial_core.h:723",
+    "verdict": "不可能",
+    "why": "uart_port_lock_irqsave 是公开的加锁封装，临界区由调用者执行；对应的 uart_port_unlock_irqrestore 在释放 nbcon 所有权后执行 spin_unlock_irqrestore。头文件中的锁守卫也显式绑定了这对接口。"
+  },
+  {
+    "k": 7,
+    "loc": "kernel/dma/debug.c:260",
+    "verdict": "不可能",
+    "why": "get_hash_bucket 按注释和 __acquires 标注获取桶的独占访问权，返回持锁桶及中断状态。put_hash_bucket 在第 272 行执行配对解锁，add_dma_entry 等调用者已在桶操作后调用它。"
+  },
+  {
+    "k": 8,
+    "loc": "kernel/locking/locktorture.c:290",
+    "verdict": "不可能",
+    "why": "这是 locktorture 操作表的 writelock 回调，需要持锁返回供测试执行临界区。操作表的 writeunlock 指向 torture_lock_spin_write_unlock_irq，它在第 298 行用保存的 flags 解锁并恢复中断。"
+  },
+  {
+    "k": 9,
+    "loc": "kernel/time/clocksource.c:161",
+    "verdict": "不可能",
+    "why": "clocksource_watchdog_lock 是加锁包装，配对的 clocksource_watchdog_unlock 紧邻定义，并在第 166 行释放同一 watchdog_lock、恢复 *flags。这里需要让调用者在两次调用之间持锁操作。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/compaction.c:518",
+    "verdict": "不可能",
+    "why": "compact_lock_irqsave 带 __acquires(lock) 标注，作用是获取锁并把持锁状态交给调用者，同时记录异步规整的争用情况。实际调用者会配对解锁，例如 isolate_freepages_block 在第 669–670 行根据 locked 释放 zone->lock 并恢复 flags。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/hugetlb.c:190",
+    "verdict": "不可能",
+    "why": "本函数在减少 count 后立即调用 unlock_or_release_subpool(spool, flags)。该辅助函数在第 149 行无条件执行 spin_unlock_irqrestore，再根据是否空闲决定释放 subpool，解锁效果没有缺失。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/hugetlb.c:258",
+    "verdict": "不可能",
+    "why": "加锁后的记账分支最终都到达第 279 行的 unlock_or_release_subpool(spool, flags)，期间没有普通提前返回。该辅助函数在第 149 行释放同一把锁并恢复中断，已完成报告要求的效果。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/hugetlb.c:6826",
+    "verdict": "不可能",
+    "why": "该错误回滚分支在恢复 used_hpages 后，第 6829 行立即调用 unlock_or_release_subpool(spool, flags)。其内部第 149 行无条件执行对应的 spin_unlock_irqrestore，不存在此处漏解锁。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/list_lru.c:22",
+    "verdict": "不可能",
+    "why": "lock_list_lru 根据参数选择加锁方式，供调用者在返回后继续操作链表。配对的 unlock_list_lru 在 irq_flags 非空时执行 spin_unlock_irqrestore，list_lru_unlock_irqrestore 也通过它完成同一对象的解锁。"
+  },
+  {
+    "k": 15,
+    "loc": "kernel/sched/fair.c:10503",
+    "verdict": "不可能",
+    "why": "node_distance 返回 NUMA 节点距离数据，不是需要检查成功与否的状态码。dist 已传给 group_weight 或 task_weight 计算源、目标节点权重，并用于返回迁移的局部性差异，直接加条件检查没有这里所需的语义。"
+  },
+  {
+    "k": 16,
+    "loc": "lib/decompress_bunzip2.c:643",
+    "verdict": "不可能",
+    "why": "malloc 的返回值通过 bd = *bdp = malloc(i) 同时赋给 bd 和 *bdp，紧接着第 644–645 行已有 if (!bd) return RETVAL_OUT_OF_MEMORY。空指针检查发生在 memset 或字段访问之前，报告漏识别了链式赋值。"
+  },
+  {
+    "k": 17,
+    "loc": "kernel/smp.c:675",
+    "verdict": "不可能",
+    "why": "was_pending 保存刷新前的软中断位图，并作为参数传给 do_softirq_post_smp_call_flush；RT 实现在 kernel/softirq.c 中比较刷新前后的位图。非 RT 实现直接执行 do_softirq，无须该快照，零位图也不是失败返回。"
+  },
+  {
+    "k": 18,
+    "loc": "fs/proc/task_mmu.c:2930",
+    "verdict": "不可能",
+    "why": "ptent 已传给 pagemap_page_category，该函数在第 2439、2454 行分别判断 pte_none 和 pte_present，并处理非 present 情况。调用者随后用得到的 categories 决定是否输出或写保护，检查通过被调函数和派生值完成。"
+  },
+  {
+    "k": 19,
+    "loc": "fs/proc/task_mmu.c:3452",
+    "verdict": "不可能",
+    "why": "所读 ptent 立即传给 can_gather_numa_stats，该函数首先检查 pte_present，再验证 vm_normal_page 等条件。调用者还检查返回的 page 是否为空，只有通过检查才收集统计，状态判断并未缺失。"
+  },
+  {
+    "k": 20,
+    "loc": "include/linux/pgtable.h:649",
+    "verdict": "不可能",
+    "why": "ptep_get_and_clear 的职责是读取旧 PTE、清空并返回旧值，ptep_get 返回页表项内容而非错误码。旧值既交给 page_table_check_pte_clear 做记账，又返回给上层使用，无须在这一基础操作里额外写条件分支。"
+  },
+  {
+    "k": 21,
+    "loc": "include/linux/pgtable.h:703",
+    "verdict": "不可能",
+    "why": "这里读取旧 PTE 是为了清空后调用 page_table_check_pte_clear(mm, addr, pte)，返回值没有被丢弃。该检查的实现在 mm/page_table_check.c 中自行判断 pte_user_accessible_page 和 pte_special，本函数不需要重复检查。"
+  },
+  {
+    "k": 22,
+    "loc": "include/linux/pgtable.h:1049",
+    "verdict": "不可能",
+    "why": "这是读旧项、经 pte_wrprotect 清除写权限、再用 set_pte_at 写回的基础操作，读取结果作为数据被完整使用。wrprotect_ptes 的接口注释要求调用者持有页表锁且各 PTE 映射同一 folio 的连续页面，不存在每次读取都必须检查错误码的要求。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/damon/ops-common.c:205",
+    "verdict": "不可能",
+    "why": "第 212 行已经用 pte_present(pte) && pte_young(pte) 判断读取的 PTE，再将结果写入 *accessed；第 226 行根据 *accessed 决定停止遍历。判断写在布尔赋值表达式中，不能据此认定未检查。"
+  },
+  {
+    "k": 24,
+    "loc": "mm/kasan/shadow.c:477",
+    "verdict": "不可能",
+    "why": "读取后第 478 行立即通过 pte_none(pte) 计算 none，第 479、483 行均用 !none 守卫清除映射及释放页。状态已由布尔中间变量传递并检查，不存在未判断空项就释放页的路径。"
+  },
+  {
+    "k": 25,
+    "loc": "mm/madvise.c:216",
+    "verdict": "不可能",
+    "why": "PTE 已经转换为 softleaf_t entry，并在第 218 行用 softleaf_is_swap(entry) 判断，非 swap 项直接 continue。后续交换缓存读取只处理通过该判断的 entry，检查发生在转换后的等价表示上。"
+  },
+  {
+    "k": 26,
+    "loc": "mm/mlock.c:311",
+    "verdict": "不可能",
+    "why": "调用者 mlock_pte_range 已持有页表锁，并在第 385–390 行检查 pte_present 和 vm_normal_folio 后才调用本函数。这里重新读取的 ptent 用作大 folio 的 folio_pte_batch 输入；小 folio 固定步进 1，无须检查该数据值。"
+  },
+  {
+    "k": 27,
+    "loc": "mm/page_vma_mapped.c:326",
+    "verdict": "不可能",
+    "why": "赋值后的下一行就是 do-while 的循环条件 while (pte_none(pteval))，已直接检查读取值并跳过空 PTE。之后还通过 check_pte 校验映射，报告漏识别了循环条件中的检查。"
+  },
+  {
+    "k": 28,
+    "loc": "mm/ptdump.c:124",
+    "verdict": "不可能",
+    "why": "页表转储需要把原始 PTE 内容交给 effective_prot_pte 和 note_page_pte 回调，而不是把它当成成功或失败状态码。相邻的 ptdump_hole 也主动把零 PTE 传给同一 note_page_pte 回调，空项本来就是合法的展示输入。"
+  },
+  {
+    "k": 29,
+    "loc": "mm/rmap.c:972",
+    "verdict": "不可能",
+    "why": "代码位于 page_vma_mapped_walk 成功的循环内，该遍历接口已经核实目标 folio 的映射并持有对应页表锁。pteval 随即传给 folio_pte_batch 计算连续映射数量，属于受保护的映射数据读取，不是丢弃需要判错的返回值。"
+  },
+  {
+    "k": 30,
+    "loc": "mm/memory.c:3911",
+    "verdict": "不可能",
+    "why": "wp_page_reuse 复用同一物理页，只放宽访问权限并更新 young/dirty，随后已通过 ptep_set_access_flags 安装所需变化，并按返回值调用 update_mmu_cache_range。该接口的通用实现会按需 set_pte_at 并处理 TLB，架构可覆盖，因此无需强制先 ptep_clear_flush 再直接 set_pte_at。"
+  }
+]

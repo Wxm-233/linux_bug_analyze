@@ -1,0 +1,117 @@
+[
+ {
+  "k": 1,
+  "verdict": "不可能",
+  "why": "riscv 只刷本地是上游有意的设计：让 update_mmu_cache 通知其他 hart 的 4bd1d80efb5a 已被 e921050022f1 回退，改用 ASID 切换时刷新和 Svvptc/Svinval 处理。"
+ },
+ {
+  "k": 2,
+  "verdict": "不可能",
+  "why": "xtensa 的 update_mmu_cache_range 调用的是 flush_tlb_page，SMP 上是全局刷新；“只刷本地”来自单核配置下的宏别名，是分类误差。"
+ },
+ {
+  "k": 3,
+  "verdict": "不可能",
+  "why": "simple_fsync_noflush 是文件同步，与页表映射无关，规则误把名字带 _noflush 的函数算进来。"
+ },
+ {
+  "k": 4,
+  "verdict": "不可能",
+  "why": "同 3。"
+ },
+ {
+  "k": 5,
+  "verdict": "不可能",
+  "why": "同 3。"
+ },
+ {
+  "k": 6,
+  "verdict": "不可能",
+  "why": "apply_to_page_range 的回调：调用方在映射后调 flush_vmap_cache（第 533、763 行）；第 263 行只建中间页表，注释说明过期的未映射项只会多一次缺页、走同一路径修复。"
+ },
+ {
+  "k": 7,
+  "verdict": "不可能",
+  "why": "set_direct_map_default_noflush 在 riscv 上经 __set_memory 末尾 flush_tlb_kernel_range；x86、arm64 不缓存无效项。"
+ },
+ {
+  "k": 8,
+  "verdict": "不可能",
+  "why": "同 7，set_direct_map_valid_noflush 在 riscv 上也会刷 TLB。"
+ },
+ {
+  "k": 9,
+  "verdict": "不可能",
+  "why": "PKMAP 槽在回收时（flush_all_zero_pkmaps）已刷 TLB，新映射写入的是已刷过的槽，设计如此。"
+ },
+ {
+  "k": 10,
+  "verdict": "不可能",
+  "why": "kmap_local 在调度切回时重建映射，arch_kmap_local_post_map 钩子由需要的架构自己刷新。"
+ },
+ {
+  "k": 11,
+  "verdict": "不可能",
+  "why": "walk 回调，vmemmap_remap_range 在遍历后 flush_tlb_kernel_range（第 170 行）。"
+ },
+ {
+  "k": 12,
+  "verdict": "不可能",
+  "why": "同 11。"
+ },
+ {
+  "k": 13,
+  "verdict": "不可能",
+  "why": "早期 KASAN 影子映射，各架构 kasan_init 结束时刷新（riscv local_flush_tlb_all）。"
+ },
+ {
+  "k": 14,
+  "verdict": "不可能",
+  "why": "apply_to_page_range 的回调，__kasan_populate_vmalloc 在第 428 行 flush_cache_vmap。"
+ },
+ {
+  "k": 15,
+  "verdict": "不可能",
+  "why": "解除映射，调用方 pcpu_depopulate_chunk 调 pcpu_post_unmap_tlb_flush（内部 flush_tlb_kernel_range），刷新被包了一层。"
+ },
+ {
+  "k": 16,
+  "verdict": "不可能",
+  "why": "调用方随后调 pcpu_post_map_flush（内部 flush_cache_vmap），刷新被包了一层。"
+ },
+ {
+  "k": 17,
+  "verdict": "不可能",
+  "why": "这处 flush_cache_page 在 PTE 分支，第 3 个参数就是 pte_pfn，PMD 分支用的是 flush_cache_range；只是距离 PMD 代码 15 行以内。"
+ },
+ {
+  "k": 18,
+  "verdict": "不可能",
+  "why": "同 7。"
+ },
+ {
+  "k": 19,
+  "verdict": "不可能",
+  "why": "当前版本 __populate_section_memmap 在 vmemmap_populate 之后调 flush_cache_vmap；被报只是因为调用链超过 3 层。"
+ },
+ {
+  "k": 20,
+  "verdict": "不可能",
+  "why": "vmap_range_noflush 的调用方（vmap_page_range 等）都刷新，调用链超过 3 层。"
+ },
+ {
+  "k": 21,
+  "verdict": "不可能",
+  "why": "同 20（vmap_pages_range 调 flush_cache_vmap）。"
+ },
+ {
+  "k": 22,
+  "verdict": "不可能",
+  "why": "vmap block 的延迟解除映射，TLB 在后续统一清理（purge）时刷新，设计如此。"
+ },
+ {
+  "k": 23,
+  "verdict": "不可能",
+  "why": "apply_to_page_range 的回调，vmap_pfn 随后调 flush_cache_vmap。"
+ }
+]

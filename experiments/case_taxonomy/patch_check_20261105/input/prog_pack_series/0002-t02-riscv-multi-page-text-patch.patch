@@ -1,0 +1,55 @@
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -55,8 +55,9 @@
+ 
+ static int patch_insn_write(void *addr, const void *insn, size_t len)
+ {
+-	void *waddr = addr;
+-	bool across_pages = (((uintptr_t) addr & ~PAGE_MASK) + len) > PAGE_SIZE;
++	const u8 *src = insn;
++	void *dst = addr;
++	size_t done = 0;
+ 	int ret;
+ 
+ 	/*
+@@ -73,19 +74,31 @@
+ 	if (!riscv_patch_in_stop_machine)
+ 		lockdep_assert_held(&text_mutex);
+ 
+-	if (across_pages)
+-		patch_map(addr + len, FIX_TEXT_POKE1);
++	while (done < len) {
++		size_t offset = offset_in_page(dst + done);
++		size_t chunk = min_t(size_t, PAGE_SIZE - offset, len - done);
++		void *waddr;
+ 
+-	waddr = patch_map(addr, FIX_TEXT_POKE0);
++		if (chunk == 0)
++			chunk = min_t(size_t, PAGE_SIZE, len - done);
+ 
+-	ret = copy_to_kernel_nofault(waddr, insn, len);
++		waddr = patch_map(dst + done, FIX_TEXT_POKE0);
++		if (!waddr) {
++			patch_unmap(FIX_TEXT_POKE0);
++			return -EFAULT;
++		}
+ 
+-	patch_unmap(FIX_TEXT_POKE0);
++		ret = copy_to_kernel_nofault(waddr, src + done, chunk);
+ 
+-	if (across_pages)
+-		patch_unmap(FIX_TEXT_POKE1);
++		patch_unmap(FIX_TEXT_POKE0);
+ 
+-	return ret;
++		if (ret)
++			return ret;
++
++		done += chunk;
++	}
++
++	return 0;
+ }
+ NOKPROBE_SYMBOL(patch_insn_write);
+ #else

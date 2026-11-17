@@ -1,0 +1,336 @@
+[51] 2858b4027f49:include/linux/pgtable.h pattern=pmd_is_huge
+(pattern not found; no source inference from this query)
+
+[51] 2858b4027f49:include/linux/huge_mm.h pattern=pmd_is_huge|pmd_trans_huge_lock
+...
+426: }
+427: 
+428: int folio_memcg_alloc_deferred(struct folio *folio);
+429: 
+430: void deferred_split_folio(struct folio *folio, bool partially_mapped);
+431: 
+432: void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
+433: 		unsigned long address, bool freeze);
+434: 
+435: /**
+436:  * pmd_is_huge() - Is this PMD either a huge PMD entry or a software leaf entry?
+437:  * @pmd: The PMD to check.
+438:  *
+439:  * A huge PMD entry is a non-empty entry which is present and marked huge or a
+440:  * software leaf entry. This check be performed without the appropriate locks
+441:  * held, in which case the condition should be rechecked after they are
+442:  * acquired.
+443:  *
+444:  * Returns: true if this PMD is huge, false otherwise.
+445:  */
+446: static inline bool pmd_is_huge(pmd_t pmd)
+447: {
+448: 	if (pmd_present(pmd)) {
+449: 		return pmd_trans_huge(pmd);
+450: 	} else if (!pmd_none(pmd)) {
+451: 		/*
+452: 		 * Non-present PMDs must be valid huge non-present entries. We
+453: 		 * cannot assert that here due to header dependency issues.
+454: 		 */
+455: 		return true;
+456: 	}
+457: 
+458: 	return false;
+459: }
+460: 
+461: #define split_huge_pmd(__vma, __pmd, __address)				\
+462: 	do {								\
+463: 		pmd_t *____pmd = (__pmd);				\
+464: 		if (pmd_is_huge(*____pmd))				\
+465: 			__split_huge_pmd(__vma, __pmd, __address,	\
+466: 					 false);			\
+467: 	}  while (0)
+468: 
+469: void split_huge_pmd_address(struct vm_area_struct *vma, unsigned long address,
+470: 		bool freeze);
+471: 
+472: void __split_huge_pud(struct vm_area_struct *vma, pud_t *pud,
+473: 		unsigned long address);
+474: 
+475: #ifdef CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+476: int change_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
+477: 		    pud_t *pudp, unsigned long addr, pgprot_t newprot,
+478: 		    unsigned long cp_flags);
+479: #else
+480: static inline int
+481: change_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
+482: 		pud_t *pudp, unsigned long addr, pgprot_t newprot,
+483: 		unsigned long cp_flags) { return 0; }
+484: #endif
+...
+489: 		if (pud_trans_huge(*____pud))				\
+490: 			__split_huge_pud(__vma, __pud, __address);	\
+491: 	}  while (0)
+492: 
+493: int hugepage_madvise(struct vm_area_struct *vma, vm_flags_t *vm_flags,
+494: 		     int advice);
+495: int madvise_collapse(struct vm_area_struct *vma, unsigned long start,
+496: 		     unsigned long end, bool *lock_dropped);
+497: void vma_adjust_trans_huge(struct vm_area_struct *vma, unsigned long start,
+498: 			   unsigned long end, struct vm_area_struct *next);
+499: spinlock_t *__pmd_trans_huge_lock(pmd_t *pmd, struct vm_area_struct *vma);
+500: spinlock_t *__pud_trans_huge_lock(pud_t *pud, struct vm_area_struct *vma);
+501: 
+502: /* mmap_lock must be held on entry */
+503: static inline spinlock_t *pmd_trans_huge_lock(pmd_t *pmd,
+504: 		struct vm_area_struct *vma)
+505: {
+506: 	if (pmd_is_huge(*pmd))
+507: 		return __pmd_trans_huge_lock(pmd, vma);
+508: 
+509: 	return NULL;
+510: }
+511: static inline spinlock_t *pud_trans_huge_lock(pud_t *pud,
+512: 		struct vm_area_struct *vma)
+513: {
+514: 	if (pud_trans_huge(*pud))
+515: 		return __pud_trans_huge_lock(pud, vma);
+516: 	else
+517: 		return NULL;
+518: }
+519: 
+520: /**
+521:  * folio_test_pmd_mappable - Can we map this folio with a PMD?
+522:  * @folio: The folio to test
+523:  *
+524:  * Return: true - @folio can be mapped, false - @folio cannot be mapped.
+525:  */
+526: static inline bool folio_test_pmd_mappable(struct folio *folio)
+527: {
+...
+708: {
+709: 	return -EINVAL;
+710: }
+711: 
+712: static inline void vma_adjust_trans_huge(struct vm_area_struct *vma,
+713: 					 unsigned long start,
+714: 					 unsigned long end,
+715: 					 struct vm_area_struct *next)
+716: {
+717: }
+718: static inline spinlock_t *pmd_trans_huge_lock(pmd_t *pmd,
+719: 		struct vm_area_struct *vma)
+720: {
+721: 	return NULL;
+722: }
+723: static inline spinlock_t *pud_trans_huge_lock(pud_t *pud,
+724: 		struct vm_area_struct *vma)
+725: {
+726: 	return NULL;
+727: }
+728: 
+729: static inline vm_fault_t do_huge_pmd_uffd_rwp(struct vm_fault *vmf)
+730: {
+731: 	return 0;
+732: }
+733: 
+734: static inline vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
+735: {
+736: 	return 0;
+737: }
+738: 
+...
+787: 				  unsigned long cp_flags)
+788: {
+789: 	return 0;
+790: }
+791: 
+792: static inline struct folio *get_persistent_huge_zero_folio(void)
+793: {
+794: 	return NULL;
+795: }
+796: 
+797: static inline bool pmd_is_huge(pmd_t pmd)
+798: {
+799: 	return false;
+800: }
+801: #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+802: 
+803: static inline bool is_pmd_order(unsigned int order)
+804: {
+805: 	return order == HPAGE_PMD_ORDER;
+806: }
+807: 
+808: static inline int split_folio_to_list_to_order(struct folio *folio,
+809: 		struct list_head *list, int new_order)
+810: {
+811: 	return split_huge_page_to_list_to_order(&folio->page, list, new_order);
+812: }
+813: 
+814: static inline int split_folio_to_order(struct folio *folio, int new_order)
+815: {
+816: 	return split_folio_to_list_to_order(folio, NULL, new_order);
+817: }
+
+[51] 2858b4027f49:arch/x86/include/asm/pgtable.h pattern=^static inline int pmd_trans_huge
+...
+294: }
+295: 
+296: #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+297: static inline int pmd_trans_huge(pmd_t pmd)
+298: {
+299: 	return (pmd_val(pmd) & _PAGE_PSE) == _PAGE_PSE;
+300: }
+301: 
+302: #ifdef CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+303: static inline int pud_trans_huge(pud_t pud)
+304: {
+305: 	return (pud_val(pud) & _PAGE_PSE) == _PAGE_PSE;
+306: }
+307: #endif
+308: 
+309: #define has_transparent_hugepage has_transparent_hugepage
+310: static inline int has_transparent_hugepage(void)
+311: {
+312: 	return boot_cpu_has(X86_FEATURE_PSE);
+313: }
+314: 
+315: #ifdef CONFIG_ARCH_SUPPORTS_PMD_PFNMAP
+
+[51] 2858b4027f49:arch/arm64/include/asm/pgtable.h pattern=^static inline int pmd_trans_huge|^#define pmd_trans_huge
+...
+788: #define pte_leaf_size(pte)	(pte_cont(pte) ? CONT_PTE_SIZE : PAGE_SIZE)
+789: 
+790: #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+791: static inline int pmd_trans_huge(pmd_t pmd)
+792: {
+793: 	/*
+794: 	 * If pmd is present-invalid, pmd_table() won't detect it
+795: 	 * as a table, so force the valid bit for the comparison.
+796: 	 */
+797: 	return pmd_present(pmd) && !pmd_table(__pmd(pmd_val(pmd) | PTE_VALID));
+798: }
+799: #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+800: 
+801: #if defined(CONFIG_ARM64_64K_PAGES) || CONFIG_PGTABLE_LEVELS < 3
+802: static inline bool pud_table(pud_t pud) { return true; }
+803: #else
+804: #define pud_table(pud)		((pud_val(pud) & PUD_TYPE_MASK) == \
+805: 				 PUD_TYPE_TABLE)
+806: #endif
+807: 
+808: extern pgd_t swapper_pg_dir[];
+809: extern pgd_t idmap_pg_dir[];
+
+[51] 2858b4027f49:mm/Kconfig pattern=^config DEVICE_PRIVATE
+...
+1256: 
+1257: config GET_FREE_REGION
+1258: 	bool
+1259: 
+1260: config DEVICE_PRIVATE
+1261: 	bool "Unaddressable device memory (GPU memory, ...)"
+1262: 	depends on ZONE_DEVICE
+1263: 	select GET_FREE_REGION
+1264: 
+1265: 	help
+1266: 	  Allows creation of struct pages to represent unaddressable device
+1267: 	  memory; i.e., memory that is only accessible from the device (or
+1268: 	  group of devices). You likely also want to select HMM_MIRROR.
+1269: 
+1270: config VMAP_PFN
+1271: 	bool
+1272: 
+1273: config ARCH_USES_HIGH_VMA_FLAGS
+1274: 	bool
+1275: config ARCH_HAS_PKEYS
+1276: 	bool
+1277: 
+1278: config ARCH_USES_PG_ARCH_2
+
+[54] 2d331a6ac481:drivers/acpi/resource.c pattern=acpi_get_override_irq
+...
+589: 	/*
+590: 	 * In IO-APIC mode, use overridden attribute. Two reasons:
+591: 	 * 1. BIOS bug in DSDT
+592: 	 * 2. BIOS uses IO-APIC mode Interrupt Source Override
+593: 	 *
+594: 	 * We do this only if we are dealing with IRQ() or IRQNoFlags()
+595: 	 * resource (the legacy ISA resources). With modern ACPI 5 devices
+596: 	 * using extended IRQ descriptors we take the IRQ configuration
+597: 	 * from _CRS directly.
+598: 	 */
+599: 	if (check_override &&
+600: 	    acpi_dev_irq_override(gsi, triggering, polarity, shareable) &&
+601: 	    !acpi_get_override_irq(gsi, &t, &p)) {
+602: 		u8 trig = t ? ACPI_LEVEL_SENSITIVE : ACPI_EDGE_SENSITIVE;
+603: 		u8 pol = p ? ACPI_ACTIVE_LOW : ACPI_ACTIVE_HIGH;
+604: 
+605: 		if (triggering != trig || polarity != pol) {
+606: 			pr_warn("ACPI: IRQ %d override to %s%s, %s%s\n", gsi,
+607: 				t ? "level" : "edge",
+608: 				trig == triggering ? "" : "(!)",
+609: 				p ? "low" : "high",
+610: 				pol == polarity ? "" : "(!)");
+611: 			triggering = trig;
+612: 			polarity = pol;
+613: 		}
+614: 	}
+615: 
+616: 	res->flags = acpi_dev_irq_flags(triggering, polarity, shareable, wake_capable);
+617: 	irq = acpi_register_gsi(NULL, gsi, triggering, polarity);
+618: 	if (irq >= 0) {
+619: 		res->start = irq;
+620: 		res->end = irq;
+621: 	} else {
+
+[54] 2d331a6ac481:arch/x86/kernel/acpi/boot.c pattern=^int acpi_get_override_irq
+(pattern not found; no source inference from this query)
+
+[57] e5dec38ac5d0:drivers/irqchip/Kconfig pattern=^config LOONGSON_PCH_PIC
+...
+555: 	  Support for the Loongson3 HyperTransport Interrupt Vector Controller.
+556: 
+557: config LOONGSON_PCH_PIC
+558: 	bool "Loongson PCH PIC Controller"
+559: 	depends on MACH_LOONGSON64 || COMPILE_TEST
+560: 	default MACH_LOONGSON64
+561: 	select IRQ_DOMAIN_HIERARCHY
+562: 	select IRQ_FASTEOI_HIERARCHY_HANDLERS
+563: 	help
+564: 	  Support for the Loongson PCH PIC Controller.
+565: 
+566: config LOONGSON_PCH_MSI
+567: 	bool "Loongson PCH MSI Controller"
+568: 	depends on MACH_LOONGSON64 || COMPILE_TEST
+569: 	depends on PCI
+570: 	default MACH_LOONGSON64
+571: 	select IRQ_DOMAIN_HIERARCHY
+572: 	select PCI_MSI
+573: 	help
+
+[60] 1690eeb0cb2b:drivers/irqchip/Kconfig pattern=^config ARM_GIC_V5
+...
+58: 	default ARM_GIC_V3_ITS
+59: 
+60: config ARM_GIC_V5
+61: 	bool
+62: 	select IRQ_DOMAIN_HIERARCHY
+63: 	select GENERIC_IRQ_EFFECTIVE_AFF_MASK
+64: 	select GENERIC_MSI_IRQ
+65: 	select IRQ_MSI_LIB
+66: 	select ARM_GIC_ITS_PARENT
+67: 
+68: config ARM_NVIC
+69: 	bool
+70: 	select IRQ_DOMAIN_HIERARCHY
+71: 	select GENERIC_IRQ_CHIP
+72: 
+73: config ARM_VIC
+74: 	bool
+75: 	select IRQ_DOMAIN
+76: 
+77: config ARM_VIC_NR
+78: 	int
+79: 	default 4 if ARCH_S5PV210
+80: 	default 2
+81: 	depends on ARM_VIC
+82: 	help
+83: 	  The maximum number of VICs available in the system, for
+84: 	  power management.
+

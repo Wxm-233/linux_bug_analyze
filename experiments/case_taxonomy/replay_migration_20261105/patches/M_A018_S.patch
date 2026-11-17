@@ -1,0 +1,170 @@
+diff --git a/arch/loongarch/include/asm/module.h b/arch/loongarch/include/asm/module.h
+--- a/arch/loongarch/include/asm/module.h
++++ b/arch/loongarch/include/asm/module.h
+@@
+ struct mod_section {
+-	Elf_Shdr *shdr;
++	int shndx;
+ 	int num_entries;
+ 	int max_entries;
+ };
+@@
+-Elf_Addr module_emit_got_entry(struct module *mod, Elf_Addr val);
+-Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Addr val);
++Elf_Addr module_emit_got_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr val);
++Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr val);
+@@
+-static inline int get_plt_idx(unsigned long val, const struct mod_section *sec)
++static inline int get_plt_idx(unsigned long val, Elf_Shdr *sechdrs,
++			      const struct mod_section *sec)
+ {
+ 	int i;
+-	struct plt_idx_entry *plt_idx = (struct plt_idx_entry *)sec->shdr->sh_addr;
++	struct plt_idx_entry *plt_idx =
++		(struct plt_idx_entry *)sechdrs[sec->shndx].sh_addr;
+@@
+-static inline struct plt_entry *get_plt_entry(unsigned long val,
++static inline struct plt_entry *get_plt_entry(unsigned long val,
++				      Elf_Shdr *sechdrs,
+ 				      const struct mod_section *sec_plt,
+ 				      const struct mod_section *sec_plt_idx)
+ {
+-	int plt_idx = get_plt_idx(val, sec_plt_idx);
+-	struct plt_entry *plt = (struct plt_entry *)sec_plt->shdr->sh_addr;
++	int plt_idx = get_plt_idx(val, sechdrs, sec_plt_idx);
++	struct plt_entry *plt = (struct plt_entry *)sechdrs[sec_plt->shndx].sh_addr;
+@@
+-static inline struct got_entry *get_got_entry(Elf_Addr val,
++static inline struct got_entry *get_got_entry(Elf_Addr val,
++					      Elf_Shdr *sechdrs,
+ 					      const struct mod_section *sec)
+ {
+-	struct got_entry *got = (struct got_entry *)sec->shdr->sh_addr;
++	struct got_entry *got = (struct got_entry *)sechdrs[sec->shndx].sh_addr;
+ 	int i;
+diff --git a/arch/loongarch/kernel/module-sections.c b/arch/loongarch/kernel/module-sections.c
+--- a/arch/loongarch/kernel/module-sections.c
++++ b/arch/loongarch/kernel/module-sections.c
+@@
+-Elf_Addr module_emit_got_entry(struct module *mod, Elf_Addr val)
++Elf_Addr module_emit_got_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr val)
+ {
+ 	struct mod_section *got_sec = &mod->arch.got;
+ 	int i = got_sec->num_entries;
+-	struct got_entry *got = get_got_entry(val, got_sec);
++	struct got_entry *got = get_got_entry(val, sechdrs, got_sec);
+ 
+ 	if (got)
+ 		return (Elf_Addr)got;
+ 
+ 	/* There is no GOT entry for val yet, create a new one. */
+-	got = (struct got_entry *)got_sec->shdr->sh_addr;
++	got = (struct got_entry *)sechdrs[got_sec->shndx].sh_addr;
+ 	got[i] = emit_got_entry(val);
+@@
+-Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Addr val)
++Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr val)
+ {
+ 	int nr;
+ 	struct mod_section *plt_sec = &mod->arch.plt;
+ 	struct mod_section *plt_idx_sec = &mod->arch.plt_idx;
+-	struct plt_entry *plt = get_plt_entry(val, plt_sec, plt_idx_sec);
++	struct plt_entry *plt = get_plt_entry(val, sechdrs, plt_sec, plt_idx_sec);
+ 	struct plt_idx_entry *plt_idx;
+@@
+-	plt = (struct plt_entry *)plt_sec->shdr->sh_addr;
++	plt = (struct plt_entry *)sechdrs[plt_sec->shndx].sh_addr;
+ 	plt[nr] = emit_plt_entry(val);
+-	plt_idx = (struct plt_idx_entry *)plt_idx_sec->shdr->sh_addr;
++	plt_idx = (struct plt_idx_entry *)sechdrs[plt_idx_sec->shndx].sh_addr;
+ 	plt_idx[nr] = emit_plt_idx_entry(val);
+@@
+ 	unsigned int i, num_plts = 0, num_gots = 0;
++	Elf_Shdr *shdr;
+ 
+@@
+ 		if (!strcmp(secstrings + sechdrs[i].sh_name, ".got"))
+-			mod->arch.got.shdr = sechdrs + i;
++			mod->arch.got.shndx = i;
+ 		else if (!strcmp(secstrings + sechdrs[i].sh_name, ".plt"))
+-			mod->arch.plt.shdr = sechdrs + i;
++			mod->arch.plt.shndx = i;
+ 		else if (!strcmp(secstrings + sechdrs[i].sh_name, ".plt.idx"))
+-			mod->arch.plt_idx.shdr = sechdrs + i;
++			mod->arch.plt_idx.shndx = i;
+ 	}
+ 
+-	if (!mod->arch.got.shdr) {
++	if (!mod->arch.got.shndx) {
+ 		pr_err("%s: module GOT section(s) missing\n", mod->name);
+ 		return -ENOEXEC;
+ 	}
+-	if (!mod->arch.plt.shdr) {
++	if (!mod->arch.plt.shndx) {
+ 		pr_err("%s: module PLT section(s) missing\n", mod->name);
+ 		return -ENOEXEC;
+ 	}
+-	if (!mod->arch.plt_idx.shdr) {
++	if (!mod->arch.plt_idx.shndx) {
+ 		pr_err("%s: module PLT.IDX section(s) missing\n", mod->name);
+ 		return -ENOEXEC;
+ 	}
+@@
+-	mod->arch.got.shdr->sh_type = SHT_NOBITS;
+-	mod->arch.got.shdr->sh_flags = SHF_ALLOC;
+-	mod->arch.got.shdr->sh_addralign = L1_CACHE_BYTES;
+-	mod->arch.got.shdr->sh_size = (num_gots + 1) * sizeof(struct got_entry);
++	shdr = sechdrs + mod->arch.got.shndx;
++	shdr->sh_type = SHT_NOBITS;
++	shdr->sh_flags = SHF_ALLOC;
++	shdr->sh_addralign = L1_CACHE_BYTES;
++	shdr->sh_size = (num_gots + 1) * sizeof(struct got_entry);
+ 	mod->arch.got.num_entries = 0;
+ 	mod->arch.got.max_entries = num_gots;
+ 
+-	mod->arch.plt.shdr->sh_type = SHT_NOBITS;
+-	mod->arch.plt.shdr->sh_flags = SHF_EXECINSTR | SHF_ALLOC;
+-	mod->arch.plt.shdr->sh_addralign = L1_CACHE_BYTES;
+-	mod->arch.plt.shdr->sh_size = (num_plts + 1) * sizeof(struct plt_entry);
++	shdr = sechdrs + mod->arch.plt.shndx;
++	shdr->sh_type = SHT_NOBITS;
++	shdr->sh_flags = SHF_EXECINSTR | SHF_ALLOC;
++	shdr->sh_addralign = L1_CACHE_BYTES;
++	shdr->sh_size = (num_plts + 1) * sizeof(struct plt_entry);
+ 	mod->arch.plt.num_entries = 0;
+ 	mod->arch.plt.max_entries = num_plts;
+ 
+-	mod->arch.plt_idx.shdr->sh_type = SHT_NOBITS;
+-	mod->arch.plt_idx.shdr->sh_flags = SHF_ALLOC;
+-	mod->arch.plt_idx.shdr->sh_addralign = L1_CACHE_BYTES;
+-	mod->arch.plt_idx.shdr->sh_size = (num_plts + 1) * sizeof(struct plt_idx_entry);
++	shdr = sechdrs + mod->arch.plt_idx.shndx;
++	shdr->sh_type = SHT_NOBITS;
++	shdr->sh_flags = SHF_ALLOC;
++	shdr->sh_addralign = L1_CACHE_BYTES;
++	shdr->sh_size = (num_plts + 1) * sizeof(struct plt_idx_entry);
+ 	mod->arch.plt_idx.num_entries = 0;
+ 	mod->arch.plt_idx.max_entries = num_plts;
+diff --git a/arch/loongarch/kernel/module.c b/arch/loongarch/kernel/module.c
+--- a/arch/loongarch/kernel/module.c
++++ b/arch/loongarch/kernel/module.c
+@@
++/* sechdrs is passed to handlers via this file-local variable-free wrapper. */
+ static int apply_r_larch_sop_push_plt_pcrel(struct module *mod, u32 *location, Elf_Addr v,
+-			s64 *rela_stack, size_t *rela_stack_top, unsigned int type)
++			s64 *rela_stack, size_t *rela_stack_top, unsigned int type,
++			Elf_Shdr *sechdrs)
+ {
+ 	ptrdiff_t offset = (void *)v - (void *)location;
+ 
+ 	if (offset >= SZ_128M)
+-		v = module_emit_plt_entry(mod, v);
++		v = module_emit_plt_entry(mod, sechdrs, v);
+ 
+ 	if (offset < -SZ_128M)
+-		v = module_emit_plt_entry(mod, v);
++		v = module_emit_plt_entry(mod, sechdrs, v);
+ 
+-	return apply_r_larch_sop_push_pcrel(mod, location, v, rela_stack, rela_stack_top, type);
++	return apply_r_larch_sop_push_pcrel(mod, location, v, rela_stack, rela_stack_top, type);
+ }

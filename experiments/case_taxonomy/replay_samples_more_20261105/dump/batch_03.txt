@@ -1,0 +1,2061 @@
+
+##### A075
+=== 8afa901c147a LA2 2025-03-13 +7/-136
+arch, mm: make releasing of memory to page allocator more explicit
+
+The point where the memory is released from memblock to the buddy
+allocator is hidden inside arch-specific mem_init()s and the call to
+memblock_free_all() is needlessly duplicated in every artiste cure and
+after introduction of arch_mm_preinit() hook, mem_init() implementation on
+many architecture only contains the call to memblock_free_all().
+
+Pull memblock_free_all() call into mm_core_init() and drop mem_init() on
+relevant architectures to make it more explicit where the free memory is
+released from memblock to the buddy allocator and to reduce code
+duplication in architecture specific code.
+functions: arch/alpha/mm/init.c:mem_init, arch/arc/mm/init.c:mem_init, arch/arm/mm/init.c:mem_init, arch/arm64/mm/init.c:mem_init, arch/csky/mm/init.c:mem_init, arch/hexagon/mm/init.c:mem_init, arch/loongarch/kernel/numa.c:mem_init, arch/loongarch/mm/init.c:mem_init, arch/m68k/mm/init.c:mem_init, arch/microblaze/mm/init.c:mem_init, arch/mips/mm/init.c:mem_init, arch/nios2/mm/init.c:mem_init
+fixes: 
+ arch/s390/mm/init.c          |  6 ------
+ arch/sh/mm/init.c            |  2 --
+ arch/sparc/mm/init_32.c      |  5 -----
+ arch/sparc/mm/init_64.c      |  2 --
+ arch/um/kernel/mem.c         |  2 --
+ arch/x86/mm/init_32.c        |  3 ---
+ arch/x86/mm/init_64.c        |  2 --
+ arch/xtensa/mm/init.c        |  9 ---------
+ include/linux/memblock.h     |  1 -
+ mm/internal.h                |  3 ++-
+ mm/mm_init.c                 |  5 +++++
+ 27 files changed, 7 insertions(+), 136 deletions(-)
+diff --git a/arch/alpha/mm/init.c b/arch/alpha/mm/init.c
+index 3ab2d2f3c917..2d491b8cdab9 100644
+--- a/arch/alpha/mm/init.c
++++ b/arch/alpha/mm/init.c
+@@ -274,10 +274,4 @@ srm_paging_stop (void)
+ #endif
+ 
+-void __init
+-mem_init(void)
+-{
+-	memblock_free_all();
+-}
+-
+ static const pgprot_t protection_map[16] = {
+ 	[VM_NONE]					= _PAGE_P(_PAGE_FOE | _PAGE_FOW |
+diff --git a/arch/arc/mm/init.c b/arch/arc/mm/init.c
+index 90715b4a0bfa..a73cc94f806e 100644
+--- a/arch/arc/mm/init.c
++++ b/arch/arc/mm/init.c
+@@ -170,15 +170,4 @@ void __init arch_mm_preinit(void)
+ }
+ 
+-/*
+- * mem_init - initializes memory
+- *
+- * Frees up bootmem
+- * Calculates and displays memory available/used
+- */
+-void __init mem_init(void)
+-{
+-	memblock_free_all();
+-}
+-
+ #ifdef CONFIG_HIGHMEM
+ int pfn_valid(unsigned long pfn)
+diff --git a/arch/arm/mm/init.c b/arch/arm/mm/init.c
+index 7222100b0631..54bdca025c9f 100644
+--- a/arch/arm/mm/init.c
++++ b/arch/arm/mm/init.c
+@@ -264,15 +264,4 @@ void __init arch_mm_preinit(void)
+ }
+ 
+-/*
+- * mem_init() marks the free areas in the mem_map and tells us how much
+- * memory is free.  This is done after various parts of the system have
+- * claimed their memory after the kernel image.
+- */
+-void __init mem_init(void)
+-{
+-	/* this will put all unused low memory onto the freelists */
+-	memblock_free_all();
+-}
+-
+ #ifdef CONFIG_STRICT_KERNEL_RWX
+ struct section_perm {
+diff --git a/arch/arm64/mm/init.c b/arch/arm64/mm/init.c
+index 2312e3812043..4b966d5709d2 100644
+--- a/arch/arm64/mm/init.c
++++ b/arch/arm64/mm/init.c
+@@ -407,15 +407,4 @@ void __init arch_mm_preinit(void)
+... (331 more diff lines)
+
+##### A076
+=== 7ace1602abf2 LA2 2025-03-20 +45/-18
+LoongArch: entry: Migrate ret_from_fork() to C
+
+LoongArch is the only architecture that calls syscall_exit_to_user_mode()
+from assembly.
+
+Move the call into C so that this function can be inlined across all
+architectures.
+functions: arch/loongarch/kernel/process.c:copy_thread
+fixes: 
+ arch/loongarch/include/asm/asm-prototypes.h |  8 ++++++++
+ arch/loongarch/kernel/entry.S               | 22 ++++++++++------------
+ arch/loongarch/kernel/process.c             | 33 +++++++++++++++++++++++++++------
+ 3 files changed, 45 insertions(+), 18 deletions(-)
+diff --git a/arch/loongarch/include/asm/asm-prototypes.h b/arch/loongarch/include/asm/asm-prototypes.h
+index 51f224bcfc65..704066b4f736 100644
+--- a/arch/loongarch/include/asm/asm-prototypes.h
++++ b/arch/loongarch/include/asm/asm-prototypes.h
+@@ -13,2 +13,10 @@ __int128_t __ashrti3(__int128_t a, int b);
+ __int128_t __lshrti3(__int128_t a, int b);
+ #endif
++
++asmlinkage void noinstr __no_stack_protector ret_from_fork(struct task_struct *prev,
++							   struct pt_regs *regs);
++
++asmlinkage void noinstr __no_stack_protector ret_from_kernel_thread(struct task_struct *prev,
++								    struct pt_regs *regs,
++								    int (*fn)(void *),
++								    void *fn_arg);
+diff --git a/arch/loongarch/kernel/entry.S b/arch/loongarch/kernel/entry.S
+index 48e7e34e355e..2abc29e57381 100644
+--- a/arch/loongarch/kernel/entry.S
++++ b/arch/loongarch/kernel/entry.S
+@@ -78,23 +78,21 @@ SYM_CODE_END(handle_syscall)
+ _ASM_NOKPROBE(handle_syscall)
+ 
+-SYM_CODE_START(ret_from_fork)
++SYM_CODE_START(ret_from_fork_asm)
+ 	UNWIND_HINT_REGS
+-	bl		schedule_tail		# a0 = struct task_struct *prev
+-	move		a0, sp
+-	bl 		syscall_exit_to_user_mode
++	move		a1, sp
++	bl 		ret_from_fork
+ 	RESTORE_STATIC
+ 	RESTORE_SOME
+ 	RESTORE_SP_AND_RET
+-SYM_CODE_END(ret_from_fork)
++SYM_CODE_END(ret_from_fork_asm)
+ 
+-SYM_CODE_START(ret_from_kernel_thread)
++SYM_CODE_START(ret_from_kernel_thread_asm)
+ 	UNWIND_HINT_REGS
+-	bl		schedule_tail		# a0 = struct task_struct *prev
+-	move		a0, s1
+-	jirl		ra, s0, 0
+-	move		a0, sp
+-	bl		syscall_exit_to_user_mode
++	move		a1, sp
++	move		a2, s0
++	move		a3, s1
++	bl		ret_from_kernel_thread
+ 	RESTORE_STATIC
+ 	RESTORE_SOME
+ 	RESTORE_SP_AND_RET
+-SYM_CODE_END(ret_from_kernel_thread)
++SYM_CODE_END(ret_from_kernel_thread_asm)
+diff --git a/arch/loongarch/kernel/process.c b/arch/loongarch/kernel/process.c
+index 6e58f65455c7..98bc60d7c550 100644
+--- a/arch/loongarch/kernel/process.c
++++ b/arch/loongarch/kernel/process.c
+@@ -15,4 +15,5 @@
+ #include <linux/kernel.h>
+ #include <linux/errno.h>
+... (65 more diff lines)
+
+##### A077
+=== c271c86a4c72 LA2 2025-03-30 +1/-2
+LoongArch: vDSO: Remove --hash-style=sysv
+
+Glibc added support for .gnu.hash in 2006 and .hash has been obsoleted
+far before the first LoongArch CPU was taped.  Using --hash-style=sysv
+might imply unaddressed issues and confuse readers.
+
+Some architectures use an explicit --hash-style=both for vDSO here, but
+DT_GNU_HASH has already been supported by Glibc and Musl and become the
+de-facto standard of the distros when the first LoongArch CPU was taped.
+So DT_HASH seems just wasting storage space for LoongArch.
+
+Just drop the option and rely on the linker default, which is likely
+"gnu" (Arch, Debian, Gentoo, LFS) on all LoongArch distros (confirmed on
+Arch, Debian, Gentoo, and LFS; AOSC now defaults to "both" but it seems
+just an oversight).
+
+Following the logic of commit 48f6430505c0b049 ("arm64/vdso: Remove
+--hash-style=sysv").
+functions: 
+fixes: 
+diff --git a/arch/loongarch/vdso/Makefile b/arch/loongarch/vdso/Makefile
+index fdde1bcd4e26..cf6c41054396 100644
+--- a/arch/loongarch/vdso/Makefile
++++ b/arch/loongarch/vdso/Makefile
+@@ -37,6 +37,5 @@ endif
+ # VDSO linker flags.
+ ldflags-y := -Bsymbolic --no-undefined -soname=linux-vdso.so.1 \
+-	$(filter -E%,$(KBUILD_CFLAGS)) -nostdlib -shared \
+-	--hash-style=sysv --build-id -T
++	$(filter -E%,$(KBUILD_CFLAGS)) -nostdlib -shared --build-id -T
+ 
+ #
+
+##### A078
+=== 5071ea3d7b3d LA2 2025-04-02 +0/-51
+arch: remove mk_pmd()
+
+There are now no callers of mk_huge_pmd() and mk_pmd().  Remove them.
+functions: arch/loongarch/mm/pgtable.c:mk_pmd, arch/mips/mm/pgtable-32.c:mk_pmd, arch/mips/mm/pgtable-64.c:mk_pmd, arch/powerpc/mm/book3s64/pgtable.c:mk_pmd
+fixes: 
+ arch/loongarch/mm/pgtable.c                  |  9 ---------
+ arch/mips/include/asm/pgtable.h              |  3 ---
+ arch/mips/mm/pgtable-32.c                    | 10 ----------
+ arch/mips/mm/pgtable-64.c                    |  9 ---------
+ arch/powerpc/include/asm/book3s/64/pgtable.h |  1 -
+ arch/powerpc/mm/book3s64/pgtable.c           |  5 -----
+ arch/riscv/include/asm/pgtable-64.h          |  2 --
+ arch/s390/include/asm/pgtable.h              |  1 -
+ arch/sparc/include/asm/pgtable_64.h          |  1 -
+ arch/x86/include/asm/pgtable.h               |  2 --
+ include/linux/huge_mm.h                      |  2 --
+ 16 files changed, 51 deletions(-)
+diff --git a/arch/arc/include/asm/hugepage.h b/arch/arc/include/asm/hugepage.h
+index 8a2441670a8f..7765dc105d54 100644
+--- a/arch/arc/include/asm/hugepage.h
++++ b/arch/arc/include/asm/hugepage.h
+@@ -41,6 +41,4 @@ static inline pmd_t pte_pmd(pte_t pte)
+ #define pmd_dirty(pmd)		pte_dirty(pmd_pte(pmd))
+ 
+-#define mk_pmd(page, prot)	pte_pmd(mk_pte(page, prot))
+-
+ #define pmd_trans_huge(pmd)	(pmd_val(pmd) & _PAGE_HW_SZ)
+ 
+diff --git a/arch/arc/include/asm/pgtable-levels.h b/arch/arc/include/asm/pgtable-levels.h
+index 55dbd2719e35..d1ce4b0f1071 100644
+--- a/arch/arc/include/asm/pgtable-levels.h
++++ b/arch/arc/include/asm/pgtable-levels.h
+@@ -143,5 +143,4 @@
+ #define pmd_pfn(pmd)		((pmd_val(pmd) & PMD_MASK) >> PAGE_SHIFT)
+ #define pfn_pmd(pfn,prot)	__pmd(((pfn) << PAGE_SHIFT) | pgprot_val(prot))
+-#define mk_pmd(page,prot)	pfn_pmd(page_to_pfn(page),prot)
+ 
+ #endif
+diff --git a/arch/arm/include/asm/pgtable-3level.h b/arch/arm/include/asm/pgtable-3level.h
+index fa5939eb9864..7b71a3d414b7 100644
+--- a/arch/arm/include/asm/pgtable-3level.h
++++ b/arch/arm/include/asm/pgtable-3level.h
+@@ -210,5 +210,4 @@ PMD_BIT_FUNC(mkyoung,   |= PMD_SECT_AF);
+ #define pmd_pfn(pmd)		(((pmd_val(pmd) & PMD_MASK) & PHYS_MASK) >> PAGE_SHIFT)
+ #define pfn_pmd(pfn,prot)	(__pmd(((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot)))
+-#define mk_pmd(page,prot)	pfn_pmd(page_to_pfn(page),prot)
+ 
+ /* No hardware dirty/accessed bits -- generic_pmdp_establish() fits */
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index f03c6c2b0944..2a77f11b78d5 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -610,5 +610,4 @@ static inline pmd_t pmd_mkspecial(pmd_t pmd)
+ #define pmd_pfn(pmd)		((__pmd_to_phys(pmd) & PMD_MASK) >> PAGE_SHIFT)
+ #define pfn_pmd(pfn,prot)	__pmd(__phys_to_pmd_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
+-#define mk_pmd(page,prot)	pfn_pmd(page_to_pfn(page),prot)
+ 
+ #define pud_young(pud)		pte_young(pud_pte(pud))
+diff --git a/arch/loongarch/include/asm/pgtable.h b/arch/loongarch/include/asm/pgtable.h
+index 9ba3a4ebcd98..a3f17914dbab 100644
+--- a/arch/loongarch/include/asm/pgtable.h
++++ b/arch/loongarch/include/asm/pgtable.h
+@@ -256,5 +256,4 @@ static inline void pmd_clear(pmd_t *pmdp)
+ #define pmd_page_vaddr(pmd)	pmd_val(pmd)
+ 
+-extern pmd_t mk_pmd(struct page *page, pgprot_t prot);
+ extern void set_pmd_at(struct mm_struct *mm, unsigned long addr, pmd_t *pmdp, pmd_t pmd);
+ 
+diff --git a/arch/loongarch/mm/pgtable.c b/arch/loongarch/mm/pgtable.c
+index 22a94bb3e6e8..352d9b2e02ab 100644
+--- a/arch/loongarch/mm/pgtable.c
++++ b/arch/loongarch/mm/pgtable.c
+@@ -136,13 +136,4 @@ void kernel_pte_init(void *addr)
+ }
+ 
+-pmd_t mk_pmd(struct page *page, pgprot_t prot)
+-{
+... (135 more diff lines)
+
+##### A079
+=== cb5b13cd6c92 LA2 2025-04-02 +10/-99
+mm: introduce a common definition of mk_pte()
+
+Most architectures simply call pfn_pte().  Centralise that as the normal
+definition and remove the definition of mk_pte() from the architectures
+which have either that exact definition or something similar.
+functions: 
+fixes: 
+ arch/mips/include/asm/pgtable.h          | 6 ------
+ arch/nios2/include/asm/pgtable.h         | 6 ------
+ arch/openrisc/include/asm/pgtable.h      | 2 --
+ arch/parisc/include/asm/pgtable.h        | 6 ------
+ arch/powerpc/include/asm/pgtable.h       | 3 +--
+ arch/riscv/include/asm/pgtable.h         | 2 --
+ arch/s390/include/asm/pgtable.h          | 5 -----
+ arch/sh/include/asm/pgtable_32.h         | 8 --------
+ arch/sparc/include/asm/pgtable_64.h      | 1 -
+ arch/xtensa/include/asm/pgtable.h        | 6 ------
+ include/linux/mm.h                       | 9 +++++++++
+ 22 files changed, 10 insertions(+), 99 deletions(-)
+diff --git a/arch/alpha/include/asm/pgtable.h b/arch/alpha/include/asm/pgtable.h
+index 02e8817a8921..2676017f42f1 100644
+--- a/arch/alpha/include/asm/pgtable.h
++++ b/arch/alpha/include/asm/pgtable.h
+@@ -193,11 +193,4 @@ extern unsigned long __zero_page(void);
+ 
+ #define pte_page(pte)	pfn_to_page(pte_pfn(pte))
+-#define mk_pte(page, pgprot)						\
+-({									\
+-	pte_t pte;							\
+-									\
+-	pte_val(pte) = (page_to_pfn(page) << 32) | pgprot_val(pgprot);	\
+-	pte;								\
+-})
+ 
+ extern inline pte_t pfn_pte(unsigned long physpfn, pgprot_t pgprot)
+diff --git a/arch/arc/include/asm/pgtable-levels.h b/arch/arc/include/asm/pgtable-levels.h
+index 86e148226463..55dbd2719e35 100644
+--- a/arch/arc/include/asm/pgtable-levels.h
++++ b/arch/arc/include/asm/pgtable-levels.h
+@@ -178,5 +178,4 @@
+ #define pte_pfn(pte)		(pte_val(pte) >> PAGE_SHIFT)
+ #define pfn_pte(pfn, prot)	__pte(__pfn_to_phys(pfn) | pgprot_val(prot))
+-#define mk_pte(page, prot)	pfn_pte(page_to_pfn(page), prot)
+ 
+ #ifdef CONFIG_ISA_ARCV2
+diff --git a/arch/arm/include/asm/pgtable.h b/arch/arm/include/asm/pgtable.h
+index 6b986ef6042f..7f1c3b4e3e04 100644
+--- a/arch/arm/include/asm/pgtable.h
++++ b/arch/arm/include/asm/pgtable.h
+@@ -169,5 +169,4 @@ static inline pte_t *pmd_page_vaddr(pmd_t pmd)
+ 
+ #define pte_page(pte)		pfn_to_page(pte_pfn(pte))
+-#define mk_pte(page,prot)	pfn_pte(page_to_pfn(page), prot)
+ 
+ #define pte_clear(mm,addr,ptep)	set_pte_ext(ptep, __pte(0), 0)
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index d3b538be1500..f03c6c2b0944 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -814,10 +814,4 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
+ #define pte_offset_kimg(dir,addr)	((pte_t *)__phys_to_kimg(pte_offset_phys((dir), (addr))))
+ 
+-/*
+- * Conversion functions: convert a page and protection to a page entry,
+- * and a page entry and page directory to the page they refer to.
+- */
+-#define mk_pte(page,prot)	pfn_pte(page_to_pfn(page),prot)
+-
+ #if CONFIG_PGTABLE_LEVELS > 2
+ 
+diff --git a/arch/csky/include/asm/pgtable.h b/arch/csky/include/asm/pgtable.h
+index a397e1718ab6..b8378431aeff 100644
+--- a/arch/csky/include/asm/pgtable.h
++++ b/arch/csky/include/asm/pgtable.h
+@@ -250,9 +250,4 @@ static inline pgprot_t pgprot_writecombine(pgprot_t _prot)
+ }
+ 
+-/*
+- * Conversion functions: convert a page and protection to a page entry,
+... (258 more diff lines)
+
+##### A080
+=== d82d3bf41152 LA2 2025-04-08 +30/-28
+mm: pass mm down to pagetable_{pte,pmd}_ctor
+
+Patch series "Always call constructor for kernel page tables", v2.
+
+There has been much confusion around exactly when page table
+constructors/destructors (pagetable_*_[cd]tor) are supposed to be called. 
+They were initially introduced for user PTEs only (to support split page
+table locks), then at the PMD level for the same purpose.  Accounting was
+added later on, starting at the PTE level and then moving to higher levels
+(PMD, PUD).  Finally, with my earlier series "Account page tables at all
+levels" [1], the ctor/dtor is run for all levels, all the way to PGD.
+
+I thought this was the end of the story, and it hopefully is for user
+pgtables, but I was wrong for what concerns kernel pgtables.  The current
+situation there makes very little sense:
+
+* At the PTE level, the ctor/dtor is not called (at least in the generic
+  implementation).  Specific helpers are used for kernel pgtables at this
+  level (pte_{alloc,free}_kernel()) and those have never called the
+  ctor/dtor, most likely because they were initially irrelevant in the
+  kernel case.
+
+* At all other levels, the ctor/dtor is normally called.  This is
+  potentially wasteful at the PMD level (more on that later).
+
+This series aims to ensure that the ctor/dtor is always called for kernel
+pgtables, as it already is for user pgtables.  Besides consistency, the
+main motivation is to guarantee that ctor/dtor hooks are systematically
+called; this makes it possible to insert hooks to protect page tables [2],
+for instance.  There is however an extra challenge: split locks are not
+used for kernel pgtables, and it would therefore be wasteful to initialise
+them (ptlock_init()).
+
+It is worth clarifying exactly when split locks are used.  They clearly
+are for user pgtables, but as illustrated in commit 61444cde9170 ("ARM:
+8591/1: mm: use fully constructed struct pages for EFI pgd allocations"),
+they also are for special page tables like efi_mm.  The one case where
+split locks are definitely unused is pgtables owned by init_mm; this is
+consistent with the behaviour of apply_to_pte_range().
+
+The approach chosen in this series is therefore to pass the mm associated
+functions: arch/arm/mm/mmu.c:late_alloc, arch/arm64/mm/mmu.c:pgd_pgtable_alloc, arch/m68k/mm/motorola.c:get_pointer_table, arch/powerpc/mm/book3s64/pgtable.c:__alloc_for_pmdcache, arch/powerpc/mm/pgtable-frag.c:__alloc_for_ptecache, arch/riscv/mm/init.c:alloc_pte_late, arch/riscv/mm/init.c:alloc_pmd_late, arch/s390/mm/pgalloc.c:page_table_alloc, arch/sparc/mm/init_64.c:pte_alloc_one, arch/sparc/mm/srmmu.c:pte_alloc_one, arch/x86/mm/pgtable.c:preallocate_pmds
+fixes: 
+ arch/parisc/include/asm/pgalloc.h        |  2 +-
+ arch/powerpc/mm/book3s64/pgtable.c       |  2 +-
+ arch/powerpc/mm/pgtable-frag.c           |  2 +-
+ arch/riscv/mm/init.c                     |  4 ++--
+ arch/s390/include/asm/pgalloc.h          |  2 +-
+ arch/s390/mm/pgalloc.c                   |  2 +-
+ arch/sparc/mm/init_64.c                  |  2 +-
+ arch/sparc/mm/srmmu.c                    |  2 +-
+ arch/x86/mm/pgtable.c                    |  2 +-
+ include/asm-generic/pgalloc.h            |  4 ++--
+ include/linux/mm.h                       |  6 ++++--
+ 18 files changed, 30 insertions(+), 28 deletions(-)
+diff --git a/arch/arm/mm/mmu.c b/arch/arm/mm/mmu.c
+index f02f872ea8a9..edb7f56b7c91 100644
+--- a/arch/arm/mm/mmu.c
++++ b/arch/arm/mm/mmu.c
+@@ -736,5 +736,5 @@ static void *__init late_alloc(unsigned long sz)
+ 			get_order(sz));
+ 
+-	if (!ptdesc || !pagetable_pte_ctor(ptdesc))
++	if (!ptdesc || !pagetable_pte_ctor(NULL, ptdesc))
+ 		BUG();
+ 	return ptdesc_to_virt(ptdesc);
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index ea6695d53fb9..8c5c471cfb06 100644
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -495,7 +495,7 @@ static phys_addr_t pgd_pgtable_alloc(int shift)
+ 	 */
+ 	if (shift == PAGE_SHIFT)
+-		BUG_ON(!pagetable_pte_ctor(ptdesc));
++		BUG_ON(!pagetable_pte_ctor(NULL, ptdesc));
+ 	else if (shift == PMD_SHIFT)
+-		BUG_ON(!pagetable_pmd_ctor(ptdesc));
++		BUG_ON(!pagetable_pmd_ctor(NULL, ptdesc));
+ 
+ 	return pa;
+diff --git a/arch/loongarch/include/asm/pgalloc.h b/arch/loongarch/include/asm/pgalloc.h
+index b58f587f0f0a..1c63a9d9a6d3 100644
+--- a/arch/loongarch/include/asm/pgalloc.h
++++ b/arch/loongarch/include/asm/pgalloc.h
+@@ -70,5 +70,5 @@ static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long address)
+ 		return NULL;
+ 
+-	if (!pagetable_pmd_ctor(ptdesc)) {
++	if (!pagetable_pmd_ctor(mm, ptdesc)) {
+ 		pagetable_free(ptdesc);
+ 		return NULL;
+diff --git a/arch/m68k/include/asm/mcf_pgalloc.h b/arch/m68k/include/asm/mcf_pgalloc.h
+index 4c648b51e7fd..465a71101b7d 100644
+--- a/arch/m68k/include/asm/mcf_pgalloc.h
++++ b/arch/m68k/include/asm/mcf_pgalloc.h
+@@ -49,5 +49,5 @@ static inline pgtable_t pte_alloc_one(struct mm_struct *mm)
+ 	if (!ptdesc)
+ 		return NULL;
+-	if (!pagetable_pte_ctor(ptdesc)) {
++	if (!pagetable_pte_ctor(mm, ptdesc)) {
+ 		pagetable_free(ptdesc);
+ 		return NULL;
+diff --git a/arch/m68k/include/asm/motorola_pgalloc.h b/arch/m68k/include/asm/motorola_pgalloc.h
+index 5abe7da8ac5a..1091fb0affbe 100644
+--- a/arch/m68k/include/asm/motorola_pgalloc.h
++++ b/arch/m68k/include/asm/motorola_pgalloc.h
+@@ -16,5 +16,5 @@ enum m68k_table_types {
+ 
+ extern void init_pointer_table(void *table, int type);
+-extern void *get_pointer_table(int type);
++extern void *get_pointer_table(struct mm_struct *mm, int type);
+ extern int free_pointer_table(void *table, int type);
+ 
+@@ -27,5 +27,5 @@ extern int free_pointer_table(void *table, int type);
+ static inline pte_t *pte_alloc_one_kernel(struct mm_struct *mm)
+... (203 more diff lines)
+
+##### A081
+=== 648c7fb16f60 LA2 2025-05-09 +11/-11
+lib/crc: make arch-optimized code use subsys_initcall
+
+Make the architecture-optimized CRC code do its CPU feature checks in
+subsys_initcalls instead of arch_initcalls.  This makes it consistent
+with arch/*/lib/crypto/ and ensures that it runs after initcalls that
+possibly could be a prerequisite for kernel-mode FPU, such as x86's
+xfd_update_static_branch() and loongarch's init_euen_mask().
+
+Note: as far as I can tell, x86's xfd_update_static_branch() isn't
+*actually* needed for kernel-mode FPU.  loongarch's init_euen_mask() is
+needed to enable save/restore of the vector registers, but loongarch
+doesn't yet have any CRC or crypto code that uses vector registers
+anyway.  Regardless, let's be consistent with arch/*/lib/crypto/ and
+robust against any potential future dependency on an arch_initcall.
+functions: 
+fixes: 
+ arch/arm/lib/crc-t10dif.c            | 2 +-
+ arch/arm/lib/crc32.c                 | 2 +-
+ arch/arm64/lib/crc-t10dif.c          | 2 +-
+ arch/loongarch/lib/crc32-loongarch.c | 2 +-
+ arch/mips/lib/crc32-mips.c           | 2 +-
+ arch/powerpc/lib/crc-t10dif.c        | 2 +-
+ arch/powerpc/lib/crc32.c             | 2 +-
+ arch/sparc/lib/crc32.c               | 2 +-
+ arch/x86/lib/crc-t10dif.c            | 2 +-
+ arch/x86/lib/crc32.c                 | 2 +-
+ arch/x86/lib/crc64.c                 | 2 +-
+ 11 files changed, 11 insertions(+), 11 deletions(-)
+diff --git a/arch/arm/lib/crc-t10dif.c b/arch/arm/lib/crc-t10dif.c
+index 382437094bdd..1093f8ec13b0 100644
+--- a/arch/arm/lib/crc-t10dif.c
++++ b/arch/arm/lib/crc-t10dif.c
+@@ -61,5 +61,5 @@ static int __init crc_t10dif_arm_init(void)
+ 	return 0;
+ }
+-arch_initcall(crc_t10dif_arm_init);
++subsys_initcall(crc_t10dif_arm_init);
+ 
+ static void __exit crc_t10dif_arm_exit(void)
+diff --git a/arch/arm/lib/crc32.c b/arch/arm/lib/crc32.c
+index 7ef7db9c0de7..f2bef8849c7c 100644
+--- a/arch/arm/lib/crc32.c
++++ b/arch/arm/lib/crc32.c
+@@ -104,5 +104,5 @@ static int __init crc32_arm_init(void)
+ 	return 0;
+ }
+-arch_initcall(crc32_arm_init);
++subsys_initcall(crc32_arm_init);
+ 
+ static void __exit crc32_arm_exit(void)
+diff --git a/arch/arm64/lib/crc-t10dif.c b/arch/arm64/lib/crc-t10dif.c
+index 99d0b5668a28..c2ffe4fdb59d 100644
+--- a/arch/arm64/lib/crc-t10dif.c
++++ b/arch/arm64/lib/crc-t10dif.c
+@@ -62,5 +62,5 @@ static int __init crc_t10dif_arm64_init(void)
+ 	return 0;
+ }
+-arch_initcall(crc_t10dif_arm64_init);
++subsys_initcall(crc_t10dif_arm64_init);
+ 
+ static void __exit crc_t10dif_arm64_exit(void)
+diff --git a/arch/loongarch/lib/crc32-loongarch.c b/arch/loongarch/lib/crc32-loongarch.c
+index 8e6d1f517e73..b37cd8537b45 100644
+--- a/arch/loongarch/lib/crc32-loongarch.c
++++ b/arch/loongarch/lib/crc32-loongarch.c
+@@ -115,5 +115,5 @@ static int __init crc32_loongarch_init(void)
+ 	return 0;
+ }
+-arch_initcall(crc32_loongarch_init);
++subsys_initcall(crc32_loongarch_init);
+ 
+ static void __exit crc32_loongarch_exit(void)
+diff --git a/arch/mips/lib/crc32-mips.c b/arch/mips/lib/crc32-mips.c
+index 84df361e7181..45e4d2c9fbf5 100644
+--- a/arch/mips/lib/crc32-mips.c
++++ b/arch/mips/lib/crc32-mips.c
+@@ -164,5 +164,5 @@ static int __init crc32_mips_init(void)
+ 	return 0;
+ }
+-arch_initcall(crc32_mips_init);
++subsys_initcall(crc32_mips_init);
+ 
+ static void __exit crc32_mips_exit(void)
+diff --git a/arch/powerpc/lib/crc-t10dif.c b/arch/powerpc/lib/crc-t10dif.c
+index ddd5c4088f50..4253842cc50d 100644
+--- a/arch/powerpc/lib/crc-t10dif.c
++++ b/arch/powerpc/lib/crc-t10dif.c
+@@ -72,5 +72,5 @@ static int __init crc_t10dif_powerpc_init(void)
+... (61 more diff lines)
+
+##### A082
+=== 2468b0e3d565 LA2 2025-05-14 +20/-2
+LoongArch: Prevent cond_resched() occurring within kernel-fpu
+
+When CONFIG_PREEMPT_COUNT is not configured (i.e. CONFIG_PREEMPT_NONE/
+CONFIG_PREEMPT_VOLUNTARY), preempt_disable() / preempt_enable() merely
+acts as a barrier(). However, in these cases cond_resched() can still
+trigger a context switch and modify the CSR.EUEN, resulting in do_fpu()
+exception being activated within the kernel-fpu critical sections, as
+demonstrated in the following path:
+
+dcn32_calculate_wm_and_dlg()
+    DC_FP_START()
+	dcn32_calculate_wm_and_dlg_fpu()
+	    dcn32_find_dummy_latency_index_for_fw_based_mclk_switch()
+		dcn32_internal_validate_bw()
+		    dcn32_enable_phantom_stream()
+			dc_create_stream_for_sink()
+			   kzalloc(GFP_KERNEL)
+				__kmem_cache_alloc_node()
+				    __cond_resched()
+    DC_FP_END()
+
+This patch is similar to commit d02198550423a0b (x86/fpu: Improve crypto
+performance by making kernel-mode FPU reliably usable in softirqs).  It
+uses local_bh_disable() instead of preempt_disable() for non-RT kernels
+so it can avoid the cond_resched() issue, and also extend the kernel-fpu
+application scenarios to the softirq context.
+functions: arch/loongarch/kernel/kfpu.c:kernel_fpu_begin, arch/loongarch/kernel/kfpu.c:kernel_fpu_end
+fixes: 
+diff --git a/arch/loongarch/kernel/kfpu.c b/arch/loongarch/kernel/kfpu.c
+index ec5b28e570c9..4c476904227f 100644
+--- a/arch/loongarch/kernel/kfpu.c
++++ b/arch/loongarch/kernel/kfpu.c
+@@ -19,9 +19,26 @@ static DEFINE_PER_CPU(bool, in_kernel_fpu);
+ static DEFINE_PER_CPU(unsigned int, euen_current);
+ 
++static inline void fpregs_lock(void)
++{
++	if (IS_ENABLED(CONFIG_PREEMPT_RT))
++		preempt_disable();
++	else
++		local_bh_disable();
++}
++
++static inline void fpregs_unlock(void)
++{
++	if (IS_ENABLED(CONFIG_PREEMPT_RT))
++		preempt_enable();
++	else
++		local_bh_enable();
++}
++
+ void kernel_fpu_begin(void)
+ {
+ 	unsigned int *euen_curr;
+ 
+-	preempt_disable();
++	if (!irqs_disabled())
++		fpregs_lock();
+ 
+ 	WARN_ON(this_cpu_read(in_kernel_fpu));
+@@ -74,5 +91,6 @@ void kernel_fpu_end(void)
+ 	this_cpu_write(in_kernel_fpu, false);
+ 
+-	preempt_enable();
++	if (!irqs_disabled())
++		fpregs_unlock();
+ }
+ EXPORT_SYMBOL_GPL(kernel_fpu_end);
+
+##### A083
+=== aec58b48517c LA2 2025-05-15 +13/-12
+bugs/core: Extend __WARN_FLAGS() with the 'cond_str' parameter
+
+Push the new parameter down into every architecture that defines __WARN_FLAGS():
+
+  arm64
+  loongarch
+  parisc
+  powerpc
+  riscv
+  s390
+  sh
+  x86
+
+Don't pass anything substantial down yet, just propagate the
+new parameter with empty strings, without generating it or
+using it.
+
+( The string is never NULL, so it can be concatenated at the
+  preprocessor level. )
+functions: 
+fixes: 
+ arch/arm64/include/asm/bug.h     | 2 +-
+ arch/loongarch/include/asm/bug.h | 2 +-
+ arch/parisc/include/asm/bug.h    | 4 ++--
+ arch/powerpc/include/asm/bug.h   | 2 +-
+ arch/riscv/include/asm/bug.h     | 2 +-
+ arch/s390/include/asm/bug.h      | 2 +-
+ arch/sh/include/asm/bug.h        | 2 +-
+ arch/x86/include/asm/bug.h       | 2 +-
+ include/asm-generic/bug.h        | 7 ++++---
+ 9 files changed, 13 insertions(+), 12 deletions(-)
+diff --git a/arch/arm64/include/asm/bug.h b/arch/arm64/include/asm/bug.h
+index 28be048db3f6..bceeaec21fb9 100644
+--- a/arch/arm64/include/asm/bug.h
++++ b/arch/arm64/include/asm/bug.h
+@@ -20,5 +20,5 @@
+ } while (0)
+ 
+-#define __WARN_FLAGS(flags) __BUG_FLAGS(BUGFLAG_WARNING|(flags))
++#define __WARN_FLAGS(cond_str, flags) __BUG_FLAGS(BUGFLAG_WARNING|(flags))
+ 
+ #define HAVE_ARCH_BUG
+diff --git a/arch/loongarch/include/asm/bug.h b/arch/loongarch/include/asm/bug.h
+index f6f254f2c5db..51c2cb98d728 100644
+--- a/arch/loongarch/include/asm/bug.h
++++ b/arch/loongarch/include/asm/bug.h
+@@ -43,5 +43,5 @@
+ 			     extra);
+ 
+-#define __WARN_FLAGS(flags)					\
++#define __WARN_FLAGS(cond_str, flags)				\
+ do {								\
+ 	instrumentation_begin();				\
+diff --git a/arch/parisc/include/asm/bug.h b/arch/parisc/include/asm/bug.h
+index 833555f74ffa..1a87cf80ec3c 100644
+--- a/arch/parisc/include/asm/bug.h
++++ b/arch/parisc/include/asm/bug.h
+@@ -51,5 +51,5 @@
+ 
+ #ifdef CONFIG_DEBUG_BUGVERBOSE
+-#define __WARN_FLAGS(flags)						\
++#define __WARN_FLAGS(cond_str, flags)					\
+ 	do {								\
+ 		asm volatile("\n"					\
+@@ -67,5 +67,5 @@
+ 	} while(0)
+ #else
+-#define __WARN_FLAGS(flags)						\
++#define __WARN_FLAGS(cond_str, flags)					\
+ 	do {								\
+ 		asm volatile("\n"					\
+diff --git a/arch/powerpc/include/asm/bug.h b/arch/powerpc/include/asm/bug.h
+index 1db485aacbd9..34d39ec79720 100644
+--- a/arch/powerpc/include/asm/bug.h
++++ b/arch/powerpc/include/asm/bug.h
+@@ -73,5 +73,5 @@
+ #define HAVE_ARCH_BUG
+ 
+-#define __WARN_FLAGS(flags) BUG_ENTRY("twi 31, 0, 0", BUGFLAG_WARNING | (flags))
++#define __WARN_FLAGS(cond_str, flags) BUG_ENTRY("twi 31, 0, 0", BUGFLAG_WARNING | (flags))
+ 
+ #ifdef CONFIG_PPC64
+diff --git a/arch/riscv/include/asm/bug.h b/arch/riscv/include/asm/bug.h
+index 1aaea81fb141..b22ee4d2c882 100644
+--- a/arch/riscv/include/asm/bug.h
++++ b/arch/riscv/include/asm/bug.h
+@@ -77,5 +77,5 @@ do {								\
+ } while (0)
+ 
+-#define __WARN_FLAGS(flags) __BUG_FLAGS(BUGFLAG_WARNING|(flags))
++#define __WARN_FLAGS(cond_str, flags) __BUG_FLAGS(BUGFLAG_WARNING|(flags))
+... (59 more diff lines)
+
+##### A084
+=== 35c18f2933c5 LA2 2025-06-12 +27/-14
+Add a new optional ",cma" suffix to the crashkernel= command line option
+
+Patch series "kdump: crashkernel reservation from CMA", v5.
+
+This series implements a way to reserve additional crash kernel memory
+using CMA.
+
+Currently, all the memory for the crash kernel is not usable by the 1st
+(production) kernel.  It is also unmapped so that it can't be corrupted by
+the fault that will eventually trigger the crash.  This makes sense for
+the memory actually used by the kexec-loaded crash kernel image and initrd
+and the data prepared during the load (vmcoreinfo, ...).  However, the
+reserved space needs to be much larger than that to provide enough
+run-time memory for the crash kernel and the kdump userspace.  Estimating
+the amount of memory to reserve is difficult.  Being too careful makes
+kdump likely to end in OOM, being too generous takes even more memory from
+the production system.  Also, the reservation only allows reserving a
+single contiguous block (or two with the "low" suffix).  I've seen systems
+where this fails because the physical memory is fragmented.
+
+By reserving additional crashkernel memory from CMA, the main crashkernel
+reservation can be just large enough to fit the kernel and initrd image,
+minimizing the memory taken away from the production system.  Most of the
+run-time memory for the crash kernel will be memory previously available
+to userspace in the production system.  As this memory is no longer
+wasted, the reservation can be done with a generous margin, making kdump
+more reliable.  Kernel memory that we need to preserve for dumping is
+normally not allocated from CMA, unless it is explicitly allocated as
+movable.  Currently this is only the case for memory ballooning and zswap.
+Such movable memory will be missing from the vmcore.  User data is
+typically not dumped by makedumpfile.  When dumping of user data is
+intended this new CMA reservation cannot be used.
+
+There are five patches in this series:
+
+The first adds a new ",cma" suffix to the recenly introduced generic
+crashkernel parsing code.  parse_crashkernel() takes one more argument to
+store the cma reservation size.
+
+The second patch implements reserve_crashkernel_cma() which performs the
+reservation.  If the requested size is not available in a single range,
+functions: arch/arm/kernel/setup.c:reserve_crashkernel, arch/arm64/mm/init.c:arch_reserve_crashkernel, arch/loongarch/kernel/setup.c:arch_reserve_crashkernel, arch/mips/kernel/setup.c:mips_parse_crashkernel, arch/powerpc/kernel/fadump.c:fadump_calculate_reserve_size, arch/powerpc/kexec/core.c:arch_reserve_crashkernel, arch/powerpc/mm/nohash/kaslr_booke.c:get_crash_kernel, arch/riscv/mm/init.c:arch_reserve_crashkernel, arch/s390/kernel/setup.c:reserve_crashkernel, arch/sh/kernel/machine_kexec.c:reserve_crashkernel, arch/x86/kernel/setup.c:arch_reserve_crashkernel, kernel/crash_reserve.c:parse_crashkernel
+fixes: 
+ arch/loongarch/kernel/setup.c        |  2 +-
+ arch/mips/kernel/setup.c             |  2 +-
+ arch/powerpc/kernel/fadump.c         |  2 +-
+ arch/powerpc/kexec/core.c            |  2 +-
+ arch/powerpc/mm/nohash/kaslr_booke.c |  2 +-
+ arch/riscv/mm/init.c                 |  2 +-
+ arch/s390/kernel/setup.c             |  2 +-
+ arch/sh/kernel/machine_kexec.c       |  2 +-
+ arch/x86/kernel/setup.c              |  2 +-
+ include/linux/crash_reserve.h        |  3 ++-
+ kernel/crash_reserve.c               | 16 ++++++++++++++--
+ 13 files changed, 27 insertions(+), 14 deletions(-)
+diff --git a/arch/arm/kernel/setup.c b/arch/arm/kernel/setup.c
+index a41c93988d2c..0bfd66c7ada0 100644
+--- a/arch/arm/kernel/setup.c
++++ b/arch/arm/kernel/setup.c
+@@ -1005,5 +1005,5 @@ static void __init reserve_crashkernel(void)
+ 	ret = parse_crashkernel(boot_command_line, total_mem,
+ 				&crash_size, &crash_base,
+-				NULL, NULL);
++				NULL, NULL, NULL);
+ 	/* invalid value specified or crashkernel=0 */
+ 	if (ret || !crash_size)
+diff --git a/arch/arm64/mm/init.c b/arch/arm64/mm/init.c
+index 0c8c35dd645e..ea84a61ed508 100644
+--- a/arch/arm64/mm/init.c
++++ b/arch/arm64/mm/init.c
+@@ -107,5 +107,5 @@ static void __init arch_reserve_crashkernel(void)
+ 	ret = parse_crashkernel(boot_command_line, memblock_phys_mem_size(),
+ 				&crash_size, &crash_base,
+-				&low_size, &high);
++				&low_size, NULL, &high);
+ 	if (ret)
+ 		return;
+diff --git a/arch/loongarch/kernel/setup.c b/arch/loongarch/kernel/setup.c
+index b99fbb388fe0..22b27cd447a1 100644
+--- a/arch/loongarch/kernel/setup.c
++++ b/arch/loongarch/kernel/setup.c
+@@ -266,5 +266,5 @@ static void __init arch_reserve_crashkernel(void)
+ 
+ 	ret = parse_crashkernel(boot_command_line, memblock_phys_mem_size(),
+-				&crash_size, &crash_base, &low_size, &high);
++				&crash_size, &crash_base, &low_size, NULL, &high);
+ 	if (ret)
+ 		return;
+diff --git a/arch/mips/kernel/setup.c b/arch/mips/kernel/setup.c
+index fbfe0771317e..11b9b6b63e19 100644
+--- a/arch/mips/kernel/setup.c
++++ b/arch/mips/kernel/setup.c
+@@ -459,5 +459,5 @@ static void __init mips_parse_crashkernel(void)
+ 	ret = parse_crashkernel(boot_command_line, total_mem,
+ 				&crash_size, &crash_base,
+-				NULL, NULL);
++				NULL, NULL, NULL);
+ 	if (ret != 0 || crash_size <= 0)
+ 		return;
+diff --git a/arch/powerpc/kernel/fadump.c b/arch/powerpc/kernel/fadump.c
+index 8ca49e40c473..28cab25d5b33 100644
+--- a/arch/powerpc/kernel/fadump.c
++++ b/arch/powerpc/kernel/fadump.c
+@@ -334,5 +334,5 @@ static __init u64 fadump_calculate_reserve_size(void)
+ 	 */
+ 	ret = parse_crashkernel(boot_command_line, memblock_phys_mem_size(),
+-				&size, &base, NULL, NULL);
++				&size, &base, NULL, NULL, NULL);
+ 	if (ret == 0 && size > 0) {
+ 		unsigned long max_size;
+diff --git a/arch/powerpc/kexec/core.c b/arch/powerpc/kexec/core.c
+index 00e9c267b912..d1a2d755381c 100644
+--- a/arch/powerpc/kexec/core.c
++++ b/arch/powerpc/kexec/core.c
+@@ -111,5 +111,5 @@ void __init arch_reserve_crashkernel(void)
+... (119 more diff lines)
+
+##### A085
+=== d438d2734170 LA2 2025-06-19 +17/-319
+mm: remove devmap related functions and page table bits
+
+Now that DAX and all other reference counts to ZONE_DEVICE pages are
+managed normally there is no need for the special devmap PTE/PMD/PUD page
+table bits.  So drop all references to these, freeing up a software
+defined page table bit on architectures supporting it.
+functions: mm/debug_vm_pgtable.c:pud_advanced_tests, mm/debug_vm_pgtable.c:pte_devmap_tests, mm/debug_vm_pgtable.c:pmd_devmap_tests, mm/debug_vm_pgtable.c:pud_devmap_tests, mm/debug_vm_pgtable.c:debug_vm_pgtable, mm/madvise.c:guard_install_pud_entry, mm/madvise.c:guard_install_pmd_entry, mm/madvise.c:guard_remove_pud_entry, mm/madvise.c:guard_remove_pmd_entry
+fixes: 
+ arch/riscv/include/asm/pgtable-bits.h         |  1 -
+ arch/riscv/include/asm/pgtable.h              | 22 ------------------
+ arch/x86/Kconfig                              |  1 -
+ arch/x86/include/asm/pgtable.h                | 51 ++--------------------------------------
+ arch/x86/include/asm/pgtable_types.h          |  5 +---
+ include/linux/mm.h                            |  7 ------
+ include/linux/pgtable.h                       | 19 ++-------------
+ mm/Kconfig                                    |  4 ----
+ mm/debug_vm_pgtable.c                         | 59 -----------------------------------------------
+ mm/hmm.c                                      |  3 +--
+ mm/madvise.c                                  |  8 +++----
+ 25 files changed, 17 insertions(+), 319 deletions(-)
+diff --git a/Documentation/mm/arch_pgtable_helpers.rst b/Documentation/mm/arch_pgtable_helpers.rst
+index af245161d8e7..c88c7fa665d6 100644
+--- a/Documentation/mm/arch_pgtable_helpers.rst
++++ b/Documentation/mm/arch_pgtable_helpers.rst
+@@ -31,6 +31,4 @@ PTE Page Table Helpers
+ | pte_protnone              | Tests a PROT_NONE PTE                            |
+ +---------------------------+--------------------------------------------------+
+-| pte_devmap                | Tests a ZONE_DEVICE mapped PTE                   |
+-+---------------------------+--------------------------------------------------+
+ | pte_soft_dirty            | Tests a soft dirty PTE                           |
+ +---------------------------+--------------------------------------------------+
+@@ -105,6 +103,4 @@ PMD Page Table Helpers
+ | pmd_protnone              | Tests a PROT_NONE PMD                            |
+ +---------------------------+--------------------------------------------------+
+-| pmd_devmap                | Tests a ZONE_DEVICE mapped PMD                   |
+-+---------------------------+--------------------------------------------------+
+ | pmd_soft_dirty            | Tests a soft dirty PMD                           |
+ +---------------------------+--------------------------------------------------+
+@@ -178,6 +174,4 @@ PUD Page Table Helpers
+ | pud_write                 | Tests a writable PUD                             |
+ +---------------------------+--------------------------------------------------+
+-| pud_devmap                | Tests a ZONE_DEVICE mapped PUD                   |
+-+---------------------------+--------------------------------------------------+
+ | pud_mkyoung               | Creates a young PUD                              |
+ +---------------------------+--------------------------------------------------+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 55fc331af337..94b48b1dae71 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -45,5 +45,4 @@ config ARM64
+ 	select ARCH_HAS_PREEMPT_LAZY
+ 	select ARCH_HAS_PTDUMP
+-	select ARCH_HAS_PTE_DEVMAP
+ 	select ARCH_HAS_PTE_SPECIAL
+ 	select ARCH_HAS_HW_PTE_YOUNG
+diff --git a/arch/arm64/include/asm/pgtable-prot.h b/arch/arm64/include/asm/pgtable-prot.h
+index 7830d031742e..85dceb1c66f4 100644
+--- a/arch/arm64/include/asm/pgtable-prot.h
++++ b/arch/arm64/include/asm/pgtable-prot.h
+@@ -18,5 +18,4 @@
+ #define PTE_DIRTY		(_AT(pteval_t, 1) << 55)
+ #define PTE_SPECIAL		(_AT(pteval_t, 1) << 56)
+-#define PTE_DEVMAP		(_AT(pteval_t, 1) << 57)
+ 
+ /*
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index e511f909f63c..ba63c8736666 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -191,5 +191,4 @@ static inline pteval_t __phys_to_pte_val(phys_addr_t phys)
+ #define pte_user_exec(pte)	(!(pte_val(pte) & PTE_UXN))
+ #define pte_cont(pte)		(!!(pte_val(pte) & PTE_CONT))
+-#define pte_devmap(pte)		(!!(pte_val(pte) & PTE_DEVMAP))
+ #define pte_tagged(pte)		((pte_val(pte) & PTE_ATTRINDX_MASK) == \
+ 				 PTE_ATTRINDX(MT_NORMAL_TAGGED))
+@@ -373,9 +372,4 @@ static inline pmd_t pmd_mkcont(pmd_t pmd)
+ }
+ 
+-static inline pte_t pte_mkdevmap(pte_t pte)
+-{
+... (693 more diff lines)
+
+##### A086
+=== d35ec48fa6c8 LA2 2025-08-05 +1/-1
+LoongArch: vDSO: Remove -nostdlib complier flag
+
+Since $(LD) is directly used, hence -nostdlib is unneeded, MIPS has
+removed this, we should remove it too.
+
+bdbf2038fbf4 ("MIPS: VDSO: remove -nostdlib compiler flag").
+
+In fact, other architectures also use $(LD) now.
+
+fe00e50b2db8 ("ARM: 8858/1: vdso: use $(LD) instead of $(CC) to link VDSO")
+691efbedc60d ("arm64: vdso: use $(LD) instead of $(CC) to link VDSO")
+2ff906994b6c ("MIPS: VDSO: Use $(LD) instead of $(CC) to link VDSO")
+2b2a25845d53 ("s390/vdso: Use $(LD) instead of $(CC) to link vDSO")
+functions: 
+fixes: 
+diff --git a/arch/loongarch/vdso/Makefile b/arch/loongarch/vdso/Makefile
+index ccd2c5e135c6..d8316f993482 100644
+--- a/arch/loongarch/vdso/Makefile
++++ b/arch/loongarch/vdso/Makefile
+@@ -37,5 +37,5 @@ endif
+ # VDSO linker flags.
+ ldflags-y := -Bsymbolic --no-undefined -soname=linux-vdso.so.1 \
+-	$(filter -E%,$(KBUILD_CFLAGS)) -nostdlib -shared --build-id -T
++	$(filter -E%,$(KBUILD_CFLAGS)) -shared --build-id -T
+ 
+ #
+
+##### A087
+=== f7794a4d92ad LA2 2025-08-20 +8/-0
+LoongArch: Increase COMMAND_LINE_SIZE up to 4096
+
+The default COMMAND_LINE_SIZE of 512, inherited from asm-generic, is
+too small for modern use cases. For example, kdump configurations or
+extensive debugging parameters can easily exceed this limit.
+
+Therefore, increase the command line size to 4096 bytes, aligning
+LoongArch with the MIPS architecture. This change follows a broader
+trend among architectures to raise this limit to support modern needs;
+for instance, PowerPC increased its value for similar reasons in the
+commit a5980d064fe2 ("powerpc: Bump COMMAND_LINE_SIZE to 2048").
+
+Similar to the change made for RISC-V in the commit 61fc1ee8be26
+("riscv: Bump COMMAND_LINE_SIZE value to 1024"), this is considered
+a safe change. The broader kernel community has reached a consensus
+that modifying COMMAND_LINE_SIZE from UAPI headers does not constitute
+a uABI breakage, as well-behaved userspace applications should not
+rely on this macro.
+functions: 
+fixes: 
+diff --git a/arch/loongarch/include/uapi/asm/setup.h b/arch/loongarch/include/uapi/asm/setup.h
+new file mode 100644
+index 000000000000..d46363ce3e02
+--- /dev/null
++++ b/arch/loongarch/include/uapi/asm/setup.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++
++#ifndef _UAPI_ASM_LOONGARCH_SETUP_H
++#define _UAPI_ASM_LOONGARCH_SETUP_H
++
++#define COMMAND_LINE_SIZE	4096
++
++#endif /* _UAPI_ASM_LOONGARCH_SETUP_H */
+
+##### A088
+=== 6d0386ea9987 LA2 2025-08-27 +24/-26
+entry/kvm: KVM: Move KVM details related to signal/-EINTR into KVM proper
+
+Move KVM's morphing of pending signals into userspace exits into KVM
+proper, and drop the @vcpu param from xfer_to_guest_mode_handle_work().
+How KVM responds to -EINTR is a detail that really belongs in KVM itself,
+and invoking kvm_handle_signal_exit() from kernel code creates an inverted
+module dependency.  E.g. attempting to move kvm_handle_signal_exit() into
+kvm_main.c would generate an linker error when building kvm.ko as a module.
+
+Dropping KVM details will also converting the KVM "entry" code into a more
+generic virtualization framework so that it can be used when running as a
+Hyper-V root partition.
+
+Lastly, eliminating usage of "struct kvm_vcpu" outside of KVM is also nice
+to have for KVM x86 developers, as keeping the details of kvm_vcpu purely
+within KVM allows changing the layout of the structure without having to
+boot into a new kernel, e.g. allows rebuilding and reloading kvm.ko with a
+modified kvm_vcpu structure as part of debug/development.
+functions: arch/arm64/kvm/arm.c:kvm_arch_vcpu_ioctl_run, arch/loongarch/kvm/vcpu.c:kvm_enter_guest_check, arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_ioctl_run, arch/x86/kvm/x86.c:vcpu_run, kernel/entry/kvm.c:xfer_to_guest_mode_work, kernel/entry/kvm.c:xfer_to_guest_mode_handle_work
+fixes: 
+ arch/arm64/kvm/arm.c      |  3 +--
+ arch/loongarch/kvm/vcpu.c |  3 +--
+ arch/riscv/kvm/vcpu.c     |  3 +--
+ arch/x86/kvm/vmx/vmx.c    |  1 -
+ arch/x86/kvm/x86.c        |  3 +--
+ include/linux/entry-kvm.h | 11 +++--------
+ include/linux/kvm_host.h  | 13 ++++++++++++-
+ kernel/entry/kvm.c        | 13 +++++--------
+ 8 files changed, 24 insertions(+), 26 deletions(-)
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 888f7c7abf54..418fd3043467 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -7,5 +7,4 @@
+ #include <linux/bug.h>
+ #include <linux/cpu_pm.h>
+-#include <linux/entry-kvm.h>
+ #include <linux/errno.h>
+ #include <linux/err.h>
+@@ -1178,5 +1177,5 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
+ 		 * Check conditions before entering the guest
+ 		 */
+-		ret = xfer_to_guest_mode_handle_work(vcpu);
++		ret = kvm_xfer_to_guest_mode_handle_work(vcpu);
+ 		if (!ret)
+ 			ret = 1;
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index d1b8c50941ca..514256b25ba1 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -5,5 +5,4 @@
+ 
+ #include <linux/kvm_host.h>
+-#include <linux/entry-kvm.h>
+ #include <asm/fpu.h>
+ #include <asm/lbt.h>
+@@ -252,5 +251,5 @@ static int kvm_enter_guest_check(struct kvm_vcpu *vcpu)
+ 	 * Check conditions before entering the guest
+ 	 */
+-	ret = xfer_to_guest_mode_handle_work(vcpu);
++	ret = kvm_xfer_to_guest_mode_handle_work(vcpu);
+ 	if (ret < 0)
+ 		return ret;
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index f001e56403f9..251e787f2ebc 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -8,5 +8,4 @@
+ 
+ #include <linux/bitops.h>
+-#include <linux/entry-kvm.h>
+ #include <linux/errno.h>
+ #include <linux/err.h>
+@@ -911,5 +910,5 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
+ 	while (ret > 0) {
+ 		/* Check conditions before entering the guest */
+-		ret = xfer_to_guest_mode_handle_work(vcpu);
++		ret = kvm_xfer_to_guest_mode_handle_work(vcpu);
+ 		if (ret)
+ 			continue;
+diff --git a/arch/x86/kvm/vmx/vmx.c b/arch/x86/kvm/vmx/vmx.c
+index aa157fe5b7b3..d7c86613e50a 100644
+--- a/arch/x86/kvm/vmx/vmx.c
++++ b/arch/x86/kvm/vmx/vmx.c
+@@ -29,5 +29,4 @@
+ #include <linux/tboot.h>
+ #include <linux/trace_events.h>
+-#include <linux/entry-kvm.h>
+ 
+... (123 more diff lines)
+
+##### A089
+=== 35561bab7689 LA2 2025-09-17 +24/-0
+arch: Add the macro COMPILE_OFFSETS to all the asm-offsets.c
+
+The include/generated/asm-offsets.h is generated in Kbuild during
+compiling from arch/SRCARCH/kernel/asm-offsets.c. When we want to
+generate another similar offset header file, circular dependency can
+happen.
+
+For example, we want to generate a offset file include/generated/test.h,
+which is included in include/sched/sched.h. If we generate asm-offsets.h
+first, it will fail, as include/sched/sched.h is included in asm-offsets.c
+and include/generated/test.h doesn't exist; If we generate test.h first,
+it can't success neither, as include/generated/asm-offsets.h is included
+by it.
+
+In x86_64, the macro COMPILE_OFFSETS is used to avoid such circular
+dependency. We can generate asm-offsets.h first, and if the
+COMPILE_OFFSETS is defined, we don't include the "generated/test.h".
+
+And we define the macro COMPILE_OFFSETS for all the asm-offsets.c for this
+purpose.
+functions: 
+fixes: 
+ arch/mips/kernel/asm-offsets.c       | 2 ++
+ arch/nios2/kernel/asm-offsets.c      | 1 +
+ arch/openrisc/kernel/asm-offsets.c   | 1 +
+ arch/parisc/kernel/asm-offsets.c     | 1 +
+ arch/powerpc/kernel/asm-offsets.c    | 1 +
+ arch/riscv/kernel/asm-offsets.c      | 1 +
+ arch/s390/kernel/asm-offsets.c       | 1 +
+ arch/sh/kernel/asm-offsets.c         | 1 +
+ arch/sparc/kernel/asm-offsets.c      | 1 +
+ arch/um/kernel/asm-offsets.c         | 2 ++
+ arch/xtensa/kernel/asm-offsets.c     | 1 +
+ 20 files changed, 24 insertions(+)
+diff --git a/arch/alpha/kernel/asm-offsets.c b/arch/alpha/kernel/asm-offsets.c
+index e9dad60b147f..1ebb05890499 100644
+--- a/arch/alpha/kernel/asm-offsets.c
++++ b/arch/alpha/kernel/asm-offsets.c
+@@ -5,4 +5,5 @@
+  * and format the required data.
+  */
++#define COMPILE_OFFSETS
+ 
+ #include <linux/types.h>
+diff --git a/arch/arc/kernel/asm-offsets.c b/arch/arc/kernel/asm-offsets.c
+index f77deb799175..2978da85fcb6 100644
+--- a/arch/arc/kernel/asm-offsets.c
++++ b/arch/arc/kernel/asm-offsets.c
+@@ -3,4 +3,5 @@
+  * Copyright (C) 2004, 2007-2010, 2011-2012 Synopsys, Inc. (www.synopsys.com)
+  */
++#define COMPILE_OFFSETS
+ 
+ #include <linux/sched.h>
+diff --git a/arch/arm/kernel/asm-offsets.c b/arch/arm/kernel/asm-offsets.c
+index 123f4a8ef446..2101938d27fc 100644
+--- a/arch/arm/kernel/asm-offsets.c
++++ b/arch/arm/kernel/asm-offsets.c
+@@ -8,4 +8,6 @@
+  * and format the required data.
+  */
++#define COMPILE_OFFSETS
++
+ #include <linux/compiler.h>
+ #include <linux/sched.h>
+diff --git a/arch/arm64/kernel/asm-offsets.c b/arch/arm64/kernel/asm-offsets.c
+index 30d4bbe68661..b6367ff3a49c 100644
+--- a/arch/arm64/kernel/asm-offsets.c
++++ b/arch/arm64/kernel/asm-offsets.c
+@@ -7,4 +7,5 @@
+  * Copyright (C) 2012 ARM Ltd.
+  */
++#define COMPILE_OFFSETS
+ 
+ #include <linux/arm_sdei.h>
+diff --git a/arch/csky/kernel/asm-offsets.c b/arch/csky/kernel/asm-offsets.c
+index d1e903579473..5525c8e7e1d9 100644
+--- a/arch/csky/kernel/asm-offsets.c
++++ b/arch/csky/kernel/asm-offsets.c
+@@ -1,4 +1,5 @@
+ // SPDX-License-Identifier: GPL-2.0
+ // Copyright (C) 2018 Hangzhou C-SKY Microsystems co.,ltd.
++#define COMPILE_OFFSETS
+ 
+ #include <linux/sched.h>
+diff --git a/arch/hexagon/kernel/asm-offsets.c b/arch/hexagon/kernel/asm-offsets.c
+index 03a7063f9456..50eea9fa6f13 100644
+--- a/arch/hexagon/kernel/asm-offsets.c
++++ b/arch/hexagon/kernel/asm-offsets.c
+@@ -9,4 +9,5 @@
+  * Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
+  */
++#define COMPILE_OFFSETS
+ 
+... (141 more diff lines)
+
+##### A090
+=== b0f50dc09bf0 LA2 2025-10-02 +0/-1
+LoongArch: BPF: Remove duplicated bpf_flush_icache()
+
+The bpf_flush_icache() is called by bpf_arch_text_copy() already. So
+remove it. This has been done in arm64 and riscv.
+functions: arch/loongarch/net/bpf_jit.c:arch_prepare_bpf_trampoline
+fixes: 
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 61135f8bcdad..bee2e8e340e7 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1719,5 +1719,4 @@ int arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *ro_image,
+ 	}
+ 
+-	bpf_flush_icache(ro_image, ro_image_end);
+ out:
+ 	kvfree(image);
+
+##### A091
+=== 0a0da3f92118 LA2 2025-10-30 +12/-18
+KVM: Make support for kvm_arch_vcpu_async_ioctl() mandatory
+
+Implement kvm_arch_vcpu_async_ioctl() "natively" in x86 and arm64 instead
+of relying on an #ifdef'd stub, and drop HAVE_KVM_VCPU_ASYNC_IOCTL in
+anticipation of using the API on x86.  Once x86 uses the API, providing a
+stub for one architecture and having all other architectures opt-in
+requires more code than simply implementing the API in the lone holdout.
+
+Eliminating the Kconfig will also reduce churn if the API is renamed in
+the future (spoiler alert).
+
+No functional change intended.
+functions: arch/x86/kvm/x86.c:kvm_vm_ioctl_set_clock
+fixes: 
+ arch/arm64/kvm/arm.c       |  6 ++++++
+ arch/loongarch/kvm/Kconfig |  1 -
+ arch/mips/kvm/Kconfig      |  1 -
+ arch/powerpc/kvm/Kconfig   |  1 -
+ arch/riscv/kvm/Kconfig     |  1 -
+ arch/s390/kvm/Kconfig      |  1 -
+ arch/x86/kvm/x86.c         |  6 ++++++
+ include/linux/kvm_host.h   | 10 ----------
+ virt/kvm/Kconfig           |  3 ---
+ 9 files changed, 12 insertions(+), 18 deletions(-)
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 870953b4a8a7..ef5bf57f79b7 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -1836,4 +1836,10 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
+ }
+ 
++long kvm_arch_vcpu_async_ioctl(struct file *filp, unsigned int ioctl,
++			       unsigned long arg)
++{
++	return -ENOIOCTLCMD;
++}
++
+ void kvm_arch_sync_dirty_log(struct kvm *kvm, struct kvm_memory_slot *memslot)
+ {
+diff --git a/arch/loongarch/kvm/Kconfig b/arch/loongarch/kvm/Kconfig
+index ae64bbdf83a7..ed4f724db774 100644
+--- a/arch/loongarch/kvm/Kconfig
++++ b/arch/loongarch/kvm/Kconfig
+@@ -26,5 +26,4 @@ config KVM
+ 	select HAVE_KVM_MSI
+ 	select HAVE_KVM_READONLY_MEM
+-	select HAVE_KVM_VCPU_ASYNC_IOCTL
+ 	select KVM_COMMON
+ 	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
+diff --git a/arch/mips/kvm/Kconfig b/arch/mips/kvm/Kconfig
+index ab57221fa4dd..cc13cc35f208 100644
+--- a/arch/mips/kvm/Kconfig
++++ b/arch/mips/kvm/Kconfig
+@@ -23,5 +23,4 @@ config KVM
+ 	select KVM_COMMON
+ 	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
+-	select HAVE_KVM_VCPU_ASYNC_IOCTL
+ 	select KVM_MMIO
+ 	select KVM_GENERIC_MMU_NOTIFIER
+diff --git a/arch/powerpc/kvm/Kconfig b/arch/powerpc/kvm/Kconfig
+index 2f2702c867f7..c9a2d50ff1b0 100644
+--- a/arch/powerpc/kvm/Kconfig
++++ b/arch/powerpc/kvm/Kconfig
+@@ -21,5 +21,4 @@ config KVM
+ 	bool
+ 	select KVM_COMMON
+-	select HAVE_KVM_VCPU_ASYNC_IOCTL
+ 	select KVM_VFIO
+ 	select HAVE_KVM_IRQ_BYPASS
+diff --git a/arch/riscv/kvm/Kconfig b/arch/riscv/kvm/Kconfig
+index c50328212917..77379f77840a 100644
+--- a/arch/riscv/kvm/Kconfig
++++ b/arch/riscv/kvm/Kconfig
+@@ -24,5 +24,4 @@ config KVM
+ 	select HAVE_KVM_IRQ_ROUTING
+ 	select HAVE_KVM_MSI
+-	select HAVE_KVM_VCPU_ASYNC_IOCTL
+ 	select HAVE_KVM_READONLY_MEM
+ 	select HAVE_KVM_DIRTY_RING_ACQ_REL
+diff --git a/arch/s390/kvm/Kconfig b/arch/s390/kvm/Kconfig
+index cae908d64550..96d16028e8b7 100644
+--- a/arch/s390/kvm/Kconfig
++++ b/arch/s390/kvm/Kconfig
+@@ -21,5 +21,4 @@ config KVM
+... (53 more diff lines)
+
+##### A092
+=== 50efc2340a59 LA2 2025-10-30 +19/-19
+KVM: Rename kvm_arch_vcpu_async_ioctl() to kvm_arch_vcpu_unlocked_ioctl()
+
+Rename the "async" ioctl API to "unlocked" so that upcoming usage in x86's
+TDX code doesn't result in a massive misnomer.  To avoid having to retry
+SEAMCALLs, TDX needs to acquire kvm->lock *and* all vcpu->mutex locks, and
+acquiring all of those locks after/inside the current vCPU's mutex is a
+non-starter.  However, TDX also needs to acquire the vCPU's mutex and load
+the vCPU, i.e. the handling is very much not async to the vCPU.
+
+No functional change intended.
+functions: virt/kvm/kvm_main.c:kvm_vcpu_ioctl
+fixes: 
+ arch/arm64/kvm/arm.c       | 4 ++--
+ arch/loongarch/kvm/vcpu.c  | 4 ++--
+ arch/mips/kvm/mips.c       | 4 ++--
+ arch/powerpc/kvm/powerpc.c | 4 ++--
+ arch/riscv/kvm/vcpu.c      | 4 ++--
+ arch/s390/kvm/kvm-s390.c   | 4 ++--
+ arch/x86/kvm/x86.c         | 4 ++--
+ include/linux/kvm_host.h   | 4 ++--
+ virt/kvm/kvm_main.c        | 6 +++---
+ 9 files changed, 19 insertions(+), 19 deletions(-)
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index ef5bf57f79b7..cf23f6b07ec7 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -1836,6 +1836,6 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
+ }
+ 
+-long kvm_arch_vcpu_async_ioctl(struct file *filp, unsigned int ioctl,
+-			       unsigned long arg)
++long kvm_arch_vcpu_unlocked_ioctl(struct file *filp, unsigned int ioctl,
++				  unsigned long arg)
+ {
+ 	return -ENOIOCTLCMD;
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index 30e3b089a596..9a5844e85fd3 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -1472,6 +1472,6 @@ int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu, struct kvm_interrupt *irq)
+ }
+ 
+-long kvm_arch_vcpu_async_ioctl(struct file *filp,
+-			       unsigned int ioctl, unsigned long arg)
++long kvm_arch_vcpu_unlocked_ioctl(struct file *filp, unsigned int ioctl,
++				  unsigned long arg)
+ {
+ 	void __user *argp = (void __user *)arg;
+diff --git a/arch/mips/kvm/mips.c b/arch/mips/kvm/mips.c
+index a75587018f44..b0fb92fda4d4 100644
+--- a/arch/mips/kvm/mips.c
++++ b/arch/mips/kvm/mips.c
+@@ -896,6 +896,6 @@ static int kvm_vcpu_ioctl_enable_cap(struct kvm_vcpu *vcpu,
+ }
+ 
+-long kvm_arch_vcpu_async_ioctl(struct file *filp, unsigned int ioctl,
+-			       unsigned long arg)
++long kvm_arch_vcpu_unlocked_ioctl(struct file *filp, unsigned int ioctl,
++				  unsigned long arg)
+ {
+ 	struct kvm_vcpu *vcpu = filp->private_data;
+diff --git a/arch/powerpc/kvm/powerpc.c b/arch/powerpc/kvm/powerpc.c
+index 2ba057171ebe..9a89a6d98f97 100644
+--- a/arch/powerpc/kvm/powerpc.c
++++ b/arch/powerpc/kvm/powerpc.c
+@@ -2029,6 +2029,6 @@ int kvm_arch_vcpu_ioctl_set_mpstate(struct kvm_vcpu *vcpu,
+ }
+ 
+-long kvm_arch_vcpu_async_ioctl(struct file *filp,
+-			       unsigned int ioctl, unsigned long arg)
++long kvm_arch_vcpu_unlocked_ioctl(struct file *filp, unsigned int ioctl,
++				  unsigned long arg)
+ {
+ 	struct kvm_vcpu *vcpu = filp->private_data;
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index bccb919ca615..a4bd6077eecc 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -239,6 +239,6 @@ vm_fault_t kvm_arch_vcpu_fault(struct kvm_vcpu *vcpu, struct vm_fault *vmf)
+ }
+ 
+-long kvm_arch_vcpu_async_ioctl(struct file *filp,
+... (65 more diff lines)
+
+##### A093
+=== 62cda5e54f7c LA2 2025-11-09 +0/-22
+LoongArch: kexec: Print out debugging message if required
+
+When specifying '-d' for kexec_file_load interface, loaded locations of
+kernel/initrd/cmdline etc can be printed out to help debug.
+
+Commit eb7622d908a0 ("kexec_file, riscv: print out debugging message if
+required") fixes the same issue on RISC-V.
+
+So, remove kexec_image_info() because the content has been printed out
+in generic code.
+
+And on Loongson-3A5000, the printed messages look like below:
+
+ kexec_file: kernel: 00000000d9aad283 kernel_size: 0x2e77f30
+ kexec_file(EFI): No LoongArch PE image header.
+ kexec_file: Loaded initrd at 0x80000000 bufsz=0x1637cd0 memsz=0x1638000
+ kexec_file(ELF): Loaded kernel at 0x9c20000 bufsz=0x27f1800 memsz=0x2950000
+ kexec_file: nr_segments = 2
+ kexec_file: segment[0]: buf=0x00000000cc3e6c33 bufsz=0x27f1800 mem=0x9c20000 memsz=0x2950000
+ kexec_file: segment[1]: buf=0x00000000bb75a541 bufsz=0x1637cd0 mem=0x80000000 memsz=0x1638000
+ kexec_file: kexec_file_load: type:0, start:0xb15d000 head:0x18db60002 flags:0x8
+functions: arch/loongarch/kernel/machine_kexec.c:kexec_image_info, arch/loongarch/kernel/machine_kexec.c:machine_kexec_prepare
+fixes: 
+diff --git a/arch/loongarch/kernel/machine_kexec.c b/arch/loongarch/kernel/machine_kexec.c
+index e4b2bbc47e62..2d64b7c81e5e 100644
+--- a/arch/loongarch/kernel/machine_kexec.c
++++ b/arch/loongarch/kernel/machine_kexec.c
+@@ -40,24 +40,4 @@ static unsigned long start_addr;
+ static unsigned long first_ind_entry;
+ 
+-static void kexec_image_info(const struct kimage *kimage)
+-{
+-	unsigned long i;
+-
+-	pr_debug("kexec kimage info:\n");
+-	pr_debug("\ttype:        %d\n", kimage->type);
+-	pr_debug("\tstart:       %lx\n", kimage->start);
+-	pr_debug("\thead:        %lx\n", kimage->head);
+-	pr_debug("\tnr_segments: %lu\n", kimage->nr_segments);
+-
+-	for (i = 0; i < kimage->nr_segments; i++) {
+-		pr_debug("\t    segment[%lu]: %016lx - %016lx", i,
+-			kimage->segment[i].mem,
+-			kimage->segment[i].mem + kimage->segment[i].memsz);
+-		pr_debug("\t\t0x%lx bytes, %lu pages\n",
+-			(unsigned long)kimage->segment[i].memsz,
+-			(unsigned long)kimage->segment[i].memsz /  PAGE_SIZE);
+-	}
+-}
+-
+ int machine_kexec_prepare(struct kimage *kimage)
+ {
+@@ -66,6 +46,4 @@ int machine_kexec_prepare(struct kimage *kimage)
+ 	void *cmdline_ptr = (void *)KEXEC_CMDLINE_ADDR;
+ 
+-	kexec_image_info(kimage);
+-
+ 	kimage->arch.efi_boot = fw_arg0;
+ 	kimage->arch.systable_ptr = fw_arg2;
+
+##### A094
+=== a41e0ab394e4 LA2 2025-11-26 +68/-55
+sysfb: Replace screen_info with sysfb_primary_display
+
+Replace the global screen_info with sysfb_primary_display of type
+struct sysfb_display_info. Adapt all users of screen_info.
+
+Instances of screen_info are defined for x86, loongarch and EFI,
+with only one instance compiled into a specific build. Replace all
+of them with sysfb_primary_display.
+
+All existing users of screen_info are updated by pointing them to
+sysfb_primary_display.screen instead. This introduces some churn to
+the code, but has no impact on functionality.
+
+Boot parameters and EFI config tables are unchanged. They transfer
+screen_info as before. The logic in EFI's alloc_screen_info() changes
+slightly, as it now returns the screen field of sysfb_primary_display.
+functions: arch/loongarch/kernel/efi.c:init_screen_info, arch/loongarch/kernel/efi.c:efi_init, arch/x86/kernel/kexec-bzimage64.c:setup_boot_parameters, arch/x86/kernel/setup.c:parse_boot_params, arch/x86/kernel/setup.c:setup_arch, arch/x86/video/video-common.c:video_is_primary_device, drivers/firmware/efi/earlycon.c:efi_earlycon_remap_fb, drivers/firmware/efi/earlycon.c:efi_earlycon_write, drivers/firmware/efi/earlycon.c:efi_earlycon_setup, drivers/firmware/efi/efi-init.c:init_screen_info, drivers/firmware/efi/efi-init.c:efi_init, drivers/firmware/efi/libstub/efi-stub-entry.c:alloc_screen_info
+fixes: 
+ arch/x86/video/video-common.c                 |  4 ++--
+ drivers/firmware/efi/earlycon.c               |  8 ++++----
+ drivers/firmware/efi/efi-init.c               | 22 +++++++++++-----------
+ drivers/firmware/efi/libstub/efi-stub-entry.c | 18 +++++++++++++-----
+ drivers/firmware/efi/sysfb_efi.c              |  8 ++++----
+ drivers/firmware/sysfb.c                      |  6 +++---
+ drivers/hv/vmbus_drv.c                        |  6 +++---
+ drivers/pci/vgaarb.c                          |  4 ++--
+ drivers/video/screen_info_pci.c               |  5 +++--
+ include/linux/screen_info.h                   |  2 --
+ include/linux/sysfb.h                         |  5 +++--
+ 17 files changed, 68 insertions(+), 55 deletions(-)
+diff --git a/arch/arm64/kernel/image-vars.h b/arch/arm64/kernel/image-vars.h
+index 85bc629270bd..d7b0d12b1015 100644
+--- a/arch/arm64/kernel/image-vars.h
++++ b/arch/arm64/kernel/image-vars.h
+@@ -39,5 +39,5 @@ PROVIDE(__efistub___inittext_end       	= __inittext_end);
+ PROVIDE(__efistub__edata		= _edata);
+ #if defined(CONFIG_EFI_EARLYCON) || defined(CONFIG_SYSFB)
+-PROVIDE(__efistub_screen_info		= screen_info);
++PROVIDE(__efistub_sysfb_primary_display	= sysfb_primary_display);
+ #endif
+ PROVIDE(__efistub__ctype		= _ctype);
+diff --git a/arch/loongarch/kernel/efi.c b/arch/loongarch/kernel/efi.c
+index 52c21c895318..95fb535daf1c 100644
+--- a/arch/loongarch/kernel/efi.c
++++ b/arch/loongarch/kernel/efi.c
+@@ -19,5 +19,5 @@
+ #include <linux/memblock.h>
+ #include <linux/reboot.h>
+-#include <linux/screen_info.h>
++#include <linux/sysfb.h>
+ #include <linux/uaccess.h>
+ 
+@@ -76,9 +76,9 @@ unsigned long __initdata screen_info_table = EFI_INVALID_TABLE_ADDR;
+ 
+ #if defined(CONFIG_SYSFB) || defined(CONFIG_EFI_EARLYCON)
+-struct screen_info screen_info __section(".data");
+-EXPORT_SYMBOL_GPL(screen_info);
++struct sysfb_display_info sysfb_primary_display __section(".data");
++EXPORT_SYMBOL_GPL(sysfb_primary_display);
+ #endif
+ 
+-static void __init init_screen_info(void)
++static void __init init_primary_display(void)
+ {
+ 	struct screen_info *si;
+@@ -92,9 +92,10 @@ static void __init init_screen_info(void)
+ 		return;
+ 	}
+-	screen_info = *si;
++	sysfb_primary_display.screen = *si;
+ 	memset(si, 0, sizeof(*si));
+ 	early_memunmap(si, sizeof(*si));
+ 
+-	memblock_reserve(__screen_info_lfb_base(&screen_info), screen_info.lfb_size);
++	memblock_reserve(__screen_info_lfb_base(&sysfb_primary_display.screen),
++			 sysfb_primary_display.screen.lfb_size);
+ }
+ 
+@@ -130,5 +131,5 @@ void __init efi_init(void)
+ 
+ 	if (IS_ENABLED(CONFIG_EFI_EARLYCON) || IS_ENABLED(CONFIG_SYSFB))
+-		init_screen_info();
++		init_primary_display();
+ 
+ 	if (boot_memmap == EFI_INVALID_TABLE_ADDR)
+diff --git a/arch/loongarch/kernel/image-vars.h b/arch/loongarch/kernel/image-vars.h
+index 41ddcf56d21c..e557ebd46c2b 100644
+--- a/arch/loongarch/kernel/image-vars.h
++++ b/arch/loongarch/kernel/image-vars.h
+@@ -13,5 +13,5 @@ __efistub_kernel_asize		= kernel_asize;
+... (364 more diff lines)
+
+##### A095
+=== 4b24910c0569 LA2 2025-12-05 +16/-8
+KVM: Add a simplified wrapper for registering perf callbacks
+
+Add a parameter-less API for registering perf callbacks in anticipation of
+introducing another x86-only parameter for handling mediated PMU PMIs.
+
+No functional change intended.
+functions: arch/arm64/kvm/arm.c:init_subsystems, arch/loongarch/kvm/main.c:kvm_loongarch_env_init, arch/riscv/kvm/main.c:riscv_kvm_init, arch/x86/kvm/x86.c:kvm_x86_vendor_init, virt/kvm/kvm_main.c:kvm_register_perf_callbacks
+fixes: 
+ arch/arm64/kvm/arm.c      |  2 +-
+ arch/loongarch/kvm/main.c |  2 +-
+ arch/riscv/kvm/main.c     |  2 +-
+ arch/x86/kvm/x86.c        |  2 +-
+ include/linux/kvm_host.h  | 11 +++++++++--
+ virt/kvm/kvm_main.c       |  5 +++--
+ 6 files changed, 16 insertions(+), 8 deletions(-)
+diff --git a/arch/arm64/kvm/arm.c b/arch/arm64/kvm/arm.c
+index 4f80da0c0d1d..3e6f184d6d04 100644
+--- a/arch/arm64/kvm/arm.c
++++ b/arch/arm64/kvm/arm.c
+@@ -2358,5 +2358,5 @@ static int __init init_subsystems(void)
+ 		goto out;
+ 
+-	kvm_register_perf_callbacks(NULL);
++	kvm_register_perf_callbacks();
+ 
+ out:
+diff --git a/arch/loongarch/kvm/main.c b/arch/loongarch/kvm/main.c
+index 80ea63d465b8..f62326fe29fa 100644
+--- a/arch/loongarch/kvm/main.c
++++ b/arch/loongarch/kvm/main.c
+@@ -395,5 +395,5 @@ static int kvm_loongarch_env_init(void)
+ 
+ 	kvm_init_gcsr_flag();
+-	kvm_register_perf_callbacks(NULL);
++	kvm_register_perf_callbacks();
+ 
+ 	/* Register LoongArch IPI interrupt controller interface. */
+diff --git a/arch/riscv/kvm/main.c b/arch/riscv/kvm/main.c
+index 45536af521f0..0f3fe3986fc0 100644
+--- a/arch/riscv/kvm/main.c
++++ b/arch/riscv/kvm/main.c
+@@ -175,5 +175,5 @@ static int __init riscv_kvm_init(void)
+ 	kvm_riscv_setup_vendor_features();
+ 
+-	kvm_register_perf_callbacks(NULL);
++	kvm_register_perf_callbacks();
+ 
+ 	rc = kvm_init(sizeof(struct kvm_vcpu), 0, THIS_MODULE);
+diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
+index 0c6d899d53dd..1b2827cecf38 100644
+--- a/arch/x86/kvm/x86.c
++++ b/arch/x86/kvm/x86.c
+@@ -10108,5 +10108,5 @@ int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
+ #endif
+ 
+-	kvm_register_perf_callbacks(ops->handle_intel_pt_intr);
++	__kvm_register_perf_callbacks(ops->handle_intel_pt_intr, NULL);
+ 
+ 	if (IS_ENABLED(CONFIG_KVM_SW_PROTECTED_VM) && tdp_mmu_enabled)
+diff --git a/include/linux/kvm_host.h b/include/linux/kvm_host.h
+index d93f75b05ae2..8e410d1a63df 100644
+--- a/include/linux/kvm_host.h
++++ b/include/linux/kvm_host.h
+@@ -1750,8 +1750,15 @@ static inline bool kvm_arch_intc_initialized(struct kvm *kvm)
+ unsigned long kvm_arch_vcpu_get_ip(struct kvm_vcpu *vcpu);
+ 
+-void kvm_register_perf_callbacks(unsigned int (*pt_intr_handler)(void));
++void __kvm_register_perf_callbacks(unsigned int (*pt_intr_handler)(void),
++				   void (*mediated_pmi_handler)(void));
++
++static inline void kvm_register_perf_callbacks(void)
++{
++	__kvm_register_perf_callbacks(NULL, NULL);
++}
++
+... (22 more diff lines)
+
+##### A096
+=== 8e38607aa4aa LA2 2026-01-06 +29/-28
+treewide: provide a generic clear_user_page() variant
+
+Patch series "mm: folio_zero_user: clear page ranges", v11.
+
+This series adds clearing of contiguous page ranges for hugepages.
+
+The series improves on the current discontiguous clearing approach in two
+ways:
+
+  - clear pages in a contiguous fashion.
+  - use batched clearing via clear_pages() wherever exposed.
+
+The first is useful because it allows us to make much better use of
+hardware prefetchers.
+
+The second, enables advertising the real extent to the processor.  Where
+specific instructions support it (ex.  string instructions on x86; "mops"
+on arm64 etc), a processor can optimize based on this because, instead of
+seeing a sequence of 8-byte stores, or a sequence of 4KB pages, it sees a
+larger unit being operated on.
+
+For instance, AMD Zen uarchs (for extents larger than LLC-size) switch to
+a mode where they start eliding cacheline allocation.  This is helpful not
+just because it results in higher bandwidth, but also because now the
+cache is not evicting useful cachelines and replacing them with zeroes.
+
+Demand faulting a 64GB region shows performance improvement:
+
+ $ perf bench mem mmap -p $pg-sz -f demand -s 64GB -l 5
+
+                       baseline              +series
+                   (GBps +- %stdev)      (GBps +- %stdev)
+
+   pg-sz=2MB       11.76 +- 1.10%        25.34 +- 1.18% [*]   +115.47%  	preempt=*
+
+   pg-sz=1GB       24.85 +- 2.41%        39.22 +- 2.32%       + 57.82%  	preempt=none|voluntary
+   pg-sz=1GB         (similar)           52.73 +- 0.20% [#]   +112.19%  	preempt=full|lazy
+
+ [*] This improvement is because switching to sequential clearing
+  allows the hardware prefetchers to do a much better job.
+
+functions: 
+fixes: 
+ arch/nios2/include/asm/page.h      |  1 +
+ arch/openrisc/include/asm/page.h   |  1 -
+ arch/parisc/include/asm/page.h     |  1 -
+ arch/powerpc/include/asm/page.h    |  1 +
+ arch/riscv/include/asm/page.h      |  1 -
+ arch/s390/include/asm/page.h       |  1 -
+ arch/sparc/include/asm/page_64.h   |  1 +
+ arch/um/include/asm/page.h         |  1 -
+ arch/x86/include/asm/page.h        |  6 ------
+ arch/xtensa/include/asm/page.h     |  1 -
+ include/linux/highmem.h            | 24 ++++++++++++++++++++++--
+ 22 files changed, 29 insertions(+), 28 deletions(-)
+diff --git a/arch/alpha/include/asm/page.h b/arch/alpha/include/asm/page.h
+index d2c6667d73e9..59d01f9b77f6 100644
+--- a/arch/alpha/include/asm/page.h
++++ b/arch/alpha/include/asm/page.h
+@@ -12,5 +12,4 @@
+ 
+ extern void clear_page(void *page);
+-#define clear_user_page(page, vaddr, pg)	clear_page(page)
+ 
+ #define vma_alloc_zeroed_movable_folio(vma, vaddr) \
+diff --git a/arch/arc/include/asm/page.h b/arch/arc/include/asm/page.h
+index 9720fe6b2c24..38214e126c6d 100644
+--- a/arch/arc/include/asm/page.h
++++ b/arch/arc/include/asm/page.h
+@@ -33,4 +33,6 @@ struct page;
+ void copy_user_highpage(struct page *to, struct page *from,
+ 			unsigned long u_vaddr, struct vm_area_struct *vma);
++
++#define clear_user_page clear_user_page
+ void clear_user_page(void *to, unsigned long u_vaddr, struct page *page);
+ 
+diff --git a/arch/arm/include/asm/page-nommu.h b/arch/arm/include/asm/page-nommu.h
+index 7c2c72323d17..e74415c959be 100644
+--- a/arch/arm/include/asm/page-nommu.h
++++ b/arch/arm/include/asm/page-nommu.h
+@@ -12,5 +12,4 @@
+ #define copy_page(to,from)	memcpy((to), (from), PAGE_SIZE)
+ 
+-#define clear_user_page(page, vaddr, pg)	clear_page(page)
+ #define copy_user_page(to, from, vaddr, pg)	copy_page(to, from)
+ 
+diff --git a/arch/arm64/include/asm/page.h b/arch/arm64/include/asm/page.h
+index 00f117ff4f7a..b39cc1127e1f 100644
+--- a/arch/arm64/include/asm/page.h
++++ b/arch/arm64/include/asm/page.h
+@@ -37,5 +37,4 @@ bool tag_clear_highpages(struct page *to, int numpages);
+ #define __HAVE_ARCH_TAG_CLEAR_HIGHPAGES
+ 
+-#define clear_user_page(page, vaddr, pg)	clear_page(page)
+ #define copy_user_page(to, from, vaddr, pg)	copy_page(to, from)
+ 
+diff --git a/arch/csky/abiv1/inc/abi/page.h b/arch/csky/abiv1/inc/abi/page.h
+index 2d2159933b76..58307254e7e5 100644
+--- a/arch/csky/abiv1/inc/abi/page.h
++++ b/arch/csky/abiv1/inc/abi/page.h
+@@ -11,4 +11,5 @@ static inline unsigned long pages_do_alias(unsigned long addr1,
+ }
+ 
++#define clear_user_page clear_user_page
+ static inline void clear_user_page(void *addr, unsigned long vaddr,
+ 				   struct page *page)
+diff --git a/arch/csky/abiv2/inc/abi/page.h b/arch/csky/abiv2/inc/abi/page.h
+index cf005f13cd15..a5a255013308 100644
+--- a/arch/csky/abiv2/inc/abi/page.h
++++ b/arch/csky/abiv2/inc/abi/page.h
+@@ -1,10 +1,3 @@
+ /* SPDX-License-Identifier: GPL-2.0 */
+-
+-static inline void clear_user_page(void *addr, unsigned long vaddr,
+-				   struct page *page)
+... (200 more diff lines)
+
+##### A097
+=== 6215d9f4470f LA2 2026-02-11 +23/-285
+arch, mm: consolidate empty_zero_page
+
+Reduce 22 declarations of empty_zero_page to 3 and 23 declarations of
+ZERO_PAGE() to 4.
+
+Every architecture defines empty_zero_page that way or another, but for the
+most of them it is always a page aligned page in BSS and most definitions
+of ZERO_PAGE do virt_to_page(empty_zero_page).
+
+Move Linus vetted x86 definition of empty_zero_page and ZERO_PAGE() to the
+core MM and drop these definitions in architectures that do not implement
+colored zero page (MIPS and s390).
+
+ZERO_PAGE() remains a macro because turning it to a wrapper for a static
+inline causes severe pain in header dependencies.
+
+For the most part the change is mechanical, with these being noteworthy:
+
+* alpha: aliased empty_zero_page with ZERO_PGE that was also used for boot
+  parameters. Switching to a generic empty_zero_page removes the aliasing
+  and keeps ZERO_PGE for boot parameters only
+* arm64: uses __pa_symbol() in ZERO_PAGE() so that definition of
+  ZERO_PAGE() is kept intact.
+* m68k/parisc/um: allocated empty_zero_page from memblock,
+  although they do not support zero page coloring and having it in BSS
+  will work fine.
+* sparc64 can have empty_zero_page in BSS rather allocate it, but it
+  can't use virt_to_page() for BSS. Keep it's definition of ZERO_PAGE()
+  but instead of allocating it, make mem_map_zero point to
+  empty_zero_page.
+* sh: used empty_zero_page for boot parameters at the very early boot.
+  Rename the parameters page to boot_params_page and let sh use the generic
+  empty_zero_page.
+* hexagon: had an amusing comment about empty_zero_page
+
+	/* A handy thing to have if one has the RAM. Declared in head.S */
+
+  that unfortunately had to go :)
+functions: arch/m68k/mm/mcfmmu.c:paging_init, arch/m68k/mm/motorola.c:paging_init, arch/m68k/mm/sun3mmu.c:paging_init, arch/openrisc/mm/init.c:mem_init, arch/parisc/mm/init.c:pagetable_init, arch/sh/mm/init.c:mem_init, arch/sparc/mm/init_32.c:arch_mm_preinit, arch/sparc/mm/init_64.c:mem_init, arch/um/kernel/mem.c:arch_mm_preinit, arch/um/kernel/mem.c:paging_init, arch/um/kernel/um_arch.c:setup_arch
+fixes: 
+ arch/um/include/shared/kern_util.h        |  1 -
+ arch/um/kernel/mem.c                      | 16 ----------------
+ arch/um/kernel/um_arch.c                  |  1 -
+ arch/x86/include/asm/pgtable.h            |  8 --------
+ arch/x86/kernel/head_32.S                 |  4 ----
+ arch/x86/kernel/head_64.S                 |  7 -------
+ arch/xtensa/include/asm/pgtable.h         |  4 ----
+ arch/xtensa/kernel/head.S                 |  3 ---
+ arch/xtensa/kernel/xtensa_ksyms.c         |  2 --
+ include/linux/pgtable.h                   | 10 ++++++++++
+ mm/mm_init.c                              |  5 +++++
+ 59 files changed, 23 insertions(+), 285 deletions(-)
+diff --git a/arch/alpha/include/asm/pgtable.h b/arch/alpha/include/asm/pgtable.h
+index e9368c54be45..268ddde33617 100644
+--- a/arch/alpha/include/asm/pgtable.h
++++ b/arch/alpha/include/asm/pgtable.h
+@@ -127,10 +127,4 @@ struct vm_area_struct;
+ #define pgprot_noncached(prot)	(prot)
+ 
+-/*
+- * ZERO_PAGE is a global shared page that is always zero:  used
+- * for zero-mapped memory areas etc..
+- */
+-#define ZERO_PAGE(vaddr)	(virt_to_page(ZERO_PGE))
+-
+ /*
+  * On certain platforms whose physical address space can overlap KSEG,
+diff --git a/arch/arc/include/asm/pgtable.h b/arch/arc/include/asm/pgtable.h
+index bd580e2b62d7..0fdaea81b5fa 100644
+--- a/arch/arc/include/asm/pgtable.h
++++ b/arch/arc/include/asm/pgtable.h
+@@ -22,7 +22,4 @@
+ #ifndef __ASSEMBLER__
+ 
+-extern char empty_zero_page[PAGE_SIZE];
+-#define ZERO_PAGE(vaddr)	(virt_to_page(empty_zero_page))
+-
+ extern pgd_t swapper_pg_dir[] __aligned(PAGE_SIZE);
+ 
+diff --git a/arch/arc/mm/init.c b/arch/arc/mm/init.c
+index a5e92f46e5d1..d6b5c27a0098 100644
+--- a/arch/arc/mm/init.c
++++ b/arch/arc/mm/init.c
+@@ -20,6 +20,4 @@
+ 
+ pgd_t swapper_pg_dir[PTRS_PER_PGD] __aligned(PAGE_SIZE);
+-char empty_zero_page[PAGE_SIZE] __aligned(PAGE_SIZE);
+-EXPORT_SYMBOL(empty_zero_page);
+ 
+ static const unsigned long low_mem_start = CONFIG_LINUX_RAM_BASE;
+diff --git a/arch/arm/include/asm/pgtable.h b/arch/arm/include/asm/pgtable.h
+index 6fa9acd6a7f5..982795cf4563 100644
+--- a/arch/arm/include/asm/pgtable.h
++++ b/arch/arm/include/asm/pgtable.h
+@@ -11,13 +11,4 @@
+ #include <asm/proc-fns.h>
+ 
+-#ifndef __ASSEMBLY__
+-/*
+- * ZERO_PAGE is a global shared page that is always zero: used
+- * for zero-mapped memory areas etc..
+- */
+-extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
+-#define ZERO_PAGE(vaddr)	(virt_to_page(empty_zero_page))
+-#endif
+-
+ #include <asm-generic/pgtable-nopud.h>
+ 
+diff --git a/arch/arm/mm/mmu.c b/arch/arm/mm/mmu.c
+index 518def8314e7..23b87b5ef7f1 100644
+--- a/arch/arm/mm/mmu.c
++++ b/arch/arm/mm/mmu.c
+... (818 more diff lines)
+
+##### A098
+=== a96ef5848cb0 LA2 2026-03-03 +33/-115
+randomize_kstack: Unify random source across arches
+
+Previously different architectures were using random sources of
+differing strength and cost to decide the random kstack offset. A number
+of architectures (loongarch, powerpc, s390, x86) were using their
+timestamp counter, at whatever the frequency happened to be. Other
+arches (arm64, riscv) were using entropy from the crng via
+get_random_u16().
+
+There have been concerns that in some cases the timestamp counters may
+be too weak, because they can be easily guessed or influenced by user
+space. And get_random_u16() has been shown to be too costly for the
+level of protection kstack offset randomization provides.
+
+So let's use a common, architecture-agnostic source of entropy; a
+per-cpu prng, seeded at boot-time from the crng. This has a few
+benefits:
+
+  - We can remove choose_random_kstack_offset(); That was only there to
+    try to make the timestamp counter value a bit harder to influence
+    from user space [*].
+
+  - The architecture code is simplified. All it has to do now is call
+    add_random_kstack_offset() in the syscall path.
+
+  - The strength of the randomness can be reasoned about independently
+    of the architecture.
+
+  - Arches previously using get_random_u16() now have much faster
+    syscall paths, see below results.
+
+[*] Additionally, this gets rid of some redundant work on s390 and x86.
+Before this patch, those architectures called
+choose_random_kstack_offset() under arch_exit_to_user_mode_prepare(),
+which is also called for exception returns to userspace which were *not*
+syscalls (e.g. regular interrupts). Getting rid of
+choose_random_kstack_offset() avoids a small amount of redundant work
+for the non-syscall cases.
+
+In some configurations, add_random_kstack_offset() will now call
+instrumentable code, so for a couple of arches, I have moved the call a
+functions: arch/arm64/kernel/syscall.c:invoke_syscall, arch/loongarch/kernel/syscall.c:do_syscall, arch/powerpc/kernel/syscall.c:system_call_exception, arch/riscv/kernel/traps.c:do_trap_ecall_u, arch/s390/kernel/syscall.c:__do_syscall, arch/x86/entry/syscall_32.c:__do_fast_syscall_32, arch/x86/entry/syscall_64.c:do_syscall_64, kernel/fork.c:copy_process
+fixes: 
+ arch/powerpc/kernel/syscall.c        | 16 ++--------------
+ arch/riscv/kernel/traps.c            | 12 ------------
+ arch/s390/include/asm/entry-common.h |  8 --------
+ arch/s390/kernel/syscall.c           |  2 +-
+ arch/x86/entry/syscall_32.c          |  4 ++--
+ arch/x86/entry/syscall_64.c          |  2 +-
+ arch/x86/include/asm/entry-common.h  | 12 ------------
+ include/linux/randomize_kstack.h     | 52 +++++++++++++++++-----------------------------------
+ include/linux/sched.h                |  4 ----
+ init/main.c                          |  8 ++++++++
+ kernel/fork.c                        |  1 -
+ 14 files changed, 33 insertions(+), 115 deletions(-)
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 102ddbd4298e..f134527ace10 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -1520,7 +1520,6 @@ config HAVE_ARCH_RANDOMIZE_KSTACK_OFFSET
+ 	help
+ 	  An arch should select this symbol if it can support kernel stack
+-	  offset randomization with calls to add_random_kstack_offset()
+-	  during syscall entry and choose_random_kstack_offset() during
+-	  syscall exit. Careful removal of -fstack-protector-strong and
++	  offset randomization with a call to add_random_kstack_offset()
++	  during syscall entry. Careful removal of -fstack-protector-strong and
+ 	  -fstack-protector should also be applied to the entry code and
+ 	  closely examined, as the artificial stack bump looks like an array
+diff --git a/arch/arm64/kernel/syscall.c b/arch/arm64/kernel/syscall.c
+index c062badd1a56..358ddfbf1401 100644
+--- a/arch/arm64/kernel/syscall.c
++++ b/arch/arm64/kernel/syscall.c
+@@ -53,15 +53,4 @@ static void invoke_syscall(struct pt_regs *regs, unsigned int scno,
+ 
+ 	syscall_set_return_value(current, regs, 0, ret);
+-
+-	/*
+-	 * This value will get limited by KSTACK_OFFSET_MAX(), which is 10
+-	 * bits. The actual entropy will be further reduced by the compiler
+-	 * when applying stack alignment constraints: the AAPCS mandates a
+-	 * 16-byte aligned SP at function boundaries, which will remove the
+-	 * 4 low bits from any entropy chosen here.
+-	 *
+-	 * The resulting 6 bits of entropy is seen in SP[9:4].
+-	 */
+-	choose_random_kstack_offset(get_random_u16());
+ }
+ 
+diff --git a/arch/loongarch/kernel/syscall.c b/arch/loongarch/kernel/syscall.c
+index 1249d82c1cd0..85da7e050d97 100644
+--- a/arch/loongarch/kernel/syscall.c
++++ b/arch/loongarch/kernel/syscall.c
+@@ -80,15 +80,4 @@ void noinstr __no_stack_protector do_syscall(struct pt_regs *regs)
+ 	}
+ 
+-	/*
+-	 * This value will get limited by KSTACK_OFFSET_MAX(), which is 10
+-	 * bits. The actual entropy will be further reduced by the compiler
+-	 * when applying stack alignment constraints: 16-bytes (i.e. 4-bits)
+-	 * aligned, which will remove the 4 low bits from any entropy chosen
+-	 * here.
+-	 *
+-	 * The resulting 6 bits of entropy is seen in SP[9:4].
+-	 */
+-	choose_random_kstack_offset(get_cycles());
+-
+ 	syscall_exit_to_user_mode(regs);
+ }
+diff --git a/arch/powerpc/kernel/syscall.c b/arch/powerpc/kernel/syscall.c
+index be159ad4b77b..b762677f8737 100644
+--- a/arch/powerpc/kernel/syscall.c
++++ b/arch/powerpc/kernel/syscall.c
+@@ -21,6 +21,4 @@ notrace long system_call_exception(struct pt_regs *regs, unsigned long r0)
+ 	kuap_lock();
+... (261 more diff lines)
+
+##### A099
+=== a7034e9e4491 LA2 2026-04-01 +37/-26
+ACPI: PPTT: Use acpi_get_cpu_uid() and remove get_acpi_id_for_cpu()
+
+Update acpi/pptt.c to use acpi_get_cpu_uid() and remove unused
+get_acpi_id_for_cpu() from arm64/loongarch/riscv, completing PPTT's
+migration to the unified ACPI CPU UID interface
+functions: drivers/acpi/pptt.c:cache_setup_acpi_cpu, drivers/acpi/pptt.c:topology_get_acpi_cpu_tag, drivers/acpi/pptt.c:check_acpi_cpu_flag, drivers/acpi/pptt.c:acpi_get_cache_info, drivers/acpi/pptt.c:find_acpi_cpu_topology_cluster, drivers/acpi/pptt.c:acpi_pptt_get_child_cpus, drivers/acpi/pptt.c:find_acpi_cache_level_from_id, drivers/acpi/pptt.c:acpi_pptt_get_cpumask_from_cache_id
+fixes: 
+ arch/arm64/include/asm/acpi.h     |  4 ----
+ arch/loongarch/include/asm/acpi.h |  5 -----
+ arch/riscv/include/asm/acpi.h     |  4 ----
+ drivers/acpi/pptt.c               | 50 +++++++++++++++++++++++++++++++++++++-------------
+ 4 files changed, 37 insertions(+), 26 deletions(-)
+diff --git a/arch/arm64/include/asm/acpi.h b/arch/arm64/include/asm/acpi.h
+index bdb0ecf95b5c..8a54ca6ba602 100644
+--- a/arch/arm64/include/asm/acpi.h
++++ b/arch/arm64/include/asm/acpi.h
+@@ -115,8 +115,4 @@ static inline bool acpi_has_cpu_in_madt(void)
+ 
+ struct acpi_madt_generic_interrupt *acpi_cpu_get_madt_gicc(int cpu);
+-static inline u32 get_acpi_id_for_cpu(unsigned int cpu)
+-{
+-	return	acpi_cpu_get_madt_gicc(cpu)->uid;
+-}
+ int get_cpu_for_acpi_id(u32 uid);
+ 
+diff --git a/arch/loongarch/include/asm/acpi.h b/arch/loongarch/include/asm/acpi.h
+index 7376840fa9f7..eda9d4d0a493 100644
+--- a/arch/loongarch/include/asm/acpi.h
++++ b/arch/loongarch/include/asm/acpi.h
+@@ -41,9 +41,4 @@ extern struct acpi_madt_core_pic acpi_core_pic[MAX_CORE_PIC];
+ extern int __init parse_acpi_topology(void);
+ 
+-static inline u32 get_acpi_id_for_cpu(unsigned int cpu)
+-{
+-	return acpi_core_pic[cpu_logical_map(cpu)].processor_id;
+-}
+-
+ #endif /* !CONFIG_ACPI */
+ 
+diff --git a/arch/riscv/include/asm/acpi.h b/arch/riscv/include/asm/acpi.h
+index 6e13695120bc..26ab37c171bc 100644
+--- a/arch/riscv/include/asm/acpi.h
++++ b/arch/riscv/include/asm/acpi.h
+@@ -62,8 +62,4 @@ static inline void arch_fix_phys_package_id(int num, u32 slot) { }
+ void acpi_init_rintc_map(void);
+ struct acpi_madt_rintc *acpi_cpu_get_madt_rintc(int cpu);
+-static inline u32 get_acpi_id_for_cpu(int cpu)
+-{
+-	return acpi_cpu_get_madt_rintc(cpu)->uid;
+-}
+ 
+ int acpi_get_riscv_isa(struct acpi_table_header *table,
+diff --git a/drivers/acpi/pptt.c b/drivers/acpi/pptt.c
+index de5f8c018333..7bd5bc1f225a 100644
+--- a/drivers/acpi/pptt.c
++++ b/drivers/acpi/pptt.c
+@@ -460,9 +460,12 @@ static void cache_setup_acpi_cpu(struct acpi_table_header *table,
+ 	struct acpi_pptt_cache *found_cache;
+ 	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);
+-	u32 acpi_cpu_id = get_acpi_id_for_cpu(cpu);
++	u32 acpi_cpu_id;
+ 	struct cacheinfo *this_leaf;
+ 	unsigned int index = 0;
+ 	struct acpi_pptt_processor *cpu_node = NULL;
+ 
++	if (acpi_get_cpu_uid(cpu, &acpi_cpu_id) != 0)
++		return;
++
+ 	while (index < get_cpu_cacheinfo(cpu)->num_leaves) {
+ 		this_leaf = this_cpu_ci->info_list + index;
+@@ -547,5 +550,8 @@ static int topology_get_acpi_cpu_tag(struct acpi_table_header *table,
+ {
+... (102 more diff lines)

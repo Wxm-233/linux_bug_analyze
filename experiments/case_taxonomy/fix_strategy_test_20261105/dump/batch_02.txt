@@ -1,0 +1,1104 @@
+
+##### R050
+=== 85fadc0d0411 R 2023-06-14 +3/-1
+riscv: move memblock_allow_resize() after linear mapping is ready
+
+The initial memblock metadata is accessed from kernel image mapping. The
+regions arrays need to "reallocated" from memblock and accessed through
+linear mapping to cover more memblock regions. So the resizing should
+not be allowed until linear mapping is ready. Note that there are
+memblock allocations when building linear mapping.
+
+This patch is similar to 24cc61d8cb5a ("arm64: memblock: don't permit
+memblock resizing until linear mapping is up").
+
+In following log, many memblock regions are reserved before
+create_linear_mapping_page_table(). And then it triggered reallocation
+of memblock.reserved.regions and memcpy the old array in kernel image
+mapping to the new array in linear mapping which caused a page fault.
+
+[    0.000000] memblock_reserve: [0x00000000bf01f000-0x00000000bf01ffff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf021000-0x00000000bf021fff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf023000-0x00000000bf023fff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf025000-0x00000000bf025fff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf027000-0x00000000bf027fff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf029000-0x00000000bf029fff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf02b000-0x00000000bf02bfff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf02d000-0x00000000bf02dfff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf02f000-0x00000000bf02ffff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] memblock_reserve: [0x00000000bf030000-0x00000000bf030fff] early_init_fdt_scan_reserved_mem+0x28c/0x2c6
+[    0.000000] OF: reserved mem: 0x0000000080000000..0x000000008007ffff (512 KiB) map non-reusable mmode_resv0@80000000
+[    0.000000] memblock_reserve: [0x00000000bf000000-0x00000000bf001fed] paging_init+0x19a/0x5ae
+[    0.000000] memblock_phys_alloc_range: 4096 bytes align=0x1000 from=0x0000000000000000 max_addr=0x0000000000000000 alloc_pmd_fixmap+0x14/0x1c
+[    0.000000] memblock_reserve: [0x000000017ffff000-0x000000017fffffff] memblock_alloc_range_nid+0xb8/0x128
+[    0.000000] memblock: reserved is doubled to 256 at [0x000000017fffd000-0x000000017fffe7ff]
+[    0.000000] Unable to handle kernel paging request at virtual address ff600000ffffd000
+[    0.000000] Oops [#1]
+[    0.000000] Modules linked in:
+[    0.000000] CPU: 0 PID: 0 Comm: swapper Not tainted 6.4.0-rc1-00011-g99a670b2069c #66
+[    0.000000] Hardware name: riscv-virtio,qemu (DT)
+[    0.000000] epc : __memcpy+0x60/0xf8
+[    0.000000]  ra : memblock_double_array+0x192/0x248
+[    0.000000] epc : ffffffff8081d214 ra : ffffffff80a3dfc0 sp : ffffffff81403bd0
+[    0.000000]  gp : ffffffff814fbb38 tp : ffffffff8140dac0 t0 : 0000000001600000
+[    0.000000]  t1 : 0000000000000000 t2 : 000000008f001000 s0 : ffffffff81403c60
+functions: arch/riscv/mm/init.c:setup_bootmem, arch/riscv/mm/init.c:paging_init
+fixes: 671f9a3e2e24
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 3b1e927a06b7..59df29fc635d 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -268,5 +268,4 @@ static void __init setup_bootmem(void)
+ 	if (IS_ENABLED(CONFIG_64BIT))
+ 		hugetlb_cma_reserve(PUD_SHIFT - PAGE_SHIFT);
+-	memblock_allow_resize();
+ }
+ 
+@@ -1371,4 +1370,7 @@ void __init paging_init(void)
+ 	setup_bootmem();
+ 	setup_vm_final();
++
++	/* Depend on that Linear Mapping is ready */
++	memblock_allow_resize();
+ }
+ 
+
+##### R051
+=== 377f71f6d68d R 2023-06-16 +4/-3
+riscv: kvm: define vcpu_sbi_ext_pmu in header
+
+Sparse is giving a warning about vcpu_sbi_ext_pmu not being
+defined, so add a definition to the relevant header to fix
+the following:
+
+arch/riscv/kvm/vcpu_sbi_pmu.c:81:37: warning: symbol 'vcpu_sbi_ext_pmu' was not declared. Should it be static?
+
+Fixes: cbddc4c4cb9e ("RISC-V: KVM: Add SBI PMU extension support")
+functions: 
+fixes: cbddc4c4cb9e
+diff --git a/arch/riscv/include/asm/kvm_vcpu_sbi.h b/arch/riscv/include/asm/kvm_vcpu_sbi.h
+index 14ee03df252d..cdcf0ff07be7 100644
+--- a/arch/riscv/include/asm/kvm_vcpu_sbi.h
++++ b/arch/riscv/include/asm/kvm_vcpu_sbi.h
+@@ -73,3 +73,6 @@ extern const struct kvm_vcpu_sbi_extension vcpu_sbi_ext_experimental;
+ extern const struct kvm_vcpu_sbi_extension vcpu_sbi_ext_vendor;
+ 
++#ifdef CONFIG_RISCV_PMU_SBI
++extern const struct kvm_vcpu_sbi_extension vcpu_sbi_ext_pmu;
++#endif
+ #endif /* __RISCV_KVM_VCPU_SBI_H__ */
+diff --git a/arch/riscv/kvm/vcpu_sbi.c b/arch/riscv/kvm/vcpu_sbi.c
+index b3e92c11e54f..7b46e04fb667 100644
+--- a/arch/riscv/kvm/vcpu_sbi.c
++++ b/arch/riscv/kvm/vcpu_sbi.c
+@@ -21,7 +21,5 @@ static const struct kvm_vcpu_sbi_extension vcpu_sbi_ext_v01 = {
+ #endif
+ 
+-#ifdef CONFIG_RISCV_PMU_SBI
+-extern const struct kvm_vcpu_sbi_extension vcpu_sbi_ext_pmu;
+-#else
++#ifndef CONFIG_RISCV_PMU_SBI
+ static const struct kvm_vcpu_sbi_extension vcpu_sbi_ext_pmu = {
+ 	.extid_start = -1UL,
+
+##### R052
+=== e50db34efdc8 R 2023-06-19 +4/-0
+RISC-V: Fix up some vector state related build failures
+
+I get a few build failures along the lines of
+
+./arch/riscv/include/uapi/asm/sigcontext.h:19:36: error: field ‘v_state’ has incomplete type
+   19 |         struct __riscv_v_ext_state v_state;
+      |                                    ^~~~~~~
+./arch/riscv/include/uapi/asm/sigcontext.h:32:49: error: field ‘sc_extdesc’ has incomplete type
+   32 |                 struct __riscv_extra_ext_header sc_extdesc;
+
+The V structures in question are defined for !assembly, so let's just do
+so for the others.
+
+Fixes: 8ee0b41898fa ("riscv: signal: Add sigcontext save/restore for vector")
+functions: 
+fixes: 8ee0b41898fa
+diff --git a/arch/riscv/include/uapi/asm/sigcontext.h b/arch/riscv/include/uapi/asm/sigcontext.h
+index 8b8a8541673a..8c8712aa9551 100644
+--- a/arch/riscv/include/uapi/asm/sigcontext.h
++++ b/arch/riscv/include/uapi/asm/sigcontext.h
+@@ -16,4 +16,6 @@
+ #define END_HDR_SIZE	0x0
+ 
++#ifndef __ASSEMBLY__
++
+ struct __sc_riscv_v_state {
+ 	struct __riscv_v_ext_state v_state;
+@@ -34,3 +36,5 @@ struct sigcontext {
+ };
+ 
++#endif /*!__ASSEMBLY__*/
++
+ #endif /* _UAPI_ASM_RISCV_SIGCONTEXT_H */
+
+##### R053
+=== 75b59f2a90aa R 2023-06-27 +1/-0
+riscv: vector: clear V-reg in the first-use trap
+
+If there is no context switch happens after we enable V for a process,
+then we return to user space with whatever left on the CPU's V registers
+accessible to the process. The leaked data could belong to another
+process's V-context saved from last context switch, impacting process's
+confidentiality on the system.
+
+To prevent this from happening, we clear V registers by restoring
+zero'd V context after turining on V.
+
+Fixes: cd054837243b ("riscv: Allocate user's vector context in the first-use trap")
+functions: arch/riscv/kernel/vector.c:riscv_v_first_use_handler
+fixes: cd054837243b
+diff --git a/arch/riscv/kernel/vector.c b/arch/riscv/kernel/vector.c
+index f9c8e19ab301..8d92fb6c522c 100644
+--- a/arch/riscv/kernel/vector.c
++++ b/arch/riscv/kernel/vector.c
+@@ -168,4 +168,5 @@ bool riscv_v_first_use_handler(struct pt_regs *regs)
+ 	}
+ 	riscv_v_vstate_on(regs);
++	riscv_v_vstate_restore(current, regs);
+ 	return true;
+ }
+
+##### R054
+=== 2fa4139f3e48 R 2023-06-28 +1/-0
+RISC-V: make ARCH_THEAD preclude XIP_KERNEL
+
+Randy reported build errors in linux-next where XIP_KERNEL was enabled.
+ARCH_THEAD requires alternatives to support the non-standard ISA
+extensions used by the THEAD cores, which are mutually exclusive with
+XIP kernels. Clone the dependency list from the Allwinner entry, since
+Allwinner's D1 uses T-Head cores with the same non-standard extensions.
+
+Fixes: da47ce003963 ("riscv: Add the T-HEAD SoC family Kconfig option")
+functions: 
+fixes: da47ce003963
+diff --git a/arch/riscv/Kconfig.socs b/arch/riscv/Kconfig.socs
+index ce10a38dff37..6833d01e2e70 100644
+--- a/arch/riscv/Kconfig.socs
++++ b/arch/riscv/Kconfig.socs
+@@ -44,4 +44,5 @@ config ARCH_SUNXI
+ config ARCH_THEAD
+ 	bool "T-HEAD RISC-V SoCs"
++	depends on MMU && !XIP_KERNEL
+ 	select ERRATA_THEAD
+ 	help
+
+##### R055
+=== 6259f3443c6a R 2023-07-03 +3/-2
+risc-v: Fix order of IPI enablement vs RCU startup
+
+Conor reports that risc-v tries to enable IPIs before telling the
+core code to enable RCU. With the introduction of the mapple tree
+as a backing store for the irq descriptors, this results in
+a very shouty boot sequence, as RCU is legitimately upset.
+
+Restore some sanity by moving the risc_ipi_enable() call after
+notify_cpu_starting(), which explicitly enables RCU on the calling
+CPU.
+
+Fixes: 832f15f42646 ("RISC-V: Treat IPIs as normal Linux IRQs")
+functions: arch/riscv/kernel/smpboot.c:smp_callin
+fixes: 832f15f42646
+diff --git a/arch/riscv/kernel/smpboot.c b/arch/riscv/kernel/smpboot.c
+index bb0b76e1a6d4..f4d6acb38dd0 100644
+--- a/arch/riscv/kernel/smpboot.c
++++ b/arch/riscv/kernel/smpboot.c
+@@ -239,8 +239,9 @@ asmlinkage __visible void smp_callin(void)
+ 	current->active_mm = mm;
+ 
+-	riscv_ipi_enable();
+-
+ 	store_cpu_topology(curr_cpuid);
+ 	notify_cpu_starting(curr_cpuid);
++
++	riscv_ipi_enable();
++
+ 	numa_add_cpu(curr_cpuid);
+ 	set_cpu_online(curr_cpuid, 1);
+
+##### R056
+=== c3bcc65d4d2e R 2023-07-04 +6/-1
+riscv: Start of DRAM should at least be aligned on PMD size for the direct mapping
+
+So that we do not end up mapping the whole linear mapping using 4K
+pages, which is slow at boot time, and also very likely at runtime.
+
+So make sure we align the start of DRAM on a PMD boundary.
+
+Fixes: 3335068f8721 ("riscv: Use PUD/P4D/PGD pages for the linear mapping")
+functions: arch/riscv/mm/init.c:setup_bootmem
+fixes: 3335068f8721
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 9ce504737d18..ad845c3aa9b2 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -215,6 +215,11 @@ static void __init setup_bootmem(void)
+ 
+ 	phys_ram_end = memblock_end_of_DRAM();
++
++	/*
++	 * Make sure we align the start of the memory on a PMD boundary so that
++	 * at worst, we map the linear mapping with PMD mappings.
++	 */
+ 	if (!IS_ENABLED(CONFIG_XIP_KERNEL))
+-		phys_ram_base = memblock_start_of_DRAM();
++		phys_ram_base = memblock_start_of_DRAM() & PMD_MASK;
+ 
+ 	/*
+
+##### R057
+=== b690e266dae2 R 2023-07-10 +1/-1
+riscv: mm: fix truncation warning on RV32
+
+lkp reports below sparse warning when building for RV32:
+arch/riscv/mm/init.c:1204:48: sparse: warning: cast truncates bits from
+constant value (100000000 becomes 0)
+
+IMO, the reason we didn't see this truncates bug in real world is "0"
+means MEMBLOCK_ALLOC_ACCESSIBLE in memblock and there's no RV32 HW
+with more than 4GB memory.
+
+Fix it anyway to make sparse happy.
+
+Fixes: decf89f86ecd ("riscv: try to allocate crashkern region from 32bit addressible memory")
+functions: arch/riscv/mm/init.c:reserve_crashkernel
+fixes: decf89f86ecd
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 70fb31960b63..9ce504737d18 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -1347,5 +1347,5 @@ static void __init reserve_crashkernel(void)
+ 	crash_base = memblock_phys_alloc_range(crash_size, PMD_SIZE,
+ 					       search_start,
+-					       min(search_end, (unsigned long) SZ_4G));
++					       min(search_end, (unsigned long)(SZ_4G - 1)));
+ 	if (crash_base == 0) {
+ 		/* Try again without restricting region to 32bit addressible memory */
+
+##### R058
+=== ab2dbc7acced R 2023-07-11 +2/-7
+RISC-V: Don't include Zicsr or Zifencei in I from ACPI
+
+ACPI ISA strings are based on a specification after Zicsr and Zifencei
+were split out of I, so we shouldn't be treating them as part of I.  We
+haven't release an ACPI-based kernel yet, so we don't need to worry
+about compatibility with the old ISA strings.
+
+Fixes: 07edc32779e3 ("RISC-V: always report presence of extensions formerly part of the base ISA")
+functions: arch/riscv/kernel/cpufeature.c:riscv_fill_hwcap
+fixes: 07edc32779e3
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index bdcf460ea53d..a8f66c015229 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -318,11 +318,4 @@ void __init riscv_fill_hwcap(void)
+ 		}
+ 
+-		/*
+-		 * Linux requires the following extensions, so we may as well
+-		 * always set them.
+-		 */
+-		set_bit(RISCV_ISA_EXT_ZICSR, isainfo->isa);
+-		set_bit(RISCV_ISA_EXT_ZIFENCEI, isainfo->isa);
+-
+ 		/*
+ 		 * These ones were as they were part of the base ISA when the
+@@ -331,4 +324,6 @@ void __init riscv_fill_hwcap(void)
+ 		 */
+ 		if (acpi_disabled) {
++			set_bit(RISCV_ISA_EXT_ZICSR, isainfo->isa);
++			set_bit(RISCV_ISA_EXT_ZIFENCEI, isainfo->isa);
+ 			set_bit(RISCV_ISA_EXT_ZICNTR, isainfo->isa);
+ 			set_bit(RISCV_ISA_EXT_ZIHPM, isainfo->isa);
+
+##### R059
+=== 568701fee366 R 2023-07-24 +3/-3
+RISC-V: ACPI: Fix acpi_os_ioremap to return iomem address
+
+acpi_os_ioremap() currently is a wrapper to memremap() on
+RISC-V. But the callers of acpi_os_ioremap() expect it to
+return __iomem address and hence sparse tool reports a new
+warning. Fix this issue by type casting to  __iomem type.
+
+Fixes: a91a9ffbd3a5 ("RISC-V: Add support to build the ACPI core")
+functions: arch/riscv/kernel/acpi.c:acpi_os_ioremap
+fixes: a91a9ffbd3a5
+diff --git a/arch/riscv/include/asm/acpi.h b/arch/riscv/include/asm/acpi.h
+index f71ce21ff684..d5604d2073bc 100644
+--- a/arch/riscv/include/asm/acpi.h
++++ b/arch/riscv/include/asm/acpi.h
+@@ -20,5 +20,5 @@ typedef u64 phys_cpuid_t;
+ 
+ /* ACPI table mapping after acpi_permanent_mmap is set */
+-void *acpi_os_ioremap(acpi_physical_address phys, acpi_size size);
++void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size);
+ #define acpi_os_ioremap acpi_os_ioremap
+ 
+diff --git a/arch/riscv/kernel/acpi.c b/arch/riscv/kernel/acpi.c
+index 5ee03ebab80e..56cb2c986c48 100644
+--- a/arch/riscv/kernel/acpi.c
++++ b/arch/riscv/kernel/acpi.c
+@@ -216,7 +216,7 @@ void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
+ }
+ 
+-void *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
++void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
+ {
+-	return memremap(phys, size, MEMREMAP_WB);
++	return (void __iomem *)memremap(phys, size, MEMREMAP_WB);
+ }
+ 
+
+##### R060
+=== fbe7d19d2b7f R 2023-07-24 +2/-0
+riscv: Export va_kernel_pa_offset in vmcoreinfo
+
+Since RISC-V Linux v6.4, the commit 3335068f8721 ("riscv: Use
+PUD/P4D/PGD pages for the linear mapping") changes phys_ram_base
+from the physical start of the kernel to the actual start of the DRAM.
+
+The Crash-utility's VTOP() still uses phys_ram_base and kernel_map.virt_addr
+to translate kernel virtual address, that failed the Crash with Linux v6.4 [1].
+
+Export kernel_map.va_kernel_pa_offset in vmcoreinfo to help Crash translate
+the kernel virtual address correctly.
+
+Fixes: 3335068f8721 ("riscv: Use PUD/P4D/PGD pages for the linear mapping")
+functions: arch/riscv/kernel/crash_core.c:arch_crash_save_vmcoreinfo
+fixes: 3335068f8721
+diff --git a/arch/riscv/kernel/crash_core.c b/arch/riscv/kernel/crash_core.c
+index b351a3c01355..55f1d7856b54 100644
+--- a/arch/riscv/kernel/crash_core.c
++++ b/arch/riscv/kernel/crash_core.c
+@@ -19,3 +19,5 @@ void arch_crash_save_vmcoreinfo(void)
+ #endif
+ 	vmcoreinfo_append_str("NUMBER(KERNEL_LINK_ADDR)=0x%lx\n", KERNEL_LINK_ADDR);
++	vmcoreinfo_append_str("NUMBER(va_kernel_pa_offset)=0x%lx\n",
++						kernel_map.va_kernel_pa_offset);
+ }
+
+##### R061
+=== 7e3811521dc3 R 2023-07-25 +4/-0
+riscv: Implement flush_cache_vmap()
+
+The RISC-V kernel needs a sfence.vma after a page table modification: we
+used to rely on the vmalloc fault handling to emit an sfence.vma, but
+commit 7d3332be011e ("riscv: mm: Pre-allocate PGD entries for
+vmalloc/modules area") got rid of this path for 64-bit kernels, so now we
+need to explicitly emit a sfence.vma in flush_cache_vmap().
+
+Note that we don't need to implement flush_cache_vunmap() as the generic
+code should emit a flush tlb after unmapping a vmalloc region.
+
+Fixes: 7d3332be011e ("riscv: mm: Pre-allocate PGD entries for vmalloc/modules area")
+functions: 
+fixes: 7d3332be011e
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+index 8091b8bf4883..b93ffddf8a61 100644
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -38,4 +38,8 @@ static inline void flush_dcache_page(struct page *page)
+ 	flush_icache_mm(vma->vm_mm, 0)
+ 
++#ifdef CONFIG_64BIT
++#define flush_cache_vmap(start, end)	flush_tlb_kernel_range(start, end)
++#endif
++
+ #ifndef CONFIG_SMP
+ 
+
+##### R062
+=== 49af7a2cd5f6 R 2023-07-26 +1/-1
+riscv/kexec: load initrd high in available memory
+
+When initrd is loaded low, the secondary kernel fails like this:
+
+ INITRD: 0xdc581000+0x00eef000 overlaps in-use memory region
+
+This initrd load address corresponds to the _end symbol, but the
+reservation is aligned on PMD_SIZE, as explained by a comment in
+setup_bootmem().
+
+It is technically possible to align the initrd load address accordingly,
+leaving a hole between the end of kernel and the initrd, but it is much
+simpler to allocate the initrd top-down.
+
+Fixes: 838b3e28488f ("RISC-V: Load purgatory in kexec_file")
+functions: arch/riscv/kernel/elf_kexec.c:elf_kexec_load
+fixes: 838b3e28488f
+diff --git a/arch/riscv/kernel/elf_kexec.c b/arch/riscv/kernel/elf_kexec.c
+index 38390d3bdcac..c08bb5c3b385 100644
+--- a/arch/riscv/kernel/elf_kexec.c
++++ b/arch/riscv/kernel/elf_kexec.c
+@@ -282,5 +282,5 @@ static void *elf_kexec_load(struct kimage *image, char *kernel_buf,
+ 		kbuf.bufsz = kbuf.memsz = initrd_len;
+ 		kbuf.buf_align = PAGE_SIZE;
+-		kbuf.top_down = false;
++		kbuf.top_down = true;
+ 		kbuf.mem = KEXEC_BUF_MEM_UNKNOWN;
+ 		ret = kexec_add_buffer(&kbuf);
+
+##### R063
+=== 79bc3f85c51f R 2023-07-31 +13/-2
+riscv: correct riscv_insn_is_c_jr() and riscv_insn_is_c_jalr()
+
+The instructions c.jr and c.jalr must have rs1 != 0, but
+riscv_insn_is_c_jr() and riscv_insn_is_c_jalr() do not check for this. So,
+riscv_insn_is_c_jr() can match a reserved encoding, while
+riscv_insn_is_c_jalr() can match the c.ebreak instruction.
+
+Rewrite them with check for rs1 != 0.
+
+Fixes: ec5f90877516 ("RISC-V: Move riscv_insn_is_* macros into a common header")
+functions: 
+fixes: ec5f90877516
+diff --git a/arch/riscv/include/asm/insn.h b/arch/riscv/include/asm/insn.h
+index 4e1505cef8aa..fce00400c9bc 100644
+--- a/arch/riscv/include/asm/insn.h
++++ b/arch/riscv/include/asm/insn.h
+@@ -111,4 +111,5 @@
+ #define RVC_INSN_FUNCT3_MASK	GENMASK(15, 13)
+ #define RVC_INSN_FUNCT3_OPOFF	13
++#define RVC_INSN_J_RS1_MASK	GENMASK(11, 7)
+ #define RVC_INSN_J_RS2_MASK	GENMASK(6, 2)
+ #define RVC_INSN_OPCODE_MASK	GENMASK(1, 0)
+@@ -246,6 +247,4 @@ __RISCV_INSN_FUNCS(auipc, RVG_MASK_AUIPC, RVG_MATCH_AUIPC)
+ __RISCV_INSN_FUNCS(jalr, RVG_MASK_JALR, RVG_MATCH_JALR)
+ __RISCV_INSN_FUNCS(jal, RVG_MASK_JAL, RVG_MATCH_JAL)
+-__RISCV_INSN_FUNCS(c_jr, RVC_MASK_C_JR, RVC_MATCH_C_JR)
+-__RISCV_INSN_FUNCS(c_jalr, RVC_MASK_C_JALR, RVC_MATCH_C_JALR)
+ __RISCV_INSN_FUNCS(c_j, RVC_MASK_C_J, RVC_MATCH_C_J)
+ __RISCV_INSN_FUNCS(beq, RVG_MASK_BEQ, RVG_MATCH_BEQ)
+@@ -274,4 +273,16 @@ static __always_inline bool riscv_insn_is_branch(u32 code)
+ }
+ 
++static __always_inline bool riscv_insn_is_c_jr(u32 code)
++{
++	return (code & RVC_MASK_C_JR) == RVC_MATCH_C_JR &&
++	       (code & RVC_INSN_J_RS1_MASK) != 0;
++}
++
++static __always_inline bool riscv_insn_is_c_jalr(u32 code)
++{
++	return (code & RVC_MASK_C_JALR) == RVC_MATCH_C_JALR &&
++	       (code & RVC_INSN_J_RS1_MASK) != 0;
++}
++
+ #define RV_IMM_SIGN(x) (-(((x) >> 31) & 1))
+ #define RVC_IMM_SIGN(x) (-(((x) >> 12) & 1))
+
+##### R064
+=== 4eb2eb1b4c0e R 2023-08-03 +8/-8
+riscv,mmio: Fix readX()-to-delay() ordering
+
+Section 2.1 of the Platform Specification [1] states:
+
+  Unless otherwise specified by a given I/O device, I/O devices are on
+  ordering channel 0 (i.e., they are point-to-point strongly ordered).
+
+which is not sufficient to guarantee that a readX() by a hart completes
+before a subsequent delay() on the same hart (cf. memory-barriers.txt,
+"Kernel I/O barrier effects").
+
+Set the I(nput) bit in __io_ar() to restore the ordering, align inline
+comments.
+
+[1] https://github.com/riscv/riscv-platform-specs
+
+Fixes: fab957c11efe ("RISC-V: Atomic and Locking Code")
+functions: 
+fixes: fab957c11efe
+diff --git a/arch/riscv/include/asm/mmio.h b/arch/riscv/include/asm/mmio.h
+index aff6c33ab0c0..4c58ee7f95ec 100644
+--- a/arch/riscv/include/asm/mmio.h
++++ b/arch/riscv/include/asm/mmio.h
+@@ -102,7 +102,7 @@ static inline u64 __raw_readq(const volatile void __iomem *addr)
+  * ordering rules but do not guarantee any ordering relative to Normal memory
+  * accesses.  These are defined to order the indicated access (either a read or
+- * write) with all other I/O memory accesses. Since the platform specification
+- * defines that all I/O regions are strongly ordered on channel 2, no explicit
+- * fences are required to enforce this ordering.
++ * write) with all other I/O memory accesses to the same peripheral. Since the
++ * platform specification defines that all I/O regions are strongly ordered on
++ * channel 0, no explicit fences are required to enforce this ordering.
+  */
+ /* FIXME: These are now the same as asm-generic */
+@@ -126,12 +126,12 @@ static inline u64 __raw_readq(const volatile void __iomem *addr)
+ 
+ /*
+- * I/O memory access primitives. Reads are ordered relative to any
+- * following Normal memory access. Writes are ordered relative to any prior
+- * Normal memory access.  The memory barriers here are necessary as RISC-V
++ * I/O memory access primitives.  Reads are ordered relative to any following
++ * Normal memory read and delay() loop.  Writes are ordered relative to any
++ * prior Normal memory write.  The memory barriers here are necessary as RISC-V
+  * doesn't define any ordering between the memory space and the I/O space.
+  */
+ #define __io_br()	do {} while (0)
+-#define __io_ar(v)	__asm__ __volatile__ ("fence i,r" : : : "memory")
+-#define __io_bw()	__asm__ __volatile__ ("fence w,o" : : : "memory")
++#define __io_ar(v)	({ __asm__ __volatile__ ("fence i,ir" : : : "memory"); })
++#define __io_bw()	({ __asm__ __volatile__ ("fence w,o" : : : "memory"); })
+ #define __io_aw()	mmiowb_set_pending()
+ 
+
+##### R065
+=== d566bea4a638 R 2023-08-08 +3/-1
+riscv: Do not allow vmap pud mappings for 3-level page table
+
+The vmalloc_fault() path was removed and to avoid syncing the vmalloc PGD
+mappings, they are now preallocated. But if the kernel can use a PUD
+mapping (which in sv39 is actually a PGD mapping) for large vmalloc
+allocation, it will free the current unused preallocated PGD mapping and
+install a new leaf one. Since there is no sync anymore, some page tables
+lack this new mapping and that triggers a panic.
+
+So only allow PUD mappings for sv48 and sv57.
+
+Fixes: 7d3332be011e ("riscv: mm: Pre-allocate PGD entries for vmalloc/modules area")
+functions: 
+fixes: 7d3332be011e
+diff --git a/arch/riscv/include/asm/vmalloc.h b/arch/riscv/include/asm/vmalloc.h
+index 58d3e447f191..924d01b56c9a 100644
+--- a/arch/riscv/include/asm/vmalloc.h
++++ b/arch/riscv/include/asm/vmalloc.h
+@@ -4,4 +4,6 @@
+ #ifdef CONFIG_HAVE_ARCH_HUGE_VMAP
+ 
++extern bool pgtable_l4_enabled, pgtable_l5_enabled;
++
+ #define IOREMAP_MAX_ORDER (PUD_SHIFT)
+ 
+@@ -9,5 +11,5 @@
+ static inline bool arch_vmap_pud_supported(pgprot_t prot)
+ {
+-	return true;
++	return pgtable_l4_enabled || pgtable_l5_enabled;
+ }
+ 
+
+##### R066
+=== 4b05b993900d R 2023-08-11 +7/-4
+riscv: uaccess: Return the number of bytes effectively not copied
+
+It was reported that the riscv kernel hangs while executing the test
+in [1].
+
+Indeed, the test hangs when trying to write a buffer to a file. The
+problem is that the riscv implementation of raw_copy_from_user() does not
+return the correct number of bytes not written when an exception happens
+and is fixed up, instead it always returns the initial size to copy,
+even if some bytes were actually copied.
+
+generic_perform_write() pre-faults the user pages and bails out if nothing
+can be written, otherwise it will access the userspace buffer: here the
+riscv implementation keeps returning it was not able to copy any byte
+though the pre-faulting indicates otherwise. So generic_perform_write()
+keeps retrying to access the user memory and ends up in an infinite
+loop.
+
+Note that before the commit mentioned in [1] that introduced this
+regression, it worked because generic_perform_write() would bail out if
+only one byte could not be written.
+
+So fix this by returning the number of bytes effectively not written in
+__asm_copy_[to|from]_user() and __clear_user(), as it is expected.
+
+Fixes: ebcbd75e3962 ("riscv: Fix the bug in memory access fixup code")
+functions: 
+fixes: ebcbd75e3962
+diff --git a/arch/riscv/lib/uaccess.S b/arch/riscv/lib/uaccess.S
+index ec486e5369d9..09b47ebacf2e 100644
+--- a/arch/riscv/lib/uaccess.S
++++ b/arch/riscv/lib/uaccess.S
+@@ -18,6 +18,9 @@ ENTRY(__asm_copy_from_user)
+ 	csrs CSR_STATUS, t6
+ 
+-	/* Save for return value */
+-	mv	t5, a2
++	/*
++	 * Save the terminal address which will be used to compute the number
++	 * of bytes copied in case of a fixup exception.
++	 */
++	add	t5, a0, a2
+ 
+ 	/*
+@@ -177,5 +180,5 @@ ENTRY(__asm_copy_from_user)
+ 	/* Disable access to user memory */
+ 	csrc CSR_STATUS, t6
+-	mv a0, t5
++	sub a0, t5, a0
+ 	ret
+ ENDPROC(__asm_copy_to_user)
+@@ -229,5 +232,5 @@ ENTRY(__clear_user)
+ 	/* Disable access to user memory */
+ 	csrc CSR_STATUS, t6
+-	mv a0, a1
++	sub a0, a3, a0
+ 	ret
+ ENDPROC(__clear_user)
+
+##### R067
+=== 6e8d96909a23 R 2023-08-11 +76/-0
+asm-generic: partially revert "Unify uapi bitsperlong.h for arm64, riscv and loongarch"
+
+Unifying the asm-generic headers across 32-bit and 64-bit architectures
+based on the compiler provided macros was a good idea and appears to work
+with all user space, but it caused a regression when building old kernels
+on systems that have the new headers installed in /usr/include, as this
+combination trips an inconsistency in the kernel's own tools/include
+headers that are a mix of userspace and kernel-internal headers.
+
+This affects kernel builds on arm64, riscv64 and loongarch64 systems that
+might end up using the "#define __BITS_PER_LONG 32" default from the old
+tools headers. Backporting the commit into stable kernels would address
+this, but it would still break building kernels without that backport,
+and waste time for developers trying to understand the problem.
+
+arm64 build machines are rather common, and on riscv64 this can also
+happen in practice, but loongarch64 is probably new enough to not
+be used much for building old kernels, so only revert the bits
+for arm64 and riscv.
+
+Fixes: 8386f58f8deda ("asm-generic: Unify uapi bitsperlong.h for arm64, riscv and loongarch")
+functions: 
+fixes: 8386f58f8ded
+ arch/arm64/include/uapi/asm/bitsperlong.h       | 24 ++++++++++++++++++++++++
+ arch/riscv/include/uapi/asm/bitsperlong.h       | 14 ++++++++++++++
+ tools/arch/arm64/include/uapi/asm/bitsperlong.h | 24 ++++++++++++++++++++++++
+ tools/arch/riscv/include/uapi/asm/bitsperlong.h | 14 ++++++++++++++
+ 4 files changed, 76 insertions(+)
+diff --git a/arch/arm64/include/uapi/asm/bitsperlong.h b/arch/arm64/include/uapi/asm/bitsperlong.h
+new file mode 100644
+index 000000000000..485d60bee26c
+--- /dev/null
++++ b/arch/arm64/include/uapi/asm/bitsperlong.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++/*
++ * Copyright (C) 2012 ARM Ltd.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ */
++#ifndef __ASM_BITSPERLONG_H
++#define __ASM_BITSPERLONG_H
++
++#define __BITS_PER_LONG 64
++
++#include <asm-generic/bitsperlong.h>
++
++#endif	/* __ASM_BITSPERLONG_H */
+diff --git a/arch/riscv/include/uapi/asm/bitsperlong.h b/arch/riscv/include/uapi/asm/bitsperlong.h
+new file mode 100644
+index 000000000000..7d0b32e3b701
+--- /dev/null
++++ b/arch/riscv/include/uapi/asm/bitsperlong.h
+@@ -0,0 +1,14 @@
++/* SPDX-License-Identifier: GPL-2.0-only WITH Linux-syscall-note */
++/*
++ * Copyright (C) 2012 ARM Ltd.
++ * Copyright (C) 2015 Regents of the University of California
++ */
++
++#ifndef _UAPI_ASM_RISCV_BITSPERLONG_H
++#define _UAPI_ASM_RISCV_BITSPERLONG_H
++
++#define __BITS_PER_LONG (__SIZEOF_POINTER__ * 8)
++
++#include <asm-generic/bitsperlong.h>
++
++#endif /* _UAPI_ASM_RISCV_BITSPERLONG_H */
+diff --git a/tools/arch/arm64/include/uapi/asm/bitsperlong.h b/tools/arch/arm64/include/uapi/asm/bitsperlong.h
+new file mode 100644
+index 000000000000..485d60bee26c
+--- /dev/null
++++ b/tools/arch/arm64/include/uapi/asm/bitsperlong.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++/*
++ * Copyright (C) 2012 ARM Ltd.
++ *
+... (40 more diff lines)
+
+##### R068
+=== c35f3aa34509 R 2023-08-16 +3/-1
+RISC-V: vector: export VLENB csr in __sc_riscv_v_state
+
+VLENB is critical for callers of ptrace to reconstruct Vector register
+files from the register dump of NT_RISCV_VECTOR. Also, future systems
+may will have a writable VLENB, so add it now to potentially save future
+compatibility issue.
+
+Fixes: 0c59922c769a ("riscv: Add ptrace vector support")
+functions: 
+fixes: 0c59922c769a
+diff --git a/arch/riscv/include/asm/vector.h b/arch/riscv/include/asm/vector.h
+index 3d78930cab51..c5ee07b3df07 100644
+--- a/arch/riscv/include/asm/vector.h
++++ b/arch/riscv/include/asm/vector.h
+@@ -71,6 +71,7 @@ static __always_inline void __vstate_csr_save(struct __riscv_v_ext_state *dest)
+ 		"csrr	%2, " __stringify(CSR_VL) "\n\t"
+ 		"csrr	%3, " __stringify(CSR_VCSR) "\n\t"
++		"csrr	%4, " __stringify(CSR_VLENB) "\n\t"
+ 		: "=r" (dest->vstart), "=r" (dest->vtype), "=r" (dest->vl),
+-		  "=r" (dest->vcsr) : :);
++		  "=r" (dest->vcsr), "=r" (dest->vlenb) : :);
+ }
+ 
+diff --git a/arch/riscv/include/uapi/asm/ptrace.h b/arch/riscv/include/uapi/asm/ptrace.h
+index e17c550986a6..283800130614 100644
+--- a/arch/riscv/include/uapi/asm/ptrace.h
++++ b/arch/riscv/include/uapi/asm/ptrace.h
+@@ -98,4 +98,5 @@ struct __riscv_v_ext_state {
+ 	unsigned long vtype;
+ 	unsigned long vcsr;
++	unsigned long vlenb;
+ 	void *datap;
+ 	/*
+
+##### R069
+=== e3f9324b231a R 2023-08-16 +0/-70
+RISC-V: Remove ptrace support for vectors
+
+We've found two bugs here: NT_RISCV_VECTOR steps on NT_RISCV_CSR (which
+is only for embedded), and we don't have vlenb in the core dumps.  Given
+that we've have a pair of bugs croup up as part of the GDB review we've
+probably got other issues, so let's just cut this for 6.5 and get it
+right.
+
+Fixes: 0c59922c769a ("riscv: Add ptrace vector support")
+functions: arch/riscv/kernel/ptrace.c:riscv_vr_get, arch/riscv/kernel/ptrace.c:riscv_vr_set
+fixes: 0c59922c769a
+ arch/riscv/kernel/ptrace.c | 69 ------------------------------------------------------------------
+ include/uapi/linux/elf.h   |  1 -
+ 2 files changed, 70 deletions(-)
+diff --git a/arch/riscv/kernel/ptrace.c b/arch/riscv/kernel/ptrace.c
+index 1d572cf3140f..487303e3ef22 100644
+--- a/arch/riscv/kernel/ptrace.c
++++ b/arch/riscv/kernel/ptrace.c
+@@ -26,7 +26,4 @@ enum riscv_regset {
+ 	REGSET_F,
+ #endif
+-#ifdef CONFIG_RISCV_ISA_V
+-	REGSET_V,
+-#endif
+ };
+ 
+@@ -85,59 +82,4 @@ static int riscv_fpr_set(struct task_struct *target,
+ #endif
+ 
+-#ifdef CONFIG_RISCV_ISA_V
+-static int riscv_vr_get(struct task_struct *target,
+-			const struct user_regset *regset,
+-			struct membuf to)
+-{
+-	struct __riscv_v_ext_state *vstate = &target->thread.vstate;
+-
+-	if (!riscv_v_vstate_query(task_pt_regs(target)))
+-		return -EINVAL;
+-
+-	/*
+-	 * Ensure the vector registers have been saved to the memory before
+-	 * copying them to membuf.
+-	 */
+-	if (target == current)
+-		riscv_v_vstate_save(current, task_pt_regs(current));
+-
+-	/* Copy vector header from vstate. */
+-	membuf_write(&to, vstate, offsetof(struct __riscv_v_ext_state, datap));
+-	membuf_zero(&to, sizeof(vstate->datap));
+-
+-	/* Copy all the vector registers from vstate. */
+-	return membuf_write(&to, vstate->datap, riscv_v_vsize);
+-}
+-
+-static int riscv_vr_set(struct task_struct *target,
+-			const struct user_regset *regset,
+-			unsigned int pos, unsigned int count,
+-			const void *kbuf, const void __user *ubuf)
+-{
+-	int ret, size;
+-	struct __riscv_v_ext_state *vstate = &target->thread.vstate;
+-
+-	if (!riscv_v_vstate_query(task_pt_regs(target)))
+-		return -EINVAL;
+-
+-	/* Copy rest of the vstate except datap */
+-	ret = user_regset_copyin(&pos, &count, &kbuf, &ubuf, vstate, 0,
+-				 offsetof(struct __riscv_v_ext_state, datap));
+-	if (unlikely(ret))
+-		return ret;
+-
+-	/* Skip copy datap. */
+-	size = sizeof(vstate->datap);
+-	count -= size;
+... (38 more diff lines)
+
+##### R070
+=== 14a270bfab7a R 2023-08-22 +0/-7
+riscv: signal: fix sigaltstack frame size checking
+
+The alternative stack checking in get_sigframe introduced by the Vector
+support is not needed and has a problem. It is not needed as we have
+already validate it at the beginning of the function if we are already
+on an altstack. If not, the size of an altstack is always validated at
+its allocation stage with sigaltstack_size_valid().
+
+Besides, we must only regard the size of an altstack if the handler of a
+signal is registered with SA_ONSTACK. So, blindly checking overflow of
+an altstack if sas_ss_size not equals to zero will check against wrong
+signal handlers if only a subset of signals are registered with
+SA_ONSTACK.
+
+Fixes: 8ee0b41898fa ("riscv: signal: Add sigcontext save/restore for vector")
+functions: arch/riscv/kernel/signal.c:get_sigframe
+fixes: 8ee0b41898fa
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index 180d951d3624..21a4d0e111bc 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -312,11 +312,4 @@ static inline void __user *get_sigframe(struct ksignal *ksig,
+ 	sp &= ~0xfUL;
+ 
+-	/*
+-	 * Fail if the size of the altstack is not large enough for the
+-	 * sigframe construction.
+-	 */
+-	if (current->sas_ss_size && sp < current->sas_ss_sp)
+-		return (void __user __force *)-1UL;
+-
+ 	return (void __user *)sp;
+ }
+
+##### R071
+=== 9f944d2e0ab3 R 2023-08-23 +1/-3
+riscv: Require FRAME_POINTER for some configurations
+
+Some V configurations implicitly turn on '-fno-omit-frame-pointer',
+but leaving FRAME_POINTER disabled. This makes it hard to reason about
+the FRAME_POINTER config, and also triggers build failures introduced
+in by the commit in the Fixes: tag.
+
+Select FRAME_POINTER explicitly for these configurations.
+
+Fixes: ebc9cb03b21e ("riscv: stack: Fixup independent softirq stack for CONFIG_FRAME_POINTER=n")
+functions: 
+fixes: ebc9cb03b21e
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index f52dd125ac5e..afa7160b136c 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -63,4 +63,5 @@ config RISCV
+ 	select CPU_PM if CPU_IDLE || HIBERNATION
+ 	select EDAC_SUPPORT
++	select FRAME_POINTER if PERF_EVENTS || (FUNCTION_TRACER && !DYNAMIC_FTRACE)
+ 	select GENERIC_ARCH_TOPOLOGY
+ 	select GENERIC_ATOMIC64 if !64BIT
+diff --git a/arch/riscv/Makefile b/arch/riscv/Makefile
+index 6ec6d52a4180..1329e060c548 100644
+--- a/arch/riscv/Makefile
++++ b/arch/riscv/Makefile
+@@ -88,7 +88,4 @@ ifeq ($(CONFIG_CMODEL_MEDANY),y)
+ 	KBUILD_CFLAGS += -mcmodel=medany
+ endif
+-ifeq ($(CONFIG_PERF_EVENTS),y)
+-        KBUILD_CFLAGS += -fno-omit-frame-pointer
+-endif
+ 
+ # Avoid generating .eh_frame sections.
+
+##### R072
+=== ef21fa7c198e R 2023-08-25 +4/-4
+riscv: Fix build errors using binutils2.37 toolchains
+
+When building the kernel with binutils 2.37 and GCC-11.1.0/GCC-11.2.0,
+the following error occurs:
+
+  Assembler messages:
+  Error: cannot find default versions of the ISA extension `zicsr'
+  Error: cannot find default versions of the ISA extension `zifencei'
+
+The above error originated from this commit of binutils[0], which has been
+resolved and backported by GCC-12.1.0[1] and GCC-11.3.0[2].
+
+So fix this by change the GCC version in
+CONFIG_TOOLCHAIN_NEEDS_OLD_ISA_SPEC to GCC-11.3.0.
+
+Fixes: ca09f772ccca ("riscv: Handle zicsr/zifencei issue between gcc and binutils")
+functions: 
+fixes: ca09f772ccca
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 10e7a7ad175a..bea7b73e895d 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -581,6 +581,6 @@ config TOOLCHAIN_NEEDS_EXPLICIT_ZICSR_ZIFENCEI
+ 	  To make life easier, and avoid forcing toolchains that default to a
+ 	  newer ISA spec to version 2.2, relax the check to binutils >= 2.36.
+-	  For clang < 17 or GCC < 11.1.0, for which this is not possible, this is
+-	  dealt with in CONFIG_TOOLCHAIN_NEEDS_OLD_ISA_SPEC.
++	  For clang < 17 or GCC < 11.3.0, for which this is not possible or need
++	  special treatment, this is dealt with in TOOLCHAIN_NEEDS_OLD_ISA_SPEC.
+ 
+ config TOOLCHAIN_NEEDS_OLD_ISA_SPEC
+@@ -588,6 +588,6 @@ config TOOLCHAIN_NEEDS_OLD_ISA_SPEC
+ 	depends on TOOLCHAIN_NEEDS_EXPLICIT_ZICSR_ZIFENCEI
+ 	# https://github.com/llvm/llvm-project/commit/22e199e6afb1263c943c0c0d4498694e15bf8a16
+-	# https://gcc.gnu.org/git/?p=gcc.git;a=commit;h=b03be74bad08c382da47e048007a78fa3fb4ef49
+-	depends on (CC_IS_CLANG && CLANG_VERSION < 170000) || (CC_IS_GCC && GCC_VERSION < 110100)
++	# https://gcc.gnu.org/git/?p=gcc.git;a=commit;h=d29f5d6ab513c52fd872f532c492e35ae9fd6671
++	depends on (CC_IS_CLANG && CLANG_VERSION < 170000) || (CC_IS_GCC && GCC_VERSION < 110300)
+ 	help
+ 	  Certain versions of clang and GCC do not support zicsr and zifencei via
+
+##### R073
+=== 9f564b92cf6d R 2023-09-12 +40/-12
+riscv: Only consider swbp/ss handlers for correct privileged mode
+
+RISC-V software breakpoint trap handlers are used for {k,u}probes.
+
+When trapping from kernelmode, only the kernelmode handlers should be
+considered. Vice versa, only usermode handlers for usermode
+traps. This is not the case on RISC-V, which can trigger a bug if a
+userspace process uses uprobes, and a WARN() is triggered from
+kernelmode (which is implemented via {c.,}ebreak).
+
+The kernel will trap on the kernelmode {c.,}ebreak, look for uprobes
+handlers, realize incorrectly that uprobes need to be handled, and
+exit the trap handler early. The trap returns to re-executing the
+{c.,}ebreak, and enter an infinite trap-loop.
+
+The issue was found running the BPF selftest [1].
+
+Fix this issue by only considering the swbp/ss handlers for
+kernel/usermode respectively. Also, move CONFIG ifdeffery from traps.c
+to the asm/{k,u}probes.h headers.
+
+Note that linux/uprobes.h only include asm/uprobes.h if CONFIG_UPROBES
+is defined, which is why asm/uprobes.h needs to be unconditionally
+included in traps.c
+
+Fixes: 74784081aac8 ("riscv: Add uprobes supported")
+functions: arch/riscv/kernel/traps.c:handle_break
+fixes: 74784081aac8
+ arch/riscv/include/asm/kprobes.h | 11 ++++++++++-
+ arch/riscv/include/asm/uprobes.h | 13 ++++++++++++-
+ arch/riscv/kernel/traps.c        | 28 ++++++++++++++++++----------
+ 3 files changed, 40 insertions(+), 12 deletions(-)
+diff --git a/arch/riscv/include/asm/kprobes.h b/arch/riscv/include/asm/kprobes.h
+index e7882ccb0fd4..78ea44f76718 100644
+--- a/arch/riscv/include/asm/kprobes.h
++++ b/arch/riscv/include/asm/kprobes.h
+@@ -41,5 +41,14 @@ int kprobe_fault_handler(struct pt_regs *regs, unsigned int trapnr);
+ bool kprobe_breakpoint_handler(struct pt_regs *regs);
+ bool kprobe_single_step_handler(struct pt_regs *regs);
+-
++#else
++static inline bool kprobe_breakpoint_handler(struct pt_regs *regs)
++{
++	return false;
++}
++
++static inline bool kprobe_single_step_handler(struct pt_regs *regs)
++{
++	return false;
++}
+ #endif /* CONFIG_KPROBES */
+ #endif /* _ASM_RISCV_KPROBES_H */
+diff --git a/arch/riscv/include/asm/uprobes.h b/arch/riscv/include/asm/uprobes.h
+index f2183e00fdd2..3fc7deda9190 100644
+--- a/arch/riscv/include/asm/uprobes.h
++++ b/arch/riscv/include/asm/uprobes.h
+@@ -35,6 +35,17 @@ struct arch_uprobe {
+ };
+ 
++#ifdef CONFIG_UPROBES
+ bool uprobe_breakpoint_handler(struct pt_regs *regs);
+ bool uprobe_single_step_handler(struct pt_regs *regs);
+-
++#else
++static inline bool uprobe_breakpoint_handler(struct pt_regs *regs)
++{
++	return false;
++}
++
++static inline bool uprobe_single_step_handler(struct pt_regs *regs)
++{
++	return false;
++}
++#endif /* CONFIG_UPROBES */
+ #endif /* _ASM_RISCV_UPROBES_H */
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 19807c4d3805..fae8f610d867 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -14,4 +14,6 @@
+ #include <linux/uaccess.h>
+ #include <linux/kprobes.h>
++#include <linux/uprobes.h>
++#include <asm/uprobes.h>
+ #include <linux/mm.h>
+ #include <linux/module.h>
+@@ -248,20 +250,26 @@ static inline unsigned long get_break_insn_length(unsigned long pc)
+ }
+ 
++static bool probe_single_step_handler(struct pt_regs *regs)
++{
++	bool user = user_mode(regs);
+... (31 more diff lines)
+
+##### R074
+=== 07a27665754b R 2023-09-13 +2/-2
+RISC-V: Fix wrong use of CONFIG_HAVE_SOFTIRQ_ON_OWN_STACK
+
+If configuration options SOFTIRQ_ON_OWN_STACK and PREEMPT_RT
+are enabled simultaneously under RISC-V architecture,
+it will result in a compilation failure:
+
+arch/riscv/kernel/irq.c:64:6: error: redefinition of 'do_softirq_own_stack'
+   64 | void do_softirq_own_stack(void)
+      |      ^~~~~~~~~~~~~~~~~~~~
+In file included from ./arch/riscv/include/generated/asm/softirq_stack.h:1,
+                 from arch/riscv/kernel/irq.c:15:
+./include/asm-generic/softirq_stack.h:8:20: note: previous definition of 'do_softirq_own_stack' was here
+    8 | static inline void do_softirq_own_stack(void)
+      |                    ^~~~~~~~~~~~~~~~~~~~
+
+After changing CONFIG_HAVE_SOFTIRQ_ON_OWN_STACK to CONFIG_SOFTIRQ_ON_OWN_STACK,
+compilation can be successful.
+
+Fixes: dd69d07a5a6c ("riscv: stack: Support HAVE_SOFTIRQ_ON_OWN_STACK")
+functions: 
+fixes: dd69d07a5a6c
+diff --git a/arch/riscv/kernel/irq.c b/arch/riscv/kernel/irq.c
+index a8efa053c4a5..9cc0a7669271 100644
+--- a/arch/riscv/kernel/irq.c
++++ b/arch/riscv/kernel/irq.c
+@@ -61,5 +61,5 @@ static void init_irq_stacks(void)
+ #endif /* CONFIG_VMAP_STACK */
+ 
+-#ifdef CONFIG_HAVE_SOFTIRQ_ON_OWN_STACK
++#ifdef CONFIG_SOFTIRQ_ON_OWN_STACK
+ void do_softirq_own_stack(void)
+ {
+@@ -93,5 +93,5 @@ void do_softirq_own_stack(void)
+ 		__do_softirq();
+ }
+-#endif /* CONFIG_HAVE_SOFTIRQ_ON_OWN_STACK */
++#endif /* CONFIG_SOFTIRQ_ON_OWN_STACK */
+ 
+ #else

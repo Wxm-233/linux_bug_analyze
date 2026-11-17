@@ -1,0 +1,960 @@
+##### A043 3951f6add519 riscv: Fix arch_tlbbatch_flush() by clearing the batch cpumask
+样本集标签：M10 K1 S1 掩盖3；对应物：arch/x86/mm/tlb.c:arch_tlbbatch_flush（cpumask_clear）；理由：批量刷新后须清空批次CPU集合；后果只是多发IPI
+--- 说明 ---
+riscv: Fix arch_tlbbatch_flush() by clearing the batch cpumask
+We must clear the cpumask once we have flushed the batch, otherwise cpus
+get accumulated and we end sending IPIs to more cpus than needed.
+Fixes: 54d7431af73e ("riscv: Add support for BATCHED_UNMAP_TLB_FLUSH")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Reviewed-by: Charlie Jenkins <charlie@rivosinc.com>
+Reviewed-by: Jisheng Zhang <jszhang@kernel.org>
+Link: https://lore.kernel.org/r/20240130115508.105386-1-alexghiti@rivosinc.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/mm/tlbflush.c b/arch/riscv/mm/tlbflush.c
+index dffb0e5bd942..893566e004b7 100644
+--- a/arch/riscv/mm/tlbflush.c
++++ b/arch/riscv/mm/tlbflush.c
+@@ -234,4 +234,5 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
+ {
+ 	__flush_tlb_range(&batch->cpumask, FLUSH_TLB_NO_ASID, 0,
+ 			  FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
++	cpumask_clear(&batch->cpumask);
+ }
+
+##### A044 ce68c035457b riscv: Fix arch_hugetlb_migration_supported() for NAPOT
+样本集标签：M1 K1 S1 掩盖1；对应物：include/linux/hugetlb.h:arch_hugetlb_migration_supported（默认）；arch/arm64/mm/hugetlbpage.c:arch_hugetlb_migration_supported；理由：公共默认只认PMD/PUD大页，NAPOT大小需自己实现
+--- 说明 ---
+riscv: Fix arch_hugetlb_migration_supported() for NAPOT
+arch_hugetlb_migration_supported() must be reimplemented to add support
+for NAPOT hugepages, which is done here.
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/r/20240130120114.106003-1-alexghiti@rivosinc.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/hugetlb.h b/arch/riscv/include/asm/hugetlb.h
+index 4c5b0e929890..20f9c3ba2341 100644
+--- a/arch/riscv/include/asm/hugetlb.h
++++ b/arch/riscv/include/asm/hugetlb.h
+@@ -11,6 +11,9 @@ static inline void arch_clear_hugepage_flags(struct page *page)
+ }
+ #define arch_clear_hugepage_flags arch_clear_hugepage_flags
+ 
++bool arch_hugetlb_migration_supported(struct hstate *h);
++#define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
++
+ #ifdef CONFIG_RISCV_ISA_SVNAPOT
+ #define __HAVE_ARCH_HUGE_PTE_CLEAR
+ void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 87406b26c3da..29c7606414d2 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -364,7 +364,7 @@ void huge_pte_clear(struct mm_struct *mm,
+ 		pte_clear(mm, addr, ptep);
+ }
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	unsigned long order;
+ 
+@@ -392,7 +392,7 @@ arch_initcall(napot_hugetlbpages_init);
+ 
+ #else
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	return false;
+ }
+@@ -409,7 +409,7 @@ int pmd_huge(pmd_t pmd)
+ 	return pmd_leaf(pmd);
+ }
+ 
+-bool __init arch_hugetlb_valid_size(unsigned long size)
++static bool __hugetlb_valid_size(unsigned long size)
+ {
+ 	if (size == HPAGE_SIZE)
+ 		return true;
+@@ -421,6 +421,16 @@ bool __init arch_hugetlb_valid_size(unsigned long size)
+ 		return false;
+ }
+ 
++bool __init arch_hugetlb_valid_size(unsigned long size)
++{
++	return __hugetlb_valid_size(size);
++}
++
++bool arch_hugetlb_migration_supported(struct hstate *h)
++{
++	return __hugetlb_valid_size(huge_page_size(h));
++}
++
+ #ifdef CONFIG_CONTIG_ALLOC
+ static __init int gigantic_pages_init(void)
+ {
+
+##### A046 d6cfd1770f20 membarrier: riscv: Add full memory barrier in switch_mm()
+样本集标签：M4 K1 S1 掩盖3；对应物：arch/powerpc/include/asm/membarrier.h:membarrier_arch_switch_mm；理由：membarrier要求写rq->curr后有完全屏障；x86等的切换路径本就隐含屏障，弱内存模型才暴露
+--- 说明 ---
+membarrier: riscv: Add full memory barrier in switch_mm()
+The membarrier system call requires a full memory barrier after storing
+to rq->curr, before going back to user-space.  The barrier is only
+needed when switching between processes: the barrier is implied by
+mmdrop() when switching from kernel to userspace, and it's not needed
+when switching from userspace to kernel.
+Rely on the feature/mechanism ARCH_HAS_MEMBARRIER_CALLBACKS and on the
+primitive membarrier_arch_switch_mm(), already adopted by the PowerPC
+architecture, to insert the required barrier.
+Fixes: fab957c11efe2f ("RISC-V: Atomic and Locking Code")
+Signed-off-by: Andrea Parri <parri.andrea@gmail.com>
+Reviewed-by: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+Link: https://lore.kernel.org/r/20240131144936.29190-2-parri.andrea@gmail.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 8d1052fa6a69..2450e88d3e2c 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -14039,7 +14039,7 @@ M:	Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ M:	"Paul E. McKenney" <paulmck@kernel.org>
+ L:	linux-kernel@vger.kernel.org
+ S:	Supported
+-F:	arch/powerpc/include/asm/membarrier.h
++F:	arch/*/include/asm/membarrier.h
+ F:	include/uapi/linux/membarrier.h
+ F:	kernel/sched/membarrier.c
+ 
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bffbd869a068..087abf9e51c6 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -27,6 +27,7 @@ config RISCV
+ 	select ARCH_HAS_GCOV_PROFILE_ALL
+ 	select ARCH_HAS_GIGANTIC_PAGE
+ 	select ARCH_HAS_KCOV
++	select ARCH_HAS_MEMBARRIER_CALLBACKS
+ 	select ARCH_HAS_MMIOWB
+ 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+ 	select ARCH_HAS_PMEM_API
+diff --git a/arch/riscv/include/asm/membarrier.h b/arch/riscv/include/asm/membarrier.h
+new file mode 100644
+index 000000000000..6c016ebb5020
+--- /dev/null
++++ b/arch/riscv/include/asm/membarrier.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _ASM_RISCV_MEMBARRIER_H
++#define _ASM_RISCV_MEMBARRIER_H
++
++static inline void membarrier_arch_switch_mm(struct mm_struct *prev,
++					     struct mm_struct *next,
++					     struct task_struct *tsk)
++{
++	/*
++	 * Only need the full barrier when switching between processes.
++	 * Barrier when switching from kernel to userspace is not
++	 * required here, given that it is implied by mmdrop(). Barrier
++	 * when switching from userspace to kernel is not needed after
++	 * store to rq->curr.
++	 */
++	if (IS_ENABLED(CONFIG_SMP) &&
++	    likely(!(atomic_read(&next->membarrier_state) &
++		     (MEMBARRIER_STATE_PRIVATE_EXPEDITED |
++		      MEMBARRIER_STATE_GLOBAL_EXPEDITED)) || !prev))
++		return;
++
++	/*
++	 * The membarrier system call requires a full memory barrier
++	 * after storing to rq->curr, before going back to user-space.
++	 * Matches a full barrier in the proximity of the membarrier
++	 * system call entry.
++	 */
++	smp_mb();
++}
++
++#endif /* _ASM_RISCV_MEMBARRIER_H */
+diff --git a/arch/riscv/mm/context.c b/arch/riscv/mm/context.c
+index 217fd4de6134..ba8eb3944687 100644
+--- a/arch/riscv/mm/context.c
++++ b/arch/riscv/mm/context.c
+@@ -323,6 +323,8 @@ void switch_mm(struct mm_struct *prev, struct mm_struct *next,
+ 	if (unlikely(prev == next))
+ 		return;
+ 
++	membarrier_arch_switch_mm(prev, next, task);
++
+ 	/*
+ 	 * Mark the current MM context as inactive, and the next as
+ 	 * active.  This is at least used by the icache flushing
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 9116bcc90346..c4ca8085885a 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -6709,8 +6709,9 @@ static void __sched notrace __schedule(unsigned int sched_mode)
+ 		 *
+ 		 * Here are the schemes providing that barrier on the
+ 		 * various architectures:
+-		 * - mm ? switch_mm() : mmdrop() for x86, s390, sparc, PowerPC.
+-		 *   switch_mm() rely on membarrier_arch_switch_mm() on PowerPC.
++		 * - mm ? switch_mm() : mmdrop() for x86, s390, sparc, PowerPC,
++		 *   RISC-V.  switch_mm() relies on membarrier_arch_switch_mm()
++		 *   on PowerPC and on RISC-V.
+ 		 * - finish_lock_switch() for weakly-ordered
+ 		 *   architectures where spin_unlock is a full barrier,
+ 		 * - switch_to() for arm64 (weakly-ordered, spin_unlock
+
+##### A047 680341382da5 riscv: add CALLER_ADDRx support
+样本集标签：M1 K1 S1 掩盖1；对应物：include/linux/ftrace.h:ftrace_return_address（默认__builtin_return_address(n)）；arch/arm64/kernel/return_address.c:return_address；理由：公共默认假设__builtin_return_address(n)对n>0可用，RISC-V不行，arm64已自己实现
+--- 说明 ---
+riscv: add CALLER_ADDRx support
+CALLER_ADDRx returns caller's address at specified level, they are used
+for several tracers. These macros eventually use
+__builtin_return_address(n) to get the caller's address if arch doesn't
+define their own implementation.
+In RISC-V, __builtin_return_address(n) only works when n == 0, we need
+to walk the stack frame to get the caller's address at specified level.
+data.level started from 'level + 3' due to the call flow of getting
+caller's address in RISC-V implementation. If we don't have additional
+three iteration, the level is corresponding to follows:
+callsite -> return_address -> arch_stack_walk -> walk_stackframe
+|           |                 |                  |
+level 3     level 2           level 1            level 0
+Fixes: 10626c32e382 ("riscv/ftrace: Add basic support")
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/ftrace.h b/arch/riscv/include/asm/ftrace.h
+index 329172122952..15055f9df4da 100644
+--- a/arch/riscv/include/asm/ftrace.h
++++ b/arch/riscv/include/asm/ftrace.h
+@@ -25,6 +25,11 @@
+ 
+ #define ARCH_SUPPORTS_FTRACE_OPS 1
+ #ifndef __ASSEMBLY__
++
++extern void *return_address(unsigned int level);
++
++#define ftrace_return_address(n) return_address(n)
++
+ void MCOUNT_NAME(void);
+ static inline unsigned long ftrace_call_adjust(unsigned long addr)
+ {
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index f71910718053..604d6bf7e476 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -7,6 +7,7 @@ ifdef CONFIG_FTRACE
+ CFLAGS_REMOVE_ftrace.o	= $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_patch.o	= $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_sbi.o	= $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_return_address.o	= $(CC_FLAGS_FTRACE)
+ endif
+ CFLAGS_syscall_table.o	+= $(call cc-option,-Wno-override-init,)
+ CFLAGS_compat_syscall_table.o += $(call cc-option,-Wno-override-init,)
+@@ -46,6 +47,7 @@ obj-y	+= irq.o
+ obj-y	+= process.o
+ obj-y	+= ptrace.o
+ obj-y	+= reset.o
++obj-y	+= return_address.o
+ obj-y	+= setup.o
+ obj-y	+= signal.o
+ obj-y	+= syscall_table.o
+diff --git a/arch/riscv/kernel/return_address.c b/arch/riscv/kernel/return_address.c
+new file mode 100644
+index 000000000000..c8115ec8fb30
+--- /dev/null
++++ b/arch/riscv/kernel/return_address.c
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * This code come from arch/arm64/kernel/return_address.c
++ *
++ * Copyright (C) 2023 SiFive.
++ */
++
++#include <linux/export.h>
++#include <linux/kprobes.h>
++#include <linux/stacktrace.h>
++
++struct return_address_data {
++	unsigned int level;
++	void *addr;
++};
++
++static bool save_return_addr(void *d, unsigned long pc)
++{
++	struct return_address_data *data = d;
++
++	if (!data->level) {
++		data->addr = (void *)pc;
++		return false;
++	}
++
++	--data->level;
++
++	return true;
++}
++NOKPROBE_SYMBOL(save_return_addr);
++
++noinline void *return_address(unsigned int level)
++{
++	struct return_address_data data;
++
++	data.level = level + 3;
++	data.addr = NULL;
++
++	arch_stack_walk(save_return_addr, &data, current, NULL);
++
++	if (!data.level)
++		return data.addr;
++	else
++		return NULL;
++
++}
++EXPORT_SYMBOL_GPL(return_address);
++NOKPROBE_SYMBOL(return_address);
+
+##### A055 16ab4646c905 Revert "riscv: mm: support Svnapot in huge vmap"
+样本集标签：M3 K1 S0 掩盖1；对应物：mm/vmalloc.c:vmap_pte_range（arch_vmap_pte_range_map_size钩子）；理由：内核vmap部分解除时无法先清后刷拆分NAPOT组，撤回NAPOT vmap
+--- 说明 ---
+Revert "riscv: mm: support Svnapot in huge vmap"
+This reverts commit ce173474cf19fe7fbe8f0fc74e3c81ec9c3d9807.
+We cannot correctly deal with NAPOT mappings in vmalloc/vmap because if
+some part of a NAPOT mapping is unmapped, the remaining mapping is not
+updated accordingly. For example:
+ptr = vmalloc_huge(64 * 1024, GFP_KERNEL);
+vunmap_range((unsigned long)(ptr + PAGE_SIZE),
+	     (unsigned long)(ptr + 64 * 1024));
+leads to the following kernel page table dump:
+0xffff8f8000ef0000-0xffff8f8000ef1000    0x00000001033c0000         4K PTE N   ..     ..   D A G . . W R V
+Meaning the first entry which was not unmapped still has the N bit set,
+which, if accessed first and cached in the TLB, could allow access to the
+unmapped range.
+That's because the logic to break the NAPOT mapping does not exist and
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/vmalloc.h b/arch/riscv/include/asm/vmalloc.h
+index 924d01b56c9a..51f6dfe19745 100644
+--- a/arch/riscv/include/asm/vmalloc.h
++++ b/arch/riscv/include/asm/vmalloc.h
+@@ -19,65 +19,6 @@ static inline bool arch_vmap_pmd_supported(pgprot_t prot)
+ 	return true;
+ }
+ 
+-#ifdef CONFIG_RISCV_ISA_SVNAPOT
+-#include <linux/pgtable.h>
++#endif
+ 
+-#define arch_vmap_pte_range_map_size arch_vmap_pte_range_map_size
+-static inline unsigned long arch_vmap_pte_range_map_size(unsigned long addr, unsigned long end,
+-							 u64 pfn, unsigned int max_page_shift)
+-{
+-	unsigned long map_size = PAGE_SIZE;
+-	unsigned long size, order;
+-
+-	if (!has_svnapot())
+-		return map_size;
+-
+-	for_each_napot_order_rev(order) {
+-		if (napot_cont_shift(order) > max_page_shift)
+-			continue;
+-
+-		size = napot_cont_size(order);
+-		if (end - addr < size)
+-			continue;
+-
+-		if (!IS_ALIGNED(addr, size))
+-			continue;
+-
+-		if (!IS_ALIGNED(PFN_PHYS(pfn), size))
+-			continue;
+-
+-		map_size = size;
+-		break;
+-	}
+-
+-	return map_size;
+-}
+-
+-#define arch_vmap_pte_supported_shift arch_vmap_pte_supported_shift
+-static inline int arch_vmap_pte_supported_shift(unsigned long size)
+-{
+-	int shift = PAGE_SHIFT;
+-	unsigned long order;
+-
+-	if (!has_svnapot())
+-		return shift;
+-
+-	WARN_ON_ONCE(size >= PMD_SIZE);
+-
+-	for_each_napot_order_rev(order) {
+-		if (napot_cont_size(order) > size)
+-			continue;
+-
+-		if (!IS_ALIGNED(size, napot_cont_size(order)))
+-			continue;
+-
+-		shift = napot_cont_shift(order);
+-		break;
+-	}
+-
+-	return shift;
+-}
+-
+-#endif /* CONFIG_RISCV_ISA_SVNAPOT */
+-#endif /* CONFIG_HAVE_ARCH_HUGE_VMAP */
+ #endif /* _ASM_RISCV_VMALLOC_H */
+
+##### A057 e0fe5ab4192c riscv: Fix pte_leaf_size() for NAPOT
+样本集标签：M1 K1 S1 掩盖1；对应物：include/linux/pgtable.h:pte_leaf_size（默认PAGE_SIZE）；arch/arm64/include/asm/pgtable.h:pte_leaf_size；理由：公共默认按单页算叶子大小，NAPOT需像arm64连续页那样自定义
+--- 说明 ---
+riscv: Fix pte_leaf_size() for NAPOT
+pte_leaf_size() must be reimplemented to add support for NAPOT mappings.
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/r/20240227205016.121901-3-alexghiti@rivosinc.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 0c94260b5d0c..89f5f1bd6e46 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -439,6 +439,10 @@ static inline pte_t pte_mkhuge(pte_t pte)
+ 	return pte;
+ }
+ 
++#define pte_leaf_size(pte)	(pte_napot(pte) ?				\
++					napot_cont_size(napot_cont_order(pte)) :\
++					PAGE_SIZE)
++
+ #ifdef CONFIG_NUMA_BALANCING
+ /*
+  * See the comment in include/asm-generic/pgtable.h
+
+##### A058 a11dd49dcb93 riscv: Sparse-Memory/vmemmap out-of-bounds fix
+样本集标签：M7 K2 S1 掩盖2；对应物：arch/arm64/include/asm/pgtable.h:vmemmap（减去memstart_addr对应的页号）；理由：vmemmap未按内存起始地址偏移；常见内存起点小，越界不出现
+--- 说明 ---
+riscv: Sparse-Memory/vmemmap out-of-bounds fix
+Offset vmemmap so that the first page of vmemmap will be mapped
+to the first page of physical memory in order to ensure that
+vmemmap’s bounds will be respected during
+pfn_to_page()/page_to_pfn() operations.
+The conversion macros will produce correct SV39/48/57 addresses
+for every possible/valid DRAM_BASE inside the physical memory limits.
+v2:Address Alex's comments
+Suggested-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Signed-off-by: Dimitris Vlachos <dvlachos@ics.forth.gr>
+Reported-by: Dimitris Vlachos <dvlachos@ics.forth.gr>
+Closes: https://lore.kernel.org/linux-riscv/20240202135030.42265-1-csd4492@csd.uoc.gr
+Fixes: d95f1a542c3d ("RISC-V: Implement sparsemem")
+Reviewed-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 89f5f1bd6e46..6066822e7396 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -84,7 +84,7 @@
+  * Define vmemmap for pfn_to_page & page_to_pfn calls. Needed if kernel
+  * is configured with CONFIG_SPARSEMEM_VMEMMAP enabled.
+  */
+-#define vmemmap		((struct page *)VMEMMAP_START)
++#define vmemmap		((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT))
+ 
+ #define PCI_IO_SIZE      SZ_16M
+ #define PCI_IO_END       VMEMMAP_START
+
+##### A062 a9ad73295cc1 riscv: Fix syscall wrapper for >word-size arguments
+样本集标签：M7 K1 S1 掩盖1；对应物：include/linux/syscalls.h:__SYSCALL_DEFINEx（按long参数别名）；理由：系统调用包装须原样传寄存器；RISC-V自定义包装在RV32上按类型取参，64位参数占寄存器对时出错
+--- 说明 ---
+riscv: Fix syscall wrapper for >word-size arguments
+The current syscall wrapper macros break 64-bit arguments on
+rv32 because they only guarantee the first N input registers are
+passed to syscalls that accept N arguments. According to the
+calling convention, values twice the word size reside in register
+pairs and as a result, syscall arguments don't always have a
+direct register mapping on rv32.
+Instead of using `__MAP(x,__SC_LONG,__VA_ARGS__)` to declare the
+type of the `__se(_compat)_sys_*` functions on rv32, change the
+function declarations to accept `ulong` arguments and alias them
+to the actual syscall implementations, similarly to the existing
+macros in include/linux/syscalls.h. This matches previous
+behavior and ensures registers are passed to syscalls as-is, no
+matter which argument types they expect.
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/syscall_wrapper.h b/arch/riscv/include/asm/syscall_wrapper.h
+index eeec04b7dae6..980094c2e976 100644
+--- a/arch/riscv/include/asm/syscall_wrapper.h
++++ b/arch/riscv/include/asm/syscall_wrapper.h
+@@ -12,25 +12,51 @@
+ 
+ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ 
+-#define SC_RISCV_REGS_TO_ARGS(x, ...)				\
+-	__MAP(x,__SC_ARGS					\
+-	      ,,regs->orig_a0,,regs->a1,,regs->a2		\
++#ifdef CONFIG_64BIT
++
++#define __SYSCALL_SE_DEFINEx(x, prefix, name, ...)					\
++	static long __se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
++	static long __se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
++
++#define SC_RISCV_REGS_TO_ARGS(x, ...)							\
++	__MAP(x,__SC_ARGS								\
++	      ,,regs->orig_a0,,regs->a1,,regs->a2					\
+ 	      ,,regs->a3,,regs->a4,,regs->a5,,regs->a6)
+ 
++#else
++/*
++ * Use type aliasing to ensure registers a0-a6 are correctly passed to the syscall
++ * implementation when >word-size arguments are used.
++ */
++#define __SYSCALL_SE_DEFINEx(x, prefix, name, ...)					\
++	__diag_push();									\
++	__diag_ignore(GCC, 8, "-Wattribute-alias",					\
++			"Type aliasing is used to sanitize syscall arguments");		\
++	static long __se_##prefix##name(ulong, ulong, ulong, ulong, ulong, ulong, 	\
++					ulong)						\
++			__attribute__((alias(__stringify(___se_##prefix##name))));	\
++	__diag_pop();									\
++	static long noinline ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));	\
++	static long ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
++
++#define SC_RISCV_REGS_TO_ARGS(x, ...) \
++	regs->orig_a0,regs->a1,regs->a2,regs->a3,regs->a4,regs->a5,regs->a6
++
++#endif /* CONFIG_64BIT */
++
+ #ifdef CONFIG_COMPAT
+ 
+ #define COMPAT_SYSCALL_DEFINEx(x, name, ...)						\
+ 	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs);		\
+ 	ALLOW_ERROR_INJECTION(__riscv_compat_sys##name, ERRNO);				\
+-	static long __se_compat_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
+ 	static inline long __do_compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__));	\
+-	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs)		\
++	__SYSCALL_SE_DEFINEx(x, compat_sys, name, __VA_ARGS__)				\
+ 	{										\
+-		return __se_compat_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
++		return __do_compat_sys##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
+ 	}										\
+-	static long __se_compat_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__))		\
++	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs)		\
+ 	{										\
+-		return __do_compat_sys##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
++		return __se_compat_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
+ 	}										\
+ 	static inline long __do_compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))
+ 
+@@ -51,19 +77,18 @@ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ #define __SYSCALL_DEFINEx(x, name, ...)						\
+ 	asmlinkage long __riscv_sys##name(const struct pt_regs *regs);		\
+ 	ALLOW_ERROR_INJECTION(__riscv_sys##name, ERRNO);			\
+-	static long __se_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
+ 	static inline long __do_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__));	\
+-	asmlinkage long __riscv_sys##name(const struct pt_regs *regs)		\
+-	{									\
+-		return __se_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
+-	}									\
+-	static long __se_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__))		\
++	__SYSCALL_SE_DEFINEx(x, sys, name, __VA_ARGS__)				\
+ 	{									\
+ 		long ret = __do_sys##name(__MAP(x,__SC_CAST,__VA_ARGS__));	\
+ 		__MAP(x,__SC_TEST,__VA_ARGS__);					\
+ 		__PROTECT(x, ret,__MAP(x,__SC_ARGS,__VA_ARGS__));		\
+ 		return ret;							\
+ 	}									\
++	asmlinkage long __riscv_sys##name(const struct pt_regs *regs)		\
++	{									\
++		return __se_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
++	}									\
+ 	static inline long __do_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))
+ 
+ #define SYSCALL_DEFINE0(sname)							\
+
+##### A065 443574b03387 riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi
+样本集标签：M7 K2 S1 掩盖1；对应物：arch/loongarch/net/bpf_jit.c:build_insn（BPF_CALL处按调用约定sign_extend）；理由：BPF按零扩展传32位参数，RV64调用约定要求符号扩展；JIT调用内核函数时须转换
+--- 说明 ---
+riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi
+We encountered a failing case when running selftest in no_alu32 mode:
+The failure case is `kfunc_call/kfunc_call_test4` and its source code is
+like bellow:
+```
+long bpf_kfunc_call_test4(signed char a, short b, int c, long d) __ksym;
+int kfunc_call_test4(struct __sk_buff *skb)
+{
+	...
+	tmp = bpf_kfunc_call_test4(-3, -30, -200, -1000);
+	...
+}
+```
+And its corresponding asm code is:
+--- 改动 ---
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index aac190085472..1adf2f39ce59 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1463,6 +1463,22 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *fm;
++			int idx;
++
++			fm = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!fm)
++				return -EINVAL;
++
++			for (idx = 0; idx < fm->nr_args; idx++) {
++				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
++
++				if (fm->arg_size[idx] == sizeof(int))
++					emit_sextw(reg, reg, ctx);
++			}
++		}
++
+ 		ret = emit_call(addr, fixed_addr, ctx);
+ 		if (ret)
+ 			return ret;
+
+##### A068 8a48ea87ce89 riscv: Fix warning by declaring arch_cpu_idle() as noinstr
+样本集标签：M5 K2 S1 掩盖0；对应物：arch/s390/kernel/idle.c:arch_cpu_idle（noinstr）；理由：选了ARCH_WANTS_NO_INSTR后，RCU已关闭的空闲函数须标noinstr
+--- 说明 ---
+riscv: Fix warning by declaring arch_cpu_idle() as noinstr
+The following warning appears when using ftrace:
+[89855.443413] RCU not on for: arch_cpu_idle+0x0/0x1c
+[89855.445640] WARNING: CPU: 5 PID: 0 at include/linux/trace_recursion.h:162 arch_ftrace_ops_list_func+0x208/0x228
+[89855.445824] Modules linked in: xt_conntrack(E) nft_chain_nat(E) xt_MASQUERADE(E) nf_conntrack_netlink(E) xt_addrtype(E) nft_compat(E) nf_tables(E) nfnetlink(E) br_netfilter(E) cfg80211(E) nls_iso8859_1(E) ofpart(E) redboot(E) cmdlinepart(E) cfi_cmdset_0001(E) virtio_net(E) cfi_probe(E) cfi_util(E) 9pnet_virtio(E) gen_probe(E) net_failover(E) virtio_rng(E) failover(E) 9pnet(E) physmap(E) map_funcs(E) chipreg(E) mtd(E) uio_pdrv_genirq(E) uio(E) dm_multipath(E) scsi_dh_rdac(E) scsi_dh_emc(E) scsi_dh_alua(E) drm(E) efi_pstore(E) backlight(E) ip_tables(E) x_tables(E) raid10(E) raid456(E) async_raid6_recov(E) async_memcpy(E) async_pq(E) async_xor(E) xor(E) async_tx(E) raid6_pq(E) raid1(E) raid0(E) virtio_blk(E)
+[89855.451563] CPU: 5 PID: 0 Comm: swapper/5 Tainted: G            E      6.8.0-rc6ubuntu-defconfig #2
+[89855.451726] Hardware name: riscv-virtio,qemu (DT)
+[89855.451899] epc : arch_ftrace_ops_list_func+0x208/0x228
+[89855.452016]  ra : arch_ftrace_ops_list_func+0x208/0x228
+[89855.452119] epc : ffffffff8016b216 ra : ffffffff8016b216 sp : ffffaf808090fdb0
+[89855.452171]  gp : ffffffff827c7680 tp : ffffaf808089ad40 t0 : ffffffff800c0dd8
+[89855.452216]  t1 : 0000000000000001 t2 : 0000000000000000 s0 : ffffaf808090fe30
+[89855.452306]  s1 : 0000000000000000 a0 : 0000000000000026 a1 : ffffffff82cd6ac8
+[89855.452423]  a2 : ffffffff800458c8 a3 : ffffaf80b1870640 a4 : 0000000000000000
+--- 改动 ---
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index 92922dbd5b5c..6abeecbfc51d 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -37,7 +37,7 @@ EXPORT_SYMBOL(__stack_chk_guard);
+ 
+ extern asmlinkage void ret_from_fork(void);
+ 
+-void arch_cpu_idle(void)
++void noinstr arch_cpu_idle(void)
+ {
+ 	cpu_do_idle();
+ }
+
+##### A069 a370c2419e46 riscv: Disable preemption when using patch_map()
+样本集标签：M5 K2 S1 掩盖0；对应物：arch/arm64/kernel/patching.c:__aarch64_insn_write（raw_spin_lock_irqsave(&patch_lock)）；理由：fixmap只刷本核TLB，使用期间不能迁移；arm64持自旋锁关中断，RISC-V改用text_mutex后可被抢占
+--- 说明 ---
+riscv: Disable preemption when using patch_map()
+patch_map() uses fixmap mappings to circumvent the non-writability of
+the kernel text mapping.
+The __set_fixmap() function only flushes the current cpu tlb, it does
+not emit an IPI so we must make sure that while we use a fixmap mapping,
+the current task is not migrated on another cpu which could miss the
+newly introduced fixmap mapping.
+So in order to avoid any task migration, disable the preemption.
+Reported-by: Andrea Parri <andrea@rivosinc.com>
+Closes: https://lore.kernel.org/all/ZcS+GAaM25LXsBOl@andrea/
+Reported-by: Andy Chiu <andy.chiu@sifive.com>
+Closes: https://lore.kernel.org/linux-riscv/CABgGipUMz3Sffu-CkmeUB1dKVwVQ73+7=sgC45-m0AE9RCjOZg@mail.gmail.com/
+Fixes: cad539baa48f ("riscv: implement a memset like function for text")
+Fixes: 0ff7c3b33127 ("riscv: Use text_mutex instead of patch_lock")
+--- 改动 ---
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 37e87fdcf6a0..30e12b310cab 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -80,6 +80,8 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	 */
+ 	lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+ 
+@@ -92,6 +94,8 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	if (across_pages)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return 0;
+ }
+ NOKPROBE_SYMBOL(__patch_insn_set);
+@@ -122,6 +126,8 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	if (!riscv_patch_in_stop_machine)
+ 		lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+ 
+@@ -134,6 +140,8 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	if (across_pages)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return ret;
+ }
+ NOKPROBE_SYMBOL(__patch_insn_write);
+
+##### A076 fb1cf0878328 riscv: rewrite __kernel_map_pages() to fix sleeping in invalid context
+样本集标签：M5 K1 S1 掩盖0；对应物：arch/arm64/mm/pageattr.c:__kernel_map_pages（不取会睡眠的锁）；理由：debug_pagealloc的__kernel_map_pages可能在原子上下文调用；RISC-V经__set_memory取init_mm的mmap锁
+--- 说明 ---
+riscv: rewrite __kernel_map_pages() to fix sleeping in invalid context
+__kernel_map_pages() is a debug function which clears the valid bit in page
+table entry for deallocated pages to detect illegal memory accesses to
+freed pages.
+This function set/clear the valid bit using __set_memory(). __set_memory()
+acquires init_mm's semaphore, and this operation may sleep. This is
+problematic, because  __kernel_map_pages() can be called in atomic context,
+and thus is illegal to sleep. An example warning that this causes:
+BUG: sleeping function called from invalid context at kernel/locking/rwsem.c:1578
+in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 2, name: kthreadd
+preempt_count: 2, expected: 0
+CPU: 0 PID: 2 Comm: kthreadd Not tainted 6.9.0-g1d4c6d784ef6 #37
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+--- 改动 ---
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index 410056a50aa9..271d01a5ba4d 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -387,17 +387,33 @@ int set_direct_map_default_noflush(struct page *page)
+ }
+ 
+ #ifdef CONFIG_DEBUG_PAGEALLOC
++static int debug_pagealloc_set_page(pte_t *pte, unsigned long addr, void *data)
++{
++	int enable = *(int *)data;
++
++	unsigned long val = pte_val(ptep_get(pte));
++
++	if (enable)
++		val |= _PAGE_PRESENT;
++	else
++		val &= ~_PAGE_PRESENT;
++
++	set_pte(pte, __pte(val));
++
++	return 0;
++}
++
+ void __kernel_map_pages(struct page *page, int numpages, int enable)
+ {
+ 	if (!debug_pagealloc_enabled())
+ 		return;
+ 
+-	if (enable)
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(_PAGE_PRESENT), __pgprot(0));
+-	else
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(0), __pgprot(_PAGE_PRESENT));
++	unsigned long start = (unsigned long)page_address(page);
++	unsigned long size = PAGE_SIZE * numpages;
++
++	apply_to_existing_page_range(&init_mm, start, size, debug_pagealloc_set_page, &enable);
++
++	flush_tlb_kernel_range(start, start + size);
+ }
+ #endif
+ 
+
+##### A078 6ca445d8af0e riscv: Fix early ftrace nop patching
+样本集标签：M3 K2 S1 掩盖0；对应物：arch/arm64/kernel/patching.c:aarch64_insn_patch_text_nosync（改指令后清指令缓存）；理由：改写代码后执行前须维护指令缓存；早期ftrace把nop改写后未刷新
+--- 说明 ---
+riscv: Fix early ftrace nop patching
+Commit c97bf629963e ("riscv: Fix text patching when IPI are used")
+converted ftrace_make_nop() to use patch_insn_write() which does not
+emit any icache flush relying entirely on __ftrace_modify_code() to do
+that.
+But we missed that ftrace_make_nop() was called very early directly when
+converting mcount calls into nops (actually on riscv it converts 2B nops
+emitted by the compiler into 4B nops).
+This caused crashes on multiple HW as reported by Conor and Björn since
+the booting core could have half-patched instructions in its icache
+which would trigger an illegal instruction trap: fix this by emitting a
+local flush icache when early patching nops.
+Fixes: c97bf629963e ("riscv: Fix text patching when IPI are used")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+index dd8d07146116..ce79c558a4c8 100644
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -13,6 +13,12 @@ static inline void local_flush_icache_all(void)
+ 	asm volatile ("fence.i" ::: "memory");
+ }
+ 
++static inline void local_flush_icache_range(unsigned long start,
++					    unsigned long end)
++{
++	local_flush_icache_all();
++}
++
+ #define PG_dcache_clean PG_arch_1
+ 
+ static inline void flush_dcache_folio(struct folio *folio)
+diff --git a/arch/riscv/kernel/ftrace.c b/arch/riscv/kernel/ftrace.c
+index 4d14eadcd765..87cbd86576b2 100644
+--- a/arch/riscv/kernel/ftrace.c
++++ b/arch/riscv/kernel/ftrace.c
+@@ -120,6 +120,9 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
+ 	out = ftrace_make_nop(mod, rec, MCOUNT_ADDR);
+ 	mutex_unlock(&text_mutex);
+ 
++	if (!mod)
++		local_flush_icache_range(rec->ip, rec->ip + MCOUNT_INSN_SIZE);
++
+ 	return out;
+ }
+ 
+
+##### A079 a638b0461b58 riscv: prevent pt_regs corruption for secondary idle threads
+样本集标签：M7 K2 S1 掩盖5；对应物：arch/arm64/kernel/head.S（sub sp, sp, #PT_REGS_SIZE）；理由：线程栈顶须留出pt_regs；主核已修，次核未跟上
+--- 说明 ---
+riscv: prevent pt_regs corruption for secondary idle threads
+Top of the kernel thread stack should be reserved for pt_regs. However
+this is not the case for the idle threads of the secondary boot harts.
+Their stacks overlap with their pt_regs, so both may get corrupted.
+Similar issue has been fixed for the primary hart, see c7cdd96eca28
+("riscv: prevent stack corruption by reserving task_pt_regs(p) early").
+However that fix was not propagated to the secondary harts. The problem
+has been noticed in some CPU hotplug tests with V enabled. The function
+smp_callin stored several registers on stack, corrupting top of pt_regs
+structure including status field. As a result, kernel attempted to save
+or restore inexistent V context.
+Fixes: 9a2451f18663 ("RISC-V: Avoid using per cpu array for ordered booting")
+Fixes: 2875fe056156 ("RISC-V: Add cpu_ops and modify default booting method")
+Signed-off-by: Sergey Matyukevich <sergey.matyukevich@syntacore.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/cpu_ops_sbi.c b/arch/riscv/kernel/cpu_ops_sbi.c
+index 1cc7df740edd..e6fbaaf54956 100644
+--- a/arch/riscv/kernel/cpu_ops_sbi.c
++++ b/arch/riscv/kernel/cpu_ops_sbi.c
+@@ -72,7 +72,7 @@ static int sbi_cpu_start(unsigned int cpuid, struct task_struct *tidle)
+ 	/* Make sure tidle is updated */
+ 	smp_mb();
+ 	bdata->task_ptr = tidle;
+-	bdata->stack_ptr = task_stack_page(tidle) + THREAD_SIZE;
++	bdata->stack_ptr = task_pt_regs(tidle);
+ 	/* Make sure boot data is updated */
+ 	smp_mb();
+ 	hsm_data = __pa(bdata);
+diff --git a/arch/riscv/kernel/cpu_ops_spinwait.c b/arch/riscv/kernel/cpu_ops_spinwait.c
+index 613872b0a21a..24869eb88908 100644
+--- a/arch/riscv/kernel/cpu_ops_spinwait.c
++++ b/arch/riscv/kernel/cpu_ops_spinwait.c
+@@ -34,8 +34,7 @@ static void cpu_update_secondary_bootdata(unsigned int cpuid,
+ 
+ 	/* Make sure tidle is updated */
+ 	smp_mb();
+-	WRITE_ONCE(__cpu_spinwait_stack_pointer[hartid],
+-		   task_stack_page(tidle) + THREAD_SIZE);
++	WRITE_ONCE(__cpu_spinwait_stack_pointer[hartid], task_pt_regs(tidle));
+ 	WRITE_ONCE(__cpu_spinwait_task_pointer[hartid], tidle);
+ }
+ 
+
+##### A081 1d84afaf0252 riscv: Fix fully ordered LR/SC xchg[8|16]() implementations
+样本集标签：M4 K2 S1 掩盖3；对应物：arch/arm64/include/asm/cmpxchg.h:__XCHG_CASE(mb_,8/16，dmb ish)；理由：完全有序的xchg须带屏障；8/16位LR/SC版本漏了，弱序硬件上才可能出现
+--- 说明 ---
+riscv: Fix fully ordered LR/SC xchg[8|16]() implementations
+The fully ordered versions of xchg[8|16]() using LR/SC lack the
+necessary memory barriers to guarantee the order.
+Fix this by matching what is already implemented in the fully ordered
+versions of cmpxchg() using LR/SC.
+Suggested-by: Andrea Parri <parri.andrea@gmail.com>
+Reported-by: Andrea Parri <parri.andrea@gmail.com>
+Closes: https://lore.kernel.org/linux-riscv/ZlYbupL5XgzgA0MX@andrea/T/#u
+Fixes: a8ed2b7a2c13 ("riscv/cmpxchg: Implement xchg for variables of size 1 and 2")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Reviewed-by: Andrea Parri <parri.andrea@gmail.com>
+Link: https://lore.kernel.org/r/20240530145546.394248-1-alexghiti@rivosinc.com
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/cmpxchg.h b/arch/riscv/include/asm/cmpxchg.h
+index ddb002ed89de..808b4c78462e 100644
+--- a/arch/riscv/include/asm/cmpxchg.h
++++ b/arch/riscv/include/asm/cmpxchg.h
+@@ -10,7 +10,7 @@
+ 
+ #include <asm/fence.h>
+ 
+-#define __arch_xchg_masked(prepend, append, r, p, n)			\
++#define __arch_xchg_masked(sc_sfx, prepend, append, r, p, n)		\
+ ({									\
+ 	u32 *__ptr32b = (u32 *)((ulong)(p) & ~0x3);			\
+ 	ulong __s = ((ulong)(p) & (0x4 - sizeof(*p))) * BITS_PER_BYTE;	\
+@@ -25,7 +25,7 @@
+ 	       "0:	lr.w %0, %2\n"					\
+ 	       "	and  %1, %0, %z4\n"				\
+ 	       "	or   %1, %1, %z3\n"				\
+-	       "	sc.w %1, %1, %2\n"				\
++	       "	sc.w" sc_sfx " %1, %1, %2\n"			\
+ 	       "	bnez %1, 0b\n"					\
+ 	       append							\
+ 	       : "=&r" (__retx), "=&r" (__rc), "+A" (*(__ptr32b))	\
+@@ -46,7 +46,8 @@
+ 		: "memory");						\
+ })
+ 
+-#define _arch_xchg(ptr, new, sfx, prepend, append)			\
++#define _arch_xchg(ptr, new, sc_sfx, swap_sfx, prepend,			\
++		   sc_append, swap_append)				\
+ ({									\
+ 	__typeof__(ptr) __ptr = (ptr);					\
+ 	__typeof__(*(__ptr)) __new = (new);				\
+@@ -55,15 +56,15 @@
+ 	switch (sizeof(*__ptr)) {					\
+ 	case 1:								\
+ 	case 2:								\
+-		__arch_xchg_masked(prepend, append,			\
++		__arch_xchg_masked(sc_sfx, prepend, sc_append,		\
+ 				   __ret, __ptr, __new);		\
+ 		break;							\
+ 	case 4:								\
+-		__arch_xchg(".w" sfx, prepend, append,			\
++		__arch_xchg(".w" swap_sfx, prepend, swap_append,	\
+ 			      __ret, __ptr, __new);			\
+ 		break;							\
+ 	case 8:								\
+-		__arch_xchg(".d" sfx, prepend, append,			\
++		__arch_xchg(".d" swap_sfx, prepend, swap_append,	\
+ 			      __ret, __ptr, __new);			\
+ 		break;							\
+ 	default:							\
+@@ -73,16 +74,17 @@
+ })
+ 
+ #define arch_xchg_relaxed(ptr, x)					\
+-	_arch_xchg(ptr, x, "", "", "")
++	_arch_xchg(ptr, x, "", "", "", "", "")
+ 
+ #define arch_xchg_acquire(ptr, x)					\
+-	_arch_xchg(ptr, x, "", "", RISCV_ACQUIRE_BARRIER)
++	_arch_xchg(ptr, x, "", "", "",					\
++		   RISCV_ACQUIRE_BARRIER, RISCV_ACQUIRE_BARRIER)
+ 
+ #define arch_xchg_release(ptr, x)					\
+-	_arch_xchg(ptr, x, "", RISCV_RELEASE_BARRIER, "")
++	_arch_xchg(ptr, x, "", "", RISCV_RELEASE_BARRIER, "", "")
+ 
+ #define arch_xchg(ptr, x)						\
+-	_arch_xchg(ptr, x, ".aqrl", "", "")
++	_arch_xchg(ptr, x, ".rl", ".aqrl", "", RISCV_FULL_BARRIER, "")
+ 
+ #define xchg32(ptr, x)							\
+ ({									\
+

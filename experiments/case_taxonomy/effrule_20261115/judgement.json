@@ -1,0 +1,35 @@
+{
+ "_note": "criteria 三.4: reasonableness of every distinct candidate whose rule changed (old r4_rule -> new nearest-effect rule). Source read at /root/repos/linux df2908090cda (CUR); kvm lines differ by tree but the code is the same.",
+ "items": [
+  {"n": 1, "fn": "kvm_get_dirty_log_protect", "interface": "kvm_arch_sync_dirty_log", "skipped": "kvm_flush_remote_tlbs_memslot", "old": null, "new": "R2",
+   "verdict": "合理",
+   "why": "flush 先置 false，循环里把脏页写保护后才置 true（kvm_main.c:2251/2274），最后 if (flush) kvm_flush_remote_tlbs_memslot。被跳过的效果是写保护之后刷客户机的 TLB，正是 R2 说的“降低权限后旧翻译必须失效”。资源是客户机内存，现有 T1～T3 只测用户进程，所以规则对上了但没有模板执行到。"},
+  {"n": 2, "fn": "kvm_clear_dirty_log_protect", "interface": "kvm_arch_sync_dirty_log", "skipped": "kvm_flush_remote_tlbs_memslot", "old": null, "new": "R2",
+   "verdict": "合理", "why": "与 1 相同的模式（kvm_main.c:2372/2395/2402）。"},
+  {"n": 3, "fn": "convert_ctx_accesses", "interface": "verbose", "skipped": "bpf_patch_insn_data", "old": "R3", "new": null,
+   "verdict": "合理（去掉错误映射）",
+   "why": "bpf_patch_insn_data 重新分配并改写 BPF 校验器内部的指令数组（vrealloc、adjust_insn_aux_data 等），不涉及即将执行的机器码，与指令缓存无关。旧映射的 R3 来自三层闭包深处碰到的刷缓存函数。新映射在第 0～2 层都没找到四族效果，判为无。"},
+  {"n": 4, "fn": "do_swap_page", "interface": "pte_modify", "skipped": "do_wp_page", "old": "R1", "new": "R4",
+   "verdict": "不合理",
+   "why": "rwp_restore=true（memory.c:5176）时跳过 do_wp_page（5255-5256），是有意不做写升级/写时复制，让访问继续走 RWP 缺页。do_wp_page 的效果是把页表项改成可写或换成私有副本：第 1 层确实写页表项（set_pte_at、set_ptes），也刷 TLB。但 R4 的性质是“页表搬移（mremap）之后内容保持”，与写升级/写时复制不是同一种性质。四条规则里没有一条对得上，正确结果应为“无”。暴露的问题：“写页表项 → R4”太粗，R4 只适用于搬移。另外同层命中的 mm_tlb_flush_pending 是查询函数，不是刷 TLB，刷 TLB 族的名字模式也会误中。"},
+  {"n": 5, "fn": "do_swap_page", "interface": "pte_same", "skipped": "swap_cache_del_folio", "old": "R1", "new": null,
+   "verdict": "合理（去掉错误映射）",
+   "why": "所谓标志是 nr_pages=1（批量页数），被跳过的 swap_cache_del_folio（memory.c:5108）把 folio 从交换缓存里摘掉，不清零也不初始化交给用户的页。旧映射的 R1 只因为闭包里有写操作、资源名是 folio。"},
+  {"n": 6, "fn": "do_swap_page", "interface": "ptep_get", "skipped": "swap_cache_del_folio", "old": "R1", "new": null,
+   "verdict": "合理（去掉错误映射）", "why": "与 5 是同一处代码。旧映射下它是“部分架构测到”，那是 R1 模板碰巧执行到 do_swap_page，并不检查这里的性质。"},
+  {"n": 7, "fn": "mincore_pte_range", "interface": "ptep_get", "skipped": "pte_is_marker", "old": "R1", "new": null,
+   "verdict": "合理（去掉错误映射）",
+   "why": "所谓标志是循环步长 step=1（mincore.c:187），pte_is_marker 是判断函数；__mincore_unmapped_range 等写的是 mincore 的结果数组 vec，不是交给用户映射的页。旧映射下它是“部分架构测到”，同 6，是虚的。"},
+  {"n": 8, "fn": "_vm_unmap_aliases", "interface": "max", "skipped": "flush_tlb_kernel_range", "old": null, "new": "R2",
+   "verdict": "合理（就规则而言）",
+   "why": "vmap 块的脏区间被清掉后置 flush=1（vmalloc.c:3004），最后 flush_tlb_kernel_range(start,end)（3013-3014）。被跳过的效果是撤销内核虚拟地址别名后刷 TLB，正是 R2 的性质，只是作用在内核地址上，现有 T1～T3 测不到。候选本身质量差：接口 max/min 是通用宏，不是架构接口（effdep7 的同资源条件已把它滤掉，只在 effdep5 里出现）。"},
+  {"n": 9, "fn": "_vm_unmap_aliases", "interface": "min", "skipped": "flush_tlb_kernel_range", "old": null, "new": "R2",
+   "verdict": "合理（就规则而言）", "why": "与 8 相同。"}
+ ],
+ "summary": {"distinct": 9, "reasonable": 8, "unreasonable": 1, "unclear": 0,
+             "gained_rule": {"n": 4, "reasonable": 4}, "rule_switched": {"n": 1, "reasonable": 0}, "rule_removed": {"n": 4, "reasonable": 4}},
+ "extra_unchanged": [
+  {"fn": "enable_instances", "interface": "pr_warn", "skipped": "map_pages", "old": "R3", "new": "R3",
+   "note": "规则没变，所以不在判据的评估范围里；顺带记下：第 2 层命中的 flush_cache_vmap 是 vmap 后刷数据缓存别名，不是指令缓存，R3 不对。说明“刷缓存族”同时包含了数据缓存和指令缓存，而 R3 只管指令缓存。"}
+ ]
+}

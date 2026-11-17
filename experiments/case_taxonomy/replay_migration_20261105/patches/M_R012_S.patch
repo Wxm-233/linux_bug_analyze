@@ -1,0 +1,64 @@
+diff --git a/arch/riscv/kernel/alternative.c b/arch/riscv/kernel/alternative.c
+--- a/arch/riscv/kernel/alternative.c
++++ b/arch/riscv/kernel/alternative.c
+@@ -80,6 +80,43 @@ static void riscv_alternative_fix_auipc_jalr(void *ptr, u32 auipc_insn,
+ 	patch_text_nosync(ptr, call, sizeof(u32) * 2);
+ }
+ 
++static bool riscv_alt_insn_is_jal(u32 insn)
++{
++	return (insn & 0x7f) == 0x6f;
++}
++
++static s32 riscv_alt_jal_get_imm(u32 insn)
++{
++	u32 imm;
++
++	imm  = ((insn >> 31) & 0x1)   << 20;
++	imm |= ((insn >> 21) & 0x3ff) << 1;
++	imm |= ((insn >> 20) & 0x1)   << 11;
++	imm |= ((insn >> 12) & 0xff)  << 12;
++
++	return sign_extend32(imm, 20);
++}
++
++static u32 riscv_alt_jal_set_imm(u32 insn, s32 offset)
++{
++	u32 imm = (u32)offset;
++
++	insn &= 0xfff;	/* keep rd and opcode */
++	insn |= ((imm >> 20) & 0x1)   << 31;
++	insn |= ((imm >> 1)  & 0x3ff) << 21;
++	insn |= ((imm >> 11) & 0x1)   << 20;
++	insn |= ((imm >> 12) & 0xff)  << 12;
++
++	return insn;
++}
++
++static void riscv_alternative_fix_jal(void *ptr, u32 jal_insn, int patch_offset)
++{
++	s32 imm = riscv_alt_jal_get_imm(jal_insn) - patch_offset;
++	u32 new_insn = riscv_alt_jal_set_imm(jal_insn, imm);
++
++	patch_text_nosync(ptr, &new_insn, sizeof(u32));
++}
++
+ void riscv_alternative_fix_offsets(void *alt_ptr, unsigned int len,
+ 				      int patch_offset)
+ {
+@@ -88,6 +125,13 @@ void riscv_alternative_fix_offsets(void *alt_ptr, unsigned int len,
+ 
+ 	for (i = 0; i < num_insn; i++) {
+ 		u32 insn = riscv_instruction_at(alt_ptr + i * sizeof(u32));
+ 
++		/* jal that leaves the block: only fix calls (rd == ra) */
++		if (riscv_alt_insn_is_jal(insn)) {
++			if (RV_EXTRACT_RD_REG(insn) == 1)
++				riscv_alternative_fix_jal(alt_ptr + i * sizeof(u32),
++							  insn, patch_offset);
++			continue;
++		}
++
+ 		/*
+ 		 * May be the start of an auipc + jalr pair
+ 		 * Needs to check that at least one more instruction

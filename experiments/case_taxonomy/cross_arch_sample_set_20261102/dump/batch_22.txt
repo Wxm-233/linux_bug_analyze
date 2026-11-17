@@ -1,0 +1,1277 @@
+
+##### B550
+=== d84f24c89886 B 2026-01-22 +4/-13
+perf header: Fix memory leaks in process_cpu_domain_info()
+
+do_read_string() returns a string in allocated memory, for some reason
+there was unused memory allocations and unnecessary strdups.
+
+Remove these and make the "perf annotate basic tests" leak sanitizer
+clean.
+
+Fixes: d40c68a49f69c9bd ("perf header: Support CPU DOMAIN relation info")
+functions: tools/perf/util/header.c:process_cpu_domain_info
+fixes: d40c68a49f69(common)
+diff --git a/tools/perf/util/header.c b/tools/perf/util/header.c
+index 9a15dd4b7640..eefd1cd73b6a 100644
+--- a/tools/perf/util/header.c
++++ b/tools/perf/util/header.c
+@@ -3635,4 +3635,5 @@ static int process_cpu_domain_info(struct feat_fd *ff, void *data __maybe_unused
+ 				return -1;
+ 
++			assert(cd_map[cpu]->domains[domain] == NULL);
+ 			cd_map[cpu]->domains[domain] = d_info;
+ 			d_info->domain = domain;
+@@ -3643,9 +3644,5 @@ static int process_cpu_domain_info(struct feat_fd *ff, void *data __maybe_unused
+ 					return -1;
+ 
+-				d_info->dname = zalloc(strlen(dname) + 1);
+-				if (!d_info->dname)
+-					return -1;
+-
+-				d_info->dname = strdup(dname);
++				d_info->dname = dname;
+ 			}
+ 
+@@ -3654,8 +3651,5 @@ static int process_cpu_domain_info(struct feat_fd *ff, void *data __maybe_unused
+ 				return -1;
+ 
+-			d_info->cpumask = zalloc(strlen(cpumask) + 1);
+-			if (!d_info->cpumask)
+-				return -1;
+-			d_info->cpumask = strdup(cpumask);
++			d_info->cpumask = cpumask;
+ 
+ 			cpulist = do_read_string(ff);
+@@ -3663,8 +3657,5 @@ static int process_cpu_domain_info(struct feat_fd *ff, void *data __maybe_unused
+ 				return -1;
+ 
+-			d_info->cpulist = zalloc(strlen(cpulist) + 1);
+-			if (!d_info->cpulist)
+-				return -1;
+-			d_info->cpulist = strdup(cpulist);
++			d_info->cpulist = cpulist;
+ 		}
+ 	}
+
+##### B551
+=== f5c262b54497 B 2026-01-22 +70/-0
+iommu/riscv: Add IOTINVAL after updating DDT/PDT entries
+
+Add riscv_iommu_iodir_iotinval() to perform required TLB and context cache
+invalidations after updating DDT or PDT entries, as mandated by the RISC-V
+IOMMU specification (Section 6.3.1 and 6.3.2).
+
+Fixes: 488ffbf18171 ("iommu/riscv: Paging domain support")
+functions: drivers/iommu/riscv/iommu.c:riscv_iommu_iodir_update
+fixes: 488ffbf18171(common)
+ drivers/iommu/riscv/iommu.c | 70 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+diff --git a/drivers/iommu/riscv/iommu.c b/drivers/iommu/riscv/iommu.c
+index fa2ebfd2f912..aadfbc181138 100644
+--- a/drivers/iommu/riscv/iommu.c
++++ b/drivers/iommu/riscv/iommu.c
+@@ -997,5 +997,65 @@ static void riscv_iommu_iotlb_inval(struct riscv_iommu_domain *domain,
+ 
+ #define RISCV_IOMMU_FSC_BARE 0
++/*
++ * This function sends IOTINVAL commands as required by the RISC-V
++ * IOMMU specification (Section 6.3.1 and 6.3.2 in 1.0 spec version)
++ * after modifying DDT or PDT entries
++ */
++static void riscv_iommu_iodir_iotinval(struct riscv_iommu_device *iommu,
++				       bool inval_pdt, unsigned long iohgatp,
++				       struct riscv_iommu_dc *dc,
++				       struct riscv_iommu_pc *pc)
++{
++	struct riscv_iommu_command cmd;
++
++	riscv_iommu_cmd_inval_vma(&cmd);
+ 
++	if (FIELD_GET(RISCV_IOMMU_DC_IOHGATP_MODE, iohgatp) ==
++	    RISCV_IOMMU_DC_IOHGATP_MODE_BARE) {
++		if (inval_pdt) {
++			/*
++			 * IOTINVAL.VMA with GV=AV=0, and PSCV=1, and
++			 * PSCID=PC.PSCID
++			 */
++			riscv_iommu_cmd_inval_set_pscid(&cmd,
++				FIELD_GET(RISCV_IOMMU_PC_TA_PSCID, pc->ta));
++		} else {
++			if (!FIELD_GET(RISCV_IOMMU_DC_TC_PDTV, dc->tc) &&
++			    FIELD_GET(RISCV_IOMMU_DC_FSC_MODE, dc->fsc) !=
++			    RISCV_IOMMU_DC_FSC_MODE_BARE) {
++				/*
++				 * DC.tc.PDTV == 0 && DC.fsc.MODE != Bare
++				 * IOTINVAL.VMA with GV=AV=0, and PSCV=1, and
++				 * PSCID=DC.ta.PSCID
++				 */
++				riscv_iommu_cmd_inval_set_pscid(&cmd,
++					FIELD_GET(RISCV_IOMMU_DC_TA_PSCID, dc->ta));
++			}
++			/* else: IOTINVAL.VMA with GV=AV=PSCV=0 */
++		}
++	} else {
++		riscv_iommu_cmd_inval_set_gscid(&cmd,
++			FIELD_GET(RISCV_IOMMU_DC_IOHGATP_GSCID, iohgatp));
++
++		if (inval_pdt) {
++			/*
++			 * IOTINVAL.VMA with GV=1, AV=0, and PSCV=1, and
++			 * GSCID=DC.iohgatp.GSCID, PSCID=PC.PSCID
++			 */
++			riscv_iommu_cmd_inval_set_pscid(&cmd,
++				FIELD_GET(RISCV_IOMMU_PC_TA_PSCID, pc->ta));
++		}
++		/*
++		 * else: IOTINVAL.VMA with GV=1,AV=PSCV=0,and
++		 * GSCID=DC.iohgatp.GSCID
++		 *
+... (30 more diff lines)
+
+##### B552
+=== 3f54ef56fd45 B 2026-01-28 +7/-8
+mm: folio_zero_user: open code range computation in folio_zero_user()
+
+riscv64-gcc-linux-gnu (v8.5) reports a compile time assert in:
+
+   r[2] = DEFINE_RANGE(clamp_t(s64, fault_idx - radius, pg.start, pg.end),
+ 		       clamp_t(s64, fault_idx + radius, pg.start, pg.end));
+
+where it decides that pg.start > pg.end in:
+  clamp_t(s64, fault_idx + radius, pg.start, pg.end));
+
+where pg comes from:
+  const struct range pg = DEFINE_RANGE(0, folio_nr_pages(folio) - 1);
+
+That does not seem like it could be true. Even for pg.start == pg.end,
+we would need folio_test_large() to evaluate to false at compile time:
+
+  static inline unsigned long folio_nr_pages(const struct folio *folio)
+  {
+	if (!folio_test_large(folio))
+		return 1;
+	return folio_large_nr_pages(folio);
+  }
+
+Workaround by open coding the range computation. Also, simplify the type
+declarations for the relevant variables.
+
+[ankur.a.arora@oracle.com: remove unneeded cast, per David]
+Fixes: 93552c9a3350 ("mm: folio_zero_user: cache neighbouring pages")
+functions: mm/memory.c:folio_zero_user
+fixes: 93552c9a3350(common)
+diff --git a/mm/memory.c b/mm/memory.c
+index 15a6c09d54ee..cf32e2666e71 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -7317,5 +7317,5 @@ void folio_zero_user(struct folio *folio, unsigned long addr_hint)
+ 	const long fault_idx = (addr_hint - base_addr) / PAGE_SIZE;
+ 	const struct range pg = DEFINE_RANGE(0, folio_nr_pages(folio) - 1);
+-	const int radius = FOLIO_ZERO_LOCALITY_RADIUS;
++	const long radius = FOLIO_ZERO_LOCALITY_RADIUS;
+ 	struct range r[3];
+ 	int i;
+@@ -7325,18 +7325,17 @@ void folio_zero_user(struct folio *folio, unsigned long addr_hint)
+ 	 * end to keep its cachelines hot.
+ 	 */
+-	r[2] = DEFINE_RANGE(clamp_t(s64, fault_idx - radius, pg.start, pg.end),
+-			    clamp_t(s64, fault_idx + radius, pg.start, pg.end));
++	r[2] = DEFINE_RANGE(fault_idx - radius < (long)pg.start ? pg.start : fault_idx - radius,
++			    fault_idx + radius > (long)pg.end   ? pg.end   : fault_idx + radius);
++
+ 
+ 	/* Region to the left of the fault */
+-	r[1] = DEFINE_RANGE(pg.start,
+-			    clamp_t(s64, r[2].start - 1, pg.start - 1, r[2].start));
++	r[1] = DEFINE_RANGE(pg.start, r[2].start - 1);
+ 
+ 	/* Region to the right of the fault: always valid for the common fault_idx=0 case. */
+-	r[0] = DEFINE_RANGE(clamp_t(s64, r[2].end + 1, r[2].end, pg.end + 1),
+-			    pg.end);
++	r[0] = DEFINE_RANGE(r[2].end + 1, pg.end);
+ 
+ 	for (i = 0; i < ARRAY_SIZE(r); i++) {
+ 		const unsigned long addr = base_addr + r[i].start * PAGE_SIZE;
+-		const unsigned int nr_pages = range_len(&r[i]);
++		const long nr_pages = (long)range_len(&r[i]);
+ 		struct page *page = folio_page(folio, r[i].start);
+ 
+
+##### B553
+=== 7217cee35aad B 2026-01-30 +8/-6
+iommu/riscv: Skip IRQ count check when using MSI interrupts
+
+In RISC-V IOMMU platform devices that use MSI interrupts (indicated by the
+presence of 'msi-parent' in the device tree), there are no wired interrupt
+lines, so calling platform_get_irq_count() returns 0 or -ENXIO, causing the
+driver to fail during probe.
+
+However, MSI interrupts are allocated dynamically via the MSI subsystem and
+do not appear in the device tree 'interrupts' property. Therefore, the
+driver should not require a non-zero IRQ count when 'msi-parent' is present.
+
+This patch fixes the bug where probe fails when using MSI interrupts
+ (which do not have an 'interrupts' property in the device tree)..
+
+Fixes: <d5f88acdd6ff> ("iommu/riscv: Add support for platform msi")
+functions: drivers/iommu/riscv/iommu-platform.c:riscv_iommu_platform_probe
+fixes: 
+diff --git a/drivers/iommu/riscv/iommu-platform.c b/drivers/iommu/riscv/iommu-platform.c
+index 83a28c83f991..8f15b06e8499 100644
+--- a/drivers/iommu/riscv/iommu-platform.c
++++ b/drivers/iommu/riscv/iommu-platform.c
+@@ -69,10 +69,5 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
+ 	iommu->fctl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FCTL);
+ 
+-	iommu->irqs_count = platform_irq_count(pdev);
+-	if (iommu->irqs_count <= 0)
+-		return dev_err_probe(dev, -ENODEV,
+-				     "no IRQ resources provided\n");
+-	if (iommu->irqs_count > RISCV_IOMMU_INTR_COUNT)
+-		iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
++	iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
+ 
+ 	igs = FIELD_GET(RISCV_IOMMU_CAPABILITIES_IGS, iommu->caps);
+@@ -121,4 +116,11 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
+ 
+ 	case RISCV_IOMMU_CAPABILITIES_IGS_WSI:
++		iommu->irqs_count = platform_irq_count(pdev);
++		if (iommu->irqs_count <= 0)
++			return dev_err_probe(dev, -ENODEV,
++					     "no IRQ resources provided\n");
++		if (iommu->irqs_count > RISCV_IOMMU_INTR_COUNT)
++			iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
++
+ 		for (vec = 0; vec < iommu->irqs_count; vec++)
+ 			iommu->irqs[vec] = platform_get_irq(pdev, vec);
+
+##### B554
+=== 0528a348b04b B 2026-01-31 +2/-2
+cache: ax45mp: Fix device node reference leak in ax45mp_cache_init()
+
+In ax45mp_cache_init(), of_find_matching_node() returns a device node
+with an incremented reference count that must be released with
+of_node_put(). The current code fails to call of_node_put() which
+causes a reference leak.
+
+Use the __free(device_node) attribute to ensure automatic cleanup when
+the variable goes out of scope.
+
+Fixes: d34599bcd2e4 ("cache: Add L2 cache management for Andes AX45MP RISC-V core")
+functions: drivers/cache/ax45mp_cache.c:ax45mp_cache_init
+fixes: d34599bcd2e4(common)
+diff --git a/drivers/cache/ax45mp_cache.c b/drivers/cache/ax45mp_cache.c
+index 1d7dd3d2c101..934c5087ec2b 100644
+--- a/drivers/cache/ax45mp_cache.c
++++ b/drivers/cache/ax45mp_cache.c
+@@ -179,9 +179,9 @@ static const struct of_device_id ax45mp_cache_ids[] = {
+ static int __init ax45mp_cache_init(void)
+ {
+-	struct device_node *np;
+ 	struct resource res;
+ 	int ret;
+ 
+-	np = of_find_matching_node(NULL, ax45mp_cache_ids);
++	struct device_node *np __free(device_node) =
++		of_find_matching_node(NULL, ax45mp_cache_ids);
+ 	if (!of_device_is_available(np))
+ 		return -ENODEV;
+
+##### B555
+=== c2e28ae2946f B 2026-02-03 +6/-7
+perf regs: Fix abort for "-I" or "--user-regs" options
+
+Fix an issue where the `perf` tool aborts unexpectedly when running the
+following command:
+
+```
+perf record -e cycles -I -- true
+
+ Usage: perf record [<options>] [<command>]
+    or: perf record [<options>] -- <command> [<options>]
+
+    -I, --intr-regs[=<any register>]
+    sample selected machine registers on interrupt, use '-I?' to list register names
+```
+
+The usage of the `-I` or `--user-regs` options without specifying any
+registers should default to sampling all general-purpose registers.
+
+However, this currently causes an abnormal termination.
+
+The issue was introduced by commit 3d06db9bad1a ("perf regs: Refactor
+ use of arch__sample_reg_masks() to perf_reg_name()").
+
+This patch resolves the problem, ensuring that the `-I` or `--user-regs`
+options work as intended without causing an abort.
+
+Fixes: 3d06db9bad1ad8e6 ("perf regs: Refactor use of arch__sample_reg_masks() to perf_reg_name()")
+functions: tools/perf/util/parse-regs-options.c:__parse_regs
+fixes: 3d06db9bad1a(common)
+diff --git a/tools/perf/util/parse-regs-options.c b/tools/perf/util/parse-regs-options.c
+index 8dd35f50f644..b44b47d9059f 100644
+--- a/tools/perf/util/parse-regs-options.c
++++ b/tools/perf/util/parse-regs-options.c
+@@ -67,10 +67,12 @@ __parse_regs(const struct option *opt, const char *str, int unset, bool intr)
+ 		return -1;
+ 
+-	/* str may be NULL in case no arg is passed to -I */
+-	if (!str)
+-		return -1;
+-
+ 	mask = intr ? arch__intr_reg_mask() : arch__user_reg_mask();
+ 
++	/* str may be NULL in case no arg is passed to -I */
++	if (!str) {
++		*mode = mask;
++		return 0;
++	}
++
+ 	/* because str is read-only */
+ 	s = os = strdup(str);
+@@ -105,7 +107,4 @@ __parse_regs(const struct option *opt, const char *str, int unset, bool intr)
+ 	ret = 0;
+ 
+-	/* default to all possible regs */
+-	if (*mode == 0)
+-		*mode = mask;
+ error:
+ 	free(os);
+
+##### B556
+=== b2e5684558ed B 2026-02-27 +3/-0
+iommu/riscv: Stop polling when CQCSR reports an error
+
+The cmdq wait loop busy-polls the consumer index until it advances
+or the software timeout expires. If the IOMMU has already signaled
+a command queue failure in CQCSR, continuing to poll for progress is
+pointless.
+
+Make riscv_iommu_queue_wait() also terminate the poll when any of these
+CQCSR error bits are observed.
+
+This helps the caller return earlier in failure cases and avoids
+spinning until the full timeout interval when the hardware has already
+reported an error. On single-core systems in particular, the current
+busy-wait can delay servicing the command-timeout interrupt until the
+software timeout expires (90s by default).
+
+Fixes: 856c0cfe5c5f ("iommu/riscv: Command and fault queue support")
+functions: drivers/iommu/riscv/iommu.c:riscv_iommu_queue_wait
+fixes: 856c0cfe5c5f(common)
+diff --git a/drivers/iommu/riscv/iommu.c b/drivers/iommu/riscv/iommu.c
+index aadfbc181138..6ac7e3edef8a 100644
+--- a/drivers/iommu/riscv/iommu.c
++++ b/drivers/iommu/riscv/iommu.c
+@@ -369,4 +369,6 @@ static int riscv_iommu_queue_wait(struct riscv_iommu_queue *queue,
+ {
+ 	unsigned int cons = atomic_read(&queue->head);
++	unsigned int flags = RISCV_IOMMU_CQCSR_CQMF | RISCV_IOMMU_CQCSR_CMD_TO |
++			     RISCV_IOMMU_CQCSR_CMD_ILL;
+ 
+ 	/* Already processed by the consumer */
+@@ -376,4 +378,5 @@ static int riscv_iommu_queue_wait(struct riscv_iommu_queue *queue,
+ 	/* Monitor consumer index */
+ 	return readx_poll_timeout(riscv_iommu_queue_cons, queue, cons,
++				 (riscv_iommu_readl(queue->iommu, queue->qcr) & flags) ||
+ 				 (int)(cons - index) > 0, 0, timeout_us);
+ }
+
+##### B557
+=== c70d20b25ca3 B 2026-02-27 +1/-0
+iommu/riscv: Add missing GENERIC_MSI_IRQ
+
+The commit below added MSI related calls to the driver that depends on
+GENERIC_MSI_IRQ. It is possible to build RISC-V without this selected.
+
+This is also necessary to make the driver COMPILE_TEST.
+
+Fixes: d5f88acdd6ff ("iommu/riscv: Add support for platform msi")
+functions: 
+fixes: d5f88acdd6ff(common)
+diff --git a/drivers/iommu/riscv/Kconfig b/drivers/iommu/riscv/Kconfig
+index a329ec634cf1..849e72321d8a 100644
+--- a/drivers/iommu/riscv/Kconfig
++++ b/drivers/iommu/riscv/Kconfig
+@@ -5,4 +5,5 @@ config RISCV_IOMMU
+ 	bool "RISC-V IOMMU Support"
+ 	depends on RISCV && 64BIT
++	depends on GENERIC_MSI_IRQ
+ 	default y
+ 	select IOMMU_API
+
+##### B558
+=== 37beb4256016 B 2026-03-03 +21/-12
+randomize_kstack: Maintain kstack_offset per task
+
+kstack_offset was previously maintained per-cpu, but this caused a
+couple of issues. So let's instead make it per-task.
+
+Issue 1: add_random_kstack_offset() and choose_random_kstack_offset()
+expected and required to be called with interrupts and preemption
+disabled so that it could manipulate per-cpu state. But arm64, loongarch
+and risc-v are calling them with interrupts and preemption enabled. I
+don't _think_ this causes any functional issues, but it's certainly
+unexpected and could lead to manipulating the wrong cpu's state, which
+could cause a minor performance degradation due to bouncing the cache
+lines. By maintaining the state per-task those functions can safely be
+called in preemptible context.
+
+Issue 2: add_random_kstack_offset() is called before executing the
+syscall and expands the stack using a previously chosen random offset.
+choose_random_kstack_offset() is called after executing the syscall and
+chooses and stores a new random offset for the next syscall. With
+per-cpu storage for this offset, an attacker could force cpu migration
+during the execution of the syscall and prevent the offset from being
+updated for the original cpu such that it is predictable for the next
+syscall on that cpu. By maintaining the state per-task, this problem
+goes away because the per-task random offset is updated after the
+syscall regardless of which cpu it is executing on.
+
+Fixes: 39218ff4c625 ("stack: Optionally randomize kernel stack offset each syscall")
+functions: kernel/fork.c:copy_process
+fixes: 39218ff4c625(common)
+ include/linux/randomize_kstack.h | 26 +++++++++++++++-----------
+ include/linux/sched.h            |  4 ++++
+ init/main.c                      |  1 -
+ kernel/fork.c                    |  2 ++
+ 4 files changed, 21 insertions(+), 12 deletions(-)
+diff --git a/include/linux/randomize_kstack.h b/include/linux/randomize_kstack.h
+index 1d982dbdd0d0..5d3916ca747c 100644
+--- a/include/linux/randomize_kstack.h
++++ b/include/linux/randomize_kstack.h
+@@ -10,5 +10,4 @@
+ DECLARE_STATIC_KEY_MAYBE(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,
+ 			 randomize_kstack_offset);
+-DECLARE_PER_CPU(u32, kstack_offset);
+ 
+ /*
+@@ -51,13 +50,12 @@ DECLARE_PER_CPU(u32, kstack_offset);
+  *			      chosen random offset
+  *
+- * This should be used in the syscall entry path when interrupts and
+- * preempt are disabled, and after user registers have been stored to
+- * the stack. For testing the resulting entropy, please see:
+- * tools/testing/selftests/lkdtm/stack-entropy.sh
++ * This should be used in the syscall entry path after user registers have been
++ * stored to the stack. Preemption may be enabled. For testing the resulting
++ * entropy, please see: tools/testing/selftests/lkdtm/stack-entropy.sh
+  */
+ #define add_random_kstack_offset() do {					\
+ 	if (static_branch_maybe(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,	\
+ 				&randomize_kstack_offset)) {		\
+-		u32 offset = raw_cpu_read(kstack_offset);		\
++		u32 offset = current->kstack_offset;			\
+ 		u8 *ptr = __kstack_alloca(KSTACK_OFFSET_MAX(offset));	\
+ 		/* Keep allocation even after "ptr" loses scope. */	\
+@@ -70,7 +68,7 @@ DECLARE_PER_CPU(u32, kstack_offset);
+  *				 add_random_kstack_offset()
+  *
+- * This should only be used during syscall exit when interrupts and
+- * preempt are disabled. This position in the syscall flow is done to
+- * frustrate attacks from userspace attempting to learn the next offset:
++ * This should only be used during syscall exit. Preemption may be enabled. This
++ * position in the syscall flow is done to frustrate attacks from userspace
++ * attempting to learn the next offset:
+  * - Maximize the timing uncertainty visible from userspace: if the
+  *   offset is chosen at syscall entry, userspace has much more control
+@@ -86,12 +84,18 @@ DECLARE_PER_CPU(u32, kstack_offset);
+ 	if (static_branch_maybe(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,	\
+ 				&randomize_kstack_offset)) {		\
+-		u32 offset = raw_cpu_read(kstack_offset);		\
++		u32 offset = current->kstack_offset;			\
+ 		offset = ror32(offset, 5) ^ (rand);			\
+-		raw_cpu_write(kstack_offset, offset);			\
++		current->kstack_offset = offset;			\
+ 	}								\
+ } while (0)
++
++static inline void random_kstack_task_init(struct task_struct *tsk)
++{
++	tsk->kstack_offset = 0;
++}
+ #else /* CONFIG_RANDOMIZE_KSTACK_OFFSET */
+ #define add_random_kstack_offset()		do { } while (0)
+ #define choose_random_kstack_offset(rand)	do { } while (0)
++#define random_kstack_task_init(tsk)		do { } while (0)
+ #endif /* CONFIG_RANDOMIZE_KSTACK_OFFSET */
+ 
+... (39 more diff lines)
+
+##### B559
+=== 9156585280f1 B 2026-03-03 +7/-0
+ACPI: RIMT: Add dependency between iommu and devices
+
+EPROBE_DEFER ensures IOMMU devices are probed before the devices that
+depend on them. During shutdown, however, the IOMMU may be removed
+first, leading to issues. To avoid this, a device link is added
+which enforces the correct removal order.
+
+Fixes: 8f7729552582 ("ACPI: RISC-V: Add support for RIMT")
+functions: drivers/acpi/riscv/rimt.c:rimt_iommu_xlate
+fixes: 8f7729552582(riscv)
+diff --git a/drivers/acpi/riscv/rimt.c b/drivers/acpi/riscv/rimt.c
+index 229c4a0d47a3..906282b0e63c 100644
+--- a/drivers/acpi/riscv/rimt.c
++++ b/drivers/acpi/riscv/rimt.c
+@@ -264,4 +264,11 @@ static int rimt_iommu_xlate(struct device *dev, struct acpi_rimt_node *node, u32
+ 		return -EPROBE_DEFER;
+ 
++	/*
++	 * EPROBE_DEFER ensures IOMMU is probed before the devices that
++	 * depend on them. During shutdown, however, the IOMMU may be removed
++	 * first, leading to issues. To avoid this, a device link is added
++	 * which enforces the correct removal order.
++	 */
++	device_link_add(dev, rimt_fwnode->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
+ 	return acpi_iommu_fwspec_init(dev, deviceid, rimt_fwnode);
+ }
+
+##### B560
+=== 511361fe7a88 B 2026-03-09 +9/-6
+selftests: riscv: Add braces around EXPECT_EQ()
+
+EXPECT_EQ() expands to multiple lines, breaking up one-line if
+statements. This issue was not present in the patch on the mailing list
+but was instead introduced by the maintainer when attempting to fix up
+checkpatch warnings. Add braces around EXPECT_EQ() to avoid the error
+even though checkpatch suggests them to be removed:
+
+validate_v_ptrace.c:626:17: error: ‘else’ without a previous ‘if’
+
+Fixes: 3789d5eecd5a ("selftests: riscv: verify syscalls discard vector context")
+Fixes: 30eb191c895b ("selftests: riscv: verify ptrace rejects invalid vector csr inputs")
+Fixes: 849f05ae1ea6 ("selftests: riscv: verify ptrace accepts valid vector csr values")
+Reviewed-and-tested-by: Sergey Matyukevich <geomatsi@gmail.com>
+functions: tools/testing/selftests/riscv/vector/validate_v_ptrace.c:TEST, tools/testing/selftests/riscv/vector/validate_v_ptrace.c:TEST_F
+fixes: 3789d5eecd5a(common), 30eb191c895b(common), 849f05ae1ea6(common)
+diff --git a/tools/testing/selftests/riscv/vector/validate_v_ptrace.c b/tools/testing/selftests/riscv/vector/validate_v_ptrace.c
+index 7ae6fede496f..74b6f6bcf067 100644
+--- a/tools/testing/selftests/riscv/vector/validate_v_ptrace.c
++++ b/tools/testing/selftests/riscv/vector/validate_v_ptrace.c
+@@ -291,8 +291,9 @@ TEST(ptrace_v_syscall_clobbering)
+ 		/* verify initial vsetvli settings */
+ 
+-		if (is_xtheadvector_supported())
++		if (is_xtheadvector_supported()) {
+ 			EXPECT_EQ(5UL, regset_data->vtype);
+-		else
++		} else {
+ 			EXPECT_EQ(9UL, regset_data->vtype);
++		}
+ 
+ 		EXPECT_EQ(regset_data->vlenb, regset_data->vl);
+@@ -620,8 +621,9 @@ TEST_F(v_csr_invalid, ptrace_v_invalid_values)
+ 		/* verify initial vsetvli settings */
+ 
+-		if (is_xtheadvector_supported())
++		if (is_xtheadvector_supported()) {
+ 			EXPECT_EQ(5UL, regset_data->vtype);
+-		else
++		} else {
+ 			EXPECT_EQ(9UL, regset_data->vtype);
++		}
+ 
+ 		EXPECT_EQ(regset_data->vlenb, regset_data->vl);
+@@ -828,8 +830,9 @@ TEST_F(v_csr_valid, ptrace_v_valid_values)
+ 		/* verify initial vsetvli settings */
+ 
+-		if (is_xtheadvector_supported())
++		if (is_xtheadvector_supported()) {
+ 			EXPECT_EQ(5UL, regset_data->vtype);
+-		else
++		} else {
+ 			EXPECT_EQ(9UL, regset_data->vtype);
++		}
+ 
+ 		EXPECT_EQ(regset_data->vlenb, regset_data->vl);
+
+##### B561
+=== 2d7f05cddf4c B 2026-03-10 +8/-20
+drm/imagination: Synchronize interrupts before suspending the GPU
+
+The runtime PM suspend callback doesn't know whether the IRQ handler is
+in progress on a different CPU core and doesn't wait for it to finish.
+
+Depending on timing, the IRQ handler could be running while the GPU is
+suspended, leading to kernel crashes when trying to access GPU
+registers. See example signature below.
+
+In a power off sequence initiated by the runtime PM suspend callback,
+wait for any IRQ handlers in progress on other CPU cores to finish, by
+calling synchronize_irq().
+
+At the same time, remove the runtime PM resume/put calls in the threaded
+IRQ handler. On top of not being the right approach to begin with, and
+being at the wrong place as they should have wrapped all GPU register
+accesses, the driver would hit a deadlock between synchronize_irq()
+being called from a runtime PM suspend callback, holding the device
+power lock, and the resume callback requiring the same.
+
+Example crash signature on a TI AM68 SK platform:
+
+  [  337.241218] SError Interrupt on CPU0, code 0x00000000bf000000 -- SError
+  [  337.241239] CPU: 0 UID: 0 PID: 112 Comm: irq/234-gpu Tainted: G   M                6.17.7-B2C-00005-g9c7bbe4ea16c #2 PREEMPT
+  [  337.241246] Tainted: [M]=MACHINE_CHECK
+  [  337.241249] Hardware name: Texas Instruments AM68 SK (DT)
+  [  337.241252] pstate: 60000005 (nZCv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+  [  337.241256] pc : pvr_riscv_irq_pending+0xc/0x24
+  [  337.241277] lr : pvr_device_irq_thread_handler+0x64/0x310
+  [  337.241282] sp : ffff800085b0bd30
+  [  337.241284] x29: ffff800085b0bd50 x28: ffff0008070d9eab x27: ffff800083a5ce10
+  [  337.241291] x26: ffff000806e48f80 x25: ffff0008070d9eac x24: 0000000000000000
+  [  337.241296] x23: ffff0008068e9bf0 x22: ffff0008068e9bd0 x21: ffff800085b0bd30
+  [  337.241301] x20: ffff0008070d9e00 x19: ffff0008068e9000 x18: 0000000000000001
+  [  337.241305] x17: 637365645f656c70 x16: 0000000000000000 x15: ffff000b7df9ff40
+  [  337.241310] x14: 0000a585fe3c0d0e x13: 000000999704f060 x12: 000000000002771a
+  [  337.241314] x11: 00000000000000c0 x10: 0000000000000af0 x9 : ffff800085b0bd00
+  [  337.241318] x8 : ffff0008071175d0 x7 : 000000000000b955 x6 : 0000000000000003
+  [  337.241323] x5 : 0000000000000000 x4 : 0000000000000002 x3 : 0000000000000000
+  [  337.241327] x2 : ffff800080e39d20 x1 : ffff800080e3fc48 x0 : 0000000000000000
+  [  337.241333] Kernel panic - not syncing: Asynchronous SError Interrupt
+functions: drivers/gpu/drm/imagination/pvr_device.c:pvr_device_irq_thread_handler, drivers/gpu/drm/imagination/pvr_power.c:pvr_power_fw_disable, drivers/gpu/drm/imagination/pvr_power.c:pvr_power_device_suspend, drivers/gpu/drm/imagination/pvr_power.c:pvr_power_reset
+fixes: cc1aeedb98ad(common), 96822d38ff57(common)
+ drivers/gpu/drm/imagination/pvr_device.c | 17 -----------------
+ drivers/gpu/drm/imagination/pvr_power.c  | 11 ++++++++---
+ 2 files changed, 8 insertions(+), 20 deletions(-)
+diff --git a/drivers/gpu/drm/imagination/pvr_device.c b/drivers/gpu/drm/imagination/pvr_device.c
+index f58bb66a6327..dbb6f5a8ded1 100644
+--- a/drivers/gpu/drm/imagination/pvr_device.c
++++ b/drivers/gpu/drm/imagination/pvr_device.c
+@@ -226,19 +226,4 @@ static irqreturn_t pvr_device_irq_thread_handler(int irq, void *data)
+ 
+ 	if (pvr_dev->has_safety_events) {
+-		int err;
+-
+-		/*
+-		 * Ensure the GPU is powered on since some safety events (such
+-		 * as ECC faults) can happen outside of job submissions, which
+-		 * are otherwise the only time a power reference is held.
+-		 */
+-		err = pvr_power_get(pvr_dev);
+-		if (err) {
+-			drm_err_ratelimited(drm_dev,
+-					    "%s: could not take power reference (%d)\n",
+-					    __func__, err);
+-			return ret;
+-		}
+-
+ 		while (pvr_device_safety_irq_pending(pvr_dev)) {
+ 			pvr_device_safety_irq_clear(pvr_dev);
+@@ -247,6 +232,4 @@ static irqreturn_t pvr_device_irq_thread_handler(int irq, void *data)
+ 			ret = IRQ_HANDLED;
+ 		}
+-
+-		pvr_power_put(pvr_dev);
+ 	}
+ 
+diff --git a/drivers/gpu/drm/imagination/pvr_power.c b/drivers/gpu/drm/imagination/pvr_power.c
+index ab10b4ac06b0..cee4d16ac851 100644
+--- a/drivers/gpu/drm/imagination/pvr_power.c
++++ b/drivers/gpu/drm/imagination/pvr_power.c
+@@ -91,5 +91,5 @@ pvr_power_request_pwr_off(struct pvr_device *pvr_dev)
+ 
+ static int
+-pvr_power_fw_disable(struct pvr_device *pvr_dev, bool hard_reset)
++pvr_power_fw_disable(struct pvr_device *pvr_dev, bool hard_reset, bool rpm_suspend)
+ {
+ 	if (!hard_reset) {
+@@ -107,4 +107,9 @@ pvr_power_fw_disable(struct pvr_device *pvr_dev, bool hard_reset)
+ 	}
+ 
++	if (rpm_suspend) {
++		/* Wait for late processing of GPU or firmware IRQs in other cores */
++		synchronize_irq(pvr_dev->irq);
++	}
++
+ 	return pvr_fw_stop(pvr_dev);
+ }
+@@ -362,5 +367,5 @@ pvr_power_device_suspend(struct device *dev)
+ 
+ 	if (pvr_dev->fw_dev.booted) {
+-		err = pvr_power_fw_disable(pvr_dev, false);
++		err = pvr_power_fw_disable(pvr_dev, false, true);
+ 		if (err)
+ 			goto err_drm_dev_exit;
+@@ -528,5 +533,5 @@ pvr_power_reset(struct pvr_device *pvr_dev, bool hard_reset)
+... (6 more diff lines)
+
+##### B562
+=== 620b6ded72a7 B 2026-03-10 +7/-4
+irqchip/riscv-aplic: Do not clear ACPI dependencies on probe failure
+
+aplic_probe() calls acpi_dev_clear_dependencies() unconditionally at the
+end, even when the preceding setup (MSI or direct mode) has failed. This is
+incorrect because if the device failed to probe, it should not be
+considered as active and should not clear dependencies for other devices
+waiting on it.
+
+Fix this by returning immediately when the setup fails, skipping the ACPI
+dependency cleanup. Also, explicitly return 0 on success instead of relying
+on the value of 'rc' to make the success path clear.
+
+Fixes: 5122e380c23b ("irqchip/riscv-aplic: Add ACPI support")
+functions: drivers/irqchip/irq-riscv-aplic-main.c:aplic_probe
+fixes: 5122e380c23b(common)
+diff --git a/drivers/irqchip/irq-riscv-aplic-main.c b/drivers/irqchip/irq-riscv-aplic-main.c
+index 4495ca26abf5..8775f188ea4f 100644
+--- a/drivers/irqchip/irq-riscv-aplic-main.c
++++ b/drivers/irqchip/irq-riscv-aplic-main.c
+@@ -373,9 +373,12 @@ static int aplic_probe(struct platform_device *pdev)
+ 	else
+ 		rc = aplic_direct_setup(dev, regs);
+-	if (rc)
++
++	if (rc) {
+ 		dev_err_probe(dev, rc, "failed to setup APLIC in %s mode\n",
+ 			      msi_mode ? "MSI" : "direct");
+-	else
+-		register_syscore(&aplic_syscore);
++		return rc;
++	}
++
++	register_syscore(&aplic_syscore);
+ 
+ #ifdef CONFIG_ACPI
+@@ -384,5 +387,5 @@ static int aplic_probe(struct platform_device *pdev)
+ #endif
+ 
+-	return rc;
++	return 0;
+ }
+ 
+
+##### B563
+=== b330fbfd34d7 B 2026-03-10 +11/-1
+irqchip/riscv-aplic: Register syscore operations only once
+
+Since commit 95a8ddde3660 ("irqchip/riscv-aplic: Preserve APLIC
+states across suspend/resume"), when multiple NUMA nodes exist
+and AIA is not configured as "none", aplic_probe() is called
+multiple times. This leads to register_syscore(&aplic_syscore)
+being invoked repeatedly, causing the following Oops:
+
+ list_add double add: new=ffffffffb91461f0, prev=ffffffffb91461f0, next=ffffffffb915c408.
+ [<ffffffffb7b5c8ca>] __list_add_valid_or_report+0x60/0xc0
+ [<ffffffffb7cc3236>] register_syscore+0x3e/0x70
+ [<ffffffffb7b8d61c>] aplic_probe+0xc6/0x112
+
+Fix this by registering syscore operations only once, using a static
+variable aplic_syscore_registered to track registration.
+
+[ tglx: Trim backtrace properly ]
+
+Fixes: 95a8ddde3660 ("irqchip/riscv-aplic: Preserve APLIC states across suspend/resume")
+functions: drivers/irqchip/irq-riscv-aplic-main.c:aplic_probe
+fixes: 95a8ddde3660(common)
+diff --git a/drivers/irqchip/irq-riscv-aplic-main.c b/drivers/irqchip/irq-riscv-aplic-main.c
+index 8775f188ea4f..9f53979b6962 100644
+--- a/drivers/irqchip/irq-riscv-aplic-main.c
++++ b/drivers/irqchip/irq-riscv-aplic-main.c
+@@ -117,4 +117,14 @@ static struct syscore aplic_syscore = {
+ };
+ 
++static bool aplic_syscore_registered __ro_after_init;
++
++static void aplic_syscore_init(void)
++{
++	if (!aplic_syscore_registered) {
++		register_syscore(&aplic_syscore);
++		aplic_syscore_registered = true;
++	}
++}
++
+ static int aplic_pm_notifier(struct notifier_block *nb, unsigned long action, void *data)
+ {
+@@ -380,5 +390,5 @@ static int aplic_probe(struct platform_device *pdev)
+ 	}
+ 
+-	register_syscore(&aplic_syscore);
++	aplic_syscore_init();
+ 
+ #ifdef CONFIG_ACPI
+
+##### B564
+=== 76f0930d6e80 B 2026-03-15 +1/-0
+irqchip/riscv-rpmi-sysmsi: Fix mailbox channel leak in rpmi_sysmsi_probe()
+
+When riscv_acpi_get_gsi_info() fails, the mailbox channel previously
+requested via mbox_request_channel() is not freed. Add the missing
+mbox_free_channel() call to prevent the resource leak.
+
+Fixes: 4752b0cfbc37 ("irqchip/riscv-rpmi-sysmsi: Add ACPI support")
+functions: drivers/irqchip/irq-riscv-rpmi-sysmsi.c:rpmi_sysmsi_probe
+fixes: 4752b0cfbc37(common)
+diff --git a/drivers/irqchip/irq-riscv-rpmi-sysmsi.c b/drivers/irqchip/irq-riscv-rpmi-sysmsi.c
+index 5c74c561ce31..612f3972f7af 100644
+--- a/drivers/irqchip/irq-riscv-rpmi-sysmsi.c
++++ b/drivers/irqchip/irq-riscv-rpmi-sysmsi.c
+@@ -251,4 +251,5 @@ static int rpmi_sysmsi_probe(struct platform_device *pdev)
+ 					     &nr_irqs, NULL);
+ 		if (rc) {
++			mbox_free_channel(priv->chan);
+ 			dev_err(dev, "failed to find GSI mapping\n");
+ 			return rc;
+
+##### B565
+=== 553a127cb665 B 2026-03-19 +5/-2
+iommu/riscv: Fix signedness bug
+
+The function platform_irq_count() returns negative error codes and
+iommu->irqs_count is an unsigned integer, so the check
+(iommu->irqs_count <= 0) is always impossible.
+
+Make the return value of platform_irq_count() be assigned to ret, check
+for error, and then assign iommu->irqs_count to ret.
+
+Detected by Smatch:
+drivers/iommu/riscv/iommu-platform.c:119 riscv_iommu_platform_probe() warn:
+'iommu->irqs_count' unsigned <= 0
+
+Fixes: 5c0ebbd3c6c6 ("iommu/riscv: Add RISC-V IOMMU platform device driver")
+functions: drivers/iommu/riscv/iommu-platform.c:riscv_iommu_platform_probe
+fixes: 5c0ebbd3c6c6(common)
+diff --git a/drivers/iommu/riscv/iommu-platform.c b/drivers/iommu/riscv/iommu-platform.c
+index 8f15b06e8499..399ba8fe1b3e 100644
+--- a/drivers/iommu/riscv/iommu-platform.c
++++ b/drivers/iommu/riscv/iommu-platform.c
+@@ -116,8 +116,11 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
+ 
+ 	case RISCV_IOMMU_CAPABILITIES_IGS_WSI:
+-		iommu->irqs_count = platform_irq_count(pdev);
+-		if (iommu->irqs_count <= 0)
++		ret = platform_irq_count(pdev);
++		if (ret <= 0)
+ 			return dev_err_probe(dev, -ENODEV,
+ 					     "no IRQ resources provided\n");
++
++		iommu->irqs_count = ret;
++
+ 		if (iommu->irqs_count > RISCV_IOMMU_INTR_COUNT)
+ 			iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
+
+##### B566
+=== 40a13b499579 B 2026-03-27 +6/-5
+iommu/riscv: Remove overflows on the invalidation path
+
+Since RISC-V supports a sign extended page table it should support
+a gather->end of ULONG_MAX, but if this happens it will infinite loop
+because of the overflow.
+
+Also avoid overflow computing the length by moving the +1 to the other
+side of the <
+
+Fixes: 488ffbf18171 ("iommu/riscv: Paging domain support")
+functions: drivers/iommu/riscv/iommu.c:riscv_iommu_iotlb_inval
+fixes: 488ffbf18171(common)
+diff --git a/drivers/iommu/riscv/iommu.c b/drivers/iommu/riscv/iommu.c
+index 6ac7e3edef8a..3ec99c979d47 100644
+--- a/drivers/iommu/riscv/iommu.c
++++ b/drivers/iommu/riscv/iommu.c
+@@ -932,6 +932,4 @@ static void riscv_iommu_iotlb_inval(struct riscv_iommu_domain *domain,
+ 	struct riscv_iommu_device *iommu, *prev;
+ 	struct riscv_iommu_command cmd;
+-	unsigned long len = end - start + 1;
+-	unsigned long iova;
+ 
+ 	/*
+@@ -976,9 +974,12 @@ static void riscv_iommu_iotlb_inval(struct riscv_iommu_domain *domain,
+ 		riscv_iommu_cmd_inval_vma(&cmd);
+ 		riscv_iommu_cmd_inval_set_pscid(&cmd, domain->pscid);
+-		if (len && len < RISCV_IOMMU_IOTLB_INVAL_LIMIT) {
+-			for (iova = start; iova < end; iova += PAGE_SIZE) {
++		if (end - start < RISCV_IOMMU_IOTLB_INVAL_LIMIT - 1) {
++			unsigned long iova = start;
++
++			do {
+ 				riscv_iommu_cmd_inval_set_addr(&cmd, iova);
+ 				riscv_iommu_cmd_send(iommu, &cmd);
+-			}
++			} while (!check_add_overflow(iova, PAGE_SIZE, &iova) &&
++				 iova < end);
+ 		} else {
+ 			riscv_iommu_cmd_send(iommu, &cmd);
+
+##### B567
+=== af416cd9b3fb B 2026-03-31 +2/-2
+irqchip/riscv-aplic: Restrict genpd notifier to device tree only
+
+On ACPI systems, the aplic's pm_domain is set to acpi_general_pm_domain,
+which provides its own power management callbacks (e.g., runtime_suspend
+via acpi_subsys_runtime_suspend).
+
+aplic_pm_add() unconditionally calls dev_pm_genpd_add_notifier() when
+dev->pm_domain is non‑NULL, leading to a comparison between runtime_suspend
+and genpd_runtime_suspend. This results in the following errors when ACPI
+is enabled:
+
+  riscv-aplic RSCV0002:00: failed to create APLIC context
+  riscv-aplic RSCV0002:00: error -ENODEV: failed to setup APLIC in MSI mode
+
+Fix this by checking for dev->of_node before adding or removing the genpd
+notifier, ensuring it is only used for device tree based systems.
+
+Fixes: 95a8ddde3660 ("irqchip/riscv-aplic: Preserve APLIC states across suspend/resume")
+functions: drivers/irqchip/irq-riscv-aplic-main.c:aplic_pm_remove, drivers/irqchip/irq-riscv-aplic-main.c:aplic_pm_add
+fixes: 95a8ddde3660(common)
+diff --git a/drivers/irqchip/irq-riscv-aplic-main.c b/drivers/irqchip/irq-riscv-aplic-main.c
+index 9f53979b6962..d9afb6ae98cf 100644
+--- a/drivers/irqchip/irq-riscv-aplic-main.c
++++ b/drivers/irqchip/irq-riscv-aplic-main.c
+@@ -151,5 +151,5 @@ static void aplic_pm_remove(void *data)
+ 
+ 	list_del(&priv->head);
+-	if (dev->pm_domain)
++	if (dev->pm_domain && dev->of_node)
+ 		dev_pm_genpd_remove_notifier(dev);
+ }
+@@ -166,5 +166,5 @@ static int aplic_pm_add(struct device *dev, struct aplic_priv *priv)
+ 	priv->saved_hw_regs.srcs = srcs;
+ 	list_add(&priv->head, &aplics);
+-	if (dev->pm_domain) {
++	if (dev->pm_domain && dev->of_node) {
+ 		priv->genpd_nb.notifier_call = aplic_pm_notifier;
+ 		ret = dev_pm_genpd_add_notifier(dev, &priv->genpd_nb);
+
+##### B568
+=== 1ec8bea903f4 B 2026-04-02 +5/-0
+KVM: riscv: selftests: Implement kvm_arch_has_default_irqchip
+
+kvm_arch_has_default_irqchip is required for irqfd_test and returns
+true if an in-kernel interrupt controller is supported.
+
+Fixes: a133052666bed ("KVM: selftests: Fix irqfd_test for non-x86 architectures")
+functions: tools/testing/selftests/kvm/lib/riscv/processor.c:riscv64_get_satp_mode
+fixes: a133052666be(common)
+diff --git a/tools/testing/selftests/kvm/lib/riscv/processor.c b/tools/testing/selftests/kvm/lib/riscv/processor.c
+index 51dd455ff52c..067c6b2c15b0 100644
+--- a/tools/testing/selftests/kvm/lib/riscv/processor.c
++++ b/tools/testing/selftests/kvm/lib/riscv/processor.c
+@@ -567,2 +567,7 @@ unsigned long riscv64_get_satp_mode(void)
+ 	return val;
+ }
++
++bool kvm_arch_has_default_irqchip(void)
++{
++	return kvm_check_cap(KVM_CAP_IRQCHIP);
++}
+
+##### B569
+=== 988ef706cdd8 B 2026-04-05 +2/-0
+PCI: sg2042: Avoid L0s and L1 on Sophgo 2042 PCIe Root Ports
+
+Since commit f3ac2ff14834 ("PCI/ASPM: Enable all ClockPM and ASPM states
+for devicetree platforms") force enables ASPM on all device tree platforms,
+the SG2042 Root Ports are breaking as they advertise L0s and L1
+capabilities without supporting them.
+
+Set ASPM quirks to disable the L0s and L1 capabilities for the Root Ports
+so that these broken link states won't be enabled.
+
+Fixes: 4e27aca4881a ("riscv: sophgo: dts: add PCIe controllers for SG2042")
+[mani: commit log]
+functions: drivers/pci/controller/cadence/pcie-sg2042.c:sg2042_pcie_probe
+fixes: 4e27aca4881a(riscv)
+diff --git a/drivers/pci/controller/cadence/pcie-sg2042.c b/drivers/pci/controller/cadence/pcie-sg2042.c
+index 0c50c74d03ee..4a2af4d0713e 100644
+--- a/drivers/pci/controller/cadence/pcie-sg2042.c
++++ b/drivers/pci/controller/cadence/pcie-sg2042.c
+@@ -49,4 +49,6 @@ static int sg2042_pcie_probe(struct platform_device *pdev)
+ 
+ 	rc = pci_host_bridge_priv(bridge);
++	rc->quirk_broken_aspm_l0s = 1;
++	rc->quirk_broken_aspm_l1 = 1;
+ 	pcie = &rc->pcie;
+ 	pcie->dev = dev;
+
+##### B570
+=== 50da1c9ccb70 B 2026-04-06 +1/-1
+riscv: Docs: fix unmatched quote warning
+
+'make htmldocs' complains about ``prctrl` -- so add a second '`' to
+avoid the warning.
+
+Documentation/arch/riscv/zicfilp.rst:79: WARNING: Inline literal start-string without end-string. [docutils]
+
+Fixes: 08ee1559052b ("prctl: cfi: change the branch landing pad prctl()s to be more descriptive")
+functions: 
+fixes: 08ee1559052b(riscv)
+diff --git a/Documentation/arch/riscv/zicfilp.rst b/Documentation/arch/riscv/zicfilp.rst
+index ab7d8e62ddaf..12b35969d17a 100644
+--- a/Documentation/arch/riscv/zicfilp.rst
++++ b/Documentation/arch/riscv/zicfilp.rst
+@@ -79,5 +79,5 @@ the program.
+ Per-task indirect branch tracking state can be monitored and
+ controlled via the :c:macro:`PR_GET_CFI` and :c:macro:`PR_SET_CFI`
+-``prctl()` arguments (respectively), by supplying
++``prctl()`` arguments (respectively), by supplying
+ :c:macro:`PR_CFI_BRANCH_LANDING_PADS` as the second argument.  These
+ are architecture-agnostic, and will return -EINVAL if the underlying
+
+##### B571
+=== 1ccca1075510 B 2026-04-19 +0/-16
+dt-bindings: timer: Remove sifive,fine-ctr-bits property
+
+The counter width can be inferred from the compatible string, making the
+explicit "sifive,fine-ctr-bits" property redundant. Remove the property
+to simplify the bindings.
+
+Fixes: 0f920690a82c ("dt-bindings: timer: Add SiFive CLINT2")
+functions: 
+fixes: 0f920690a82c(common)
+diff --git a/Documentation/devicetree/bindings/timer/sifive,clint.yaml b/Documentation/devicetree/bindings/timer/sifive,clint.yaml
+index 3c16b260db04..051edb1da0d7 100644
+--- a/Documentation/devicetree/bindings/timer/sifive,clint.yaml
++++ b/Documentation/devicetree/bindings/timer/sifive,clint.yaml
+@@ -73,20 +73,4 @@ properties:
+     maxItems: 4095
+ 
+-  sifive,fine-ctr-bits:
+-    maximum: 15
+-    description: The width in bits of the fine counter.
+-
+-if:
+-  properties:
+-    compatible:
+-      contains:
+-        const: sifive,clint2
+-then:
+-  required:
+-    - sifive,fine-ctr-bits
+-else:
+-  properties:
+-    sifive,fine-ctr-bits: false
+-
+ additionalProperties: false
+ 
+
+##### B572
+=== fb6988b83b4c B 2026-05-07 +18/-3
+kunit: fix use-after-free in debugfs when using kunit.filter
+
+When the kernel is booted with a kunit filter (e.g.,
+kunit.filter="speed!=slow"), the kunit executor dynamically allocates
+copies of the filtered test suites using kmalloc/kmemdup.
+
+During the initial boot execution, kunit_debugfs_create_suite() creates
+debugfs files (such as /sys/kernel/debug/kunit/<suite>/run) and
+permanently stores a pointer to the dynamically allocated suite in the
+inode's i_private field.
+
+Previously, the executor freed this dynamically allocated suite_set
+immediately after executing the boot-time tests. Because the debugfs
+nodes were not destroyed, any subsequent interaction with the debugfs
+`run` file from userspace triggered a use-after-free (UAF). On systems
+with architectural capabilities, like CHERI RISC-V, this resulted in
+an immediate fatal hardware exception due to the invalidation of the
+capability tags on the reclaimed memory. On other architectures, it
+resulted in silent memory corruption.
+
+Fix this UAF by properly coupling the lifetime of the filtered suite
+memory allocation to the lifetime of the kunit subsystem and its
+associated VFS nodes. Ownership of the boot-time suite_set is now
+transferred to a global tracker ('kunit_boot_suites'), and the memory
+is cleanly released in kunit_exit() during module teardown.
+
+Fixes: e2219db280e3 ("kunit: add debugfs /sys/kernel/debug/kunit/<suite>/results display")
+functions: lib/kunit/executor.c:kunit_run_all_tests, lib/kunit/test.c:kunit_exit
+fixes: e2219db280e3(common)
+diff --git a/include/kunit/test.h b/include/kunit/test.h
+index 9cd1594ab697..ce0573e196ce 100644
+--- a/include/kunit/test.h
++++ b/include/kunit/test.h
+@@ -614,4 +614,5 @@ unsigned long kunit_vm_mmap(struct kunit *test, struct file *file,
+ 
+ void kunit_cleanup(struct kunit *test);
++void kunit_free_boot_suites(void);
+ 
+ void __printf(2, 3) kunit_log_append(struct string_stream *log, const char *fmt, ...);
+diff --git a/lib/kunit/executor.c b/lib/kunit/executor.c
+index 1fef217de11d..b0f8a41d61d3 100644
+--- a/lib/kunit/executor.c
++++ b/lib/kunit/executor.c
+@@ -16,4 +16,14 @@ extern struct kunit_suite * const __kunit_init_suites_start[];
+ extern struct kunit_suite * const __kunit_init_suites_end[];
+ 
++static struct kunit_suite_set kunit_boot_suites;
++
++void kunit_free_boot_suites(void)
++{
++	if (kunit_boot_suites.start) {
++		kunit_free_suite_set(kunit_boot_suites);
++		kunit_boot_suites = (struct kunit_suite_set){ NULL, NULL };
++	}
++}
++
+ static char *action_param;
+ 
+@@ -412,7 +422,10 @@ int kunit_run_all_tests(void)
+ 
+ free_out:
+-	if (filter_glob_param || filter_param)
+-		kunit_free_suite_set(suite_set);
+-	else if (init_num_suites > 0)
++	if (filter_glob_param || filter_param) {
++		if (err)
++			kunit_free_suite_set(suite_set);
++		else
++			kunit_boot_suites = suite_set;
++	} else if (init_num_suites > 0)
+ 		/* Don't use kunit_free_suite_set because suites aren't individually allocated */
+ 		kfree(suite_set.start);
+diff --git a/lib/kunit/test.c b/lib/kunit/test.c
+index 41e1c89799b6..99773e000e1b 100644
+--- a/lib/kunit/test.c
++++ b/lib/kunit/test.c
+@@ -1076,4 +1076,5 @@ static void __exit kunit_exit(void)
+ 
+ 	kunit_debugfs_cleanup();
++	kunit_free_boot_suites();
+ }
+ module_exit(kunit_exit);
+
+##### B573
+=== cefafbd56140 B 2026-05-08 +2/-0
+irqchip/riscv-imsic: Clear interrupt move state during CPU offlining
+
+Affinity changes of IMSIC interrupts have to be careful to not lose an
+interrupt in the process. Each vector keeps track of an affinity change in
+progress with two pointers in struct imsic_vector.
+
+imsic_vector::move_prev points to the previous CPU target data and
+imsic_vector::move_next to the designated new CPU target data.
+
+imsic_vector::move_prev on the new CPU can only be cleared after the
+previous CPU has cleared imsic_vector::move_next, which ususally happens in
+__imsic_remote_sync().
+
+In case of CPU hot-unplug __imsic_remote_sync() is not invoked because the
+CPU is already marked offline. That means imsic_vector::move_prev becomes
+stale until the CPU is onlined again.
+
+The stale pointer prevents further affinity changes for the affected
+interrupts.
+
+Solve this by clearing the imsic_vector::move_prev pointers in the CPU
+hotplug offline path.
+
+[ tglx: Replace word salad in change log ]
+
+Fixes: 0f67911e821c ("irqchip/riscv-imsic: Separate next and previous pointers in IMSIC vector")
+functions: drivers/irqchip/irq-riscv-imsic-early.c:imsic_dying_cpu
+fixes: 0f67911e821c(common)
+diff --git a/drivers/irqchip/irq-riscv-imsic-early.c b/drivers/irqchip/irq-riscv-imsic-early.c
+index ba903fa689bd..a7a1852b548c 100644
+--- a/drivers/irqchip/irq-riscv-imsic-early.c
++++ b/drivers/irqchip/irq-riscv-imsic-early.c
+@@ -159,4 +159,6 @@ static int imsic_dying_cpu(unsigned int cpu)
+ 	imsic_ipi_dying_cpu();
+ 
++	imsic_local_sync_all(false);
++
+ 	/* Mark per-CPU IMSIC state as offline */
+ 	imsic_state_offline();
+
+##### B574
+=== ef5581bb30ef B 2026-05-08 +18/-11
+test_kprobes: clear kprobes between test runs
+
+Running the kprobes sanity tests twice makes all tests fail and
+eventually crashes the kernel.
+
+[root@martin-riscv-1 ~]# echo 1 > /sys/kernel/debug/kunit/kprobes_test/run
+...
+   # Totals: pass:5 fail:0 skip:0 total:5
+   ok 1 kprobes_test
+[root@martin-riscv-1 ~]# echo 1 > /sys/kernel/debug/kunit/kprobes_test/run
+...
+  # test_kprobe: EXPECTATION FAILED at lib/tests/test_kprobes.c:64
+  Expected 0 == register_kprobe(&kp), but
+      register_kprobe(&kp) == -22 (0xffffffffffffffea)
+...
+  Unable to handle kernel paging request ...
+
+The testsuite defines several kprobes and kretprobes as static variables
+that are preserved across test runs.
+
+After register_kprobe and unregister_kprobe, a kprobe contains some
+leftover data that must be cleared before the kprobe can be registered
+again. The tests are setting symbol_name to define the probe location.
+Address and flags must be cleared.
+
+The existing code clears some of the probes between subsequent tests, but
+not between two test runs. The leftover data from a previous test run
+makes the registrations fail in the next run.
+
+Move the cleanups for all kprobes into kprobes_test_init, this function
+is called before each single test (including the first test of a test
+run).
+
+
+Fixes: e44e81c5b90f ("kprobes: convert tests to kunit")
+functions: lib/tests/test_kprobes.c:test_kprobes, lib/tests/test_kprobes.c:test_kretprobes, lib/tests/test_kprobes.c:test_stacktrace_on_kretprobe, lib/tests/test_kprobes.c:test_stacktrace_on_nested_kretprobe, lib/tests/test_kprobes.c:kprobes_test_init
+fixes: e44e81c5b90f(common)
+ lib/tests/test_kprobes.c | 29 ++++++++++++++++++-----------
+ 1 file changed, 18 insertions(+), 11 deletions(-)
+diff --git a/lib/tests/test_kprobes.c b/lib/tests/test_kprobes.c
+index b7582010125c..06e729e4de05 100644
+--- a/lib/tests/test_kprobes.c
++++ b/lib/tests/test_kprobes.c
+@@ -13,4 +13,10 @@
+ #define div_factor 3
+ 
++#define KP_CLEAR(_kp) \
++do { \
++	(_kp).addr = NULL; \
++	(_kp).flags = 0; \
++} while (0)
++
+ static u32 rand1, preh_val, posth_val;
+ static u32 (*target)(u32 value);
+@@ -126,8 +132,4 @@ static void test_kprobes(struct kunit *test)
+ 	current_test = test;
+ 
+-	/* addr and flags should be cleard for reusing kprobe. */
+-	kp.addr = NULL;
+-	kp.flags = 0;
+-
+ 	KUNIT_EXPECT_EQ(test, 0, register_kprobes(kps, 2));
+ 	preh_val = 0;
+@@ -227,7 +229,4 @@ static void test_kretprobes(struct kunit *test)
+ 
+ 	current_test = test;
+-	/* addr and flags should be cleard for reusing kprobe. */
+-	rp.kp.addr = NULL;
+-	rp.kp.flags = 0;
+ 	KUNIT_EXPECT_EQ(test, 0, register_kretprobes(rps, 2));
+ 
+@@ -291,6 +290,4 @@ static void test_stacktrace_on_kretprobe(struct kunit *test)
+ 
+ 	current_test = test;
+-	rp3.kp.addr = NULL;
+-	rp3.kp.flags = 0;
+ 
+ 	/*
+@@ -353,6 +350,4 @@ static void test_stacktrace_on_nested_kretprobe(struct kunit *test)
+ 
+ 	current_test = test;
+-	rp3.kp.addr = NULL;
+-	rp3.kp.flags = 0;
+ 
+ 	//KUNIT_ASSERT_NE(test, myretaddr, stacktrace_driver());
+@@ -368,4 +363,16 @@ static void test_stacktrace_on_nested_kretprobe(struct kunit *test)
+ static int kprobes_test_init(struct kunit *test)
+ {
++	KP_CLEAR(kp);
++	KP_CLEAR(kp2);
++	KP_CLEAR(kp_missed);
++#ifdef CONFIG_KRETPROBES
++	KP_CLEAR(rp.kp);
++	KP_CLEAR(rp2.kp);
++#ifdef CONFIG_ARCH_CORRECT_STACKTRACE_ON_KRETPROBE
++	KP_CLEAR(rp3.kp);
++	KP_CLEAR(rp4.kp);
++#endif
++#endif
+... (3 more diff lines)

@@ -1,0 +1,7 @@
+agree 0.9 kappa 0.754 {'可能': 7, '不可能': 22, '说不清': 1} {'可能': 7, '不可能': 22, '说不清': 1}
+17 fs/ext2/dir.c:292 我= 可能 Codex= 不可能
+   Codex: include/linux/pagemap.h:1593-1596 的 dir_pages() 先将字节数强转 unsigned long 再右移，因此 32 位上的 npages 不超过 ULONG_MAX>>PAGE_SHIFT。该赋值只在 n<npages 的循环中执行，所以 n<<PAGE_SHIFT 必在 32 位范围内；更早的目录页数截断不能算成本行的移位溢出。
+28 fs/libfs.c:38 我= 不可能 Codex= 说不清
+   Codex: 按 32 位算术，nrpages<< (PAGE_SHIFT-9) 确会在实际缓存量达到 2 TiB 时回绕；nrpages 是驻留页数，稀疏文件的巨大逻辑大小并不足以触发。ramfs 确实调用 simple_getattr()，但我未能证实受支持的 32 位配置能容纳至少 2 TiB 的这些缓存页及其元数据，也未建立覆盖所有 32 位配置的严格排除上界。故保留触发可达性疑问，不把算术溢出条件直接视为已可达的缺陷。
+29 fs/nilfs2/inode.c:1145 我= 说不清 Codex= 可能
+   Codex: 32 位 HIGHMEM 系统若有总长至少 4 GiB 的连续延迟分配缓存块，nilfs_find_uncommitted_extent() 会跨批次累计其块数，未把这段长度限制在 32 位字节数内。delalloc_blklen 左移后再赋给 u64，使 4 KiB 块下的 1048576 个块得到 size=0，从而漏报该 FIEMAP 区间或把区间长度报短；触发需要足够缓存内存及允许这种脏页量的配置。

@@ -1,0 +1,65 @@
+diff --git a/arch/loongarch/kernel/kfpu.c b/arch/loongarch/kernel/kfpu.c
+--- a/arch/loongarch/kernel/kfpu.c
++++ b/arch/loongarch/kernel/kfpu.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <linux/cpu.h>
++#include <linux/bottom_half.h>
+ #include <linux/init.h>
+ #include <asm/fpu.h>
+ #include <asm/smp.h>
+@@ -11,18 +12,38 @@
+ static unsigned int euen_mask = CSR_EUEN_FPEN;
+ 
+ /*
+- * The critical section between kernel_fpu_begin() and kernel_fpu_end()
+- * is non-reentrant. It is the caller's responsibility to avoid reentrance.
+- * See drivers/gpu/drm/amd/display/amdgpu_dm/dc_fpu.c as an example.
++ * The critical section between kernel_fpu_begin() and kernel_fpu_end()
++ * is non-reentrant. Softirq processing is disabled inside the section
++ * (unless hardirqs are already disabled), so it is usable in task and
++ * softirq context, but nested use is not supported.
+  */
+ static DEFINE_PER_CPU(bool, in_kernel_fpu);
+ static DEFINE_PER_CPU(unsigned int, euen_current);
+ 
++static inline void kfpu_lock(void)
++{
++	if (irqs_disabled())
++		return;
++
++	if (IS_ENABLED(CONFIG_PREEMPT_RT))
++		preempt_disable();
++	else
++		local_bh_disable();
++}
++
++static inline void kfpu_unlock(void)
++{
++	if (irqs_disabled())
++		return;
++
++	if (IS_ENABLED(CONFIG_PREEMPT_RT))
++		preempt_enable();
++	else
++		local_bh_enable();
++}
++
+ void kernel_fpu_begin(void)
+ {
+ 	unsigned int *euen_curr;
+ 
+-	preempt_disable();
++	kfpu_lock();
+ 
+ 	WARN_ON(this_cpu_read(in_kernel_fpu));
+ 
+@@ -75,7 +96,7 @@ void kernel_fpu_end(void)
+ 
+ 	this_cpu_write(in_kernel_fpu, false);
+ 
+-	preempt_enable();
++	kfpu_unlock();
+ }
+ EXPORT_SYMBOL_GPL(kernel_fpu_end);

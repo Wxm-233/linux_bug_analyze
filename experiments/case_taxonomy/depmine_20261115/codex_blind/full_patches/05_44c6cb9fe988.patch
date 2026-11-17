@@ -1,0 +1,163 @@
+commit 44c6cb9fe9888b371e31165b2854bd0f4e2787d4
+Author:     Sean Christopherson <seanjc@google.com>
+AuthorDate: Fri Oct 3 16:25:58 2025 -0700
+Commit:     Sean Christopherson <seanjc@google.com>
+CommitDate: Fri Oct 10 14:25:25 2025 -0700
+
+    KVM: guest_memfd: Allow mmap() on guest_memfd for x86 VMs with private memory
+    
+    Allow mmap() on guest_memfd instances for x86 VMs with private memory as
+    the need to track private vs. shared state in the guest_memfd instance is
+    only pertinent to INIT_SHARED.  Doing mmap() on private memory isn't
+    terrible useful (yet!), but it's now possible, and will be desirable when
+    guest_memfd gains support for other VMA-based syscalls, e.g. mbind() to
+    set NUMA policy.
+    
+    Lift the restriction now, before MMAP support is officially released, so
+    that KVM doesn't need to add another capability to enumerate support for
+    mmap() on private memory.
+    
+    Fixes: 3d3a04fad25a ("KVM: Allow and advertise support for host mmap() on guest_memfd files")
+    Reviewed-by: Ackerley Tng <ackerleytng@google.com>
+    Tested-by: Ackerley Tng <ackerleytng@google.com>
+    Reviewed-by: David Hildenbrand <david@redhat.com>
+    Link: https://lore.kernel.org/r/20251003232606.4070510-6-seanjc@google.com
+    Signed-off-by: Sean Christopherson <seanjc@google.com>
+
+diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
+index 4b8138bd4857..fe3dc3eb4331 100644
+--- a/arch/x86/kvm/x86.c
++++ b/arch/x86/kvm/x86.c
+@@ -13937,20 +13937,21 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_arch_has_noncoherent_dma);
+ 
+ bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
+ {
+ 	return (vcpu->arch.msr_kvm_poll_control & 1) == 0;
+ }
+ 
+ #ifdef CONFIG_KVM_GUEST_MEMFD
+ /*
+- * KVM doesn't yet support mmap() on guest_memfd for VMs with private memory
+- * (the private vs. shared tracking needs to be moved into guest_memfd).
++ * KVM doesn't yet support initializing guest_memfd memory as shared for VMs
++ * with private memory (the private vs. shared tracking needs to be moved into
++ * guest_memfd).
+  */
+-bool kvm_arch_supports_gmem_mmap(struct kvm *kvm)
++bool kvm_arch_supports_gmem_init_shared(struct kvm *kvm)
+ {
+ 	return !kvm_arch_has_private_mem(kvm);
+ }
+ 
+ #ifdef CONFIG_HAVE_KVM_ARCH_GMEM_PREPARE
+ int kvm_arch_gmem_prepare(struct kvm *kvm, gfn_t gfn, kvm_pfn_t pfn, int max_order)
+ {
+ 	return kvm_x86_call(gmem_prepare)(kvm, pfn, gfn, max_order);
+diff --git a/include/linux/kvm_host.h b/include/linux/kvm_host.h
+index 19b8c4bebb9c..680ca838f018 100644
+--- a/include/linux/kvm_host.h
++++ b/include/linux/kvm_host.h
+@@ -724,17 +724,27 @@ static inline int kvm_arch_vcpu_memslots_id(struct kvm_vcpu *vcpu)
+ #ifndef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
+ static inline bool kvm_arch_has_private_mem(struct kvm *kvm)
+ {
+ 	return false;
+ }
+ #endif
+ 
+ #ifdef CONFIG_KVM_GUEST_MEMFD
+-bool kvm_arch_supports_gmem_mmap(struct kvm *kvm);
++bool kvm_arch_supports_gmem_init_shared(struct kvm *kvm);
++
++static inline u64 kvm_gmem_get_supported_flags(struct kvm *kvm)
++{
++	u64 flags = GUEST_MEMFD_FLAG_MMAP;
++
++	if (!kvm || kvm_arch_supports_gmem_init_shared(kvm))
++		flags |= GUEST_MEMFD_FLAG_INIT_SHARED;
++
++	return flags;
++}
+ #endif
+ 
+ #ifndef kvm_arch_has_readonly_mem
+ static inline bool kvm_arch_has_readonly_mem(struct kvm *kvm)
+ {
+ 	return IS_ENABLED(CONFIG_HAVE_KVM_READONLY_MEM);
+ }
+ #endif
+diff --git a/virt/kvm/guest_memfd.c b/virt/kvm/guest_memfd.c
+index e10d2c71e78c..fbca8c0972da 100644
+--- a/virt/kvm/guest_memfd.c
++++ b/virt/kvm/guest_memfd.c
+@@ -480,17 +480,17 @@ static int kvm_gmem_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
+ 			    struct iattr *attr)
+ {
+ 	return -EINVAL;
+ }
+ static const struct inode_operations kvm_gmem_iops = {
+ 	.setattr	= kvm_gmem_setattr,
+ };
+ 
+-bool __weak kvm_arch_supports_gmem_mmap(struct kvm *kvm)
++bool __weak kvm_arch_supports_gmem_init_shared(struct kvm *kvm)
+ {
+ 	return true;
+ }
+ 
+ static int __kvm_gmem_create(struct kvm *kvm, loff_t size, u64 flags)
+ {
+ 	const char *anon_name = "[kvm-gmem]";
+ 	struct kvm_gmem *gmem;
+@@ -544,23 +544,18 @@ static int __kvm_gmem_create(struct kvm *kvm, loff_t size, u64 flags)
+ 	put_unused_fd(fd);
+ 	return err;
+ }
+ 
+ int kvm_gmem_create(struct kvm *kvm, struct kvm_create_guest_memfd *args)
+ {
+ 	loff_t size = args->size;
+ 	u64 flags = args->flags;
+-	u64 valid_flags = 0;
+ 
+-	if (kvm_arch_supports_gmem_mmap(kvm))
+-		valid_flags |= GUEST_MEMFD_FLAG_MMAP |
+-			       GUEST_MEMFD_FLAG_INIT_SHARED;
+-
+-	if (flags & ~valid_flags)
++	if (flags & ~kvm_gmem_get_supported_flags(kvm))
+ 		return -EINVAL;
+ 
+ 	if (size <= 0 || !PAGE_ALIGNED(size))
+ 		return -EINVAL;
+ 
+ 	return __kvm_gmem_create(kvm, size, flags);
+ }
+ 
+diff --git a/virt/kvm/kvm_main.c b/virt/kvm/kvm_main.c
+index 5f644ca54af3..b7a0ae2a7b20 100644
+--- a/virt/kvm/kvm_main.c
++++ b/virt/kvm/kvm_main.c
+@@ -4924,21 +4924,17 @@ static int kvm_vm_ioctl_check_extension_generic(struct kvm *kvm, long arg)
+ #ifdef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
+ 	case KVM_CAP_MEMORY_ATTRIBUTES:
+ 		return kvm_supported_mem_attributes(kvm);
+ #endif
+ #ifdef CONFIG_KVM_GUEST_MEMFD
+ 	case KVM_CAP_GUEST_MEMFD:
+ 		return 1;
+ 	case KVM_CAP_GUEST_MEMFD_FLAGS:
+-		if (!kvm || kvm_arch_supports_gmem_mmap(kvm))
+-			return GUEST_MEMFD_FLAG_MMAP |
+-			       GUEST_MEMFD_FLAG_INIT_SHARED;
+-
+-		return 0;
++		return kvm_gmem_get_supported_flags(kvm);
+ #endif
+ 	default:
+ 		break;
+ 	}
+ 	return kvm_vm_ioctl_check_extension(kvm, arg);
+ }
+ 
+ static int kvm_vm_ioctl_enable_dirty_log_ring(struct kvm *kvm, u32 size)

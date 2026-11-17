@@ -1,0 +1,238 @@
+[21] d5dc200c3a3f:arch/x86/include/asm/uaccess.h pattern=^ \* __get_user|^#define __get_user\(
+...
+109: 
+110: /**
+111:  * __get_user - Get a simple variable from user space, with less checking.
+112:  * @x:   Variable to store result.
+113:  * @ptr: Source address, in user space.
+114:  *
+115:  * Context: User context only. This function may sleep if pagefaults are
+116:  *          enabled.
+117:  *
+118:  * This macro copies a single simple variable from user space to kernel
+119:  * space.  It supports simple types like char and int, but not larger
+120:  * data types like structures or arrays.
+121:  *
+122:  * @ptr must have pointer-to-simple-variable type, and the result of
+123:  * dereferencing @ptr must be assignable to @x without a cast.
+124:  *
+125:  * Caller must check the pointer with access_ok() before calling this
+126:  * function.
+127:  *
+128:  * Return: zero on success, or -EFAULT on error.
+129:  * On error, the variable @x is set to zero.
+130:  */
+131: #define __get_user(x,ptr) do_get_user_call(get_user_nocheck,x,ptr)
+132: 
+133: 
+134: #ifdef CONFIG_X86_32
+135: #define __put_user_goto_u64(x, addr, label)			\
+136: 	asm goto("\n"					\
+137: 		     "1:	movl %%eax,0(%1)\n"		\
+138: 		     "2:	movl %%edx,4(%1)\n"		\
+139: 		     _ASM_EXTABLE_UA(1b, %l2)			\
+140: 		     _ASM_EXTABLE_UA(2b, %l2)			\
+141: 		     : : "A" (x), "r" (addr)			\
+142: 		     : : label)
+143: 
+144: #else
+145: #define __put_user_goto_u64(x, ptr, label) \
+146: 	__put_user_goto(x, ptr, "q", "er", label)
+147: #endif
+148: 
+149: extern void __put_user_bad(void);
+150: 
+151: /*
+152:  * Strange magic calling convention: pointer in %ecx,
+153:  * value in %eax(:%edx), return value in %ecx. clobbers %rbx
+154:  */
+155: extern void __put_user_1(void);
+
+[21] d5dc200c3a3f:arch/arm64/include/asm/uaccess.h pattern=^#define __get_user\(
+...
+255: 		__p = uaccess_mask_ptr(__p);				\
+256: 		__raw_get_user((x), __p, __gu_failed);			\
+257: 	} else {							\
+258: 	__gu_failed:							\
+259: 		(x) = (__force __typeof__(x))0; (err) = -EFAULT;	\
+260: 	}								\
+261: } while (0)
+262: 
+263: #define __get_user(x, ptr)						\
+264: ({									\
+265: 	int __gu_err = 0;						\
+266: 	__get_user_error((x), (ptr), __gu_err);				\
+267: 	__gu_err;							\
+268: })
+269: 
+270: #define get_user	__get_user
+271: 
+272: /*
+273:  * We must not call into the scheduler between __mte_enable_tco_async() and
+274:  * __mte_disable_tco_async(). As `dst` and `src` may contain blocking
+275:  * functions, we must evaluate these outside of the critical section.
+276:  */
+277: #define __get_kernel_nofault(dst, src, type, err_label)			\
+278: do {									\
+
+[21] d5dc200c3a3f:include/asm-generic/uaccess.h pattern=^#define __get_user\(
+...
+141: #endif
+142: 
+143: extern int __put_user_bad(void) __attribute__((noreturn));
+144: 
+145: #define __get_user(x, ptr)					\
+146: ({								\
+147: 	int __gu_err = -EFAULT;					\
+148: 	__chk_user_ptr(ptr);					\
+149: 	switch (sizeof(*(ptr))) {				\
+150: 	case 1: {						\
+151: 		unsigned char __x = 0;				\
+152: 		__gu_err = __get_user_fn(sizeof (*(ptr)),	\
+153: 					 ptr, &__x);		\
+154: 		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
+155: 		break;						\
+156: 	};							\
+157: 	case 2: {						\
+158: 		unsigned short __x = 0;				\
+159: 		__gu_err = __get_user_fn(sizeof (*(ptr)),	\
+160: 					 ptr, &__x);		\
+161: 		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
+162: 		break;						\
+163: 	};							\
+164: 	case 4: {						\
+165: 		unsigned int __x = 0;				\
+166: 		__gu_err = __get_user_fn(sizeof (*(ptr)),	\
+167: 					 ptr, &__x);		\
+168: 		(x) = *(__force __typeof__(*(ptr)) *) &__x;	\
+169: 		break;						\
+170: 	};							\
+
+[24] b3f78e749865:arch/arm/include/asm/pgtable.h pattern=^static inline void set_pte_at|^extern void set_pte_at|^#define set_pte_at
+(pattern not found; no source inference from this query)
+
+[24] b3f78e749865:arch/arm/mm/mmu.c pattern=^void set_pte_at
+...
+1798: }
+1799: 
+1800: void set_pte_at(struct mm_struct *mm, unsigned long addr,
+1801: 			      pte_t *ptep, pte_t pteval)
+1802: {
+1803: 	unsigned long ext = 0;
+1804: 
+1805: 	if (addr < TASK_SIZE && pte_valid_user(pteval)) {
+1806: 		if (!pte_special(pteval))
+1807: 			__sync_icache_dcache(pteval);
+1808: 		ext |= PTE_EXT_NG;
+1809: 	}
+1810: 
+1811: 	set_pte_ext(ptep, pteval, ext);
+1812: }
+
+[24] b3f78e749865:arch/x86/include/asm/paravirt.h pattern=^static inline void set_pte_at
+...
+529: }
+530: 
+531: static inline void set_pte_atomic(pte_t *ptep, pte_t pte)
+532: {
+533: 	set_pte(ptep, pte);
+534: }
+535: 
+536: static inline void pte_clear(struct mm_struct *mm, unsigned long addr,
+537: 			     pte_t *ptep)
+538: {
+539: 	set_pte(ptep, native_make_pte(0));
+540: }
+541: 
+542: static inline void pmd_clear(pmd_t *pmdp)
+543: {
+544: 	set_pmd(pmdp, native_make_pmd(0));
+545: }
+546: 
+
+[50] eec76ea5a721:include/crypto/internal/poly1305.h pattern=poly1305_blocks_arch|poly1305_blocks\(
+...
+25: }
+26: 
+27: void poly1305_core_blocks(struct poly1305_state *state,
+28: 			  const struct poly1305_core_key *key, const void *src,
+29: 			  unsigned int nblocks, u32 hibit);
+30: void poly1305_core_emit(const struct poly1305_state *state, const u32 nonce[4],
+31: 			void *dst);
+32: 
+33: void poly1305_block_init_arch(struct poly1305_block_state *state,
+34: 			      const u8 raw_key[POLY1305_BLOCK_SIZE]);
+35: void poly1305_block_init_generic(struct poly1305_block_state *state,
+36: 				 const u8 raw_key[POLY1305_BLOCK_SIZE]);
+37: void poly1305_blocks_arch(struct poly1305_block_state *state, const u8 *src,
+38: 			  unsigned int len, u32 padbit);
+39: 
+40: static inline void poly1305_blocks_generic(struct poly1305_block_state *state,
+41: 					   const u8 *src, unsigned int len,
+42: 					   u32 padbit)
+43: {
+44: 	poly1305_core_blocks(&state->h, &state->core_r, src,
+45: 			     len / POLY1305_BLOCK_SIZE, padbit);
+46: }
+47: 
+48: void poly1305_emit_arch(const struct poly1305_state *state,
+49: 			u8 digest[POLY1305_DIGEST_SIZE], const u32 nonce[4]);
+50: 
+51: static inline void poly1305_emit_generic(const struct poly1305_state *state,
+52: 					 u8 digest[POLY1305_DIGEST_SIZE],
+53: 					 const u32 nonce[4])
+54: {
+55: 	poly1305_core_emit(state, nonce, digest);
+56: }
+57: 
+58: #endif
+
+[50] eec76ea5a721:lib/crypto/arm64/poly1305-glue.c pattern=^void poly1305_blocks_arch
+...
+29: EXPORT_SYMBOL_GPL(poly1305_emit_arch);
+30: 
+31: static __ro_after_init DEFINE_STATIC_KEY_FALSE(have_neon);
+32: 
+33: void poly1305_blocks_arch(struct poly1305_block_state *state, const u8 *src,
+34: 			  unsigned int len, u32 padbit)
+35: {
+36: 	len = round_down(len, POLY1305_BLOCK_SIZE);
+37: 	if (static_branch_likely(&have_neon) && likely(may_use_simd())) {
+38: 		do {
+39: 			unsigned int todo = min_t(unsigned int, len, SZ_4K);
+40: 
+41: 			kernel_neon_begin();
+42: 			poly1305_blocks_neon(state, src, todo, padbit);
+43: 			kernel_neon_end();
+44: 
+45: 			len -= todo;
+46: 			src += todo;
+47: 		} while (len);
+48: 	} else
+49: 		poly1305_blocks(state, src, len, padbit);
+50: }
+51: EXPORT_SYMBOL_GPL(poly1305_blocks_arch);
+52: 
+53: bool poly1305_is_arch_optimized(void)
+54: {
+55: 	/* We always can use at least the ARM64 scalar implementation. */
+56: 	return true;
+57: }
+58: EXPORT_SYMBOL(poly1305_is_arch_optimized);
+59: 
+60: static int __init neon_poly1305_mod_init(void)
+61: {
+62: 	if (cpu_have_named_feature(ASIMD))
+63: 		static_branch_enable(&have_neon);
+64: 	return 0;
+65: }
+66: subsys_initcall(neon_poly1305_mod_init);
+67: 
+68: static void __exit neon_poly1305_mod_exit(void)
+69: {
+70: }
+71: module_exit(neon_poly1305_mod_exit);
+72: 
+73: MODULE_DESCRIPTION("Poly1305 authenticator (ARM64 optimized)");
+74: MODULE_LICENSE("GPL v2");
+

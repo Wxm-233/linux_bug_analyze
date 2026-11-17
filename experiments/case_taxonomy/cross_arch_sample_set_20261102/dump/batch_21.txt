@@ -1,0 +1,996 @@
+
+##### B525
+=== 812258ff4166 B 2025-09-08 +1/-0
+rust: cfi: only 64-bit arm and x86 support CFI_CLANG
+
+The kernel uses the standard rustc targets for non-x86 targets, and out
+of those only 64-bit arm's target has kcfi support enabled. For x86, the
+custom 64-bit target enables kcfi.
+
+The HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC config option that allows
+CFI_CLANG to be used in combination with RUST does not check whether the
+rustc target supports kcfi. This breaks the build on riscv (and
+presumably 32-bit arm) when CFI_CLANG and RUST are enabled at the same
+time.
+
+Ordinarily, a rustc-option check would be used to detect target support
+but unfortunately rustc-option filters out the target for reasons given
+in commit 46e24a545cdb4 ("rust: kasan/kbuild: fix missing flags on first
+build"). As a result, if the host supports kcfi but the target does not,
+e.g. when building for riscv on x86_64, the build would remain broken.
+
+Instead, make HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC depend on the only
+two architectures where the target used supports it to fix the build.
+
+Fixes: ca627e636551e ("rust: cfi: add support for CFI_CLANG with Rust")
+functions: 
+fixes: ca627e636551(common)
+diff --git a/arch/Kconfig b/arch/Kconfig
+index ebe08b9186ad..74ff01133532 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -966,4 +966,5 @@ config HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC
+ 	depends on HAVE_CFI_ICALL_NORMALIZE_INTEGERS
+ 	depends on RUSTC_VERSION >= 107900
++	depends on ARM64 || X86_64
+ 	# With GCOV/KASAN we need this fix: https://github.com/rust-lang/rust/pull/129373
+ 	depends on (RUSTC_LLVM_VERSION >= 190103 && RUSTC_VERSION >= 108200) || \
+
+##### B526
+=== f75e07bf5226 B 2025-09-23 +4/-2
+irqchip/sifive-plic: Avoid interrupt ID 0 handling during suspend/resume
+
+According to the PLIC specification[1], global interrupt sources are
+assigned small unsigned integer identifiers beginning at the value 1.
+An interrupt ID of 0 is reserved to mean "no interrupt".
+
+The current plic_irq_resume() and plic_irq_suspend() functions incorrectly
+start the loop from index 0, which accesses the register space for the
+reserved interrupt ID 0.
+
+Change the loop to start from index 1, skipping the reserved
+interrupt ID 0 as per the PLIC specification.
+
+This prevents potential undefined behavior when accessing the reserved
+register space during suspend/resume cycles.
+
+Fixes: e80f0b6a2cf3 ("irqchip/irq-sifive-plic: Add syscore callbacks for hibernation")
+functions: drivers/irqchip/irq-sifive-plic.c:plic_irq_suspend, drivers/irqchip/irq-sifive-plic.c:plic_irq_resume
+fixes: e80f0b6a2cf3(common)
+diff --git a/drivers/irqchip/irq-sifive-plic.c b/drivers/irqchip/irq-sifive-plic.c
+index 559fda8fb3a8..cbd7697bc148 100644
+--- a/drivers/irqchip/irq-sifive-plic.c
++++ b/drivers/irqchip/irq-sifive-plic.c
+@@ -255,5 +255,6 @@ static int plic_irq_suspend(void)
+ 	priv = per_cpu_ptr(&plic_handlers, smp_processor_id())->priv;
+ 
+-	for (i = 0; i < priv->nr_irqs; i++) {
++	/* irq ID 0 is reserved */
++	for (i = 1; i < priv->nr_irqs; i++) {
+ 		__assign_bit(i, priv->prio_save,
+ 			     readl(priv->regs + PRIORITY_BASE + i * PRIORITY_PER_ID));
+@@ -286,5 +287,6 @@ static void plic_irq_resume(void)
+ 	priv = per_cpu_ptr(&plic_handlers, smp_processor_id())->priv;
+ 
+-	for (i = 0; i < priv->nr_irqs; i++) {
++	/* irq ID 0 is reserved */
++	for (i = 1; i < priv->nr_irqs; i++) {
+ 		index = BIT_WORD(i);
+ 		writel((priv->prio_save[index] & BIT_MASK(i)) ? 1 : 0,
+
+##### B527
+=== fde0ab43b9a3 B 2025-09-29 +1/-1
+Fix CC_HAS_ASM_GOTO_OUTPUT on non-x86 architectures
+
+There's a silly problem with the CC_HAS_ASM_GOTO_OUTPUT test: even with
+a working compiler it will fail on some architectures simply because it
+uses the mnemonic "jmp" for testing the inline asm.
+
+And as reported by Geert, not all architectures use that mnemonic, so
+the test fails spuriously on such platforms (including arm and riscv,
+but also several other architectures).
+
+This issue avoided any obvious test failures because the build still
+works thanks to falling back on the old non-asm-goto code, which just
+generates worse code.
+
+Just use an empty asm statement instead.
+
+Fixes: e2ffa15b9baa ("kbuild: Disable CC_HAS_ASM_GOTO_OUTPUT on clang < 17")
+functions: 
+fixes: e2ffa15b9baa(common)
+diff --git a/init/Kconfig b/init/Kconfig
+index ecddb94db8dc..6a91ec742186 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -103,5 +103,5 @@ config CC_HAS_ASM_GOTO_OUTPUT
+ 	depends on $(success,echo 'int foo(int x) { asm goto ("": "=r"(x) ::: bar); return x; bar: return 0; }' | $(CC) -x c - -c -o /dev/null)
+ 	# Detect clang (< v17) scoped label issues
+-	depends on $(success,echo 'void b(void **);void* c(void);int f(void){{asm goto("jmp %l0"::::l0);return 0;l0:return 1;}void *x __attribute__((cleanup(b)))=c();{asm goto("jmp %l0"::::l1);return 2;l1:return 3;}}' | $(CC) -x c - -c -o /dev/null)
++	depends on $(success,echo 'void b(void **);void* c(void);int f(void){{asm goto(""::::l0);return 0;l0:return 1;}void *x __attribute__((cleanup(b)))=c();{asm goto(""::::l1);return 2;l1:return 3;}}' | $(CC) -x c - -c -o /dev/null)
+ 
+ config CC_HAS_ASM_GOTO_TIED_OUTPUT
+
+##### B528
+=== 68247d45c045 B 2025-09-30 +1/-0
+clk: COMMON_CLK_RPMI should depend on RISCV
+
+The RISC-V platform management interface (RPMI) is only available on
+RISC-V platforms.  Hence add a dependency on RISCV, to prevent asking
+the user about this driver when configuring a kernel for a different
+architecture.
+
+Fixes: 5ba9f520f41a33c9 ("clk: Add clock driver for the RISC-V RPMI clock service group")
+functions: 
+fixes: 5ba9f520f41a(common)
+diff --git a/drivers/clk/Kconfig b/drivers/clk/Kconfig
+index 4d51fa589c1e..6fc5ae76b483 100644
+--- a/drivers/clk/Kconfig
++++ b/drivers/clk/Kconfig
+@@ -504,4 +504,5 @@ config COMMON_CLK_SP7021
+ config COMMON_CLK_RPMI
+ 	tristate "Clock driver based on RISC-V RPMI"
++	depends on RISCV || COMPILE_TEST
+ 	depends on MAILBOX
+ 	default RISCV
+
+##### B529
+=== 53d067feb8c4 B 2025-10-06 +2/-2
+tools build: Align warning options with perf
+
+The feature test programs are built without enabling '-Wall -Werror'
+options. As a result, a feature may appear to be available, but later
+building in perf can fail with stricter checks.
+
+Make the feature test program use the same warning options as perf.
+
+Fixes: 1925459b4d92 ("tools build: Fix feature Makefile issues with 'O='")
+functions: 
+fixes: 1925459b4d92(common)
+diff --git a/tools/build/feature/Makefile b/tools/build/feature/Makefile
+index a4b1e11c5807..0be509cd5f13 100644
+--- a/tools/build/feature/Makefile
++++ b/tools/build/feature/Makefile
+@@ -308,8 +308,8 @@ $(OUTPUT)test-libcapstone.bin:
+ 
+ $(OUTPUT)test-compile-32.bin:
+-	$(CC) -m32 -o $@ test-compile.c
++	$(CC) -m32 -Wall -Werror -o $@ test-compile.c
+ 
+ $(OUTPUT)test-compile-x32.bin:
+-	$(CC) -mx32 -o $@ test-compile.c
++	$(CC) -mx32 -Wall -Werror -o $@ test-compile.c
+ 
+ $(OUTPUT)test-zlib.bin:
+
+##### B530
+=== c6a43bc3e8f6 B 2025-10-06 +4/-1
+perf python: split Clang options when invoking Popen
+
+When passing a list to subprocess.Popen, each element maps to one argv
+token. Current code bundles multiple Clang flags into a single element,
+something like:
+
+  cmd = ['clang',
+         '--target=x86_64-linux-gnu -fintegrated-as -Wno-cast-function-type-mismatch',
+	 'test-hello.c']
+
+So Clang only sees one long, invalid option instead of separate flags,
+as a result, the script cannot capture any log via PIPE.
+
+Fix this by using shlex.split() to separate the string so each option
+becomes its own argv element. The fixed list will be:
+
+  cmd = ['clang',
+         '--target=x86_64-linux-gnu',
+	 '-fintegrated-as',
+	 '-Wno-cast-function-type-mismatch',
+	 'test-hello.c']
+
+Fixes: 09e6f9f98370 ("perf python: Fix splitting CC into compiler and options")
+functions: 
+fixes: 09e6f9f98370(common)
+diff --git a/tools/perf/util/setup.py b/tools/perf/util/setup.py
+index dd289d15acfd..9cae2c472f4a 100644
+--- a/tools/perf/util/setup.py
++++ b/tools/perf/util/setup.py
+@@ -2,4 +2,5 @@ from os import getenv, path
+ from subprocess import Popen, PIPE
+ from re import sub
++import shlex
+ 
+ cc = getenv("CC")
+@@ -23,5 +24,7 @@ src_feature_tests  = f'{srctree}/tools/build/feature'
+ 
+ def clang_has_option(option):
+-    cc_output = Popen([cc, cc_options + option, path.join(src_feature_tests, "test-hello.c") ], stderr=PIPE).stderr.readlines()
++    cmd = shlex.split(f"{cc} {cc_options} {option}")
++    cmd.append(path.join(src_feature_tests, "test-hello.c"))
++    cc_output = Popen(cmd, stderr=PIPE).stderr.readlines()
+     return [o for o in cc_output if ((b"unknown argument" in o) or (b"is not supported" in o) or (b"unknown warning option" in o))] == [ ]
+ 
+
+##### B531
+=== b0f2942a1601 B 2025-10-10 +1/-1
+kbuild: Use '--strip-unneeded-symbol' for removing module device table symbols
+
+After commit 5ab23c7923a1 ("modpost: Create modalias for builtin
+modules"), relocatable RISC-V kernels with CONFIG_KASAN=y start failing
+when attempting to strip the module device table symbols:
+
+  riscv64-linux-objcopy: not stripping symbol `__mod_device_table__kmod_irq_starfive_jh8100_intc__of__starfive_intc_irqchip_match_table' because it is named in a relocation
+  make[4]: *** [scripts/Makefile.vmlinux:97: vmlinux] Error 1
+
+The relocation appears to come from .LASANLOC5 in .data.rel.local:
+
+  $ llvm-objdump --disassemble-symbols=.LASANLOC5 --disassemble-all -r drivers/irqchip/irq-starfive-jh8100-intc.o
+
+  drivers/irqchip/irq-starfive-jh8100-intc.o:   file format elf64-littleriscv
+
+  Disassembly of section .data.rel.local:
+
+  0000000000000180 <.LASANLOC5>:
+  ...
+       1d0: 0000          unimp
+                  00000000000001d0:  R_RISCV_64   __mod_device_table__kmod_irq_starfive_jh8100_intc__of__starfive_intc_irqchip_match_table
+  ...
+
+This section appears to come from GCC for including additional
+information about global variables that may be protected by KASAN.
+
+There appears to be no way to opt out of the generation of these symbols
+through either a flag or attribute. Attempting to remove '.LASANLOC*'
+with '--strip-symbol' results in the same error as above because these
+symbols may refer to (thus have relocation between) each other.
+
+Avoid this build breakage by switching to '--strip-unneeded-symbol' for
+removing __mod_device_table__ symbols, as it will only remove the symbol
+when there is no relocation pointing to it. While this may result in a
+little more bloat in the symbol table in certain configurations, it is
+not as bad as outright build failures.
+
+Fixes: 5ab23c7923a1 ("modpost: Create modalias for builtin modules")
+functions: 
+fixes: 5ab23c7923a1(common)
+diff --git a/scripts/Makefile.vmlinux b/scripts/Makefile.vmlinux
+index c02f85c2e241..ced4379550d7 100644
+--- a/scripts/Makefile.vmlinux
++++ b/scripts/Makefile.vmlinux
+@@ -88,5 +88,5 @@ remove-section-$(CONFIG_ARCH_VMLINUX_NEEDS_RELOCS) += '.rel*' '!.rel*.dyn'
+ remove-section-$(CONFIG_ARCH_VMLINUX_NEEDS_RELOCS) += '.rel.*'
+ 
+-remove-symbols := -w --strip-symbol='__mod_device_table__*'
++remove-symbols := -w --strip-unneeded-symbol='__mod_device_table__*'
+ 
+ # To avoid warnings: "empty loadable segment detected at ..." from GNU objcopy,
+
+##### B532
+=== e7b969cbe302 B 2025-10-13 +61/-61
+ACPI: RIMT: Fix unused function warnings when CONFIG_IOMMU_API is disabled
+
+When CONFIG_IOMMU_API is disabled, some functions defined outside its
+conditional scope become unused, triggering compiler warnings reported
+by the kernel test robot.
+
+Move these function definitions inside the #ifdef CONFIG_IOMMU_API block
+to prevent unused function warnings when the configuration is disabled.
+
+Fixes: 8f7729552582 ("ACPI: RISC-V: Add support for RIMT")
+functions: drivers/acpi/riscv/rimt.c:rimt_get_fwnode, drivers/acpi/riscv/rimt.c:rimt_iommu_register
+fixes: 8f7729552582(riscv)
+ drivers/acpi/riscv/rimt.c | 122 +++++++++++++++++++++++++++++++++---------------------------------
+ 1 file changed, 61 insertions(+), 61 deletions(-)
+diff --git a/drivers/acpi/riscv/rimt.c b/drivers/acpi/riscv/rimt.c
+index 683fcfe35c31..7f423405e5ef 100644
+--- a/drivers/acpi/riscv/rimt.c
++++ b/drivers/acpi/riscv/rimt.c
+@@ -62,28 +62,4 @@ static int rimt_set_fwnode(struct acpi_rimt_node *rimt_node,
+ }
+ 
+-/**
+- * rimt_get_fwnode() - Retrieve fwnode associated with an RIMT node
+- *
+- * @node: RIMT table node to be looked-up
+- *
+- * Returns: fwnode_handle pointer on success, NULL on failure
+- */
+-static struct fwnode_handle *rimt_get_fwnode(struct acpi_rimt_node *node)
+-{
+-	struct fwnode_handle *fwnode = NULL;
+-	struct rimt_fwnode *curr;
+-
+-	spin_lock(&rimt_fwnode_lock);
+-	list_for_each_entry(curr, &rimt_fwnode_list, list) {
+-		if (curr->rimt_node == node) {
+-			fwnode = curr->fwnode;
+-			break;
+-		}
+-	}
+-	spin_unlock(&rimt_fwnode_lock);
+-
+-	return fwnode;
+-}
+-
+ static acpi_status rimt_match_node_callback(struct acpi_rimt_node *node,
+ 					    void *context)
+@@ -203,4 +179,65 @@ static struct acpi_rimt_node *rimt_scan_node(enum acpi_rimt_node_type type,
+ }
+ 
++/*
++ * RISC-V supports IOMMU as a PCI device or a platform device.
++ * When it is a platform device, there should be a namespace device as
++ * well along with RIMT. To create the link between RIMT information and
++ * the platform device, the IOMMU driver should register itself with the
++ * RIMT module. This is true for PCI based IOMMU as well.
++ */
++int rimt_iommu_register(struct device *dev)
++{
++	struct fwnode_handle *rimt_fwnode;
++	struct acpi_rimt_node *node;
++
++	node = rimt_scan_node(ACPI_RIMT_NODE_TYPE_IOMMU, dev);
++	if (!node) {
++		pr_err("Could not find IOMMU node in RIMT\n");
++		return -ENODEV;
++	}
++
++	if (dev_is_pci(dev)) {
++		rimt_fwnode = acpi_alloc_fwnode_static();
++		if (!rimt_fwnode)
++			return -ENOMEM;
++
++		rimt_fwnode->dev = dev;
+... (81 more diff lines)
+
+##### B533
+=== 546dbb022310 B 2025-10-23 +3/-2
+of: Skip devicetree kunit tests when RISCV+ACPI doesn't populate root node
+
+Starting with commit 69a8b62a7aa1 ("riscv: acpi: avoid errors caused by
+probing DT devices when ACPI is used"), riscv images no longer populate
+devicetree if ACPI is enabled. This causes unit tests to fail which require
+the root node to be set.
+
+  # Subtest: of_dtb
+  # module: of_test
+  1..2
+  # of_dtb_root_node_found_by_path: EXPECTATION FAILED at drivers/of/of_test.c:21
+  Expected np is not null, but is
+  # of_dtb_root_node_found_by_path: pass:0 fail:1 skip:0 total:1
+  not ok 1 of_dtb_root_node_found_by_path
+  # of_dtb_root_node_populates_of_root: EXPECTATION FAILED at drivers/of/of_test.c:31
+  Expected of_root is not null, but is
+  # of_dtb_root_node_populates_of_root: pass:0 fail:1 skip:0 total:1
+  not ok 2 of_dtb_root_node_populates_of_root
+
+Skip those tests for RISCV if the root node is not populated.
+
+Fixes: 69a8b62a7aa1 ("riscv: acpi: avoid errors caused by probing DT devices when ACPI is used")
+functions: drivers/of/of_kunit_helpers.c:of_root_kunit_skip
+fixes: 69a8b62a7aa1(riscv)
+diff --git a/drivers/of/of_kunit_helpers.c b/drivers/of/of_kunit_helpers.c
+index 7b3ed5a382aa..f6ed1af8b62a 100644
+--- a/drivers/of/of_kunit_helpers.c
++++ b/drivers/of/of_kunit_helpers.c
+@@ -19,6 +19,7 @@
+ void of_root_kunit_skip(struct kunit *test)
+ {
+-	if (IS_ENABLED(CONFIG_ARM64) && IS_ENABLED(CONFIG_ACPI) && !of_root)
+-		kunit_skip(test, "arm64+acpi doesn't populate a root node");
++	if ((IS_ENABLED(CONFIG_ARM64) || IS_ENABLED(CONFIG_RISCV)) &&
++	    IS_ENABLED(CONFIG_ACPI) && !of_root)
++		kunit_skip(test, "arm64/riscv+acpi doesn't populate a root node");
+ }
+ EXPORT_SYMBOL_GPL(of_root_kunit_skip);
+
+##### B534
+=== b750f5a9d64d B 2025-10-28 +1/-0
+drm/tiny: pixpaper: add explicit dependency on MMU
+
+The DRM_GEM_SHMEM_HELPER helper requires MMU enabled because it uses
+vmf_insert_pfn() in its mmap implementation. On NOMMU configurations
+(e.g. some RISC-V randconfig builds), this symbol is unavailable and
+selecting DRM_GEM_SHMEM_HELPER causes a modpost undefined reference:
+
+    ERROR: modpost: "vmf_insert_pfn" [drivers/gpu/drm/drm_shmem_helper.ko] undefined!
+
+Normally, Kconfig prevents this helper from being selected when
+CONFIG_MMU=n. However, in some randconfig builds (such as those used by
+0day CI), select statements can override unmet dependencies, triggering
+the issue.
+
+Add an explicit dependency on MMU to DRM_PIXPAPER to prevent this.
+
+Fixes: 0c4932f6ddf8 ("drm/tiny: pixpaper: Fix missing dependency on DRM_GEM_SHMEM_HELPER")
+functions: 
+fixes: 0c4932f6ddf8(common)
+diff --git a/drivers/gpu/drm/tiny/Kconfig b/drivers/gpu/drm/tiny/Kconfig
+index 7d9e85e932d7..f0e72d4b6a47 100644
+--- a/drivers/gpu/drm/tiny/Kconfig
++++ b/drivers/gpu/drm/tiny/Kconfig
+@@ -86,4 +86,5 @@ config DRM_PIXPAPER
+         tristate "DRM support for PIXPAPER display panels"
+         depends on DRM && SPI
++        depends on MMU
+         select DRM_CLIENT_SELECTION
+         select DRM_GEM_SHMEM_HELPER
+
+##### B535
+=== 14473a1f8859 B 2025-11-14 +2/-1
+irqchip/riscv-intc: Add missing free() callback in riscv_intc_domain_ops
+
+The irq_domain_free_irqs() helper requires that the irq_domain_ops->free
+callback is implemented. Otherwise, the kernel reports the warning message
+"NULL pointer, cannot free irq" when irq_dispose_mapping() is invoked to
+release the per-HART local interrupts.
+
+Set irq_domain_ops->free to irq_domain_free_irqs_top() to cure that.
+
+Fixes: 832f15f42646 ("RISC-V: Treat IPIs as normal Linux IRQs")
+functions: 
+fixes: 832f15f42646(riscv)
+diff --git a/drivers/irqchip/irq-riscv-intc.c b/drivers/irqchip/irq-riscv-intc.c
+index e5805885394e..70290b35b317 100644
+--- a/drivers/irqchip/irq-riscv-intc.c
++++ b/drivers/irqchip/irq-riscv-intc.c
+@@ -167,5 +167,6 @@ static const struct irq_domain_ops riscv_intc_domain_ops = {
+ 	.map	= riscv_intc_domain_map,
+ 	.xlate	= irq_domain_xlate_onecell,
+-	.alloc	= riscv_intc_domain_alloc
++	.alloc	= riscv_intc_domain_alloc,
++	.free	= irq_domain_free_irqs_top,
+ };
+ 
+
+##### B536
+=== e2cb69263e79 B 2025-11-14 +4/-3
+tools: riscv: Fixed misalignment of CSR related definitions
+
+The file tools/arch/riscv/include/asm/csr.h borrows from
+arch/riscv/include/asm/csr.h, and subsequent modifications
+related to CSR should maintain consistency.
+
+[pjw@kernel.org: dropped Fixes: lines for patches that weren't broken; removed superfluous blank line]
+functions: drivers/perf/riscv_pmu_sbi.c:pmu_sbi_ovf_handler
+fixes: 
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index e255c1b069ec..7dd282da67ce 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -1110,5 +1110,5 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
+ 			hidx = info->csr - CSR_CYCLE;
+ 
+-		/* check if the corresponding bit is set in sscountovf or overflow mask in shmem */
++		/* check if the corresponding bit is set in scountovf or overflow mask in shmem */
+ 		if (!(overflow & BIT(hidx)))
+ 			continue;
+diff --git a/tools/arch/riscv/include/asm/csr.h b/tools/arch/riscv/include/asm/csr.h
+index 56d7367ee344..21d8cee04638 100644
+--- a/tools/arch/riscv/include/asm/csr.h
++++ b/tools/arch/riscv/include/asm/csr.h
+@@ -168,5 +168,6 @@
+ #define VSIP_VALID_MASK		((_AC(1, UL) << IRQ_S_SOFT) | \
+ 				 (_AC(1, UL) << IRQ_S_TIMER) | \
+-				 (_AC(1, UL) << IRQ_S_EXT))
++				 (_AC(1, UL) << IRQ_S_EXT) | \
++				 (_AC(1, UL) << IRQ_PMU_OVF))
+ 
+ /* AIA CSR bits */
+@@ -281,5 +282,5 @@
+ #define CSR_HPMCOUNTER31H	0xc9f
+ 
+-#define CSR_SSCOUNTOVF		0xda0
++#define CSR_SCOUNTOVF		0xda0
+ 
+ #define CSR_SSTATUS		0x100
+
+##### B537
+=== 43169328c7b4 B 2025-12-02 +2/-3
+lib/crypto: riscv/chacha: Avoid s0/fp register
+
+In chacha_zvkb, avoid using the s0 register, which is the frame pointer,
+by reallocating KEY0 to t5. This makes stack traces available if e.g. a
+crash happens in chacha_zvkb.
+
+No frame pointer maintenance is otherwise required since this is a leaf
+function.
+
+Fixes: bb54668837a0 ("crypto: riscv - add vector crypto accelerated ChaCha20")
+functions: 
+fixes: bb54668837a0(riscv)
+diff --git a/lib/crypto/riscv/chacha-riscv64-zvkb.S b/lib/crypto/riscv/chacha-riscv64-zvkb.S
+index b777d0b4e379..3d183ec818f5 100644
+--- a/lib/crypto/riscv/chacha-riscv64-zvkb.S
++++ b/lib/crypto/riscv/chacha-riscv64-zvkb.S
+@@ -61,5 +61,6 @@
+ #define STRIDE		t3
+ #define ROUND_CTR	t4
+-#define KEY0		s0
++#define KEY0		t5
++// Avoid s0/fp to allow for unwinding
+ #define KEY1		s1
+ #define KEY2		s2
+@@ -144,5 +145,4 @@
+ SYM_FUNC_START(chacha_zvkb)
+ 	addi		sp, sp, -96
+-	sd		s0, 0(sp)
+ 	sd		s1, 8(sp)
+ 	sd		s2, 16(sp)
+@@ -281,5 +281,4 @@ SYM_FUNC_START(chacha_zvkb)
+ 
+ 	sw		COUNTER, 48(STATEP)
+-	ld		s0, 0(sp)
+ 	ld		s1, 8(sp)
+ 	ld		s2, 16(sp)
+
+##### B538
+=== c15d7a2a11ea B 2025-12-04 +1/-0
+tee: fix tee_ioctl_object_invoke_arg padding
+
+The tee_ioctl_object_invoke_arg structure has padding on some
+architectures but not on x86-32 and a few others:
+
+include/linux/tee.h:474:32: error: padding struct to align 'params' [-Werror=padded]
+
+I expect that all current users of this are on architectures that do
+have implicit padding here (arm64, arm, x86, riscv), so make the padding
+explicit in order to avoid surprises if this later gets used elsewhere.
+
+Fixes: d5b8b0fa1775 ("tee: add TEE_IOCTL_PARAM_ATTR_TYPE_OBJREF")
+functions: 
+fixes: d5b8b0fa1775(common)
+diff --git a/include/uapi/linux/tee.h b/include/uapi/linux/tee.h
+index cab5cadca8ef..5203977ed35d 100644
+--- a/include/uapi/linux/tee.h
++++ b/include/uapi/linux/tee.h
+@@ -471,4 +471,5 @@ struct tee_ioctl_object_invoke_arg {
+ 	__u32 ret;
+ 	__u32 num_params;
++	__u32 :32;
+ 	/* num_params tells the actual number of element in params */
+ 	struct tee_ioctl_param params[];
+
+##### B539
+=== 8fdc61faa730 B 2025-12-10 +1/-0
+soc: renesas: Fix missing dependency on new CONFIG_CACHEMAINT_FOR_DMA
+
+The Kconfig menu entry was converted to a menuconfig to allow it to be
+hidden for !CONFIG_RISCV. The drivers under this new option were selected
+by some other Kconfig symbols and so an extra select CACHEMAINT_FOR_DMA is
+needed.
+
+Fixes: 4d1608d0ab33 ("cache: Make top level Kconfig menu a boolean dependent on RISCV")
+functions: 
+fixes: 4d1608d0ab33(common)
+diff --git a/drivers/soc/renesas/Kconfig b/drivers/soc/renesas/Kconfig
+index 340a1ff7e92b..2a8ae79a11af 100644
+--- a/drivers/soc/renesas/Kconfig
++++ b/drivers/soc/renesas/Kconfig
+@@ -446,4 +446,5 @@ config ARCH_R9A07G043
+ 	select ARCH_RZG2L
+ 	select AX45MP_L2_CACHE
++	select CACHEMAINT_FOR_DMA
+ 	select DMA_GLOBAL_POOL
+ 	select ERRATA_ANDES
+
+##### B540
+=== 5a0b18825068 B 2025-12-12 +2/-0
+lib/crypto: riscv: Add poly1305-core.S to .gitignore
+
+poly1305-core.S is an auto-generated file, so it should be ignored.
+
+Fixes: bef9c7559869 ("lib/crypto: riscv/poly1305: Import OpenSSL/CRYPTOGAMS implementation")
+functions: 
+fixes: bef9c7559869(common)
+diff --git a/lib/crypto/riscv/.gitignore b/lib/crypto/riscv/.gitignore
+new file mode 100644
+index 000000000000..0d47d4f21c6d
+--- /dev/null
++++ b/lib/crypto/riscv/.gitignore
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: GPL-2.0-only
++poly1305-core.S
+
+##### B541
+=== 86c946bcc00f B 2025-12-25 +1/-0
+wifi: rtl8xxxu: fix slab-out-of-bounds in rtl8xxxu_sta_add
+
+The driver does not set hw->sta_data_size, which causes mac80211 to
+allocate insufficient space for driver private station data in
+__sta_info_alloc(). When rtl8xxxu_sta_add() accesses members of
+struct rtl8xxxu_sta_info through sta->drv_priv, this results in a
+slab-out-of-bounds write.
+
+KASAN report on RISC-V (VisionFive 2) with RTL8192EU adapter:
+
+  BUG: KASAN: slab-out-of-bounds in rtl8xxxu_sta_add+0x31c/0x346
+  Write of size 8 at addr ffffffd6d3e9ae88 by task kworker/u16:0/12
+
+Set hw->sta_data_size to sizeof(struct rtl8xxxu_sta_info) during
+probe, similar to how hw->vif_data_size is configured. This ensures
+mac80211 allocates sufficient space for the driver's per-station
+private data.
+
+Tested on StarFive VisionFive 2 v1.2A board.
+
+Fixes: eef55f1545c9 ("wifi: rtl8xxxu: support multiple interfaces in {add,remove}_interface()")
+functions: drivers/net/wireless/realtek/rtl8xxxu/core.c:rtl8xxxu_probe
+fixes: eef55f1545c9(common)
+diff --git a/drivers/net/wireless/realtek/rtl8xxxu/core.c b/drivers/net/wireless/realtek/rtl8xxxu/core.c
+index c06ad064f37c..f9a527f6a175 100644
+--- a/drivers/net/wireless/realtek/rtl8xxxu/core.c
++++ b/drivers/net/wireless/realtek/rtl8xxxu/core.c
+@@ -7827,4 +7827,5 @@ static int rtl8xxxu_probe(struct usb_interface *interface,
+ 
+ 	hw->vif_data_size = sizeof(struct rtl8xxxu_vif);
++	hw->sta_data_size = sizeof(struct rtl8xxxu_sta_info);
+ 
+ 	hw->wiphy->max_scan_ssids = 1;
+
+##### B542
+=== fff010c776f7 B 2025-12-25 +11/-8
+dt-bindings: riscv: update ratified version of h, svinval, svnapot, svpbmt
+
+The descriptions for h, svinval, svnapot, and svpbmt extensions currently
+reference the "20191213 version of the privileged ISA specification".
+While an Unprivileged ISA document exists with that date, there is no
+corresponding ratified Privileged ISA specification.
+
+These extensions were ratified in the RISC-V Instruction Set Manual,
+Volume II: Privileged Architecture, Version 20211203. Update the
+descriptions to reference the correct specification version.
+
+RISC-V International hosts a website [1] for ratified specifications.
+Following the "Ratified ISA Specifications", historical versions of
+Volume II Privileged ISA can be found.
+
+Fixes: aeb71e42caae ("dt-bindings: riscv: deprecate riscv,isa")
+functions: 
+fixes: aeb71e42caae(common)
+diff --git a/Documentation/devicetree/bindings/riscv/extensions.yaml b/Documentation/devicetree/bindings/riscv/extensions.yaml
+index 565cb2cbb49b..6a4697b36b8d 100644
+--- a/Documentation/devicetree/bindings/riscv/extensions.yaml
++++ b/Documentation/devicetree/bindings/riscv/extensions.yaml
+@@ -118,6 +118,7 @@ properties:
+         - const: h
+           description:
+-            The standard H extension for hypervisors as ratified in the 20191213
+-            version of the privileged ISA specification.
++            The standard H extension for hypervisors as ratified in the RISC-V
++            Instruction Set Manual, Volume II Privileged Architecture,
++            Document Version 20211203.
+ 
+         # multi-letter extensions, sorted alphanumerically
+@@ -203,18 +204,20 @@ properties:
+           description:
+             The standard Svinval supervisor-level extension for fine-grained
+-            address-translation cache invalidation as ratified in the 20191213
+-            version of the privileged ISA specification.
++            address-translation cache invalidation as ratified in the RISC-V
++            Instruction Set Manual, Volume II Privileged Architecture,
++            Document Version 20211203.
+ 
+         - const: svnapot
+           description:
+             The standard Svnapot supervisor-level extensions for napot
+-            translation contiguity as ratified in the 20191213 version of the
+-            privileged ISA specification.
++            translation contiguity as ratified in the RISC-V Instruction Set
++            Manual, Volume II Privileged Architecture, Document Version
++            20211203.
+ 
+         - const: svpbmt
+           description:
+             The standard Svpbmt supervisor-level extensions for page-based
+-            memory types as ratified in the 20191213 version of the privileged
+-            ISA specification.
++            memory types as ratified in the RISC-V Instruction Set Manual,
++            Volume II Privileged Architecture, Document Version 20211203.
+ 
+         - const: svrsw60t59b
+
+##### B543
+=== d8c128fb6c22 B 2025-12-28 +5/-2
+pinctrl: canaan: k230: Fix NULL pointer dereference when parsing devicetree
+
+When probing the k230 pinctrl driver, the kernel triggers a NULL pointer
+dereference. The crash trace showed:
+[    0.732084] Unable to handle kernel NULL pointer dereference at virtual address 0000000000000068
+[    0.740737] ...
+[    0.776296] epc : k230_pinctrl_probe+0x1be/0x4fc
+
+In k230_pinctrl_parse_functions(), we attempt to retrieve the device
+pointer via info->pctl_dev->dev, but info->pctl_dev is only initialized
+after k230_pinctrl_parse_dt() completes.
+
+At the time of DT parsing, info->pctl_dev is still NULL, leading to
+the invalid dereference of info->pctl_dev->dev.
+
+Use the already available device pointer from platform_device
+instead of accessing through uninitialized pctl_dev.
+
+Fixes: d94a32ac688f ("pinctrl: canaan: k230: Fix order of DT parse and pinctrl register")
+functions: drivers/pinctrl/pinctrl-k230.c:k230_pinctrl_parse_groups, drivers/pinctrl/pinctrl-k230.c:k230_pinctrl_parse_functions, drivers/pinctrl/pinctrl-k230.c:k230_pinctrl_probe
+fixes: d94a32ac688f(common)
+diff --git a/drivers/pinctrl/pinctrl-k230.c b/drivers/pinctrl/pinctrl-k230.c
+index d716f23d837f..20f7c0f70eb7 100644
+--- a/drivers/pinctrl/pinctrl-k230.c
++++ b/drivers/pinctrl/pinctrl-k230.c
+@@ -66,4 +66,5 @@ struct k230_pmx_func {
+ 
+ struct k230_pinctrl {
++	struct device		*dev;
+ 	struct pinctrl_desc	pctl;
+ 	struct pinctrl_dev	*pctl_dev;
+@@ -471,5 +472,5 @@ static int k230_pinctrl_parse_groups(struct device_node *np,
+ 				     unsigned int index)
+ {
+-	struct device *dev = info->pctl_dev->dev;
++	struct device *dev = info->dev;
+ 	const __be32 *list;
+ 	int size, i, ret;
+@@ -512,5 +513,5 @@ static int k230_pinctrl_parse_functions(struct device_node *np,
+ 					unsigned int index)
+ {
+-	struct device *dev = info->pctl_dev->dev;
++	struct device *dev = info->dev;
+ 	struct k230_pmx_func *func;
+ 	struct k230_pin_group *grp;
+@@ -597,4 +598,6 @@ static int k230_pinctrl_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 
++	info->dev = dev;
++
+ 	pctl = &info->pctl;
+ 
+
+##### B544
+=== eaa9bb1d39d5 B 2026-01-04 +2/-1
+riscv: clocksource: Fix stimecmp update hazard on RV32
+
+On RV32, updating the 64-bit stimecmp (or vstimecmp) CSR requires two
+separate 32-bit writes. A race condition exists if the timer triggers
+during these two writes.
+
+The RISC-V Privileged Specification (e.g., Section 3.2.1 for mtimecmp)
+recommends a specific 3-step sequence to avoid spurious interrupts
+when updating 64-bit comparison registers on 32-bit systems:
+
+1. Set the low-order bits (stimecmp) to all ones (ULONG_MAX).
+2. Set the high-order bits (stimecmph) to the desired value.
+3. Set the low-order bits (stimecmp) to the desired value.
+
+Current implementation writes the LSB first without ensuring a future
+value, which may lead to a transient state where the 64-bit comparison
+is incorrectly evaluated as "expired" by the hardware. This results in
+spurious timer interrupts.
+
+This patch adopts the spec-recommended 3-step sequence to ensure the
+intermediate 64-bit state is never smaller than the current time.
+
+Fixes: 9f7a8ff6391f ("RISC-V: Prefer sstc extension if available")
+functions: drivers/clocksource/timer-riscv.c:riscv_clock_next_event
+fixes: 9f7a8ff6391f(common)
+diff --git a/drivers/clocksource/timer-riscv.c b/drivers/clocksource/timer-riscv.c
+index 4d7cf338824a..cfc4d83c42c0 100644
+--- a/drivers/clocksource/timer-riscv.c
++++ b/drivers/clocksource/timer-riscv.c
+@@ -51,6 +51,7 @@ static int riscv_clock_next_event(unsigned long delta,
+ 	if (static_branch_likely(&riscv_sstc_available)) {
+ #if defined(CONFIG_32BIT)
+-		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
++		csr_write(CSR_STIMECMP, ULONG_MAX);
+ 		csr_write(CSR_STIMECMPH, next_tval >> 32);
++		csr_write(CSR_STIMECMP, next_tval & 0xFFFFFFFF);
+ #else
+ 		csr_write(CSR_STIMECMP, next_tval);
+
+##### B545
+=== 2421649778dc B 2026-01-06 +1/-1
+scripts/gen-btf.sh: Ensure initial object in gen_btf_o is ELF with correct endianness
+
+After commit 600605853f87 ("scripts/gen-btf.sh: Fix .btf.o generation
+when compiling for RISCV"), there is an error from llvm-objcopy when
+CONFIG_LTO_CLANG is enabled:
+
+  llvm-objcopy: error: '.tmp_vmlinux1.btf.o': The file was not recognized as a valid object file
+  Failed to generate BTF for vmlinux
+
+KBUILD_CFLAGS includes CC_FLAGS_LTO, which makes clang emit an LLVM IR
+object, rather than an ELF one as expected by llvm-objcopy.
+
+Most areas of the kernel deal with this by filtering out CC_FLAGS_LTO
+from KBUILD_CFLAGS for the particular object or directory but this is
+not so easy to do in bash. Just include '-fno-lto' after KBUILD_CFLAGS
+to ensure an ELF object is consistently created as the initial .o file.
+
+Additionally, while there is no reported or discovered bug yet, the
+absence of KBUILD_CPPFLAGS from this command could result in incorrect
+endianness because KBUILD_CPPFLAGS typically contains '-mbig-endian' and
+'-mlittle-endian' so that biendian toolchains can be used. Include it in
+this ${CC} command to hopefully limit necessary changes to this command
+for the foreseeable future.
+
+Fixes: 600605853f87 ("scripts/gen-btf.sh: Fix .btf.o generation when compiling for RISCV")
+functions: 
+fixes: 600605853f87(common)
+diff --git a/scripts/gen-btf.sh b/scripts/gen-btf.sh
+index d6457661b9b6..be21ccee3487 100755
+--- a/scripts/gen-btf.sh
++++ b/scripts/gen-btf.sh
+@@ -88,5 +88,5 @@ gen_btf_o()
+ 	# deletes all symbols including __start_BTF and __stop_BTF, which will
+ 	# be redefined in the linker script.
+-	echo "" | ${CC} ${CLANG_FLAGS} ${KBUILD_CFLAGS} -c -x c -o ${btf_data} -
++	echo "" | ${CC} ${CLANG_FLAGS} ${KBUILD_CPPFLAGS} ${KBUILD_CFLAGS} -fno-lto -c -x c -o ${btf_data} -
+ 	${OBJCOPY} --add-section .BTF=${ELF_FILE}.BTF \
+ 		--set-section-flags .BTF=alloc,readonly ${btf_data}
+
+##### B546
+=== 582b39463f1c B 2026-01-09 +1/-1
+KVM: riscv: selftests: Fix incorrect rounding in page_align()
+
+The implementation of `page_align()` in `processor.c` calculates
+alignment incorrectly for values that are already aligned. Specifically,
+`(v + vm->page_size) & ~(vm->page_size - 1)` aligns to the *next* page
+boundary even if `v` is already page-aligned, potentially wasting a page
+of memory.
+
+Fix the calculation to use standard alignment logic: `(v + vm->page_size
+- 1) & ~(vm->page_size - 1)`.
+
+Fixes: 3e06cdf10520 ("KVM: selftests: Add initial support for RISC-V 64-bit")
+functions: tools/testing/selftests/kvm/lib/riscv/processor.c:page_align
+fixes: 3e06cdf10520(common)
+diff --git a/tools/testing/selftests/kvm/lib/riscv/processor.c b/tools/testing/selftests/kvm/lib/riscv/processor.c
+index 2eac7d4b59e9..d5e8747b5e69 100644
+--- a/tools/testing/selftests/kvm/lib/riscv/processor.c
++++ b/tools/testing/selftests/kvm/lib/riscv/processor.c
+@@ -29,5 +29,5 @@ bool __vcpu_has_ext(struct kvm_vcpu *vcpu, uint64_t ext)
+ static uint64_t page_align(struct kvm_vm *vm, uint64_t v)
+ {
+-	return (v + vm->page_size) & ~(vm->page_size - 1);
++	return (v + vm->page_size - 1) & ~(vm->page_size - 1);
+ }
+ 
+
+##### B547
+=== 69132c2d4c11 B 2026-01-15 +3/-1
+Documentation: riscv: uabi: Clarify ISA spec version for canonical order
+
+Specify that chapter 27 refers to version 20191213 of the RISC-V ISA
+Unprivileged Architecture. The chapter numbering differs across
+specification versions - for example, in version 20250508, the ISA
+Extension Naming Conventions is chapter 36, not chapter 27.
+
+Historical versions of the RISC-V specification can be found via Link [1].
+
+Fixes: f07b2b3f9d47 ("Documentation: riscv: add a section about ISA string ordering in /proc/cpuinfo")
+functions: 
+fixes: f07b2b3f9d47(common)
+diff --git a/Documentation/arch/riscv/uabi.rst b/Documentation/arch/riscv/uabi.rst
+index 243e40062e34..0c5299e00762 100644
+--- a/Documentation/arch/riscv/uabi.rst
++++ b/Documentation/arch/riscv/uabi.rst
+@@ -8,5 +8,7 @@ ISA string ordering in /proc/cpuinfo
+ 
+ The canonical order of ISA extension names in the ISA string is defined in
+-chapter 27 of the unprivileged specification.
++Chapter 27 of the RISC-V Instruction Set Manual Volume I Unprivileged ISA
++(Document Version 20191213).
++
+ The specification uses vague wording, such as should, when it comes to ordering,
+ so for our purposes the following rules apply:
+
+##### B548
+=== 6acf50c7f0ba B 2026-01-15 +2/-2
+mailbox: Improve RISCV_SBI_MPXY_MBOX guidance
+
+RISC-V SBI Message Proxy (MPXY) Mailbox support defaults to enabled, but
+the help text states "If unsure say N".
+
+Recommend enabling this driver, as it is a very critical RISC-V driver
+providing mailbox channels to other drivers such as clock, system MSIs,
+etc.
+
+Fixes: bf3022a4eb119c6b ("mailbox: Add RISC-V SBI message proxy (MPXY) based mailbox driver")
+functions: 
+fixes: bf3022a4eb11(common)
+diff --git a/drivers/mailbox/Kconfig b/drivers/mailbox/Kconfig
+index 559fe32c5d5a..5bf4155b090a 100644
+--- a/drivers/mailbox/Kconfig
++++ b/drivers/mailbox/Kconfig
+@@ -397,6 +397,6 @@ config RISCV_SBI_MPXY_MBOX
+ 	  extension. This mailbox driver is used to send messages to the
+ 	  remote processor through the SBI implementation (M-mode firmware
+-	  or HS-mode hypervisor). Say Y here if you want to have this support.
+-	  If unsure say N.
++	  or HS-mode hypervisor). Say Y here, unless you are sure you do not
++	  need this.
+ 
+ endif
+
+##### B549
+=== 00419892bac2 B 2026-01-22 +47/-38
+perf annotate: Fix args leak of map_symbol
+
+map_symbol__exit() needs calling on an annotate_args.ms, however, rather
+than introduce proper reference count handling to symbol__annotate()
+just switch to passing the map_symbol pointer parameter around, making
+the puts the caller's responsibility.
+
+Fix a number of cases to ensure the map in a map_symbol has a
+reference count increment and add the then necessary map_symbol_exits.
+
+Fixes: 56e144fe98260a0f ("perf mem_info: Add and use map_symbol__exit and addr_map_symbol__exit")
+functions: tools/perf/arch/loongarch/annotate/instructions.c:loongarch_call__parse, tools/perf/arch/loongarch/annotate/instructions.c:loongarch_jump__parse, tools/perf/arch/s390/annotate/instructions.c:s390_call__parse, tools/perf/util/annotate.c:symbol__annotate, tools/perf/util/capstone.c:print_capstone_detail, tools/perf/util/capstone.c:symbol__disassemble_capstone, tools/perf/util/capstone.c:symbol__disassemble_capstone_powerpc, tools/perf/util/disasm.c:call__parse, tools/perf/util/disasm.c:jump__parse, tools/perf/util/disasm.c:disasm_line__new, tools/perf/util/disasm.c:symbol__parse_objdump_line, tools/perf/util/disasm.c:symbol__disassemble_raw
+fixes: 56e144fe9826(common)
+ tools/perf/arch/loongarch/annotate/instructions.c | 14 ++++++++------
+ tools/perf/arch/s390/annotate/instructions.c      | 11 +++++++----
+ tools/perf/util/annotate.c                        |  2 +-
+ tools/perf/util/capstone.c                        | 14 +++++++-------
+ tools/perf/util/disasm.c                          | 36 ++++++++++++++++++++----------------
+ tools/perf/util/disasm.h                          |  2 +-
+ tools/perf/util/llvm.c                            |  6 +++---
+ 7 files changed, 47 insertions(+), 38 deletions(-)
+diff --git a/tools/perf/arch/loongarch/annotate/instructions.c b/tools/perf/arch/loongarch/annotate/instructions.c
+index 70262d5f1444..1c3abb43c8d7 100644
+--- a/tools/perf/arch/loongarch/annotate/instructions.c
++++ b/tools/perf/arch/loongarch/annotate/instructions.c
+@@ -11,7 +11,5 @@ static int loongarch_call__parse(struct arch *arch, struct ins_operands *ops, st
+ 	char *c, *endptr, *tok, *name;
+ 	struct map *map = ms->map;
+-	struct addr_map_symbol target = {
+-		.ms = { .map = map, },
+-	};
++	struct addr_map_symbol target;
+ 
+ 	c = strchr(ops->raw, '#');
+@@ -39,5 +37,8 @@ static int loongarch_call__parse(struct arch *arch, struct ins_operands *ops, st
+ 		return -1;
+ 
+-	target.addr = map__objdump_2mem(map, ops->target.addr);
++	target = (struct addr_map_symbol) {
++		.ms = { .map = map__get(map), },
++		.addr = map__objdump_2mem(map, ops->target.addr),
++	};
+ 
+ 	if (maps__find_ams(ms->maps, &target) == 0 &&
+@@ -45,4 +46,5 @@ static int loongarch_call__parse(struct arch *arch, struct ins_operands *ops, st
+ 		ops->target.sym = target.ms.sym;
+ 
++	addr_map_symbol__exit(&target);
+ 	return 0;
+ }
+@@ -59,5 +61,5 @@ static int loongarch_jump__parse(struct arch *arch, struct ins_operands *ops, st
+ 	struct symbol *sym = ms->sym;
+ 	struct addr_map_symbol target = {
+-		.ms = { .map = map, },
++		.ms = { .map = map__get(map), },
+ 	};
+ 	const char *c = strchr(ops->raw, '#');
+@@ -91,5 +93,5 @@ static int loongarch_jump__parse(struct arch *arch, struct ins_operands *ops, st
+ 		ops->target.offset_avail = false;
+ 	}
+-
++	addr_map_symbol__exit(&target);
+ 	return 0;
+ }
+diff --git a/tools/perf/arch/s390/annotate/instructions.c b/tools/perf/arch/s390/annotate/instructions.c
+index c61193f1e096..626e6d2cbc81 100644
+--- a/tools/perf/arch/s390/annotate/instructions.c
++++ b/tools/perf/arch/s390/annotate/instructions.c
+@@ -7,7 +7,5 @@ static int s390_call__parse(struct arch *arch, struct ins_operands *ops,
+ 	char *endptr, *tok, *name;
+ 	struct map *map = ms->map;
+-	struct addr_map_symbol target = {
+-		.ms = { .map = map, },
+-	};
++	struct addr_map_symbol target;
+ 
+ 	tok = strchr(ops->raw, ',');
+@@ -37,5 +35,9 @@ static int s390_call__parse(struct arch *arch, struct ins_operands *ops,
+ 	if (ops->target.name == NULL)
+ 		return -1;
+-	target.addr = map__objdump_2mem(map, ops->target.addr);
+... (227 more diff lines)

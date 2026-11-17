@@ -1,0 +1,117 @@
+[
+  {
+    "k": 1,
+    "verdict": "不可能",
+    "why": "RISC-V 的本地 sfence.vma 是有意设计：另一 CPU 因旧无效项触发用户缺页时，handle_pte_fault 会再次走 ptep_set_access_flags 和 update_mmu_cache_range。未实现 Svvptc 时，架构的 ptep_set_access_flags 即使 PTE 不变也返回 true，保证在发生异常的 CPU 上刷新后重试；这类额外异常可以自愈。"
+  },
+  {
+    "k": 2,
+    "verdict": "不可能",
+    "why": "Xtensa 的 update_mmu_cache_range 调用的是 flush_tlb_page，而非 local_flush_tlb_page。CONFIG_SMP 下，arch/xtensa/kernel/smp.c:495 的实现通过 on_each_cpu(ipi_flush_tlb_page, &fd, 1) 同步刷新各 CPU；只有单处理器配置才把它定义成本地刷新。"
+  },
+  {
+    "k": 3,
+    "verdict": "不可能",
+    "why": "exfat_file_fsync 调用 simple_fsync_noflush 是为了把文件数据和元数据写回，并不建立或修改内核页表。这里的 noflush 指不发块设备缓存刷新命令，外层随后还有 sync_blockdev 和 blkdev_issue_flush，与 TLB 或虚拟地址缓存别名维护无关。"
+  },
+  {
+    "k": 4,
+    "verdict": "不可能",
+    "why": "fat_file_fsync 的 simple_fsync_noflush 处理文件写回，不是内存映射接口。后续 mmb_sync 和 blkdev_issue_flush 负责文件系统元数据及块设备缓存，函数名中的 noflush 不能据此解释成缺少 TLB 或 CPU 缓存维护。"
+  },
+  {
+    "k": 5,
+    "verdict": "不可能",
+    "why": "fs/libfs.c:1551 的 simple_fsync_noflush 实际调用 file_write_and_wait_range、sync_inode_metadata 和写回错误检查，没有页表安装操作。simple_fsync 在它返回成功后调用 blkdev_issue_flush，此处 flush 的对象是块设备缓存。"
+  },
+  {
+    "k": 6,
+    "verdict": "不可能",
+    "why": "apply_range_set_cb 是页表遍历回调，实际安装页的两个调用路径 arena_vm_fault 和 arena_alloc_pages 在安装后均调用 flush_vmap_cache，后者封装 flush_cache_vmap。批量安装的部分成功错误路径也对已安装范围调用该包装；预建中间页表时传入 NULL，回调直接返回而不安装 PTE。替换 scratch 页的分支另有 flush_tlb_before_set。"
+  },
+  {
+    "k": 7,
+    "verdict": "不可能",
+    "why": "hibernate_map_page 在 safe_copy_page 中临时恢复同一物理页的直接映射，并非把旧映射换成另一页；x86、arm64 的无效项恢复不要求清除旧的有效翻译。RISC-V 的同名 noflush 实现实际进入 __set_memory，RV64 返回前执行 flush_tlb_all，RV32 执行范围刷新，所以不能仅凭公共函数里没有刷新调用认定遗漏。"
+  },
+  {
+    "k": 8,
+    "verdict": "不可能",
+    "why": "execmem_set_direct_map_valid 位于 CONFIG_ARCH_HAS_EXECMEM_ROX 条件内，该提交只有 x86 选择此能力，两个实际调用点都传 true，在 vfree 前恢复原物理页的直接映射。x86 不保留需要 sfence.vma 才能消除的无效翻译，不能把 RISC-V 或有别名缓存架构的要求套到这条配置受限的恢复路径上。"
+  },
+  {
+    "k": 9,
+    "verdict": "不可能",
+    "why": "PKMAP 槽位复用前由 flush_all_zero_pkmaps 先执行 flush_cache_kmaps，清掉旧 PTE 后再执行 flush_tlb_kernel_range，只有计数归零的槽位才能重新安装。Xtensa 还按物理页颜色选择 PKMAP 槽，ARM 的 VIVT 路径维护旧映射缓存，VIPT 有别名的 ARM 则在初始化时舍弃高端内存。这里不能按普通 vmalloc 映射安装点孤立判断。"
+  },
+  {
+    "k": 10,
+    "verdict": "不可能",
+    "why": "set_pte_at 后紧接 arch_kmap_local_post_map，ARM、MIPS 等架构在该钩子里完成本地 TLB 刷新。调出路径也执行架构的 pre_unmap/post_unmap；Xtensa 在撤销时刷新并按页颜色分配本地槽位，所需维护不要求直接写成 flush_cache_vmap 或 flush_tlb_kernel_range。"
+  },
+  {
+    "k": 11,
+    "verdict": "不可能",
+    "why": "vmemmap_remap_pte 是由 vmemmap_remap_range 间接调用的回调，外层在未设置 VMEMMAP_REMAP_NO_TLB_FLUSH 时执行 flush_tlb_kernel_range。批量优化设置该标志时，__hugetlb_vmemmap_optimize_folios 在释放旧 vmemmap 页之前执行 flush_tlb_all，存在完整的延迟刷新安排。"
+  },
+  {
+    "k": 12,
+    "verdict": "不可能",
+    "why": "vmemmap_restore_pte 同样受 vmemmap_remap_range 的范围 TLB 刷新覆盖，失败回滚还明确把 flags 置为 0。批量恢复虽然跳过逐次刷新，但 hugetlb_vmemmap_restore_folios 在返回恢复结果之前执行 flush_tlb_all，并非只复制页面、改 PTE 后就不维护 TLB。"
+  },
+  {
+    "k": 13,
+    "verdict": "说不清",
+    "why": "启动期调用由架构初始化收尾处理，例如 RISC-V 的 kasan_init 切回页表后执行 local_flush_tlb_all，不能仅凭 zero_pte_populate 本身没有刷新就判错。但它也能经 kasan_add_zero_shadow 在运行时到达，mhp_init_memmap_on_memory 路径未见紧随安装的刷新，而 memremap_pages 路径后续有 arch_add_memory 的全局刷新。尚未闭合前一路径首次实际访问新零影子与后续有效刷新的先后关系，不能确定会失败或必定安全。"
+  },
+  {
+    "k": 14,
+    "verdict": "可能",
+    "why": "RV64 启用 KASAN_VMALLOC、处理器允许缓存无效项时，外层虽调用 flush_cache_vmap(shadow_start, shadow_end)，但 RISC-V 实现只为 vmalloc/module 或 vmemmap 地址设置 new_valid_map_cpus，KASAN 影子地址被过滤掉。get_vm_area 的非 VM_ALLOC 路径会在普通映射刷新前通过 kasan_unpoison_vmalloc 写这片新影子。若当前 CPU 的标志已清零且仍有旧无效翻译，影子访问的内核缺页不会进入带 sfence.vma 的重试分支，可能落入无法处理的内核异常并 Oops。"
+  },
+  {
+    "k": 15,
+    "verdict": "不可能",
+    "why": "__pcpu_unmap_pages 只是批量撤销的内层函数，正常撤销前由 pcpu_pre_unmap_flush 调用 flush_cache_vunmap。保留 chunk 并准备复用时，mm/percpu.c:2181 调用 pcpu_post_unmap_tlb_flush；销毁整个 chunk 则把地址交回 vmalloc 的延迟刷新队列，映射安装失败的清理路径也有 TLB 刷新。"
+  },
+  {
+    "k": 16,
+    "verdict": "不可能",
+    "why": "__pcpu_map_pages 经 pcpu_map_pages 由 pcpu_populate_chunk 调用，成功安装所有 CPU 的映射后，后者在 mm/percpu-vm.c:313 调用 pcpu_post_map_flush。该函数对覆盖各 CPU 单元的整个范围执行 flush_cache_vmap；安装失败则撤销已安装部分并调用 pcpu_post_unmap_tlb_flush。"
+  },
+  {
+    "k": 17,
+    "verdict": "不可能",
+    "why": "flush_cache_page 只在 if (pvmw->pte) 的普通 PTE 分支执行，第三个参数 pte_pfn(entry) 正是该页的页框号。PMD 大页走独立的 else 分支，在 mm/rmap.c:1162 对 address 到 address + HPAGE_PMD_SIZE 调用 flush_cache_range，分析器混淆了两个互斥分支。"
+  },
+  {
+    "k": 18,
+    "verdict": "不可能",
+    "why": "secretmem_fault 撤销直接映射时已刷新 TLB，free_folio 此处恢复的是同一页，随后才能清零并释放；x86、arm64 的这类无效到有效恢复不需要额外驱逐旧有效项。需要特别处理无效项的 RISC-V 也没有漏掉：set_direct_map_default_noflush 实际经 __set_memory 在返回前执行全局或范围 TLB 刷新。"
+  },
+  {
+    "k": 19,
+    "verdict": "不可能",
+    "why": "vmemmap_pte_populate 位于多层填充函数内部，公共入口 __populate_section_memmap 在填充成功后于 mm/sparse-vmemmap.c:569 调用 flush_cache_vmap(start, end)。RISC-V 的该钩子明确接受 VMEMMAP_START 到 VMEMMAP_END 范围并设置新映射重试标志，启动阶段还另有 vmemmap 范围的本地 TLB 刷新。"
+  },
+  {
+    "k": 20,
+    "verdict": "不可能",
+    "why": "vmap_pte_range 是低层页表填充函数，外层 vmap_page_range 在 vmap_range_noflush 返回后执行 flush_cache_vmap。经大页分配分支使用这套填充代码时，同样由 __vmap_pages_range 或 percpu 的 pcpu_post_map_flush 在使用前完成范围维护，不能只检查直接调用者。"
+  },
+  {
+    "k": 21,
+    "verdict": "不可能",
+    "why": "vmap_pages_pte_range 经多层 noflush 函数回到 __vmap_pages_range，后者在 mm/vmalloc.c:727 统一调用 flush_cache_vmap 后才返回。percpu 直接使用 noflush 接口时也由 pcpu_populate_chunk 的 pcpu_post_map_flush 补齐，属于调用者统一刷新。"
+  },
+  {
+    "k": 22,
+    "verdict": "不可能",
+    "why": "vb_free 在释放块之前已经调用 flush_cache_vunmap 并清除对应 PTE；free_vmap_block 随后把虚拟区间加入 free_vmap_area_noflush 的 lazy 队列。该地址不会立即作为可用区间重分配，__purge_vmap_area_lazy 在把待释放区间交回可用池前先执行 flush_tlb_kernel_range，这是有意的延迟 TLB 刷新。"
+  },
+  {
+    "k": 23,
+    "verdict": "不可能",
+    "why": "vmap_pfn_apply 是 vmap_pfn 交给 apply_to_page_range 的安装回调。外层在遍历成功后于 mm/vmalloc.c:3648 对整个新映射范围执行 flush_cache_vmap，然后才把地址交给调用者，词法分析没有跟踪到回调调用方。"
+  }
+]

@@ -1,0 +1,27 @@
+diff --git a/arch/riscv/kernel/machine_kexec.c b/arch/riscv/kernel/machine_kexec.c
+index 738df176ff6f..adfe912af0fc 100644
+--- a/arch/riscv/kernel/machine_kexec.c
++++ b/arch/riscv/kernel/machine_kexec.c
+@@ -106,15 +106,16 @@ machine_kexec_cleanup(struct kimage *image)
+  */
+ void machine_shutdown(void)
+ {
+-	/*
+-	 * No more interrupts on this hart
+-	 * until we are back up.
+-	 */
+-	local_irq_disable();
+-
+ #if defined(CONFIG_HOTPLUG_CPU)
+ 	smp_shutdown_nonboot_cpus(smp_processor_id());
+ #endif
++
++	/*
++	 * No more interrupts on this hart until we are back up. Disable them
++	 * only after the other harts are down: smp_shutdown_nonboot_cpus()
++	 * may sleep.
++	 */
++	local_irq_disable();
+ }
+ 
+ /*

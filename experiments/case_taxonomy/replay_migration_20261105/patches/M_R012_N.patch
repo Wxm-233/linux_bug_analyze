@@ -1,0 +1,81 @@
+diff --git a/arch/riscv/kernel/alternative.c b/arch/riscv/kernel/alternative.c
+--- a/arch/riscv/kernel/alternative.c
++++ b/arch/riscv/kernel/alternative.c
+@@ -65,6 +65,56 @@ static u32 riscv_instruction_at(void *p)
+ 	return (u32)parcel[0] | (u32)parcel[1] << 16;
+ }
+ 
++#define ALT_JAL_OPCODE		0x6f
++#define ALT_JAL_OPCODE_MASK	0x7f
++
++static bool riscv_alt_insn_is_jal(u32 insn)
++{
++	return (insn & ALT_JAL_OPCODE_MASK) == ALT_JAL_OPCODE;
++}
++
++static s32 riscv_alt_jal_extract_imm(u32 insn)
++{
++	u32 imm;
++
++	imm  = ((insn >> 31) & 0x1) << 20;
++	imm |= ((insn >> 21) & 0x3ff) << 1;
++	imm |= ((insn >> 20) & 0x1) << 11;
++	imm |= ((insn >> 12) & 0xff) << 12;
++
++	/* sign extend from bit 20 */
++	return (s32)(imm << 11) >> 11;
++}
++
++static u32 riscv_alt_jal_insert_imm(u32 insn, s32 imm)
++{
++	u32 uimm = (u32)imm;
++
++	/* keep opcode and rd (low 12 bits) */
++	insn &= 0xfff;
++	insn |= ((uimm >> 20) & 0x1) << 31;
++	insn |= ((uimm >> 1) & 0x3ff) << 21;
++	insn |= ((uimm >> 11) & 0x1) << 20;
++	insn |= ((uimm >> 12) & 0xff) << 12;
++
++	return insn;
++}
++
++static void riscv_alternative_fix_jal(void *ptr, u32 jal_insn, int patch_offset)
++{
++	s32 imm;
++
++	/* get and adjust new target address */
++	imm = riscv_alt_jal_extract_imm(jal_insn);
++	imm -= patch_offset;
++
++	/* J-type immediate is 21 bits signed, 2-byte aligned */
++	if (imm < -(1 << 20) || imm >= (1 << 20)) {
++		WARN_ONCE(1, "alternative: jal target out of range\n");
++		return;
++	}
++
++	jal_insn = riscv_alt_jal_insert_imm(jal_insn, imm);
++
++	/* patch the jump place again */
++	patch_text_nosync(ptr, &jal_insn, sizeof(u32));
++}
++
+ static void riscv_alternative_fix_auipc_jalr(void *ptr, u32 auipc_insn,
+ 					     u32 jalr_insn, int patch_offset)
+ {
+@@ -106,6 +156,17 @@ void riscv_alternative_fix_offsets(void *alt_ptr, unsigned int len,
+ 
+ 			riscv_alternative_fix_auipc_jalr(alt_ptr + i * sizeof(u32),
+ 							 insn, insn2, patch_offset);
++		} else if (riscv_alt_insn_is_jal(insn)) {
++			int rd_reg = RV_EXTRACT_RD_REG(insn);
++
++			/* only calls (link in ra or t0) are fixed up */
++			if (rd_reg != 1 && rd_reg != 5)
++				continue;
++
++			riscv_alternative_fix_jal(alt_ptr + i * sizeof(u32),
++						  insn, patch_offset);
+ 		}
+ 	}
+ }

@@ -1,0 +1,31 @@
+########## 第3条  编号 A396  提交 e971f19e4c82  日期 2026-07-16
+
+【提交说明】
+KVM: riscv: Fix infinite loop in NACL hfence entry allocation
+
+try_count is initialized to 5 but never decremented in the retry path,
+making the `if (try_count)` check always true. If all NACL shared memory
+hfence entries remain in the pending state after sync, the function loops
+forever, causing a soft lockup. Decrement try_count on each retry so the
+fallback warning and return become reachable.
+
+Fixes: d466c19cead5 ("RISC-V: KVM: Add common nested acceleration support")
+
+【改动统计】
+ arch/riscv/kvm/nacl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/nacl.c b/arch/riscv/kvm/nacl.c
+index 6f9f8963e9dd..9aff03c4f667 100644
+--- a/arch/riscv/kvm/nacl.c
++++ b/arch/riscv/kvm/nacl.c
+@@ -33,7 +33,7 @@ void __kvm_riscv_nacl_hfence(void *shmem,
+ 	}
+ 
+ 	if (ent < 0) {
+-		if (try_count) {
++		if (try_count--) {
+ 			nacl_sync_hfence(-1UL);
+ 			goto again;
+ 		} else {

@@ -1,0 +1,232 @@
+commit d8a719059b9dc963aa190598778ac804ff3e6a87
+Author:     Jonathan Marek <jonathan@marek.ca>
+AuthorDate: Wed Jul 21 17:02:13 2021 +1000
+Commit:     Will Deacon <will@kernel.org>
+CommitDate: Wed Jul 21 11:28:09 2021 +0100
+
+    Revert "mm/pgtable: add stubs for {pmd/pub}_{set/clear}_huge"
+    
+    This reverts commit c742199a014de23ee92055c2473d91fe5561ffdf.
+    
+    c742199a014d ("mm/pgtable: add stubs for {pmd/pub}_{set/clear}_huge")
+    breaks arm64 in at least two ways for configurations where PUD or PMD
+    folding occur:
+    
+      1. We no longer install huge-vmap mappings and silently fall back to
+         page-granular entries, despite being able to install block entries
+         at what is effectively the PGD level.
+    
+      2. If the linear map is backed with block mappings, these will now
+         silently fail to be created in alloc_init_pud(), causing a panic
+         early during boot.
+    
+    The pgtable selftests caught this, although a fix has not been
+    forthcoming and Christophe is AWOL at the moment, so just revert the
+    change for now to get a working -rc3 on which we can queue patches for
+    5.15.
+    
+    A simple revert breaks the build for 32-bit PowerPC 8xx machines, which
+    rely on the default function definitions when the corresponding
+    page-table levels are folded, since commit a6a8f7c4aa7e ("powerpc/8xx:
+    add support for huge pages on VMAP and VMALLOC"), eg:
+    
+      powerpc64-linux-ld: mm/vmalloc.o: in function `vunmap_pud_range':
+      linux/mm/vmalloc.c:362: undefined reference to `pud_clear_huge'
+    
+    To avoid that, add stubs for pud_clear_huge() and pmd_clear_huge() in
+    arch/powerpc/mm/nohash/8xx.c as suggested by Christophe.
+    
+    Cc: Christophe Leroy <christophe.leroy@csgroup.eu>
+    Cc: Catalin Marinas <catalin.marinas@arm.com>
+    Cc: Andrew Morton <akpm@linux-foundation.org>
+    Cc: Nicholas Piggin <npiggin@gmail.com>
+    Cc: Mike Rapoport <rppt@kernel.org>
+    Cc: Mark Rutland <mark.rutland@arm.com>
+    Cc: Geert Uytterhoeven <geert@linux-m68k.org>
+    Fixes: c742199a014d ("mm/pgtable: add stubs for {pmd/pub}_{set/clear}_huge")
+    Signed-off-by: Jonathan Marek <jonathan@marek.ca>
+    Reviewed-by: Ard Biesheuvel <ardb@kernel.org>
+    Acked-by: Marc Zyngier <maz@kernel.org>
+    [mpe: Fold in 8xx.c changes from Christophe and mention in change log]
+    Signed-off-by: Michael Ellerman <mpe@ellerman.id.au>
+    Link: https://lore.kernel.org/linux-arm-kernel/CAMuHMdXShORDox-xxaeUfDW3wx2PeggFSqhVSHVZNKCGK-y_vQ@mail.gmail.com/
+    Link: https://lore.kernel.org/r/20210717160118.9855-1-jonathan@marek.ca
+    Link: https://lore.kernel.org/r/87r1fs1762.fsf@mpe.ellerman.id.au
+    Signed-off-by: Will Deacon <will@kernel.org>
+
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index d74586508448..9ff0de1b2b93 100644
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -1339,7 +1339,6 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
+ 	return dt_virt;
+ }
+ 
+-#if CONFIG_PGTABLE_LEVELS > 3
+ int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
+ {
+ 	pud_t new_pud = pfn_pud(__phys_to_pfn(phys), mk_pud_sect_prot(prot));
+@@ -1354,16 +1353,6 @@ int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
+ 	return 1;
+ }
+ 
+-int pud_clear_huge(pud_t *pudp)
+-{
+-	if (!pud_sect(READ_ONCE(*pudp)))
+-		return 0;
+-	pud_clear(pudp);
+-	return 1;
+-}
+-#endif
+-
+-#if CONFIG_PGTABLE_LEVELS > 2
+ int pmd_set_huge(pmd_t *pmdp, phys_addr_t phys, pgprot_t prot)
+ {
+ 	pmd_t new_pmd = pfn_pmd(__phys_to_pfn(phys), mk_pmd_sect_prot(prot));
+@@ -1378,6 +1367,14 @@ int pmd_set_huge(pmd_t *pmdp, phys_addr_t phys, pgprot_t prot)
+ 	return 1;
+ }
+ 
++int pud_clear_huge(pud_t *pudp)
++{
++	if (!pud_sect(READ_ONCE(*pudp)))
++		return 0;
++	pud_clear(pudp);
++	return 1;
++}
++
+ int pmd_clear_huge(pmd_t *pmdp)
+ {
+ 	if (!pmd_sect(READ_ONCE(*pmdp)))
+@@ -1385,7 +1382,6 @@ int pmd_clear_huge(pmd_t *pmdp)
+ 	pmd_clear(pmdp);
+ 	return 1;
+ }
+-#endif
+ 
+ int pmd_free_pte_page(pmd_t *pmdp, unsigned long addr)
+ {
+diff --git a/arch/powerpc/mm/nohash/8xx.c b/arch/powerpc/mm/nohash/8xx.c
+index 60780e089118..0df9fe29dd56 100644
+--- a/arch/powerpc/mm/nohash/8xx.c
++++ b/arch/powerpc/mm/nohash/8xx.c
+@@ -240,3 +240,13 @@ void __init setup_kuap(bool disabled)
+ 	mtspr(SPRN_MD_AP, MD_APG_KUAP);
+ }
+ #endif
++
++int pud_clear_huge(pud_t *pud)
++{
++	 return 0;
++}
++
++int pmd_clear_huge(pmd_t *pmd)
++{
++	 return 0;
++}
+diff --git a/arch/x86/mm/pgtable.c b/arch/x86/mm/pgtable.c
+index 3364fe62b903..3481b35cb4ec 100644
+--- a/arch/x86/mm/pgtable.c
++++ b/arch/x86/mm/pgtable.c
+@@ -682,7 +682,6 @@ int p4d_clear_huge(p4d_t *p4d)
+ }
+ #endif
+ 
+-#if CONFIG_PGTABLE_LEVELS > 3
+ /**
+  * pud_set_huge - setup kernel PUD mapping
+  *
+@@ -721,23 +720,6 @@ int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot)
+ 	return 1;
+ }
+ 
+-/**
+- * pud_clear_huge - clear kernel PUD mapping when it is set
+- *
+- * Returns 1 on success and 0 on failure (no PUD map is found).
+- */
+-int pud_clear_huge(pud_t *pud)
+-{
+-	if (pud_large(*pud)) {
+-		pud_clear(pud);
+-		return 1;
+-	}
+-
+-	return 0;
+-}
+-#endif
+-
+-#if CONFIG_PGTABLE_LEVELS > 2
+ /**
+  * pmd_set_huge - setup kernel PMD mapping
+  *
+@@ -768,6 +750,21 @@ int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot)
+ 	return 1;
+ }
+ 
++/**
++ * pud_clear_huge - clear kernel PUD mapping when it is set
++ *
++ * Returns 1 on success and 0 on failure (no PUD map is found).
++ */
++int pud_clear_huge(pud_t *pud)
++{
++	if (pud_large(*pud)) {
++		pud_clear(pud);
++		return 1;
++	}
++
++	return 0;
++}
++
+ /**
+  * pmd_clear_huge - clear kernel PMD mapping when it is set
+  *
+@@ -782,7 +779,6 @@ int pmd_clear_huge(pmd_t *pmd)
+ 
+ 	return 0;
+ }
+-#endif
+ 
+ #ifdef CONFIG_X86_64
+ /**
+diff --git a/include/linux/pgtable.h b/include/linux/pgtable.h
+index d147480cdefc..e24d2c992b11 100644
+--- a/include/linux/pgtable.h
++++ b/include/linux/pgtable.h
+@@ -1397,34 +1397,10 @@ static inline int p4d_clear_huge(p4d_t *p4d)
+ }
+ #endif /* !__PAGETABLE_P4D_FOLDED */
+ 
+-#ifndef __PAGETABLE_PUD_FOLDED
+ int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot);
+-int pud_clear_huge(pud_t *pud);
+-#else
+-static inline int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot)
+-{
+-	return 0;
+-}
+-static inline int pud_clear_huge(pud_t *pud)
+-{
+-	return 0;
+-}
+-#endif /* !__PAGETABLE_PUD_FOLDED */
+-
+-#ifndef __PAGETABLE_PMD_FOLDED
+ int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot);
++int pud_clear_huge(pud_t *pud);
+ int pmd_clear_huge(pmd_t *pmd);
+-#else
+-static inline int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot)
+-{
+-	return 0;
+-}
+-static inline int pmd_clear_huge(pmd_t *pmd)
+-{
+-	return 0;
+-}
+-#endif /* !__PAGETABLE_PMD_FOLDED */
+-
+ int p4d_free_pud_page(p4d_t *p4d, unsigned long addr);
+ int pud_free_pmd_page(pud_t *pud, unsigned long addr);
+ int pmd_free_pte_page(pmd_t *pmd, unsigned long addr);

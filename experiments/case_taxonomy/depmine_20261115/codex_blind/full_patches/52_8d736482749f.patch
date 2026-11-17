@@ -1,0 +1,85 @@
+commit 8d736482749f6d350892ef83a7a11d43cd49981e
+Author:     Mathis Salmen <mathis.salmen@matsal.de>
+AuthorDate: Thu Apr 6 12:11:31 2023 +0200
+Commit:     Palmer Dabbelt <palmer@rivosinc.com>
+CommitDate: Tue Apr 11 12:52:27 2023 -0700
+
+    riscv: add icache flush for nommu sigreturn trampoline
+    
+    In a NOMMU kernel, sigreturn trampolines are generated on the user
+    stack by setup_rt_frame. Currently, these trampolines are not instruction
+    fenced, thus their visibility to ifetch is not guaranteed.
+    
+    This patch adds a flush_icache_range in setup_rt_frame to fix this
+    problem.
+    
+    Signed-off-by: Mathis Salmen <mathis.salmen@matsal.de>
+    Fixes: 6bd33e1ece52 ("riscv: add nommu support")
+    Cc: stable@vger.kernel.org
+    Link: https://lore.kernel.org/r/20230406101130.82304-1-mathis.salmen@matsal.de
+    Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index bfb2afa4135f..dee66c9290cc 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -14,16 +14,17 @@
+ #include <linux/linkage.h>
+ 
+ #include <asm/ucontext.h>
+ #include <asm/vdso.h>
+ #include <asm/signal.h>
+ #include <asm/signal32.h>
+ #include <asm/switch_to.h>
+ #include <asm/csr.h>
++#include <asm/cacheflush.h>
+ 
+ extern u32 __user_rt_sigreturn[2];
+ 
+ #define DEBUG_SIG 0
+ 
+ struct rt_sigframe {
+ 	struct siginfo info;
+ 	struct ucontext uc;
+@@ -176,16 +177,17 @@ static inline void __user *get_sigframe(struct ksignal *ksig,
+ 	return (void __user *)sp;
+ }
+ 
+ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
+ 	struct pt_regs *regs)
+ {
+ 	struct rt_sigframe __user *frame;
+ 	long err = 0;
++	unsigned long __maybe_unused addr;
+ 
+ 	frame = get_sigframe(ksig, regs, sizeof(*frame));
+ 	if (!access_ok(frame, sizeof(*frame)))
+ 		return -EFAULT;
+ 
+ 	err |= copy_siginfo_to_user(&frame->info, &ksig->info);
+ 
+ 	/* Create the ucontext. */
+@@ -204,17 +206,22 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
+ #else
+ 	/*
+ 	 * For the nommu case we don't have a VDSO.  Instead we push two
+ 	 * instructions to call the rt_sigreturn syscall onto the user stack.
+ 	 */
+ 	if (copy_to_user(&frame->sigreturn_code, __user_rt_sigreturn,
+ 			 sizeof(frame->sigreturn_code)))
+ 		return -EFAULT;
+-	regs->ra = (unsigned long)&frame->sigreturn_code;
++
++	addr = (unsigned long)&frame->sigreturn_code;
++	/* Make sure the two instructions are pushed to icache. */
++	flush_icache_range(addr, addr + sizeof(frame->sigreturn_code));
++
++	regs->ra = addr;
+ #endif /* CONFIG_MMU */
+ 
+ 	/*
+ 	 * Set up registers for signal handler.
+ 	 * Registers that we don't modify keep the value they had from
+ 	 * user-space at the time we took the signal.
+ 	 * We always pass siginfo and mcontext, regardless of SA_SIGINFO,
+ 	 * since some things rely on this (e.g. glibc's debug/segfault.c).

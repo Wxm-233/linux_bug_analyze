@@ -1,0 +1,2279 @@
+{
+ "note": "三类标签（criteria.md第四节），第一标注人读代码和上游提交后写定，生成提示词之前记录SHA。",
+ "rows": [
+  {
+   "snapshot": "v6.1",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "die",
+   "start": 229,
+   "end": 260,
+   "reason": "sleep A:raw: line 241 bust_spinlocks -> might_sleep",
+   "chain": [
+    [
+     "lib/bust_spinlocks.c",
+     "bust_spinlocks",
+     25,
+     "console_unblank",
+     null
+    ],
+    [
+     "kernel/printk/printk.c",
+     "console_unblank",
+     2911,
+     "console_lock",
+     null
+    ],
+    [
+     "kernel/printk/printk.c",
+     "console_lock",
+     2565,
+     "might_sleep",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:raw",
+   "issue": "CTX|sleep|console_lock|might_sleep",
+   "key": [
+    "CTX",
+    "die",
+    "might_sleep",
+    "bust_spinlocks"
+   ],
+   "cand": "L00",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "标记的是bust_spinlocks(1)，它只把oops_in_progress加1；console_unblank只在bust_spinlocks(0)中调用，而且那时oops_in_progress不为0，走down_trylock_console_sem，不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/sysrq.c",
+   "name": "sysrq_tlbdump_single",
+   "start": 23,
+   "end": 35,
+   "reason": "rt C:callback: line 26 spin_lock_irqsave -> spin_lock_irqsave",
+   "chain": [],
+   "refs": null,
+   "kind": "rt",
+   "source": "C:callback",
+   "issue": "CTX|rt|sysrq_tlbdump_single|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "sysrq_tlbdump_single",
+    "spin_lock_irqsave",
+    "spin_lock_irqsave"
+   ],
+   "cand": "L01",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "该快照的LoongArch还不能开启PREEMPT_RT（ARCH_SUPPORTS_RT从v6.13起才有，be2ea982bb83），普通自旋锁不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/smp.c",
+   "name": "smp_send_stop",
+   "start": 523,
+   "end": 525,
+   "reason": "sleep D:hook: line 524 smp_call_function -> smp_call_function",
+   "chain": [],
+   "refs": null,
+   "kind": "sleep",
+   "source": "D:hook",
+   "issue": "CTX|sleep|smp_send_stop|smp_call_function",
+   "key": [
+    "CTX",
+    "smp_send_stop",
+    "smp_call_function",
+    "smp_call_function"
+   ],
+   "cand": "L02",
+   "label3": "unsure",
+   "basis3": "first_annotator",
+   "reason3": "panic路径先bust_spinlocks(1)，smp_call_function不报警告；machine_halt/restart/power_off只关抢占、未关中断。但sysrq-b在键盘中断中调用emergency_restart→machine_restart→smp_send_stop，此时关中断且oops_in_progress为0，开启lockdep时会触发lockdep_assert_irqs_enabled；这算不算实际错误拿不准",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_lbt",
+   "start": 568,
+   "end": 576,
+   "reason": "noinstr N2: line 572 force_sig -> instrumentable callee",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1651,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|force_sig|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_lbt",
+    "instrumentable callee",
+    "force_sig"
+   ],
+   "cand": "L03",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "handle_loongarch_irq",
+   "start": 607,
+   "end": 615,
+   "reason": "noinstr N2: line 610 irq_enter_rcu -> instrumentable callee",
+   "chain": [
+    [
+     "kernel/softirq.c",
+     "irq_enter_rcu",
+     608,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|irq_enter_rcu|instrumentable callee",
+   "key": [
+    "CTX",
+    "handle_loongarch_irq",
+    "instrumentable callee",
+    "irq_enter_rcu"
+   ],
+   "cand": "L04",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.2",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.2.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_ale",
+   "start": 373,
+   "end": 403,
+   "reason": "sleep B:trap: line 393 emulate_load_store_insn -> get_user",
+   "chain": [
+    [
+     "arch/loongarch/kernel/unaligned.c",
+     "emulate_load_store_insn",
+     260,
+     "__get_inst",
+     null
+    ],
+    [
+     "arch/loongarch/kernel/access-helper.h",
+     "__get_inst",
+     7,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst|get_user",
+   "key": [
+    "CTX",
+    "do_ale",
+    "get_user",
+    "emulate_load_store_insn"
+   ],
+   "cand": "L05",
+   "label3": "bug",
+   "basis3": "fixed_upstream",
+   "reason3": "do_ale不开中断，用户态非对齐访问路径中emulate_load_store_insn调用get_user，可能睡眠；修复在中断原本开启时打开中断（与开发样本28为同一函数、同一修复）",
+   "fix": "69cc6fad5df4"
+  },
+  {
+   "snapshot": "v6.2",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.2.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_ale",
+   "start": 373,
+   "end": 403,
+   "reason": "noinstr N2: line 389 show_registers -> instrumentable callee",
+   "chain": [
+    [
+     "arch/loongarch/kernel/traps.c",
+     "show_registers",
+     212,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|show_registers|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_ale",
+    "instrumentable callee",
+    "show_registers"
+   ],
+   "cand": "L06",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.2",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.2.json",
+   "rule": "R10",
+   "path": "arch/loongarch/include/asm/stackprotector.h",
+   "name": "boot_init_stack_canary",
+   "start": 27,
+   "end": 36,
+   "reason": "all three references call ['get_random_canary'], loongarch does not",
+   "chain": null,
+   "refs": {
+    "arm64": "arch/arm64/include/asm/stackprotector.h",
+    "x86": "arch/x86/include/asm/stackprotector.h",
+    "riscv": "arch/riscv/include/asm/stackprotector.h"
+   },
+   "kind": null,
+   "source": null,
+   "issue": "R10|arch/loongarch/include/asm/stackprotector.h:boot_init_stack_canary",
+   "key": [
+    "R10",
+    "boot_init_stack_canary"
+   ],
+   "cand": "L07",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "canary由get_random_bytes异或LINUX_VERSION_CODE得到，没有像get_random_canary那样把最低字节清零，防字符串溢出泄露的能力弱一些，但不会造成实际错误；上游后来改为get_random_canary，说明为“Like others”",
+   "fix": "a28547576b3b"
+  },
+  {
+   "snapshot": "v6.3",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.3.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_bp",
+   "start": 434,
+   "end": 512,
+   "reason": "sleep B:trap: line 444 __get_inst -> get_user",
+   "chain": [
+    [
+     "arch/loongarch/kernel/access-helper.h",
+     "__get_inst",
+     7,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst|get_user",
+   "key": [
+    "CTX",
+    "do_bp",
+    "get_user",
+    "__get_inst"
+   ],
+   "cand": "L08",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "入口先按PIE恢复异常前的中断状态；从用户态进入时中断已打开，get_user可以睡眠；内核态时__get_inst用get_kernel_nofault，不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.3",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.3.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_bp",
+   "start": 434,
+   "end": 512,
+   "reason": "noinstr N2: line 460 kprobe_singlestep_handler -> instrumentable callee",
+   "chain": [
+    [
+     "arch/loongarch/kernel/kprobes.c",
+     "kprobe_singlestep_handler",
+     318,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|kprobe_singlestep_handler|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_bp",
+    "instrumentable callee",
+    "kprobe_singlestep_handler"
+   ],
+   "cand": "L09",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.3",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.3.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_watch",
+   "start": 515,
+   "end": 562,
+   "reason": "noinstr N2: line 554 breakpoint_handler -> instrumentable callee",
+   "chain": [
+    [
+     "arch/loongarch/kernel/hw_breakpoint.c",
+     "breakpoint_handler",
+     466,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|breakpoint_handler|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_watch",
+    "instrumentable callee",
+    "breakpoint_handler"
+   ],
+   "cand": "L10",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.3",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.3.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_watch",
+   "start": 515,
+   "end": 562,
+   "reason": "noinstr N2: line 558 force_sig -> instrumentable callee",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1651,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|force_sig|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_watch",
+    "instrumentable callee",
+    "force_sig"
+   ],
+   "cand": "L11",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.4",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.4.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_bce",
+   "start": 594,
+   "end": 680,
+   "reason": "sleep B:trap: line 613 __get_inst -> get_user",
+   "chain": [
+    [
+     "arch/loongarch/kernel/access-helper.h",
+     "__get_inst",
+     7,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst|get_user",
+   "key": [
+    "CTX",
+    "do_bce",
+    "get_user",
+    "__get_inst"
+   ],
+   "cand": "L12",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "内核态先die_if_kernel；入口先按PIE恢复异常前的中断状态；从用户态进入时中断已打开，get_user可以睡眠；内核态时__get_inst用get_kernel_nofault，不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.4",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.4.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_bce",
+   "start": 594,
+   "end": 680,
+   "reason": "noinstr N2: line 664 force_sig_bnderr -> instrumentable callee",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig_bnderr",
+     1780,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|force_sig_bnderr|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_bce",
+    "instrumentable callee",
+    "force_sig_bnderr"
+   ],
+   "cand": "L13",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.4",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.4.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_bce",
+   "start": 594,
+   "end": 680,
+   "reason": "noinstr N2: line 678 force_sig -> instrumentable callee",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1652,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|force_sig|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_bce",
+    "instrumentable callee",
+    "force_sig"
+   ],
+   "cand": "L14",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.5",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.5.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/mm/fault.c",
+   "name": "do_page_fault",
+   "start": 252,
+   "end": 264,
+   "reason": "sleep B:trap: line 259 __do_page_fault -> mutex_lock",
+   "chain": [
+    [
+     "arch/loongarch/mm/fault.c",
+     "__do_page_fault",
+     210,
+     "handle_mm_fault",
+     null
+    ],
+    [
+     "mm/memory.c",
+     "handle_mm_fault",
+     5231,
+     "hugetlb_fault",
+     null
+    ],
+    [
+     "mm/hugetlb.c",
+     "hugetlb_fault",
+     6104,
+     "mutex_lock",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|hugetlb_fault|mutex_lock",
+   "key": [
+    "CTX",
+    "do_page_fault",
+    "mutex_lock",
+    "__do_page_fault"
+   ],
+   "cand": "L15",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "__do_page_fault按PIE开中断：从用户态或开中断的内核进入时已先开中断；faulthandler_disabled或没有mm时直接返回，不进handle_mm_fault；关中断的内核上下文访问用户地址在各架构都是同样处理（与开发样本15的标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.6",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.6.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/traps.c",
+   "name": "do_lbt",
+   "start": 979,
+   "end": 1007,
+   "reason": "noinstr N2: line 999 init_restore_lbt -> instrumentable callee",
+   "chain": [
+    [
+     "arch/loongarch/kernel/traps.c",
+     "init_restore_lbt",
+     965,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|init_restore_lbt|instrumentable callee",
+   "key": [
+    "CTX",
+    "do_lbt",
+    "instrumentable callee",
+    "init_restore_lbt"
+   ],
+   "cand": "L16",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.7",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.7.json",
+   "rule": "R7",
+   "path": "arch/loongarch/kvm/main.c",
+   "name": "get_gcsr_flag",
+   "start": 20,
+   "end": 25,
+   "reason": "line 22: [csr] after bound check at line 21, no array_index_nospec",
+   "chain": null,
+   "refs": null,
+   "kind": null,
+   "source": null,
+   "issue": "R7|arch/loongarch/kvm/main.c:get_gcsr_flag",
+   "key": [
+    "R7",
+    "get_gcsr_flag"
+   ],
+   "cand": "L17",
+   "label3": "bug",
+   "basis3": "first_annotator_nofix",
+   "reason3": "下标csr来自客体指令（exit.c的csrid）或用户态（KVM_GET/SET_ONE_REG的id），检查上界后直接读gcsr_flag，没有array_index_nospec，读出的值决定后续分支和对csrs[id]的访问；到终点版本仍未加（与开发样本49、50的标准一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.13",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.13.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kvm/intc/eiointc.c",
+   "name": "kvm_eiointc_regs_access",
+   "start": 826,
+   "end": 883,
+   "reason": "sleep A:spin: line 877 copy_to_user -> copy_to_user",
+   "chain": [],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:spin",
+   "issue": "CTX|sleep|kvm_eiointc_regs_access|copy_to_user",
+   "key": [
+    "CTX",
+    "kvm_eiointc_regs_access",
+    "copy_to_user",
+    "copy_to_user"
+   ],
+   "cand": "L18",
+   "label3": "bug",
+   "basis3": "fixed_upstream",
+   "reason3": "持spin_lock_irqsave时调用copy_to_user，可能睡眠（与开发样本52为同一函数、同一修复）",
+   "fix": "62f11796a0df"
+  },
+  {
+   "snapshot": "v6.13",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.13.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kvm/intc/eiointc.c",
+   "name": "kvm_eiointc_sw_status_access",
+   "start": 888,
+   "end": 925,
+   "reason": "sleep A:spin: line 919 copy_to_user -> copy_to_user",
+   "chain": [],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:spin",
+   "issue": "CTX|sleep|kvm_eiointc_sw_status_access|copy_to_user",
+   "key": [
+    "CTX",
+    "kvm_eiointc_sw_status_access",
+    "copy_to_user",
+    "copy_to_user"
+   ],
+   "cand": "L19",
+   "label3": "bug",
+   "basis3": "fixed_upstream",
+   "reason3": "持spin_lock_irqsave时调用copy_to_user，可能睡眠（与开发样本53为同一函数、同一修复）",
+   "fix": "01a8e68396a6"
+  },
+  {
+   "snapshot": "v6.13",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v6.13.json",
+   "rule": "R10",
+   "path": "arch/loongarch/kvm/vm.c",
+   "name": "kvm_arch_irqchip_in_kernel",
+   "start": 191,
+   "end": 193,
+   "reason": "all three references call ['irqchip_in_kernel'], loongarch does not",
+   "chain": null,
+   "refs": {
+    "arm64": "arch/arm64/kvm/arm.c",
+    "x86": "arch/x86/kvm/irq.c",
+    "riscv": "arch/riscv/kvm/vm.c"
+   },
+   "kind": null,
+   "source": null,
+   "issue": "R10|arch/loongarch/kvm/vm.c:kvm_arch_irqchip_in_kernel",
+   "key": [
+    "R10",
+    "kvm_arch_irqchip_in_kernel"
+   ],
+   "cand": "L20",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "LoongArch没有通用的irqchip_mode，kvm_arch_irqchip_in_kernel检查ipi、eiointc、pch_pic三个内核中断控制器都已创建，作用与参照架构的irqchip_in_kernel相同",
+   "fix": null
+  },
+  {
+   "snapshot": "v7.0",
+   "source_file": "llm_review_expand_20261103/flags_la/flags_v7.0.json",
+   "rule": "CTX",
+   "path": "arch/loongarch/kernel/smp.c",
+   "name": "loongson_cpu_disable",
+   "start": 445,
+   "end": 466,
+   "reason": "sleep A:irq: line 460 irq_migrate_all_off_this_cpu -> schedule_work",
+   "chain": [
+    [
+     "kernel/irq/cpuhotplug.c",
+     "irq_migrate_all_off_this_cpu",
+     183,
+     "irq_affinity_schedule_notify_work",
+     null
+    ],
+    [
+     "kernel/irq/manage.c",
+     "irq_affinity_schedule_notify_work",
+     370,
+     "schedule_work",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:irq",
+   "issue": "CTX|sleep|irq_affinity_schedule_notify_work|schedule_work",
+   "key": [
+    "CTX",
+    "loongson_cpu_disable",
+    "schedule_work",
+    "irq_migrate_all_off_this_cpu"
+   ],
+   "cand": "L21",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "schedule_work可在原子上下文中调用，不会睡眠；参照架构的__cpu_disable同样在关中断时调用irq_migrate_all_off_this_cpu",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kvm/vz.c",
+   "name": "_kvm_vz_restore_htimer",
+   "start": 389,
+   "end": 415,
+   "reason": "rt A:irq: line 398 kvm_mips_freeze_hrtimer -> spin_lock_bh",
+   "chain": [
+    [
+     "arch/mips/kvm/emulate.c",
+     "kvm_mips_freeze_hrtimer",
+     477,
+     "hrtimer_cancel",
+     null
+    ],
+    [
+     "kernel/time/hrtimer.c",
+     "hrtimer_cancel",
+     1446,
+     "hrtimer_cancel_wait_running",
+     null
+    ],
+    [
+     "kernel/time/hrtimer.c",
+     "hrtimer_cancel_wait_running",
+     1415,
+     "spin_lock_bh",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "A:irq",
+   "issue": "CTX|rt|hrtimer_cancel_wait_running|spin_lock_bh",
+   "key": [
+    "CTX",
+    "_kvm_vz_restore_htimer",
+    "spin_lock_bh",
+    "kvm_mips_freeze_hrtimer"
+   ],
+   "cand": "M00",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/idle.c",
+   "name": "arch_cpu_idle",
+   "start": 245,
+   "end": 250,
+   "reason": "noinstr N1: line 245 arch_cpu_idle -> called from noinstr/__cpuidle",
+   "chain": [],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N1",
+   "issue": "CTX|noinstr|arch_cpu_idle|called from noinstr/__cpuidle",
+   "key": [
+    "CTX",
+    "arch_cpu_idle",
+    "called from noinstr/__cpuidle",
+    "arch_cpu_idle"
+   ],
+   "cand": "M01",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "v6.1的arch_cpu_idle没有__cpuidle/noinstr标注；MIPS没有select HAVE_NOINSTR_VALIDATION，objtool不校验noinstr，不会造成实际错误，只是与参照架构的写法不一致。上游26388a7c353f在所有架构上统一补了__cpuidle，属于写法统一",
+   "fix": "26388a7c353f"
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/crash.c",
+   "name": "default_machine_crash_shutdown",
+   "start": 97,
+   "end": 103,
+   "reason": "sleep A:irq: line 101 crash_kexec_prepare_cpus -> smp_call_function",
+   "chain": [
+    [
+     "arch/mips/kernel/crash.c",
+     "crash_kexec_prepare_cpus",
+     66,
+     "smp_call_function",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:irq",
+   "issue": "CTX|sleep|crash_kexec_prepare_cpus|smp_call_function",
+   "key": [
+    "CTX",
+    "default_machine_crash_shutdown",
+    "smp_call_function",
+    "crash_kexec_prepare_cpus"
+   ],
+   "cand": "M02",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "崩溃转储路径：panic已bust_spinlocks(1)置oops_in_progress，smp_call_function不等待（wait=0），关中断调用在此场合是允许的（与LoongArch开发样本20的标签一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "die",
+   "start": 395,
+   "end": 426,
+   "reason": "sleep A:raw: line 407 bust_spinlocks -> might_sleep",
+   "chain": [
+    [
+     "lib/bust_spinlocks.c",
+     "bust_spinlocks",
+     25,
+     "console_unblank",
+     null
+    ],
+    [
+     "kernel/printk/printk.c",
+     "console_unblank",
+     2911,
+     "console_lock",
+     null
+    ],
+    [
+     "kernel/printk/printk.c",
+     "console_lock",
+     2565,
+     "might_sleep",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:raw",
+   "issue": "CTX|sleep|console_lock|might_sleep",
+   "key": [
+    "CTX",
+    "die",
+    "might_sleep",
+    "bust_spinlocks"
+   ],
+   "cand": "M03",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "标记的是bust_spinlocks(1)，只把oops_in_progress加1，不调用console_unblank",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "die",
+   "start": 395,
+   "end": 426,
+   "reason": "sleep A:raw: line 410 show_registers -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "show_registers",
+     387,
+     "show_stacktrace",
+     null
+    ],
+    [
+     "arch/mips/kernel/traps.c",
+     "show_stacktrace",
+     196,
+     "__get_addr",
+     null
+    ],
+    [
+     "arch/mips/kernel/access-helper.h",
+     "__get_addr",
+     7,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:raw",
+   "issue": "CTX|sleep|__get_addr|get_user",
+   "key": [
+    "CTX",
+    "die",
+    "get_user",
+    "show_registers"
+   ],
+   "cand": "M04",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "MIPS中die只由die_if_kernel和mm/fault.c的no_context调用，regs都是内核态，show_registers按user_mode(regs)读内核栈和内核正文，不走get_user",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/unaligned.c",
+   "name": "do_ade",
+   "start": 1476,
+   "end": 1560,
+   "reason": "sleep B:trap: line 1492 fixup_exception -> __get_user",
+   "chain": [
+    [
+     "arch/mips/mm/extable.c",
+     "fixup_exception",
+     17,
+     "exception_epc",
+     null
+    ],
+    [
+     "arch/mips/include/asm/branch.h",
+     "exception_epc",
+     66,
+     "__isa_exception_epc",
+     null
+    ],
+    [
+     "arch/mips/kernel/branch.c",
+     "__isa_exception_epc",
+     35,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__isa_exception_epc|__get_user",
+   "key": [
+    "CTX",
+    "do_ade",
+    "__get_user",
+    "fixup_exception"
+   ],
+   "cand": "M05",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "do_ade的入口参数为ade（KMODE），保持异常前的中断状态：从用户态进入时中断已打开；fixup_exception只查异常表，不访问用户内存",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/unaligned.c",
+   "name": "do_ade",
+   "start": 1476,
+   "end": 1560,
+   "reason": "sleep B:trap: line 1548 emulate_load_store_insn -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/unaligned.c",
+     "emulate_load_store_insn",
+     127,
+     "__get_inst32",
+     null
+    ],
+    [
+     "arch/mips/kernel/access-helper.h",
+     "__get_inst32",
+     18,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst32|get_user",
+   "key": [
+    "CTX",
+    "do_ade",
+    "get_user",
+    "emulate_load_store_insn"
+   ],
+   "cand": "M06",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "do_ade入口为KMODE，从用户态进入时中断已打开，emulate_load_store_insn中get_user可以睡眠；关中断的内核上下文访问用户地址在各架构都是同样处理",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/unaligned.c",
+   "name": "do_ade",
+   "start": 1476,
+   "end": 1560,
+   "reason": "sleep B:trap: line 1536 emulate_load_store_MIPS16e -> __get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/unaligned.c",
+     "emulate_load_store_MIPS16e",
+     1213,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|emulate_load_store_MIPS16e|__get_user",
+   "key": [
+    "CTX",
+    "do_ade",
+    "__get_user",
+    "emulate_load_store_MIPS16e"
+   ],
+   "cand": "M07",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "do_ade入口为KMODE，从用户态进入时中断已打开；同M06",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/unaligned.c",
+   "name": "do_ade",
+   "start": 1476,
+   "end": 1560,
+   "reason": "sleep B:trap: line 1527 show_registers -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "show_registers",
+     387,
+     "show_stacktrace",
+     null
+    ],
+    [
+     "arch/mips/kernel/traps.c",
+     "show_stacktrace",
+     196,
+     "__get_addr",
+     null
+    ],
+    [
+     "arch/mips/kernel/access-helper.h",
+     "__get_addr",
+     7,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_addr|get_user",
+   "key": [
+    "CTX",
+    "do_ade",
+    "get_user",
+    "show_registers"
+   ],
+   "cand": "M08",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "do_ade入口为KMODE，从用户态进入时中断已打开；show_registers只在unaligned_action为SHOW的调试选项下调用",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_be",
+   "start": 448,
+   "end": 496,
+   "reason": "sleep B:trap: line 458 exception_epc -> __get_user",
+   "chain": [
+    [
+     "arch/mips/include/asm/branch.h",
+     "exception_epc",
+     66,
+     "__isa_exception_epc",
+     null
+    ],
+    [
+     "arch/mips/kernel/branch.c",
+     "__isa_exception_epc",
+     35,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__isa_exception_epc|__get_user",
+   "key": [
+    "CTX",
+    "do_be",
+    "__get_user",
+    "exception_epc"
+   ],
+   "cand": "M09",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "do_be入口为cli，但exception_epc只在!user_mode(regs)时调用，读的是内核正文，不会缺页、不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_bp",
+   "start": 1028,
+   "end": 1112,
+   "reason": "sleep B:trap: line 1029 exception_epc -> __get_user",
+   "chain": [
+    [
+     "arch/mips/include/asm/branch.h",
+     "exception_epc",
+     66,
+     "__isa_exception_epc",
+     null
+    ],
+    [
+     "arch/mips/kernel/branch.c",
+     "__isa_exception_epc",
+     35,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__isa_exception_epc|__get_user",
+   "key": [
+    "CTX",
+    "do_bp",
+    "__get_user",
+    "exception_epc"
+   ],
+   "cand": "M10",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_cpu",
+   "start": 1403,
+   "end": 1505,
+   "reason": "sleep B:trap: line 1429 get_user -> get_user",
+   "chain": [],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|do_cpu|get_user",
+   "key": [
+    "CTX",
+    "do_cpu",
+    "get_user",
+    "get_user"
+   ],
+   "cand": "M11",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_cpu",
+   "start": 1403,
+   "end": 1505,
+   "reason": "sleep B:trap: line 1476 fpu_emulator_cop1Handler -> get_user",
+   "chain": [
+    [
+     "arch/mips/math-emu/cp1emu.c",
+     "fpu_emulator_cop1Handler",
+     2862,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|fpu_emulator_cop1Handler|get_user",
+   "key": [
+    "CTX",
+    "do_cpu",
+    "get_user",
+    "fpu_emulator_cop1Handler"
+   ],
+   "cand": "M12",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_cpu",
+   "start": 1403,
+   "end": 1505,
+   "reason": "sleep B:trap: line 1419 exception_epc -> __get_user",
+   "chain": [
+    [
+     "arch/mips/include/asm/branch.h",
+     "exception_epc",
+     66,
+     "__isa_exception_epc",
+     null
+    ],
+    [
+     "arch/mips/kernel/branch.c",
+     "__isa_exception_epc",
+     35,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__isa_exception_epc|__get_user",
+   "key": [
+    "CTX",
+    "do_cpu",
+    "__get_user",
+    "exception_epc"
+   ],
+   "cand": "M13",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_cpu",
+   "start": 1403,
+   "end": 1505,
+   "reason": "rt B:trap: line 1442 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_cpu",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M14",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且该处理函数入口为sti，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_cpu",
+   "start": 1403,
+   "end": 1505,
+   "reason": "sleep B:trap: line 1487 process_fpemu_return -> down_read",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "process_fpemu_return",
+     807,
+     "mmap_read_lock",
+     null
+    ],
+    [
+     "include/linux/mmap_lock.h",
+     "mmap_read_lock",
+     117,
+     "down_read",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|mmap_read_lock|down_read",
+   "key": [
+    "CTX",
+    "do_cpu",
+    "down_read",
+    "process_fpemu_return"
+   ],
+   "cand": "M15",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_dsp",
+   "start": 1649,
+   "end": 1654,
+   "reason": "rt B:trap: line 1653 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_dsp",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M16",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且该处理函数入口为sti，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_gsexc",
+   "start": 1910,
+   "end": 1938,
+   "reason": "rt B:trap: line 1925 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_gsexc",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M17",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且do_gsexc入口参数为gsexc，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_mcheck",
+   "start": 1588,
+   "end": 1610,
+   "reason": "sleep B:trap: line 1601 show_code -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "show_code",
+     243,
+     "__get_inst16",
+     null
+    ],
+    [
+     "arch/mips/kernel/access-helper.h",
+     "__get_inst16",
+     13,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst16|get_user",
+   "key": [
+    "CTX",
+    "do_mcheck",
+    "get_user",
+    "show_code"
+   ],
+   "cand": "M18",
+   "label3": "unsure",
+   "basis3": "first_annotator",
+   "reason3": "do_mcheck入口为cli；用户态发生机器检查时，show_code走get_user，开启DEBUG_ATOMIC_SLEEP会报“在原子上下文中睡眠”警告，但紧接着就panic，这算不算实际错误拿不准",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_mdmx",
+   "start": 1549,
+   "end": 1555,
+   "reason": "rt B:trap: line 1553 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_mdmx",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M19",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且该处理函数入口为sti，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_msa",
+   "start": 1528,
+   "end": 1546,
+   "reason": "rt B:trap: line 1535 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_msa",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M20",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且该处理函数入口为sti，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_ri",
+   "start": 1152,
+   "end": 1243,
+   "reason": "sleep B:trap: line 1177 process_fpemu_return -> down_read",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "process_fpemu_return",
+     807,
+     "mmap_read_lock",
+     null
+    ],
+    [
+     "include/linux/mmap_lock.h",
+     "mmap_read_lock",
+     117,
+     "down_read",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|mmap_read_lock|down_read",
+   "key": [
+    "CTX",
+    "do_ri",
+    "down_read",
+    "process_fpemu_return"
+   ],
+   "cand": "M21",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_ri",
+   "start": 1152,
+   "end": 1243,
+   "reason": "sleep B:trap: line 1203 simulate_llsc -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "simulate_llsc",
+     620,
+     "simulate_ll",
+     null
+    ],
+    [
+     "arch/mips/kernel/traps.c",
+     "simulate_ll",
+     548,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|simulate_ll|get_user",
+   "key": [
+    "CTX",
+    "do_ri",
+    "get_user",
+    "simulate_llsc"
+   ],
+   "cand": "M22",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_ri",
+   "start": 1152,
+   "end": 1243,
+   "reason": "rt B:trap: line 1238 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_ri",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M23",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且该处理函数入口为sti，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_ri",
+   "start": 1152,
+   "end": 1243,
+   "reason": "sleep B:trap: line 1212 simulate_fp -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/traps.c",
+     "simulate_fp",
+     852,
+     "fpu_emulator_cop1Handler",
+     null
+    ],
+    [
+     "arch/mips/math-emu/cp1emu.c",
+     "fpu_emulator_cop1Handler",
+     2862,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|fpu_emulator_cop1Handler|get_user",
+   "key": [
+    "CTX",
+    "do_ri",
+    "get_user",
+    "simulate_fp"
+   ],
+   "cand": "M24",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_ri",
+   "start": 1152,
+   "end": 1243,
+   "reason": "sleep B:trap: line 1153 exception_epc -> __get_user",
+   "chain": [
+    [
+     "arch/mips/include/asm/branch.h",
+     "exception_epc",
+     66,
+     "__isa_exception_epc",
+     null
+    ],
+    [
+     "arch/mips/kernel/branch.c",
+     "__isa_exception_epc",
+     35,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__isa_exception_epc|__get_user",
+   "key": [
+    "CTX",
+    "do_ri",
+    "__get_user",
+    "exception_epc"
+   ],
+   "cand": "M25",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_ri",
+   "start": 1152,
+   "end": 1243,
+   "reason": "sleep B:trap: line 1195 compute_return_epc -> __get_user",
+   "chain": [
+    [
+     "arch/mips/include/asm/branch.h",
+     "compute_return_epc",
+     77,
+     "__microMIPS_compute_return_epc",
+     null
+    ],
+    [
+     "arch/mips/kernel/branch.c",
+     "__microMIPS_compute_return_epc",
+     274,
+     "__get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__microMIPS_compute_return_epc|__get_user",
+   "key": [
+    "CTX",
+    "do_ri",
+    "__get_user",
+    "compute_return_epc"
+   ],
+   "cand": "M26",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_tr",
+   "start": 1115,
+   "end": 1149,
+   "reason": "sleep B:trap: line 1125 __get_inst16 -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/access-helper.h",
+     "__get_inst16",
+     13,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst16|get_user",
+   "key": [
+    "CTX",
+    "do_tr",
+    "get_user",
+    "__get_inst16"
+   ],
+   "cand": "M27",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_tr",
+   "start": 1115,
+   "end": 1149,
+   "reason": "rt B:trap: line 1147 force_sig -> spin_lock_irqsave",
+   "chain": [
+    [
+     "kernel/signal.c",
+     "force_sig",
+     1660,
+     "force_sig_info",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info",
+     1357,
+     "force_sig_info_to_task",
+     null
+    ],
+    [
+     "kernel/signal.c",
+     "force_sig_info_to_task",
+     1329,
+     "spin_lock_irqsave",
+     "rt"
+    ]
+   ],
+   "refs": null,
+   "kind": "rt",
+   "source": "B:trap",
+   "issue": "CTX|rt|force_sig_info_to_task|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "do_tr",
+    "spin_lock_irqsave",
+    "force_sig"
+   ],
+   "cand": "M28",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠；且该处理函数入口为sti，已开中断",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/traps.c",
+   "name": "do_tr",
+   "start": 1115,
+   "end": 1149,
+   "reason": "sleep B:trap: line 1133 __get_inst32 -> get_user",
+   "chain": [
+    [
+     "arch/mips/kernel/access-helper.h",
+     "__get_inst32",
+     18,
+     "get_user",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "B:trap",
+   "issue": "CTX|sleep|__get_inst32|get_user",
+   "key": [
+    "CTX",
+    "do_tr",
+    "get_user",
+    "__get_inst32"
+   ],
+   "cand": "M29",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kvm/mips.c",
+   "name": "kvm_mips_handle_exit",
+   "start": 1392,
+   "end": 1400,
+   "reason": "noinstr N2: line 1396 __kvm_mips_handle_exit -> instrumentable callee",
+   "chain": [
+    [
+     "arch/mips/kvm/mips.c",
+     "__kvm_mips_handle_exit",
+     1203,
+     "",
+     null
+    ]
+   ],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N2",
+   "issue": "CTX|noinstr|__kvm_mips_handle_exit|instrumentable callee",
+   "key": [
+    "CTX",
+    "kvm_mips_handle_exit",
+    "instrumentable callee",
+    "__kvm_mips_handle_exit"
+   ],
+   "cand": "M30",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "MIPS没有select HAVE_NOINSTR_VALIDATION，objtool不校验noinstr，不会造成实际错误，只是与参照架构的写法不一致（e4de20576986修的是空指针，与此无关）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/lantiq/xway/sysctrl.c",
+   "name": "pmu_enable",
+   "start": 204,
+   "end": 226,
+   "reason": "rt D:hook: line 214 spin_lock -> spin_lock",
+   "chain": [],
+   "refs": null,
+   "kind": "rt",
+   "source": "D:hook",
+   "issue": "CTX|rt|pmu_enable|spin_lock",
+   "key": [
+    "CTX",
+    "pmu_enable",
+    "spin_lock",
+    "spin_lock"
+   ],
+   "cand": "M31",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/kernel/sysrq.c",
+   "name": "sysrq_tlbdump_single",
+   "start": 24,
+   "end": 36,
+   "reason": "rt C:callback: line 27 spin_lock_irqsave -> spin_lock_irqsave",
+   "chain": [],
+   "refs": null,
+   "kind": "rt",
+   "source": "C:callback",
+   "issue": "CTX|rt|sysrq_tlbdump_single|spin_lock_irqsave",
+   "key": [
+    "CTX",
+    "sysrq_tlbdump_single",
+    "spin_lock_irqsave",
+    "spin_lock_irqsave"
+   ],
+   "cand": "M32",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "到终点版本MIPS的Kconfig都没有select ARCH_SUPPORTS_RT，不能开启PREEMPT_RT，普通自旋锁不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "CTX",
+   "path": "arch/mips/txx9/generic/setup_tx4938.c",
+   "name": "tx4938_machine_restart",
+   "start": 48,
+   "end": 66,
+   "reason": "sleep A:irq: line 55 txx9_wdt_now -> mutex_lock",
+   "chain": [
+    [
+     "arch/mips/txx9/generic/setup.c",
+     "txx9_wdt_now",
+     333,
+     "ioremap",
+     null
+    ],
+    [
+     "lib/logic_iomem.c",
+     "ioremap",
+     92,
+     "mutex_lock",
+     "sleep"
+    ]
+   ],
+   "refs": null,
+   "kind": "sleep",
+   "source": "A:irq",
+   "issue": "CTX|sleep|ioremap|mutex_lock",
+   "key": [
+    "CTX",
+    "tx4938_machine_restart",
+    "mutex_lock",
+    "txx9_wdt_now"
+   ],
+   "cand": "M33",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "TX49的plat_ioremap对0xff000000起4MB的寄存器区直接映射，TX4938_TMR_REG(2)在此范围内，ioremap不会走get_vm_area，不会睡眠",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "R10",
+   "path": "arch/mips/kernel/uprobes.c",
+   "name": "arch_uprobe_post_xol",
+   "start": 127,
+   "end": 134,
+   "reason": "all three references call ['WARN_ON_ONCE'], mips does not",
+   "chain": null,
+   "refs": {
+    "arm64": "arch/arm64/kernel/probes/uprobes.c",
+    "x86": "arch/x86/kernel/uprobes.c",
+    "riscv": "arch/riscv/kernel/probes/uprobes.c"
+   },
+   "kind": null,
+   "source": null,
+   "issue": "R10|arch/mips/kernel/uprobes.c:arch_uprobe_post_xol",
+   "key": [
+    "R10",
+    "arch_uprobe_post_xol"
+   ],
+   "cand": "M34",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "参照架构多出的是WARN_ON_ONCE(trap_nr != UPROBE_TRAP_NR)这一自检警告，缺少它不会造成错误",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "R10",
+   "path": "arch/mips/mm/extable.c",
+   "name": "fixup_exception",
+   "start": 14,
+   "end": 25,
+   "reason": "all three references call ['BUG'], mips does not",
+   "chain": null,
+   "refs": {
+    "arm64": "arch/arm64/mm/extable.c",
+    "x86": "arch/x86/mm/extable.c",
+    "riscv": "arch/riscv/mm/extable.c"
+   },
+   "kind": null,
+   "source": null,
+   "issue": "R10|arch/mips/mm/extable.c:fixup_exception",
+   "key": [
+    "R10",
+    "fixup_exception"
+   ],
+   "cand": "M35",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "MIPS的异常表项没有type字段，fixup_exception没有switch，不需要BUG()兜底",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "R10",
+   "path": "arch/mips/kernel/setup.c",
+   "name": "setup_arch",
+   "start": 779,
+   "end": 810,
+   "reason": "all three references call ['efi_init', 'jump_label_init', 'parse_early_param', 'setup_initial_init_mm'], mips does not",
+   "chain": null,
+   "refs": {
+    "arm64": "arch/arm64/kernel/setup.c",
+    "x86": "arch/x86/kernel/setup.c",
+    "riscv": "arch/riscv/kernel/setup.c"
+   },
+   "kind": null,
+   "source": null,
+   "issue": "R10|arch/mips/kernel/setup.c:setup_arch",
+   "key": [
+    "R10",
+    "setup_arch"
+   ],
+   "cand": "M36",
+   "label3": "bug",
+   "basis3": "first_annotator_nofix",
+   "reason3": "arch_mem_init（由setup_arch调用）中执行parse_early_param，早于start_kernel中的jump_label_init；MIPS选了IRQ_FORCED_THREADING和HAVE_ARCH_JUMP_LABEL，启动参数threadirqs的setup_forced_irqthreads会调用static_branch_enable，触发“static key used before call to jump_label_init”警告；到终点版本仍未改（LoongArch的同一问题已由ea68d444a658修复）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "R10",
+   "path": "arch/mips/include/asm/syscall.h",
+   "name": "syscall_get_error",
+   "start": 95,
+   "end": 97,
+   "reason": "all three references call ['IS_ERR_VALUE'], mips does not",
+   "chain": null,
+   "refs": {
+    "arm64": "arch/arm64/include/asm/syscall.h",
+    "x86": "arch/x86/include/asm/syscall.h",
+    "riscv": "arch/riscv/include/asm/syscall.h"
+   },
+   "kind": null,
+   "source": null,
+   "issue": "R10|arch/mips/include/asm/syscall.h:syscall_get_error",
+   "key": [
+    "R10",
+    "syscall_get_error"
+   ],
+   "cand": "M37",
+   "label3": "not_issue",
+   "basis3": "first_annotator",
+   "reason3": "MIPS用a3寄存器（regs[7]）标记系统调用出错，按a3返回-regs[2]，不需要IS_ERR_VALUE",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.1",
+   "source_file": "flags_mips/flags_v6.1.json",
+   "rule": "R7",
+   "path": "arch/mips/kvm/vz.c",
+   "name": "kvm_vz_set_one_reg",
+   "start": 2137,
+   "end": 2409,
+   "reason": "line 2356: [idx] after bound check at line 2354, no array_index_nospec",
+   "chain": null,
+   "refs": null,
+   "kind": null,
+   "source": null,
+   "issue": "R7|arch/mips/kvm/vz.c:kvm_vz_set_one_reg",
+   "key": [
+    "R7",
+    "kvm_vz_set_one_reg"
+   ],
+   "cand": "M38",
+   "label3": "bug",
+   "basis3": "first_annotator_nofix",
+   "reason3": "下标idx来自用户态（KVM_SET_ONE_REG的reg->id），检查上界后直接写maar[idx]，没有array_index_nospec，到终点版本仍未加（与LoongArch同类样本的标准一致）",
+   "fix": null
+  },
+  {
+   "snapshot": "v6.3",
+   "source_file": "flags_mips/flags_v6.3.json",
+   "rule": "CTX",
+   "path": "arch/mips/cavium-octeon/csrc-octeon.c",
+   "name": "sched_clock",
+   "start": 115,
+   "end": 136,
+   "reason": "noinstr N1: line 115 sched_clock -> called from noinstr/__cpuidle",
+   "chain": [],
+   "refs": null,
+   "kind": "noinstr",
+   "source": "N1",
+   "issue": "CTX|noinstr|sched_clock|called from noinstr/__cpuidle",
+   "key": [
+    "CTX",
+    "sched_clock",
+    "called from noinstr/__cpuidle",
+    "sched_clock"
+   ],
+   "cand": "M39",
+   "label3": "convention",
+   "basis3": "first_annotator",
+   "reason3": "被noinstr/__cpuidle代码调用的sched_clock没有noinstr标注；MIPS没有select HAVE_NOINSTR_VALIDATION，objtool不校验noinstr，不会造成实际错误，只是与参照架构的写法不一致",
+   "fix": null
+  }
+ ]
+}

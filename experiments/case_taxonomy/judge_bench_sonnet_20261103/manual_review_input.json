@@ -1,0 +1,152 @@
+[
+ {
+  "variant": "V0",
+  "id": "A288",
+  "year": "2023",
+  "target": {
+   "path": "arch/riscv/kernel/module.c",
+   "name": "module_alloc",
+   "start": 894,
+   "end": 899
+  },
+  "problem": "module_alloc 分配模块内存后没有调用 kasan_alloc_module_shadow 为其建立 KASAN 影子内存，失败时也没有 vfree 并返回 NULL",
+  "lines": [
+   895,
+   896,
+   897,
+   898
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A288",
+  "year": "2023",
+  "target": {
+   "path": "arch/riscv/kernel/module.c",
+   "name": "module_alloc",
+   "start": 894,
+   "end": 899
+  },
+  "problem": "RISC-V的module_alloc未调用kasan_alloc_module_shadow（及失败时vfree），若启用KASAN且模块区位于vmalloc区，模块内存缺少shadow映射，可能导致KASAN访问异常；另外也没有VM_FLUSH_RESET_PERMS等标志，权限重置情况不确定。",
+  "lines": [
+   895,
+   898
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A305",
+  "year": "2024",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "emit_atomic",
+   "start": 473,
+   "end": 553
+  },
+  "problem": "switch(imm)没有default分支，遇到未知的原子操作码时不报错、不返回错误，静默不生成任何指令（函数返回void，无法让JIT失败）",
+  "lines": [
+   487,
+   552
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A344",
+  "year": "2025",
+  "target": {
+   "path": "arch/riscv/kernel/traps.c",
+   "name": "do_trap_misaligned",
+   "start": 220,
+   "end": 236
+  },
+  "problem": "x86参照实现在irqentry_enter/exit之间用instrumentation_begin()/instrumentation_end()包住可插桩的处理代码，RISC-V的do_trap_misaligned在进入entry之后直接调用handler和do_trap_error，没有这对标注。",
+  "lines": [
+   228,
+   229,
+   230
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A359",
+  "year": "2025",
+  "target": {
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_prepare_memory_region",
+   "start": 172,
+   "end": 261
+  },
+  "problem": "GPA上界检查使用 >=，把恰好到达GPA空间末尾的合法memslot也拒绝了；参照实现用 > （即 base_gfn+npages 可等于上限）",
+  "lines": [
+   186,
+   187
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A387",
+  "year": "2026",
+  "target": {
+   "path": "arch/riscv/kvm/vcpu.c",
+   "name": "kvm_arch_vcpu_ioctl_set_guest_debug",
+   "start": 535,
+   "end": 542
+  },
+  "problem": "未校验 dbg->control 中的无效/不支持的标志位，直接存入 vcpu->guest_debug，未对未知位返回 -EINVAL",
+  "lines": [
+   536,
+   537
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A392",
+  "year": "2026",
+  "target": {
+   "path": "arch/riscv/kernel/machine_kexec_file.c",
+   "name": "prepare_elf_headers",
+   "start": 60,
+   "end": 86
+  },
+  "problem": "只排除了 crashk_res，没有排除 crashk_low_res（低端 crashkernel 保留区），且 nr_ranges 只预留了 1 个额外槽位，不够再多分裂一次。",
+  "lines": [
+   65,
+   78,
+   79,
+   80,
+   81
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A393",
+  "year": "2026",
+  "target": {
+   "path": "arch/riscv/kernel/machine_kexec.c",
+   "name": "machine_kexec_prepare",
+   "start": 32,
+   "end": 79
+  },
+  "problem": "控制页只用set_memory_x加上可执行权限，没有清除写权限，页面保持可写可执行（W+X）；x86参照实现用set_memory_rox设为只读可执行。",
+  "lines": [
+   75
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A398",
+  "year": "2026",
+  "target": {
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_prepare_memory_region",
+   "start": 262,
+   "end": 330
+  },
+  "problem": "GPA范围上界检查使用了`>=`，应像arm64/x86那样允许区域末尾恰好等于GPA空间上限（用`>`），否则会错误拒绝刚好填满GPA空间末尾的合法memslot",
+  "lines": [
+   275,
+   276,
+   277
+  ]
+ }
+]

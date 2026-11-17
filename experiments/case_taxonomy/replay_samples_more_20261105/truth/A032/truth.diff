@@ -1,0 +1,65 @@
+commit 656f9aec07dba7c61d469727494a5d1b18d0bef4
+Subject: LoongArch: Ensure FP/SIMD registers in the core dump file is up to date
+
+
+diff --git a/arch/loongarch/include/asm/fpu.h b/arch/loongarch/include/asm/fpu.h
+index b541f6248837..c2d8962fda00 100644
+--- a/arch/loongarch/include/asm/fpu.h
++++ b/arch/loongarch/include/asm/fpu.h
+@@ -173,16 +173,30 @@ static inline void restore_fp(struct task_struct *tsk)
+ 		_restore_fp(&tsk->thread.fpu);
+ }
+ 
+-static inline union fpureg *get_fpu_regs(struct task_struct *tsk)
++static inline void save_fpu_regs(struct task_struct *tsk)
+ {
++	unsigned int euen;
++
+ 	if (tsk == current) {
+ 		preempt_disable();
+-		if (is_fpu_owner())
++
++		euen = csr_read32(LOONGARCH_CSR_EUEN);
++
++#ifdef CONFIG_CPU_HAS_LASX
++		if (euen & CSR_EUEN_LASXEN)
++			_save_lasx(&current->thread.fpu);
++		else
++#endif
++#ifdef CONFIG_CPU_HAS_LSX
++		if (euen & CSR_EUEN_LSXEN)
++			_save_lsx(&current->thread.fpu);
++		else
++#endif
++		if (euen & CSR_EUEN_FPEN)
+ 			_save_fp(&current->thread.fpu);
++
+ 		preempt_enable();
+ 	}
+-
+-	return tsk->thread.fpu.fpr;
+ }
+ 
+ static inline int is_simd_owner(void)
+diff --git a/arch/loongarch/kernel/ptrace.c b/arch/loongarch/kernel/ptrace.c
+index a0767c3a0f0a..f72adbf530c6 100644
+--- a/arch/loongarch/kernel/ptrace.c
++++ b/arch/loongarch/kernel/ptrace.c
+@@ -147,6 +147,8 @@ static int fpr_get(struct task_struct *target,
+ {
+ 	int r;
+ 
++	save_fpu_regs(target);
++
+ 	if (sizeof(target->thread.fpu.fpr[0]) == sizeof(elf_fpreg_t))
+ 		r = gfpr_get(target, &to);
+ 	else
+@@ -278,6 +280,8 @@ static int simd_get(struct task_struct *target,
+ {
+ 	const unsigned int wr_size = NUM_FPU_REGS * regset->size;
+ 
++	save_fpu_regs(target);
++
+ 	if (!tsk_used_math(target)) {
+ 		/* The task hasn't used FP or LSX, fill with 0xff */
+ 		copy_pad_fprs(target, regset, &to, 0);

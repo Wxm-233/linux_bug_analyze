@@ -1,0 +1,820 @@
+
+##### A325
+=== 13134cc94914 A DEV 2024-11-19 +1/-1
+riscv: kprobes: Fix incorrect address calculation
+
+p->ainsn.api.insn is a pointer to u32, therefore arithmetic operations are
+multiplied by four. This is clearly undesirable for this case.
+
+Cast it to (void *) first before any calculation.
+
+Below is a sample before/after. The dumped memory is two kprobe slots, the
+first slot has
+
+  - c.addiw a0, 0x1c (0x7125)
+  - ebreak           (0x00100073)
+
+and the second slot has:
+
+  - c.addiw a0, -4   (0x7135)
+  - ebreak           (0x00100073)
+
+Before this patch:
+
+(gdb) x/16xh 0xff20000000135000
+0xff20000000135000:	0x7125	0x0000	0x0000	0x0000	0x7135	0x0010	0x0000	0x0000
+0xff20000000135010:	0x0073	0x0010	0x0000	0x0000	0x0000	0x0000	0x0000	0x0000
+
+After this patch:
+
+(gdb) x/16xh 0xff20000000125000
+0xff20000000125000:	0x7125	0x0073	0x0010	0x0000	0x7135	0x0073	0x0010	0x0000
+0xff20000000125010:	0x0000	0x0000	0x0000	0x0000	0x0000	0x0000	0x0000	0x0000
+
+Fixes: b1756750a397 ("riscv: kprobes: Use patch_text_nosync() for insn slots")
+functions: arch/riscv/kernel/probes/kprobes.c:arch_prepare_ss_slot
+fixes: b1756750a397(riscv)
+diff --git a/arch/riscv/kernel/probes/kprobes.c b/arch/riscv/kernel/probes/kprobes.c
+index 380a0e8cecc0..c0738d6c6498 100644
+--- a/arch/riscv/kernel/probes/kprobes.c
++++ b/arch/riscv/kernel/probes/kprobes.c
+@@ -31,5 +31,5 @@ static void __kprobes arch_prepare_ss_slot(struct kprobe *p)
+ 
+ 	patch_text_nosync(p->ainsn.api.insn, &p->opcode, len);
+-	patch_text_nosync(p->ainsn.api.insn + len, &insn, GET_INSN_LENGTH(insn));
++	patch_text_nosync((void *)p->ainsn.api.insn + len, &insn, GET_INSN_LENGTH(insn));
+ }
+ 
+
+##### A326
+=== ea6398a5af81 A DEV 2024-11-27 +1/-1
+RISC-V: KVM: Fix csr_write -> csr_set for HVIEN PMU overflow bit
+
+This doesn't cause a problem currently as HVIEN isn't used elsewhere
+yet. Found by inspection.
+
+Fixes: 16b0bde9a37c ("RISC-V: KVM: Add perf sampling support for guests")
+functions: arch/riscv/kvm/aia.c:kvm_riscv_aia_enable
+fixes: 16b0bde9a37c(riscv)
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index dcced4db7fe8..19afd1f23537 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -591,5 +591,5 @@ void kvm_riscv_aia_enable(void)
+ 	/* Enable IRQ filtering for overflow interrupt only if sscofpmf is present */
+ 	if (__riscv_isa_extension_available(NULL, RISCV_ISA_EXT_SSCOFPMF))
+-		csr_write(CSR_HVIEN, BIT(IRQ_PMU_OVF));
++		csr_set(CSR_HVIEN, BIT(IRQ_PMU_OVF));
+ }
+ 
+
+##### A327
+=== b3134b8c1a1c A DEV 2024-11-30 +9/-3
+riscv: Fixup boot failure when CONFIG_DEBUG_RT_MUTEXES=y
+
+When CONFIG_DEBUG_RT_MUTEXES=y, mutex_lock->rt_mutex_try_acquire
+would change from rt_mutex_cmpxchg_acquire to
+rt_mutex_slowtrylock():
+	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+	ret = __rt_mutex_slowtrylock(lock);
+	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+
+Because queued_spin_#ops to ticket_#ops is changed one by one by
+jump_label, raw_spin_lock/unlock would cause a deadlock during the
+changing.
+
+That means in arch/riscv/kernel/jump_label.c:
+1.
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock  -> queued_spin_lock
+			 |-> raw_spin_unlock -> queued_spin_unlock
+patch_insn_write -> change the raw_spin_lock to ticket_lock
+mutex_unlock(&text_mutex);
+...
+
+2. /* Dirty the lock value */
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock -> *ticket_lock*
+                         |-> raw_spin_unlock -> *queued_spin_unlock*
+			  /* BUG: ticket_lock with queued_spin_unlock */
+patch_insn_write  ->  change the raw_spin_unlock to ticket_unlock
+mutex_unlock(&text_mutex);
+...
+
+3. /* Dead lock */
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock -> ticket_lock /* deadlock! */
+                         |-> raw_spin_unlock -> ticket_unlock
+patch_insn_write -> change other raw_spin_#op -> ticket_#op
+mutex_unlock(&text_mutex);
+
+So, the solution is to disable mutex usage of
+arch_jump_label_transform_queue() during early_boot_irqs_disabled, just
+like we have done for stop_machine.
+functions: arch/riscv/kernel/jump_label.c:arch_jump_label_transform_queue
+fixes: ab83647fadae(riscv)
+diff --git a/arch/riscv/kernel/jump_label.c b/arch/riscv/kernel/jump_label.c
+index 6eee6f736f68..654ed159c830 100644
+--- a/arch/riscv/kernel/jump_label.c
++++ b/arch/riscv/kernel/jump_label.c
+@@ -37,7 +37,13 @@ bool arch_jump_label_transform_queue(struct jump_entry *entry,
+ 	}
+ 
+-	mutex_lock(&text_mutex);
+-	patch_insn_write(addr, &insn, sizeof(insn));
+-	mutex_unlock(&text_mutex);
++	if (early_boot_irqs_disabled) {
++		riscv_patch_in_stop_machine = 1;
++		patch_insn_write(addr, &insn, sizeof(insn));
++		riscv_patch_in_stop_machine = 0;
++	} else {
++		mutex_lock(&text_mutex);
++		patch_insn_write(addr, &insn, sizeof(insn));
++		mutex_unlock(&text_mutex);
++	}
+ 
+ 	return true;
+
+##### A328
+=== c796e1872012 A DEV 2024-12-09 +1/-1
+riscv: Fix wrong usage of __pa() on a fixmap address
+
+riscv uses fixmap addresses to map the dtb so we can't use __pa() which
+is reserved for linear mapping addresses.
+
+Fixes: b2473a359763 ("of/fdt: add dt_phys arg to early_init_dt_scan and early_init_dt_verify")
+functions: arch/riscv/kernel/setup.c:parse_dtb
+fixes: b2473a359763(riscv)
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index 016b48fcd6f2..45010e71df86 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -228,5 +228,5 @@ static void __init parse_dtb(void)
+ {
+ 	/* Early scan of device tree from init memory */
+-	if (early_init_dt_scan(dtb_early_va, __pa(dtb_early_va))) {
++	if (early_init_dt_scan(dtb_early_va, dtb_early_pa)) {
+ 		const char *name = of_flat_dt_get_machine_name();
+ 
+
+##### A329
+=== 564fc8eb6f78 A DEV 2024-12-20 +1/-1
+riscv: signal: fix signal_minsigstksz
+
+The init_rt_signal_env() funciton is called before the alternative patch
+is applied, so using the alternative-related API to check the availability
+of an extension within this function doesn't have the intended effect.
+This patch reorders the init_rt_signal_env() and apply_boot_alternatives()
+to get the correct signal_minsigstksz.
+
+Fixes: e92f469b0771 ("riscv: signal: Report signal frame size to userspace via auxv")
+functions: arch/riscv/kernel/setup.c:setup_arch
+fixes: e92f469b0771(riscv)
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index f1793630fc51..4fe45daa6281 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -323,6 +323,6 @@ void __init setup_arch(char **cmdline_p)
+ 	riscv_init_cbo_blocksizes();
+ 	riscv_fill_hwcap();
+-	init_rt_signal_env();
+ 	apply_boot_alternatives();
++	init_rt_signal_env();
+ 
+ 	if (IS_ENABLED(CONFIG_RISCV_ISA_ZICBOM) &&
+
+##### A330
+=== aa49bc2ca852 A DEV 2024-12-20 +0/-6
+riscv: signal: fix signal frame size
+
+The signal context of certain RISC-V extensions will be appended after
+struct __riscv_extra_ext_header, which already includes an empty context
+header. Therefore, there is no need to preserve a separate hdr for the
+END of signal context.
+
+Fixes: 8ee0b41898fa ("riscv: signal: Add sigcontext save/restore for vector")
+functions: arch/riscv/kernel/signal.c:get_rt_frame_size
+fixes: 8ee0b41898fa(riscv)
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index 94e905eea1de..08378fea3a11 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -216,10 +216,4 @@ static size_t get_rt_frame_size(bool cal_all)
+ 			total_context_size += riscv_v_sc_size;
+ 	}
+-	/*
+-	 * Preserved a __riscv_ctx_hdr for END signal context header if an
+-	 * extension uses __riscv_extra_ext_header
+-	 */
+-	if (total_context_size)
+-		total_context_size += sizeof(struct __riscv_ctx_hdr);
+ 
+ 	frame_size += total_context_size;
+
+##### A331
+=== c6ec1e1b078d A DEV 2025-02-10 +1/-1
+riscv: cpufeature: use bitmap_equal() instead of memcmp()
+
+Comparison of bitmaps should be done using bitmap_equal(), not memcmp(),
+use the former one to compare isa bitmaps.
+
+Fixes: 625034abd52a8c ("riscv: add ISA extensions validation callback")
+functions: arch/riscv/kernel/cpufeature.c:riscv_resolve_isa
+fixes: 625034abd52a(riscv)
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index c6ba750536c3..40ac72e407b6 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -480,5 +480,5 @@ static void __init riscv_resolve_isa(unsigned long *source_isa,
+ 				*this_hwcap |= isa2hwcap[bit];
+ 		}
+-	} while (loop && memcmp(prev_resolved_isa, resolved_isa, sizeof(prev_resolved_isa)));
++	} while (loop && !bitmap_equal(prev_resolved_isa, resolved_isa, RISCV_ISA_EXT_MAX));
+ }
+ 
+
+##### A332
+=== 0611f78f83c9 A DEV 2025-02-17 +11/-2
+riscv: KVM: Fix SBI IPI error generation
+
+When an invalid function ID of an SBI extension is used we should
+return not-supported, not invalid-param. Also, when we see that at
+least one hartid constructed from the base and mask parameters is
+invalid, then we should return invalid-param. Finally, rather than
+relying on overflowing a left shift to result in zero and then using
+that zero in a condition which [correctly] skips sending an IPI (but
+loops unnecessarily), explicitly check for overflow and exit the loop
+immediately.
+
+Fixes: 5f862df5585c ("RISC-V: KVM: Add v0.1 replacement SBI extensions defined in v0.2")
+functions: arch/riscv/kvm/vcpu_sbi_replace.c:kvm_sbi_ext_ipi_handler
+fixes: 5f862df5585c(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_replace.c b/arch/riscv/kvm/vcpu_sbi_replace.c
+index 9c2ab3dfa93a..74e3a38c6a29 100644
+--- a/arch/riscv/kvm/vcpu_sbi_replace.c
++++ b/arch/riscv/kvm/vcpu_sbi_replace.c
+@@ -52,7 +52,8 @@ static int kvm_sbi_ext_ipi_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 	unsigned long hmask = cp->a0;
+ 	unsigned long hbase = cp->a1;
++	unsigned long hart_bit = 0, sentmask = 0;
+ 
+ 	if (cp->a6 != SBI_EXT_IPI_SEND_IPI) {
+-		retdata->err_val = SBI_ERR_INVALID_PARAM;
++		retdata->err_val = SBI_ERR_NOT_SUPPORTED;
+ 		return 0;
+ 	}
+@@ -63,5 +64,8 @@ static int kvm_sbi_ext_ipi_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 			if (tmp->vcpu_id < hbase)
+ 				continue;
+-			if (!(hmask & (1UL << (tmp->vcpu_id - hbase))))
++			hart_bit = tmp->vcpu_id - hbase;
++			if (hart_bit >= __riscv_xlen)
++				goto done;
++			if (!(hmask & (1UL << hart_bit)))
+ 				continue;
+ 		}
+@@ -69,7 +73,12 @@ static int kvm_sbi_ext_ipi_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 		if (ret < 0)
+ 			break;
++		sentmask |= 1UL << hart_bit;
+ 		kvm_riscv_vcpu_pmu_incr_fw(tmp, SBI_PMU_FW_IPI_RCVD);
+ 	}
+ 
++done:
++	if (hbase != -1UL && (hmask ^ sentmask))
++		retdata->err_val = SBI_ERR_INVALID_PARAM;
++
+ 	return ret;
+ }
+
+##### A333
+=== b90148485299 A DEV 2025-02-17 +1/-1
+riscv: KVM: Fix SBI TIME error generation
+
+When an invalid function ID of an SBI extension is used we should
+return not-supported, not invalid-param.
+
+Fixes: 5f862df5585c ("RISC-V: KVM: Add v0.1 replacement SBI extensions defined in v0.2")
+functions: arch/riscv/kvm/vcpu_sbi_replace.c:kvm_sbi_ext_time_handler
+fixes: 5f862df5585c(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_replace.c b/arch/riscv/kvm/vcpu_sbi_replace.c
+index 74e3a38c6a29..5fbf3f94f1e8 100644
+--- a/arch/riscv/kvm/vcpu_sbi_replace.c
++++ b/arch/riscv/kvm/vcpu_sbi_replace.c
+@@ -22,5 +22,5 @@ static int kvm_sbi_ext_time_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 
+ 	if (cp->a6 != SBI_EXT_TIME_SET_TIMER) {
+-		retdata->err_val = SBI_ERR_INVALID_PARAM;
++		retdata->err_val = SBI_ERR_NOT_SUPPORTED;
+ 		return 0;
+ 	}
+
+##### A334
+=== c7db342e3b47 A DEV 2025-02-17 +4/-4
+riscv: KVM: Fix hart suspend status check
+
+"Not stopped" means started or suspended so we need to check for
+a single state in order to have a chance to check for each state.
+Also, we need to use target_vcpu when checking for the suspend
+state.
+
+Fixes: 763c8bed8c05 ("RISC-V: KVM: Implement SBI HSM suspend call")
+functions: arch/riscv/kvm/vcpu_sbi_hsm.c:kvm_sbi_hsm_vcpu_get_status
+fixes: 763c8bed8c05(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_hsm.c b/arch/riscv/kvm/vcpu_sbi_hsm.c
+index dce667f4b6ab..13a35eb77e8e 100644
+--- a/arch/riscv/kvm/vcpu_sbi_hsm.c
++++ b/arch/riscv/kvm/vcpu_sbi_hsm.c
+@@ -80,10 +80,10 @@ static int kvm_sbi_hsm_vcpu_get_status(struct kvm_vcpu *vcpu)
+ 	if (!target_vcpu)
+ 		return SBI_ERR_INVALID_PARAM;
+-	if (!kvm_riscv_vcpu_stopped(target_vcpu))
+-		return SBI_HSM_STATE_STARTED;
+-	else if (vcpu->stat.generic.blocking)
++	if (kvm_riscv_vcpu_stopped(target_vcpu))
++		return SBI_HSM_STATE_STOPPED;
++	else if (target_vcpu->stat.generic.blocking)
+ 		return SBI_HSM_STATE_SUSPENDED;
+ 	else
+-		return SBI_HSM_STATE_STOPPED;
++		return SBI_HSM_STATE_STARTED;
+ }
+ 
+
+##### A335
+=== 33981b1c4e49 A DEV 2025-02-28 +4/-1
+riscv: Fix missing __free_pages() in check_vector_unaligned_access()
+
+The locally allocated pages are never freed up, so add the corresponding
+__free_pages().
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+functions: arch/riscv/kernel/unaligned_access_speed.c:check_vector_unaligned_access
+fixes: e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 91f189cf1611..074ac4abd023 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -350,5 +350,5 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ 			cpu);
+ 
+-		return;
++		goto free;
+ 	}
+ 
+@@ -364,4 +364,7 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ 
+ 	per_cpu(vector_misaligned_access, cpu) = speed;
++
++free:
++	__free_pages(page, MISALIGNED_BUFFER_ORDER);
+ }
+ 
+
+##### A336
+=== bbb622488749 A DEV 2025-03-03 +1/-0
+RISC-V: KVM: Disable the kernel perf counter during configure
+
+The perf event should be marked disabled during the creation as
+it is not ready to be scheduled until there is SBI PMU start call
+or config matching is called with auto start. Otherwise, event add/start
+gets called during perf_event_create_kernel_counter function.
+It will be enabled and scheduled to run via perf_event_enable during
+either the above mentioned scenario.
+
+Fixes: 0cb74b65d2e5 ("RISC-V: KVM: Implement perf support without sampling")
+functions: arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_cfg_match
+fixes: 0cb74b65d2e5(riscv)
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 2707a51b082c..78ac3216a54d 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -667,4 +667,5 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 		.size = sizeof(struct perf_event_attr),
+ 		.pinned = true,
++		.disabled = true,
+ 		/*
+ 		 * It should never reach here if the platform doesn't support the sscofpmf
+
+##### A337
+=== 5af72a818612 A DEV 2025-03-04 +4/-2
+riscv: Fix riscv_online_cpu_vec
+
+We shouldn't probe when we already know vector is unsupported and
+we should probe when we see we don't yet know whether it's supported.
+Furthermore, we should ensure we've set the access type to
+unsupported when we don't have vector at all.
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+functions: arch/riscv/kernel/unaligned_access_speed.c:riscv_online_cpu_vec
+fixes: e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index b7a8ff7ba6df..161964cf2abc 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -368,8 +368,10 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ static int riscv_online_cpu_vec(unsigned int cpu)
+ {
+-	if (!has_vector())
++	if (!has_vector()) {
++		per_cpu(vector_misaligned_access, cpu) = RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED;
+ 		return 0;
++	}
+ 
+-	if (per_cpu(vector_misaligned_access, cpu) != RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED)
++	if (per_cpu(vector_misaligned_access, cpu) != RISCV_HWPROBE_MISALIGNED_VECTOR_UNKNOWN)
+ 		return 0;
+ 
+
+##### A338
+=== e5bf9a4b68fa A DEV 2025-03-12 +1/-1
+riscv: switch set_icache_stale_mask() to using non-atomic assign_cpu()
+
+The atomic cpumask_assign_cpu() follows non-atomic cpumask_setall(),
+which makes the whole operation non-atomic. Fix this by relaxing to
+non-atomic __assign_cpu().
+
+Fixes: 7c1e5b9690b0e14 ("riscv: Disable preemption while handling PR_RISCV_CTX_SW_FENCEI_OFF")
+functions: arch/riscv/mm/cacheflush.c:set_icache_stale_mask
+fixes: 7c1e5b9690b0(riscv)
+diff --git a/arch/riscv/mm/cacheflush.c b/arch/riscv/mm/cacheflush.c
+index b81672729887..b8e96dfff19d 100644
+--- a/arch/riscv/mm/cacheflush.c
++++ b/arch/riscv/mm/cacheflush.c
+@@ -173,5 +173,5 @@ static void set_icache_stale_mask(void)
+ 
+ 	cpumask_setall(mask);
+-	cpumask_assign_cpu(cpu, mask, stale_cpu);
++	__assign_cpu(cpu, mask, stale_cpu);
+ 	put_cpu();
+ }
+
+##### A339
+=== 2d117e67f318 A DEV 2025-03-17 +2/-2
+RISC-V: KVM: Teardown riscv specific bits after kvm_exit
+
+During a module removal, kvm_exit invokes arch specific disable
+call which disables AIA. However, we invoke aia_exit before kvm_exit
+resulting in the following warning. KVM kernel module can't be inserted
+afterwards due to inconsistent state of IRQ.
+
+[25469.031389] percpu IRQ 31 still enabled on CPU0!
+[25469.031732] WARNING: CPU: 3 PID: 943 at kernel/irq/manage.c:2476 __free_percpu_irq+0xa2/0x150
+[25469.031804] Modules linked in: kvm(-)
+[25469.031848] CPU: 3 UID: 0 PID: 943 Comm: rmmod Not tainted 6.14.0-rc5-06947-g91c763118f47-dirty #2
+[25469.031905] Hardware name: riscv-virtio,qemu (DT)
+[25469.031928] epc : __free_percpu_irq+0xa2/0x150
+[25469.031976]  ra : __free_percpu_irq+0xa2/0x150
+[25469.032197] epc : ffffffff8007db1e ra : ffffffff8007db1e sp : ff2000000088bd50
+[25469.032241]  gp : ffffffff8131cef8 tp : ff60000080b96400 t0 : ff2000000088baf8
+[25469.032285]  t1 : fffffffffffffffc t2 : 5249207570637265 s0 : ff2000000088bd90
+[25469.032329]  s1 : ff60000098b21080 a0 : 037d527a15eb4f00 a1 : 037d527a15eb4f00
+[25469.032372]  a2 : 0000000000000023 a3 : 0000000000000001 a4 : ffffffff8122dbf8
+[25469.032410]  a5 : 0000000000000fff a6 : 0000000000000000 a7 : ffffffff8122dc10
+[25469.032448]  s2 : ff60000080c22eb0 s3 : 0000000200000022 s4 : 000000000000001f
+[25469.032488]  s5 : ff60000080c22e00 s6 : ffffffff80c351c0 s7 : 0000000000000000
+[25469.032582]  s8 : 0000000000000003 s9 : 000055556b7fb490 s10: 00007ffff0e12fa0
+[25469.032621]  s11: 00007ffff0e13e9a t3 : ffffffff81354ac7 t4 : ffffffff81354ac7
+[25469.032664]  t5 : ffffffff81354ac8 t6 : ffffffff81354ac7
+[25469.032698] status: 0000000200000100 badaddr: ffffffff8007db1e cause: 0000000000000003
+[25469.032738] [<ffffffff8007db1e>] __free_percpu_irq+0xa2/0x150
+[25469.032797] [<ffffffff8007dbfc>] free_percpu_irq+0x30/0x5e
+[25469.032856] [<ffffffff013a57dc>] kvm_riscv_aia_exit+0x40/0x42 [kvm]
+[25469.033947] [<ffffffff013b4e82>] cleanup_module+0x10/0x32 [kvm]
+[25469.035300] [<ffffffff8009b150>] __riscv_sys_delete_module+0x18e/0x1fc
+[25469.035374] [<ffffffff8000c1ca>] syscall_handler+0x3a/0x46
+[25469.035456] [<ffffffff809ec9a4>] do_trap_ecall_u+0x72/0x134
+[25469.035536] [<ffffffff809f5e18>] handle_exception+0x148/0x156
+
+Invoke aia_exit and other arch specific cleanup functions after kvm_exit
+so that disable gets a chance to be called first before exit.
+
+Fixes: 54e43320c2ba ("RISC-V: KVM: Initial skeletal support for AIA")
+Fixes: eded6754f398 ("riscv: KVM: add basic support for host vs guest profiling")
+functions: arch/riscv/kvm/main.c:riscv_kvm_exit
+fixes: 54e43320c2ba(riscv), eded6754f398(riscv)
+diff --git a/arch/riscv/kvm/main.c b/arch/riscv/kvm/main.c
+index 1fa8be5ee509..4b24705dc63a 100644
+--- a/arch/riscv/kvm/main.c
++++ b/arch/riscv/kvm/main.c
+@@ -173,7 +173,7 @@ module_init(riscv_kvm_init);
+ static void __exit riscv_kvm_exit(void)
+ {
+-	kvm_riscv_teardown();
+-
+ 	kvm_exit();
++
++	kvm_riscv_teardown();
+ }
+ module_exit(riscv_kvm_exit);
+
+##### A340
+=== 28093cfef5dd A DEV 2025-03-26 +3/-0
+riscv/kexec_file: Handle R_RISCV_64 in purgatory relocator
+
+Commit 58ff537109ac ("riscv: Omit optimized string routines when
+using KASAN") introduced calls to EXPORT_SYMBOL() in assembly string
+routines, which result in R_RISCV_64 relocations against
+.export_symbol section. As these rountines are reused by RISC-V
+purgatory and our relocator doesn't recognize these relocations, this
+fails kexec-file-load with dmesg like
+
+	[   11.344251] kexec_image: Unknown rela relocation: 2
+	[   11.345972] kexec_image: Error loading purgatory ret=-8
+
+Let's support R_RISCV_64 relocation to fix kexec on 64-bit RISC-V.
+32-bit variant isn't covered since KEXEC_FILE and KEXEC_PURGATORY isn't
+available.
+
+Fixes: 58ff537109ac ("riscv: Omit optimized string routines when using KASAN")
+functions: arch/riscv/kernel/elf_kexec.c:arch_kexec_apply_relocations_add
+fixes: 58ff537109ac(riscv)
+diff --git a/arch/riscv/kernel/elf_kexec.c b/arch/riscv/kernel/elf_kexec.c
+index 3c37661801f9..e783a72d051f 100644
+--- a/arch/riscv/kernel/elf_kexec.c
++++ b/arch/riscv/kernel/elf_kexec.c
+@@ -469,4 +469,7 @@ int arch_kexec_apply_relocations_add(struct purgatory_info *pi,
+ 		case R_RISCV_RELAX:
+ 			break;
++		case R_RISCV_64:
++			*(u64 *)loc = val;
++			break;
+ 		default:
+ 			pr_err("Unknown rela relocation: %d\n", r_type);
+
+##### A341
+=== 87ec7d5249bb A DEV 2025-04-03 +2/-0
+KVM: RISC-V: reset smstateen CSRs
+
+Not resetting smstateen is a potential security hole, because VU might
+be able to access state that VS does not properly context-switch.
+
+Fixes: 81f0f314fec9 ("RISCV: KVM: Add sstateen0 context save/restore")
+functions: arch/riscv/kvm/vcpu.c:kvm_riscv_reset_vcpu
+fixes: 81f0f314fec9(riscv)
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index 60d684c76c58..02635bac91f1 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -78,4 +78,6 @@ static void kvm_riscv_reset_vcpu(struct kvm_vcpu *vcpu)
+ 	spin_unlock(&vcpu->arch.reset_cntx_lock);
+ 
++	memset(&vcpu->arch.smstateen_csr, 0, sizeof(vcpu->arch.smstateen_csr));
++
+ 	kvm_riscv_vcpu_fp_reset(vcpu);
+ 
+
+##### A342
+=== 0b4cce68efb9 A DEV 2025-04-09 +1/-1
+riscv: module: Fix out-of-bounds relocation access
+
+The current code allows rel[j] to access one element past the end of the
+relocation section. Simplify to num_relocations which is equivalent to
+the existing size expression.
+
+Fixes: 080c4324fa5e ("riscv: optimize ELF relocation function in riscv")
+functions: arch/riscv/kernel/module.c:apply_relocate_add
+fixes: 080c4324fa5e(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index 0ae34d79b87b..7f6147c18033 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -861,5 +861,5 @@ int apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
+ 
+ 				j++;
+-				if (j > sechdrs[relsec].sh_size / sizeof(*rel))
++				if (j == num_relocations)
+ 					j = 0;
+ 
+
+##### A343
+=== 1ee1313f4722 A DEV 2025-04-09 +7/-6
+riscv: module: Allocate PLT entries for R_RISCV_PLT32
+
+apply_r_riscv_plt32_rela() may need to emit a PLT entry for the
+referenced symbol, so there must be space allocated in the PLT.
+
+Fixes: 8fd6c5142395 ("riscv: Add remaining module relocations")
+functions: arch/riscv/kernel/module-sections.c:count_max_entries
+fixes: 8fd6c5142395(riscv)
+diff --git a/arch/riscv/kernel/module-sections.c b/arch/riscv/kernel/module-sections.c
+index e264e59e596e..91d0b355ceef 100644
+--- a/arch/riscv/kernel/module-sections.c
++++ b/arch/riscv/kernel/module-sections.c
+@@ -74,14 +74,15 @@ static void count_max_entries(Elf_Rela *relas, int num,
+ 			      unsigned int *plts, unsigned int *gots)
+ {
+-	unsigned int type, i;
+-
+-	for (i = 0; i < num; i++) {
+-		type = ELF_RISCV_R_TYPE(relas[i].r_info);
+-		if (type == R_RISCV_CALL_PLT) {
++	for (int i = 0; i < num; i++) {
++		switch (ELF_R_TYPE(relas[i].r_info)) {
++		case R_RISCV_CALL_PLT:
++		case R_RISCV_PLT32:
+ 			if (!duplicate_rela(relas, i))
+ 				(*plts)++;
+-		} else if (type == R_RISCV_GOT_HI20) {
++			break;
++		case R_RISCV_GOT_HI20:
+ 			if (!duplicate_rela(relas, i))
+ 				(*gots)++;
++			break;
+ 		}
+ 	}
+
+##### A344
+=== 453805f0a28f A DEV 2025-04-22 +8/-4
+riscv: misaligned: enable IRQs while handling misaligned accesses
+
+We can safely reenable IRQs if coming from userspace. This allows to
+access user memory that could potentially trigger a page fault.
+
+Fixes: b686ecdeacf6 ("riscv: misaligned: Restrict user access to kernel memory")
+functions: arch/riscv/kernel/traps.c:do_trap_misaligned
+fixes: b686ecdeacf6(riscv)
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index b1d991c78a23..9c83848797a7 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -221,8 +221,10 @@ static void do_trap_misaligned(struct pt_regs *regs, enum misaligned_access_type
+ 	irqentry_state_t state;
+ 
+-	if (user_mode(regs))
++	if (user_mode(regs)) {
+ 		irqentry_enter_from_user_mode(regs);
+-	else
++		local_irq_enable();
++	} else {
+ 		state = irqentry_nmi_enter(regs);
++	}
+ 
+ 	if (misaligned_handler[type].handler(regs))
+@@ -230,8 +232,10 @@ static void do_trap_misaligned(struct pt_regs *regs, enum misaligned_access_type
+ 			      misaligned_handler[type].type_str);
+ 
+-	if (user_mode(regs))
++	if (user_mode(regs)) {
++		local_irq_disable();
+ 		irqentry_exit_to_user_mode(regs);
+-	else
++	} else {
+ 		irqentry_nmi_exit(regs, state);
++	}
+ }
+ 
+
+##### A345
+=== ae08d55807c0 A DEV 2025-05-04 +3/-0
+riscv: Fix kernel crash due to PR_SET_TAGGED_ADDR_CTRL
+
+When userspace does PR_SET_TAGGED_ADDR_CTRL, but Supm extension is not
+available, the kernel crashes:
+
+Oops - illegal instruction [#1]
+    [snip]
+epc : set_tagged_addr_ctrl+0x112/0x15a
+ ra : set_tagged_addr_ctrl+0x74/0x15a
+epc : ffffffff80011ace ra : ffffffff80011a30 sp : ffffffc60039be10
+    [snip]
+status: 0000000200000120 badaddr: 0000000010a79073 cause: 0000000000000002
+    set_tagged_addr_ctrl+0x112/0x15a
+    __riscv_sys_prctl+0x352/0x73c
+    do_trap_ecall_u+0x17c/0x20c
+    andle_exception+0x150/0x15c
+
+Fix it by checking if Supm is available.
+
+Fixes: 09d6775f503b ("riscv: Add support for userspace pointer masking")
+functions: arch/riscv/kernel/process.c:set_tagged_addr_ctrl
+fixes: 09d6775f503b(riscv)
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index 7c244de77180..3db2c0c07acd 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -276,4 +276,7 @@ long set_tagged_addr_ctrl(struct task_struct *task, unsigned long arg)
+ 	u8 pmlen;
+ 
++	if (!riscv_has_extension_unlikely(RISCV_ISA_EXT_SUPM))
++		return -EINVAL;
++
+ 	if (is_compat_thread(ti))
+ 		return -EINVAL;
+
+##### A346
+=== 7f1c3de1370b A DEV 2025-05-07 +3/-0
+riscv: Disallow PR_GET_TAGGED_ADDR_CTRL without Supm
+
+When the prctl() interface for pointer masking was added, it did not
+check that the pointer masking ISA extension was supported, only the
+individual submodes. Userspace could still attempt to disable pointer
+masking and query the pointer masking state. commit 81de1afb2dd1
+("riscv: Fix kernel crash due to PR_SET_TAGGED_ADDR_CTRL") disallowed
+the former, as the senvcfg write could crash on older systems.
+PR_GET_TAGGED_ADDR_CTRL state does not crash, because it reads only
+kernel-internal state and not senvcfg, but it should still be disallowed
+for consistency.
+
+Fixes: 09d6775f503b ("riscv: Add support for userspace pointer masking")
+functions: arch/riscv/kernel/process.c:get_tagged_addr_ctrl
+fixes: 09d6775f503b(riscv)
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index 3db2c0c07acd..15d8f75902f8 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -334,4 +334,7 @@ long get_tagged_addr_ctrl(struct task_struct *task)
+ 	long ret = 0;
+ 
++	if (!riscv_has_extension_unlikely(RISCV_ISA_EXT_SUPM))
++		return -EINVAL;
++
+ 	if (is_compat_thread(ti))
+ 		return -EINVAL;
+
+##### A347
+=== 7917be170928 A DEV 2025-05-23 +2/-2
+RISC-V: KVM: lock the correct mp_state during reset
+
+Currently, the kvm_riscv_vcpu_sbi_system_reset() function locks
+vcpu->arch.mp_state_lock when updating tmp->arch.mp_state.mp_state
+which is incorrect hence fix it.
+
+Fixes: 2121cadec45a ("RISCV: KVM: Introduce mp_state_lock to avoid lock inversion")
+functions: arch/riscv/kvm/vcpu_sbi.c:kvm_riscv_vcpu_sbi_system_reset
+fixes: 2121cadec45a(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi.c b/arch/riscv/kvm/vcpu_sbi.c
+index 31fd3cc98d66..6e09b518a5d1 100644
+--- a/arch/riscv/kvm/vcpu_sbi.c
++++ b/arch/riscv/kvm/vcpu_sbi.c
+@@ -144,7 +144,7 @@ void kvm_riscv_vcpu_sbi_system_reset(struct kvm_vcpu *vcpu,
+ 
+ 	kvm_for_each_vcpu(i, tmp, vcpu->kvm) {
+-		spin_lock(&vcpu->arch.mp_state_lock);
++		spin_lock(&tmp->arch.mp_state_lock);
+ 		WRITE_ONCE(tmp->arch.mp_state.mp_state, KVM_MP_STATE_STOPPED);
+-		spin_unlock(&vcpu->arch.mp_state_lock);
++		spin_unlock(&tmp->arch.mp_state_lock);
+ 	}
+ 	kvm_make_all_cpus_request(vcpu->kvm, KVM_REQ_SLEEP);
+
+##### A348
+=== 2e7be1629966 A DEV 2025-06-05 +2/-2
+RISC-V: KVM: Don't treat SBI HFENCE calls as NOPs
+
+The SBI specification clearly states that SBI HFENCE calls should
+return SBI_ERR_NOT_SUPPORTED when one of the target hart doesn’t
+support hypervisor extension (aka nested virtualization in-case
+of KVM RISC-V).
+
+Fixes: c7fa3c48de86 ("RISC-V: KVM: Treat SBI HFENCE calls as NOPs")
+functions: arch/riscv/kvm/vcpu_sbi_replace.c:kvm_sbi_ext_rfence_handler
+fixes: c7fa3c48de86(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_replace.c b/arch/riscv/kvm/vcpu_sbi_replace.c
+index 9752d2ffff68..b17fad091bab 100644
+--- a/arch/riscv/kvm/vcpu_sbi_replace.c
++++ b/arch/riscv/kvm/vcpu_sbi_replace.c
+@@ -128,7 +128,7 @@ static int kvm_sbi_ext_rfence_handler(struct kvm_vcpu *vcpu, struct kvm_run *run
+ 		/*
+ 		 * Until nested virtualization is implemented, the
+-		 * SBI HFENCE calls should be treated as NOPs
++		 * SBI HFENCE calls should return not supported
++		 * hence fallthrough.
+ 		 */
+-		break;
+ 	default:
+ 		retdata->err_val = SBI_ERR_NOT_SUPPORTED;
+
+##### A349
+=== 6aba0cb5bba6 A DEV 2025-06-05 +2/-2
+RISC-V: KVM: Fix the size parameter check in SBI SFENCE calls
+
+As-per the SBI specification, an SBI remote fence operation applies
+to the entire address space if either:
+1) start_addr and size are both 0
+2) size is equal to 2^XLEN-1
+
+>From the above, only #1 is checked by SBI SFENCE calls so fix the
+size parameter check in SBI SFENCE calls to cover #2 as well.
+
+Fixes: 13acfec2dbcc ("RISC-V: KVM: Add remote HFENCE functions based on VCPU requests")
+functions: arch/riscv/kvm/vcpu_sbi_replace.c:kvm_sbi_ext_rfence_handler
+fixes: 13acfec2dbcc(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_replace.c b/arch/riscv/kvm/vcpu_sbi_replace.c
+index 5fbf3f94f1e8..9752d2ffff68 100644
+--- a/arch/riscv/kvm/vcpu_sbi_replace.c
++++ b/arch/riscv/kvm/vcpu_sbi_replace.c
+@@ -104,5 +104,5 @@ static int kvm_sbi_ext_rfence_handler(struct kvm_vcpu *vcpu, struct kvm_run *run
+ 		break;
+ 	case SBI_EXT_RFENCE_REMOTE_SFENCE_VMA:
+-		if (cp->a2 == 0 && cp->a3 == 0)
++		if ((cp->a2 == 0 && cp->a3 == 0) || cp->a3 == -1UL)
+ 			kvm_riscv_hfence_vvma_all(vcpu->kvm, hbase, hmask);
+ 		else
+@@ -112,5 +112,5 @@ static int kvm_sbi_ext_rfence_handler(struct kvm_vcpu *vcpu, struct kvm_run *run
+ 		break;
+ 	case SBI_EXT_RFENCE_REMOTE_SFENCE_VMA_ASID:
+-		if (cp->a2 == 0 && cp->a3 == 0)
++		if ((cp->a2 == 0 && cp->a3 == 0) || cp->a3 == -1UL)
+ 			kvm_riscv_hfence_vvma_asid_all(vcpu->kvm,
+ 						       hbase, hmask, cp->a4);

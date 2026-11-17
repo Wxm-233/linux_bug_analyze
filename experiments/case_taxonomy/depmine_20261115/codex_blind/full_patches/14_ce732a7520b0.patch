@@ -1,0 +1,241 @@
+commit ce732a7520b093091c345cba1b84542d1abd83ed
+Author:     Alexander Potapenko <glider@google.com>
+AuthorDate: Wed Sep 28 14:32:19 2022 +0200
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Mon Oct 3 14:03:26 2022 -0700
+
+    x86: kmsan: handle CPU entry area
+    
+    Among other data, CPU entry area holds exception stacks, so addresses from
+    this area can be passed to kmsan_get_metadata().
+    
+    This previously led to kmsan_get_metadata() returning NULL, which in turn
+    resulted in a warning that triggered further attempts to call
+    kmsan_get_metadata() in the exception context, which quickly exhausted the
+    exception stack.
+    
+    This patch allocates shadow and origin for the CPU entry area on x86 and
+    introduces arch_kmsan_get_meta_or_null(), which performs arch-specific
+    metadata mapping.
+    
+    Link: https://lkml.kernel.org/r/20220928123219.1101883-1-glider@google.com
+    Signed-off-by: Alexander Potapenko <glider@google.com>
+    Fixes: 21d723a7c1409 ("kmsan: add KMSAN runtime core")
+    Cc: Alexander Viro <viro@zeniv.linux.org.uk>
+    Cc: Alexei Starovoitov <ast@kernel.org>
+    Cc: Andrey Konovalov <andreyknvl@gmail.com>
+    Cc: Andrey Konovalov <andreyknvl@google.com>
+    Cc: Andy Lutomirski <luto@kernel.org>
+    Cc: Arnd Bergmann <arnd@arndb.de>
+    Cc: Borislav Petkov <bp@alien8.de>
+    Cc: Christoph Hellwig <hch@lst.de>
+    Cc: Christoph Lameter <cl@linux.com>
+    Cc: David Rientjes <rientjes@google.com>
+    Cc: Dmitry Vyukov <dvyukov@google.com>
+    Cc: Eric Biggers <ebiggers@google.com>
+    Cc: Eric Biggers <ebiggers@kernel.org>
+    Cc: Eric Dumazet <edumazet@google.com>
+    Cc: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+    Cc: Herbert Xu <herbert@gondor.apana.org.au>
+    Cc: Ilya Leoshkevich <iii@linux.ibm.com>
+    Cc: Ingo Molnar <mingo@redhat.com>
+    Cc: Jens Axboe <axboe@kernel.dk>
+    Cc: Joonsoo Kim <iamjoonsoo.kim@lge.com>
+    Cc: Kees Cook <keescook@chromium.org>
+    Cc: Marco Elver <elver@google.com>
+    Cc: Mark Rutland <mark.rutland@arm.com>
+    Cc: Matthew Wilcox <willy@infradead.org>
+    Cc: Michael S. Tsirkin <mst@redhat.com>
+    Cc: Pekka Enberg <penberg@kernel.org>
+    Cc: Peter Zijlstra <peterz@infradead.org>
+    Cc: Petr Mladek <pmladek@suse.com>
+    Cc: Stephen Rothwell <sfr@canb.auug.org.au>
+    Cc: Steven Rostedt <rostedt@goodmis.org>
+    Cc: Thomas Gleixner <tglx@linutronix.de>
+    Cc: Vasily Gorbik <gor@linux.ibm.com>
+    Cc: Vegard Nossum <vegard.nossum@oracle.com>
+    Cc: Vlastimil Babka <vbabka@suse.cz>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 3c7dfe9bb712..456b07f02803 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -11374,16 +11374,17 @@ F:	tools/testing/selftests/kmod/
+ KMSAN
+ M:	Alexander Potapenko <glider@google.com>
+ R:	Marco Elver <elver@google.com>
+ R:	Dmitry Vyukov <dvyukov@google.com>
+ L:	kasan-dev@googlegroups.com
+ S:	Maintained
+ F:	Documentation/dev-tools/kmsan.rst
+ F:	arch/*/include/asm/kmsan.h
++F:	arch/*/mm/kmsan_*
+ F:	include/linux/kmsan*.h
+ F:	lib/Kconfig.kmsan
+ F:	mm/kmsan/
+ F:	scripts/Makefile.kmsan
+ 
+ KPROBES
+ M:	Naveen N. Rao <naveen.n.rao@linux.ibm.com>
+ M:	Anil S Keshavamurthy <anil.s.keshavamurthy@intel.com>
+diff --git a/arch/x86/include/asm/kmsan.h b/arch/x86/include/asm/kmsan.h
+index a790b865d0a6..8fa6ac0e2d76 100644
+--- a/arch/x86/include/asm/kmsan.h
++++ b/arch/x86/include/asm/kmsan.h
+@@ -6,19 +6,51 @@
+  * Author: Alexander Potapenko <glider@google.com>
+  */
+ 
+ #ifndef _ASM_X86_KMSAN_H
+ #define _ASM_X86_KMSAN_H
+ 
+ #ifndef MODULE
+ 
++#include <asm/cpu_entry_area.h>
+ #include <asm/processor.h>
+ #include <linux/mmzone.h>
+ 
++DECLARE_PER_CPU(char[CPU_ENTRY_AREA_SIZE], cpu_entry_area_shadow);
++DECLARE_PER_CPU(char[CPU_ENTRY_AREA_SIZE], cpu_entry_area_origin);
++
++/*
++ * Functions below are declared in the header to make sure they are inlined.
++ * They all are called from kmsan_get_metadata() for every memory access in
++ * the kernel, so speed is important here.
++ */
++
++/*
++ * Compute metadata addresses for the CPU entry area on x86.
++ */
++static inline void *arch_kmsan_get_meta_or_null(void *addr, bool is_origin)
++{
++	unsigned long addr64 = (unsigned long)addr;
++	char *metadata_array;
++	unsigned long off;
++	int cpu;
++
++	if ((addr64 < CPU_ENTRY_AREA_BASE) ||
++	    (addr64 >= (CPU_ENTRY_AREA_BASE + CPU_ENTRY_AREA_MAP_SIZE)))
++		return NULL;
++	cpu = (addr64 - CPU_ENTRY_AREA_BASE) / CPU_ENTRY_AREA_SIZE;
++	off = addr64 - (unsigned long)get_cpu_entry_area(cpu);
++	if ((off < 0) || (off >= CPU_ENTRY_AREA_SIZE))
++		return NULL;
++	metadata_array = is_origin ? cpu_entry_area_origin :
++				     cpu_entry_area_shadow;
++	return &per_cpu(metadata_array[off], cpu);
++}
++
+ /*
+  * Taken from arch/x86/mm/physaddr.h to avoid using an instrumented version.
+  */
+ static inline bool kmsan_phys_addr_valid(unsigned long addr)
+ {
+ 	if (IS_ENABLED(CONFIG_PHYS_ADDR_T_64BIT))
+ 		return !(addr >> boot_cpu_data.x86_phys_bits);
+ 	else
+diff --git a/arch/x86/mm/Makefile b/arch/x86/mm/Makefile
+index afb6f7187dad..c80febc44cd2 100644
+--- a/arch/x86/mm/Makefile
++++ b/arch/x86/mm/Makefile
+@@ -41,16 +41,19 @@ obj-$(CONFIG_HUGETLB_PAGE)	+= hugetlbpage.o
+ obj-$(CONFIG_PTDUMP_CORE)	+= dump_pagetables.o
+ obj-$(CONFIG_PTDUMP_DEBUGFS)	+= debug_pagetables.o
+ 
+ obj-$(CONFIG_HIGHMEM)		+= highmem_32.o
+ 
+ KASAN_SANITIZE_kasan_init_$(BITS).o := n
+ obj-$(CONFIG_KASAN)		+= kasan_init_$(BITS).o
+ 
++KMSAN_SANITIZE_kmsan_shadow.o	:= n
++obj-$(CONFIG_KMSAN)		+= kmsan_shadow.o
++
+ obj-$(CONFIG_MMIOTRACE)		+= mmiotrace.o
+ mmiotrace-y			:= kmmio.o pf_in.o mmio-mod.o
+ obj-$(CONFIG_MMIOTRACE_TEST)	+= testmmiotrace.o
+ 
+ obj-$(CONFIG_NUMA)		+= numa.o numa_$(BITS).o
+ obj-$(CONFIG_AMD_NUMA)		+= amdtopology.o
+ obj-$(CONFIG_ACPI_NUMA)		+= srat.o
+ obj-$(CONFIG_NUMA_EMU)		+= numa_emulation.o
+diff --git a/arch/x86/mm/kmsan_shadow.c b/arch/x86/mm/kmsan_shadow.c
+new file mode 100644
+index 000000000000..bee2ec4a3bfa
+--- /dev/null
++++ b/arch/x86/mm/kmsan_shadow.c
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * x86-specific bits of KMSAN shadow implementation.
++ *
++ * Copyright (C) 2022 Google LLC
++ * Author: Alexander Potapenko <glider@google.com>
++ */
++
++#include <asm/cpu_entry_area.h>
++#include <linux/percpu-defs.h>
++
++/*
++ * Addresses within the CPU entry area (including e.g. exception stacks) do not
++ * have struct page entries corresponding to them, so they need separate
++ * handling.
++ * arch_kmsan_get_meta_or_null() (declared in the header) maps the addresses in
++ * CPU entry area to addresses in cpu_entry_area_shadow/cpu_entry_area_origin.
++ */
++DEFINE_PER_CPU(char[CPU_ENTRY_AREA_SIZE], cpu_entry_area_shadow);
++DEFINE_PER_CPU(char[CPU_ENTRY_AREA_SIZE], cpu_entry_area_origin);
+diff --git a/mm/kmsan/shadow.c b/mm/kmsan/shadow.c
+index 6e90a806a704..21e3e196ec3c 100644
+--- a/mm/kmsan/shadow.c
++++ b/mm/kmsan/shadow.c
+@@ -7,17 +7,16 @@
+  *
+  */
+ 
+ #include <asm/kmsan.h>
+ #include <asm/tlbflush.h>
+ #include <linux/cacheflush.h>
+ #include <linux/memblock.h>
+ #include <linux/mm_types.h>
+-#include <linux/percpu-defs.h>
+ #include <linux/slab.h>
+ #include <linux/smp.h>
+ #include <linux/stddef.h>
+ 
+ #include "../internal.h"
+ #include "kmsan.h"
+ 
+ #define shadow_page_for(page) ((page)->kmsan_shadow)
+@@ -121,26 +120,31 @@ struct shadow_origin_ptr kmsan_get_shadow_origin_ptr(void *address, u64 size,
+  * none. The caller must check the return value for being non-NULL if needed.
+  * The return value of this function should not depend on whether we're in the
+  * runtime or not.
+  */
+ void *kmsan_get_metadata(void *address, bool is_origin)
+ {
+ 	u64 addr = (u64)address, pad, off;
+ 	struct page *page;
++	void *ret;
+ 
+ 	if (is_origin && !IS_ALIGNED(addr, KMSAN_ORIGIN_SIZE)) {
+ 		pad = addr % KMSAN_ORIGIN_SIZE;
+ 		addr -= pad;
+ 	}
+ 	address = (void *)addr;
+ 	if (kmsan_internal_is_vmalloc_addr(address) ||
+ 	    kmsan_internal_is_module_addr(address))
+ 		return (void *)vmalloc_meta(address, is_origin);
+ 
++	ret = arch_kmsan_get_meta_or_null(address, is_origin);
++	if (ret)
++		return ret;
++
+ 	page = virt_to_page_or_null(address);
+ 	if (!page)
+ 		return NULL;
+ 	if (!page_has_metadata(page))
+ 		return NULL;
+ 	off = addr % PAGE_SIZE;
+ 
+ 	return (is_origin ? origin_ptr_for(page) : shadow_ptr_for(page)) + off;

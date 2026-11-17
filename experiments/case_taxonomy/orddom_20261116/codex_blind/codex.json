@@ -1,0 +1,182 @@
+[
+  {
+    "k": 1,
+    "loc": "fs/dax.c:2011",
+    "verdict": "不可能",
+    "why": "这里确实向 i_pages 放入 PMD 阶数的 DAX 项，但 include/linux/huge_mm.h:81-89 明确把 DAX 排除在 MAX_PAGECACHE_ORDER 限制之外，限制来自普通页缓存的拆分实现。grab_mapping_entry()（fs/dax.c:687-770）对零页或空项降级时删除原项，真实 DAX 项保留，不走 xas_split_alloc()，因此阶数 13 大于 11 不构成这里的越界。"
+  },
+  {
+    "k": 2,
+    "loc": "fs/dax.c:2132",
+    "verdict": "不可能",
+    "why": "本函数找到并锁住已有的 DAX 项、设置脏标记，再由 vmf_insert_folio_pmd() 安装 PMD 页表项；PMD_ORDER 在这里用于选择页表操作，没有创建或扩大页缓存项。DAX 也属于 THP_ORDERS_ALL_SPECIAL_DAX 的明确例外（include/linux/huge_mm.h:81-89），不适用普通页缓存拆分上限。"
+  },
+  {
+    "k": 3,
+    "loc": "mm/huge_memory.c:1521",
+    "verdict": "不可能",
+    "why": "调用者 create_huge_pmd() 只在 vma_is_anonymous() 成立时进入本函数（mm/memory.c:6379-6385），处理的是匿名 THP 或匿名巨大零页。这里安装匿名 PMD 映射，不创建 mapping->i_pages 项，匿名 THP 的允许阶数与 MAX_PAGECACHE_ORDER 分属不同约束。"
+  },
+  {
+    "k": 4,
+    "loc": "mm/khugepaged.c:1853",
+    "verdict": "不可能",
+    "why": "1887 行的 thp_vma_allowable_order() 会进入 __thp_vma_allowable_orders()，先将普通文件和 shmem 的请求与 THP_ORDERS_ALL_FILE_DEFAULT 相交（mm/huge_memory.c:131-141），然后才处理强制合并策略。arm64-64k 等组合上的 BIT(13) 因上限 11 被清掉，TVA_FORCED_COLLAPSE 也绕不过这一步；其余 HPAGE_PMD_NR 用于已有页的 PTE 检查及映射操作。"
+  },
+  {
+    "k": 5,
+    "loc": "mm/memory.c:5609",
+    "verdict": "不可能",
+    "why": "do_set_pmd() 接收已经存在的 folio，并在 5630 行确认其阶数等于 PMD 阶数，然后安装页表映射。HPAGE_PMD_NR 用于刷指令缓存、RSS 和反向映射计数，本函数不分配 folio 或向 i_pages 插入超限项。"
+  },
+  {
+    "k": 6,
+    "loc": "mm/swapfile.c:3536",
+    "verdict": "不可能",
+    "why": "SWAPFILE_CLUSTER 用于计算交换簇数及末簇补齐，SWAP_NR_ORDERS 用于初始化同样按该宏声明的 next、nonfull_clusters 和 frag_clusters 数组（include/linux/swap.h:226-254）。当前交换簇表是 entries[SWAPFILE_CLUSTER] 的平面数组（mm/swap_table.h:9-12），不是 PMD 阶数的 xarray 项，不受 MAX_PAGECACHE_ORDER 限制。"
+  },
+  {
+    "k": 7,
+    "loc": "include/linux/rmap.h:333",
+    "verdict": "不可能",
+    "why": "HPAGE_PMD_NR 和 HPAGE_PUD_NR 在这里都是一致性检查的预期页数，用来确认 folio 与页表映射层级匹配。函数只检查已有 folio 和映射范围，不分配页或创建 xarray 项，阶数高于页缓存上限本身不会使这些等值检查失败。"
+  },
+  {
+    "k": 8,
+    "loc": "include/linux/rmap.h:559",
+    "verdict": "不可能",
+    "why": "HPAGE_PMD_NR 是传给 __folio_dup_file_rmap() 的已有映射范围页数，后者更新 mapcount（include/linux/rmap.h:492-522）。此调用链不分配 folio、不插入页缓存项，因而没有把 PMD 大阶数变为受限 xarray 项的路径。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/debug_vm_pgtable.c:1144",
+    "verdict": "不可能",
+    "why": "这些页是页表自测的后备内存，没有加入文件页缓存。debug_vm_pgtable_alloc_huge_page() 已比较 MAX_PAGE_ORDER，较大阶数改用可选的 alloc_contig_pages()，失败则跳过对应大页测试或回退小页（1045-1064、1235-1265 行），并非缺少页缓存上限检查。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/huge_memory.c:1588",
+    "verdict": "不可能",
+    "why": "insert_pmd() 将调用者提供的 folio 或 PFN 安装到进程 PMD 页表，HPAGE_PMD_NR 只用于 folio 分支的 RSS 记账。它不创建 mapping->i_pages 项，vmf_insert_folio_pmd() 还会校验已有 folio 的阶数恰为 PMD_ORDER（1692-1705 行），DAX/PFN 映射不受普通页缓存拆分上限约束。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/huge_memory.c:1911",
+    "verdict": "不可能",
+    "why": "HPAGE_PMD_NR 在 1994 行只用于复制匿名巨大页映射时增加 MM_ANONPAGES，普通文件 VMA 已在 1938-1940 行返回。特殊 PFN 分支复制已有页表项也不创建页缓存，本函数没有超限页缓存分配或插入。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/huge_memory.c:2439",
+    "verdict": "不可能",
+    "why": "zap_huge_pmd_folio() 在删除已有 PMD 映射时移除反向映射、减少匿名或文件 RSS，HPAGE_PMD_NR 是被撤销映射的页数。这里没有分配 folio、扩大 folio 或向 xarray 写入新项，减计数不需要页缓存阶数上限守卫。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/huge_memory.c:3144",
+    "verdict": "不可能",
+    "why": "此处拆分的是进程 PMD 页表映射：文件分支清除 PMD、处理脏位及 RSS 后返回（3164-3193 行），没有拆分页缓存 xarray 项。后续 HPAGE_PMD_NR 循环处理匿名页的 PTE、迁移条目及引用计数，不使用 xas_split_alloc() 的受限大项拆分。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/huge_memory.c:3932",
+    "verdict": "不可能",
+    "why": "HPAGE_PMD_ORDER 在 3976-3984 行仅作为统计阈值，决定拆小后是否扣除 NR_SHMEM_THPS 或 NR_FILE_THPS。实际拆分使用传入的 new_order，外层 __folio_split() 已要求 new_order 小于旧阶数（4128-4130 行），此常量没有被用作新页缓存项的阶数。"
+  },
+  {
+    "k": 15,
+    "loc": "mm/khugepaged.c:2244",
+    "verdict": "不可能",
+    "why": "collapse_file() 虽然直接分配并插入 PMD 阶数页缓存，但唯一上游链是 collapse_scan_file() ← collapse_single_pmd()，khugepaged 扫描和 MADV_COLLAPSE 分别先在 2887、3195 行检查 collapse_possible()。该检查经 collapse_possible_orders()（568-579 行）进入 __thp_vma_allowable_orders()，首先用 THP_ORDERS_ALL_FILE_DEFAULT 清除超限 PMD 位，所以阶数 13 大于 11 时到不了此分配点。"
+  },
+  {
+    "k": 16,
+    "loc": "mm/khugepaged.c:2677",
+    "verdict": "不可能",
+    "why": "本函数在扫描成功后确实调用 collapse_file()，但它只由 collapse_single_pmd() 调用（2807 行）。两个外部入口均先经过 collapse_possible() → thp_vma_allowable_orders() 的文件阶数掩码过滤（2887、3195 行及 mm/huge_memory.c:131-141），超过 MAX_PAGECACHE_ORDER 的 PMD 位已被删除。"
+  },
+  {
+    "k": 17,
+    "loc": "mm/migrate_device.c:803",
+    "verdict": "不可能",
+    "why": "直接调用者 migrate_vma_insert_page() 在 mm/migrate_device.c:995-997 先排除了非匿名 VMA，随后才可能进入本函数。这里为设备迁移提供的页建立匿名 folio 和匿名 PMD 反向映射（824、877-880 行），不创建文件页缓存项，MAX_PAGECACHE_ORDER 不适用于该阶数。"
+  },
+  {
+    "k": 18,
+    "loc": "mm/page_io.c:399",
+    "verdict": "不可能",
+    "why": "SWAPFILE_CLUSTER 在此是扫描交换簇零标志的数组边界，405 行检查的是簇内起始偏移加扫描长度。零标志保存在当前交换簇表或配套位图中（mm/swap_table.h:267 起），这里既不决定 folio 阶数，也不创建 xarray 大项。"
+  },
+  {
+    "k": 19,
+    "loc": "mm/rmap.c:1753",
+    "verdict": "不可能",
+    "why": "HPAGE_PMD_NR 是已有 folio 的 PMD 映射页数，传给 __folio_add_file_rmap() 更新反向映射并按需 mlock（1706-1721 行）。该函数不分配 folio 或插入页缓存，DAX 的 PMD 映射也能合法使用这套记账接口，不要求服从普通页缓存拆分上限。"
+  },
+  {
+    "k": 20,
+    "loc": "mm/shmem.c:672",
+    "verdict": "可能",
+    "why": "arm64-64k 上默认 huge_shmem_orders_inherit=BIT(13)（5418 行），本函数的等值条件允许解析 force，shmem_enabled_store() 随后写入该策略（5470-5474 行）。匿名共享映射缺页时，shmem_allowable_huge_orders() 的 force 分支（1865-1866 行）直接返回 BIT(13)，经 shmem_alloc_and_add_folio() → shmem_add_to_page_cache() 创建超过上限 11 的页缓存项。该组合没有 THP_SWAP（arch/arm64/Kconfig:99），启用 swap 后回收此脏页会经 shmem_writeout() 均匀拆到阶数 0，在 lib/xarray.c:1051 命中 WARN 并返回 -ENOMEM；此项与第 23、24 项是同一路径。"
+  },
+  {
+    "k": 21,
+    "loc": "mm/shmem.c:1609",
+    "verdict": "不可能",
+    "why": "本报告命中的 HPAGE_PMD_ORDER 只在 1651 行区分拆分成功后应记录哪类 THP 回退事件，不参与分配或插入项的阶数选择。函数操作传入 folio，拆分失败会先从 1647-1648 行跳到 redirty；第 23 项的超限输入确实会在这里暴露拆分失败，但原因不是本处统计阈值缺少上限比较。"
+  },
+  {
+    "k": 22,
+    "loc": "mm/shmem.c:1820",
+    "verdict": "不可能",
+    "why": "这里只检查 PMD 策略位以决定 khugepaged 是否需要运行，调用点是 mm/khugepaged.c:527 的 hugepage_enabled()。即使默认继承位在 arm64-64k 为 BIT(13)，后续文件合并仍先经 collapse_possible() → __thp_vma_allowable_orders() 与 THP_ORDERS_ALL_FILE_DEFAULT 相交，不能据此创建阶数 13 的页缓存项。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/shmem.c:1942",
+    "verdict": "可能",
+    "why": "arm64-64k 上将 shmem_enabled 设为 force、保留默认继承掩码，并对 PMD 对齐且覆盖完整 PMD 的匿名共享映射触发缺页，shmem_fault() → shmem_get_folio_gfp() 会取得 shmem_allowable_huge_orders():1866 未过滤的 BIT(13)，虽然页缓存上限为 11。shmem_suitable_orders() 只检查 VMA 对齐和已有项冲突，本函数据此分配阶数 13 的 folio，再由 2001 行调用的 shmem_add_to_page_cache() 原阶数插入 i_pages，没有后续上限过滤。arm64-64k 的 THP_SWAP 为 n，启用 swap 并回收此脏页时，shmem_writeout():1647 → 均匀拆分 → xas_split_alloc() 满足 0+2*6<=13，触发 WARN 并以 -ENOMEM 使拆分失败。"
+  },
+  {
+    "k": 24,
+    "loc": "mm/shmem.c:5377",
+    "verdict": "可能",
+    "why": "本函数默认把 BIT(HPAGE_PMD_ORDER) 存入 huge_shmem_orders_inherit，arm64-64k 上就是超过页缓存上限 11 的 BIT(13)，该位是后续分配掩码的来源。正常策略最终会与 THP_ORDERS_ALL_FILE_DEFAULT 相交，但设置 shmem_enabled=force 后，匿名共享映射走 shmem_allowable_huge_orders():1865-1866 的直接返回，随后 shmem_alloc_and_add_folio() → shmem_add_to_page_cache() 创建阶数 13 项。该组合 THP_SWAP=n，启用 swap 后的回收均匀拆分会在 lib/xarray.c:1051 WARN 并返回 -ENOMEM；这是第 23 项同一问题的初始化来源。"
+  },
+  {
+    "k": 25,
+    "loc": "mm/swap.h:100",
+    "verdict": "不可能",
+    "why": "这里只对交换槽偏移取模，得到小于 SWAPFILE_CLUSTER 的簇内数组下标，没有把 PMD 阶数传给页缓存分配器。当前交换簇表本身就声明为 entries[SWAPFILE_CLUSTER]（mm/swap_table.h:10-12），簇大于普通页缓存允许的页数不会造成该下标越界。"
+  },
+  {
+    "k": 26,
+    "loc": "mm/swap.h:124",
+    "verdict": "不可能",
+    "why": "offset/SWAPFILE_CLUSTER 用于查找交换簇元数据，setup_swap_clusters_info() 已按 DIV_ROUND_UP(maxpages, SWAPFILE_CLUSTER) 分配 cluster_info（mm/swapfile.c:3537-3547）。126 行的检查与这段分配采用相同的末簇补齐边界，这不是建立 PMD 阶数页缓存项，也没有使用 xarray 拆分能力。"
+  },
+  {
+    "k": 27,
+    "loc": "mm/swap_state.c:413",
+    "verdict": "不可能",
+    "why": "这里确实按输入阶数分配 swap cache folio，但当前 __swap_cache_do_add_folio() 是将它逐槽写入簇的平面表（209-230 行），不是创建同阶数 xarray 项。上游 swap_cache_alloc_folio() 已要求页数不超过 SWAPFILE_CLUSTER，分配失败则按允许阶数回退（525-539 行），所以大于 MAX_PAGECACHE_ORDER 不等于超过此结构上限。"
+  },
+  {
+    "k": 28,
+    "loc": "mm/swap_state.c:517",
+    "verdict": "不可能",
+    "why": "本函数在 525-527 行检查请求不超过交换簇大小，调用的 __swap_cache_alloc() 最终按每个交换槽写入 entries[SWAPFILE_CLUSTER]，没有 xarray 大项（mm/swap_table.h:10-12、mm/swap_state.c:209-230）。启用 THP_SWAP 时，检查通过的 PMD 大 folio 被表示为多个单槽条目；arm64-64k 的 THP_SWAP=n 则固定使用 256 槽并拒绝阶数 13 的请求，普通页缓存上限不是这里遗漏的边界。"
+  },
+  {
+    "k": 29,
+    "loc": "mm/swap_table.h:221",
+    "verdict": "不可能",
+    "why": "SWAPFILE_CLUSTER 在这里是平面交换表的元素数，225 行校验的是单个 off 下标，而不是 folio 阶数。表按 entries[SWAPFILE_CLUSTER] 声明并按 sizeof(struct swap_table) 或恰好一页分配（mm/swapfile.c:449-469、3946-3949），没有受 MAX_PAGECACHE_ORDER 限制的多索引项。"
+  },
+  {
+    "k": 30,
+    "loc": "mm/swap_table.h:231",
+    "verdict": "不可能",
+    "why": "该函数只原子交换簇内 table[off] 的一个槽，SWAPFILE_CLUSTER 与实际 entries 数组长度相同（mm/swap_table.h:10-12）。阶数派生的簇大小在这里用作合法下标上界，不是要存入 xarray 的阶数，因此不存在所报告的页缓存阶数越界。"
+  }
+]

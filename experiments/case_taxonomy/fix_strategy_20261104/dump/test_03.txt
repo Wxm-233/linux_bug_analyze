@@ -1,0 +1,809 @@
+##### A119 21f1b85c8912 riscv: mm: Do not call pmd dtor on vmemmap page table teardown
+样本集标签：M6 K2 S1 掩盖2；对应物：arch/arm64/mm/mmu.c:free_empty_pmd_table（不调用pmd析构）；理由：vmemmap的PMD页表未经构造，拆除时不能调析构；只在热拔内存时走到
+--- 说明 ---
+riscv: mm: Do not call pmd dtor on vmemmap page table teardown
+The vmemmap's, which is used for RV64 with SPARSEMEM_VMEMMAP, page
+tables are populated using pmd (page middle directory) hugetables.
+However, the pmd allocation is not using the generic mechanism used by
+the VMA code (e.g. pmd_alloc()), or the RISC-V specific
+create_pgd_mapping()/alloc_pmd_late(). Instead, the vmemmap page table
+code allocates a page, and calls vmemmap_set_pmd(). This results in
+that the pmd ctor is *not* called, nor would it make sense to do so.
+Now, when tearing down a vmemmap page table pmd, the cleanup code
+would unconditionally, and incorrectly call the pmd dtor, which
+results in a crash (best case).
+This issue was found when running the HMM selftests:
+  | tools/testing/selftests/mm# ./test_hmm.sh smoke
+  | ... # when unloading the test_hmm.ko module
+--- 改动 ---
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 0e8c20adcd98..fc53ce748c80 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -1566,7 +1566,7 @@ static void __meminit free_pte_table(pte_t *pte_start, pmd_t *pmd)
+ 	pmd_clear(pmd);
+ }
+ 
+-static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud)
++static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud, bool is_vmemmap)
+ {
+ 	struct page *page = pud_page(*pud);
+ 	struct ptdesc *ptdesc = page_ptdesc(page);
+@@ -1579,7 +1579,8 @@ static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud)
+ 			return;
+ 	}
+ 
+-	pagetable_pmd_dtor(ptdesc);
++	if (!is_vmemmap)
++		pagetable_pmd_dtor(ptdesc);
+ 	if (PageReserved(page))
+ 		free_reserved_page(page);
+ 	else
+@@ -1703,7 +1704,7 @@ static void __meminit remove_pud_mapping(pud_t *pud_base, unsigned long addr, un
+ 		remove_pmd_mapping(pmd_base, addr, next, is_vmemmap, altmap);
+ 
+ 		if (pgtable_l4_enabled)
+-			free_pmd_table(pmd_base, pudp);
++			free_pmd_table(pmd_base, pudp, is_vmemmap);
+ 	}
+ }
+ 
+
+##### A122 b3431a8bb336 riscv: Fix IPIs usage in kfence_protect_page()
+样本集标签：M5 K2 S1 掩盖3；对应物：arch/x86/include/asm/kfence.h:kfence_protect_page（只刷本地TLB）；理由：kfence保护页可能在关中断时调用，不能发IPI刷TLB；arm64用硬件广播刷新，不需要IPI
+--- 说明 ---
+riscv: Fix IPIs usage in kfence_protect_page()
+flush_tlb_kernel_range() may use IPIs to flush the TLBs of all the
+cores, which triggers the following warning when the irqs are disabled:
+[    3.455330] WARNING: CPU: 1 PID: 0 at kernel/smp.c:815 smp_call_function_many_cond+0x452/0x520
+[    3.456647] Modules linked in:
+[    3.457218] CPU: 1 UID: 0 PID: 0 Comm: swapper/1 Not tainted 6.12.0-rc7-00010-g91d3de7240b8 #1
+[    3.457416] Hardware name: QEMU QEMU Virtual Machine, BIOS
+[    3.457633] epc : smp_call_function_many_cond+0x452/0x520
+[    3.457736]  ra : on_each_cpu_cond_mask+0x1e/0x30
+[    3.457786] epc : ffffffff800b669a ra : ffffffff800b67c2 sp : ff2000000000bb50
+[    3.457824]  gp : ffffffff815212b8 tp : ff6000008014f080 t0 : 000000000000003f
+[    3.457859]  t1 : ffffffff815221e0 t2 : 000000000000000f s0 : ff2000000000bc10
+[    3.457920]  s1 : 0000000000000040 a0 : ffffffff815221e0 a1 : 0000000000000001
+[    3.457953]  a2 : 0000000000010000 a3 : 0000000000000003 a4 : 0000000000000000
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/kfence.h b/arch/riscv/include/asm/kfence.h
+index 7388edd88986..d08bf7fb3aee 100644
+--- a/arch/riscv/include/asm/kfence.h
++++ b/arch/riscv/include/asm/kfence.h
+@@ -22,7 +22,9 @@ static inline bool kfence_protect_page(unsigned long addr, bool protect)
+ 	else
+ 		set_pte(pte, __pte(pte_val(ptep_get(pte)) | _PAGE_PRESENT));
+ 
+-	flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++	preempt_disable();
++	local_flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++	preempt_enable();
+ 
+ 	return true;
+ }
+
+##### A123 f754f27e98f8 riscv: mm: Fix the out of bound issue of vmemmap address
+样本集标签：M7 K2 S1 掩盖2；对应物：arch/arm64/mm/init.c:arm64_memblock_init（memstart_addr按ARM64_MEMSTART_ALIGN下对齐）；理由：vmemmap基准须按内存段对齐；内存起点不对齐时才越界
+--- 说明 ---
+riscv: mm: Fix the out of bound issue of vmemmap address
+In sparse vmemmap model, the virtual address of vmemmap is calculated as:
+((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT)).
+And the struct page's va can be calculated with an offset:
+(vmemmap + (pfn)).
+However, when initializing struct pages, kernel actually starts from the
+first page from the same section that phys_ram_base belongs to. If the
+first page's physical address is not (phys_ram_base >> PAGE_SHIFT), then
+we get an va below VMEMMAP_START when calculating va for it's struct page.
+For example, if phys_ram_base starts from 0x82000000 with pfn 0x82000, the
+first page in the same section is actually pfn 0x80000. During
+init_unavailable_range(), we will initialize struct page for pfn 0x80000
+with virtual address ((struct page *)VMEMMAP_START - 0x2000), which is
+below VMEMMAP_START as well as PCI_IO_END.
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/page.h b/arch/riscv/include/asm/page.h
+index 71aabc5c6713..125f5ecd9565 100644
+--- a/arch/riscv/include/asm/page.h
++++ b/arch/riscv/include/asm/page.h
+@@ -122,6 +122,7 @@ struct kernel_mapping {
+ 
+ extern struct kernel_mapping kernel_map;
+ extern phys_addr_t phys_ram_base;
++extern unsigned long vmemmap_start_pfn;
+ 
+ #define is_kernel_mapping(x)	\
+ 	((x) >= kernel_map.virt_addr && (x) < (kernel_map.virt_addr + kernel_map.size))
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index d4e99eef90ac..050fdc49b5ad 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -87,7 +87,7 @@
+  * Define vmemmap for pfn_to_page & page_to_pfn calls. Needed if kernel
+  * is configured with CONFIG_SPARSEMEM_VMEMMAP enabled.
+  */
+-#define vmemmap		((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT))
++#define vmemmap		((struct page *)VMEMMAP_START - vmemmap_start_pfn)
+ 
+ #define PCI_IO_SIZE      SZ_16M
+ #define PCI_IO_END       VMEMMAP_START
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index fc53ce748c80..8d167e09f1fe 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -33,6 +33,7 @@
+ #include <asm/pgtable.h>
+ #include <asm/sections.h>
+ #include <asm/soc.h>
++#include <asm/sparsemem.h>
+ #include <asm/tlbflush.h>
+ 
+ #include "../kernel/head.h"
+@@ -62,6 +63,13 @@ EXPORT_SYMBOL(pgtable_l5_enabled);
+ phys_addr_t phys_ram_base __ro_after_init;
+ EXPORT_SYMBOL(phys_ram_base);
+ 
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++#define VMEMMAP_ADDR_ALIGN	(1ULL << SECTION_SIZE_BITS)
++
++unsigned long vmemmap_start_pfn __ro_after_init;
++EXPORT_SYMBOL(vmemmap_start_pfn);
++#endif
++
+ unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)]
+ 							__page_aligned_bss;
+ EXPORT_SYMBOL(empty_zero_page);
+@@ -240,8 +248,12 @@ static void __init setup_bootmem(void)
+ 	 * Make sure we align the start of the memory on a PMD boundary so that
+ 	 * at worst, we map the linear mapping with PMD mappings.
+ 	 */
+-	if (!IS_ENABLED(CONFIG_XIP_KERNEL))
++	if (!IS_ENABLED(CONFIG_XIP_KERNEL)) {
+ 		phys_ram_base = memblock_start_of_DRAM() & PMD_MASK;
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++		vmemmap_start_pfn = round_down(phys_ram_base, VMEMMAP_ADDR_ALIGN) >> PAGE_SHIFT;
++#endif
++	}
+ 
+ 	/*
+ 	 * In 64-bit, any use of __va/__pa before this point is wrong as we
+@@ -1101,6 +1113,9 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
+ 	kernel_map.xiprom_sz = (uintptr_t)(&_exiprom) - (uintptr_t)(&_xiprom);
+ 
+ 	phys_ram_base = CONFIG_PHYS_RAM_BASE;
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++	vmemmap_start_pfn = round_down(phys_ram_base, VMEMMAP_ADDR_ALIGN) >> PAGE_SHIFT;
++#endif
+ 	kernel_map.phys_addr = (uintptr_t)CONFIG_PHYS_RAM_BASE;
+ 	kernel_map.size = (uintptr_t)(&_end) - (uintptr_t)(&_start);
+ 
+
+##### A142 67a5ba8f742f riscv: fgraph: Fix stack layout to match __arch_ftrace_regs argument of ftrace_return_to_handler
+样本集标签：M8 K1 S1 掩盖0；对应物：kernel/trace/fgraph.c:ftrace_return_to_handler（按ftrace_regs取值）；arch/arm64/kernel/entry-ftrace.S:return_to_handler（按FREGS偏移保存）；理由：公共fgraph改为传ftrace_regs后，RISC-V返回桩的栈布局未按ftrace_regs排布
+--- 说明 ---
+riscv: fgraph: Fix stack layout to match __arch_ftrace_regs argument of ftrace_return_to_handler
+Naresh Kamboju reported a "Bad frame pointer" kernel warning while
+running LTP trace ftrace_stress_test.sh in riscv. We can reproduce the
+same issue with the following command:
+```
+$ cd /sys/kernel/debug/tracing
+$ echo 'f:myprobe do_nanosleep%return args1=$retval' > dynamic_events
+$ echo 1 > events/fprobes/enable
+$ echo 1 > tracing_on
+$ sleep 1
+```
+And we can get the following kernel warning:
+[  127.692888] ------------[ cut here ]------------
+[  127.693755] Bad frame pointer: expected ff2000000065be50, received ba34c141e9594000
+--- 改动 ---
+diff --git a/arch/riscv/kernel/mcount.S b/arch/riscv/kernel/mcount.S
+index 068168046e0e..da4a4000e57e 100644
+--- a/arch/riscv/kernel/mcount.S
++++ b/arch/riscv/kernel/mcount.S
+@@ -12,8 +12,6 @@
+ #include <asm/asm-offsets.h>
+ #include <asm/ftrace.h>
+ 
+-#define ABI_SIZE_ON_STACK	80
+-
+ 	.text
+ 
+ 	.macro SAVE_ABI_STATE
+@@ -28,12 +26,12 @@
+ 	 * register if a0 was not saved.
+ 	 */
+ 	.macro SAVE_RET_ABI_STATE
+-	addi	sp, sp, -ABI_SIZE_ON_STACK
+-	REG_S	ra, 1*SZREG(sp)
+-	REG_S	s0, 8*SZREG(sp)
+-	REG_S	a0, 10*SZREG(sp)
+-	REG_S	a1, 11*SZREG(sp)
+-	addi	s0, sp, ABI_SIZE_ON_STACK
++	addi	sp, sp, -FREGS_SIZE_ON_STACK
++	REG_S	ra, FREGS_RA(sp)
++	REG_S	s0, FREGS_S0(sp)
++	REG_S	a0, FREGS_A0(sp)
++	REG_S	a1, FREGS_A1(sp)
++	addi	s0, sp, FREGS_SIZE_ON_STACK
+ 	.endm
+ 
+ 	.macro RESTORE_ABI_STATE
+@@ -43,11 +41,11 @@
+ 	.endm
+ 
+ 	.macro RESTORE_RET_ABI_STATE
+-	REG_L	ra, 1*SZREG(sp)
+-	REG_L	s0, 8*SZREG(sp)
+-	REG_L	a0, 10*SZREG(sp)
+-	REG_L	a1, 11*SZREG(sp)
+-	addi	sp, sp, ABI_SIZE_ON_STACK
++	REG_L	ra, FREGS_RA(sp)
++	REG_L	s0, FREGS_S0(sp)
++	REG_L	a0, FREGS_A0(sp)
++	REG_L	a1, FREGS_A1(sp)
++	addi	sp, sp, FREGS_SIZE_ON_STACK
+ 	.endm
+ 
+ SYM_TYPED_FUNC_START(ftrace_stub)
+
+##### A155 e94eb7ea6f20 riscv: Properly export reserved regions in /proc/iomem
+样本集标签：M10 K2 S1 掩盖4；对应物：arch/arm64/kernel/setup.c:reserve_memblock_reserved_regions；理由：/proc/iomem须标出与内存重叠的保留区；arm64、LoongArch早已修过，RISC-V未跟上
+--- 说明 ---
+riscv: Properly export reserved regions in /proc/iomem
+The /proc/iomem represents the kernel's memory map. Regions marked
+with "Reserved" tells the user that the range should not be tampered
+with. Kexec-tools, when using the older kexec_load syscall relies on
+the "Reserved" regions to build the memory segments, that will be the
+target of the new kexec'd kernel.
+The RISC-V port tries to expose all reserved regions to userland, but
+some regions were not properly exposed: Regions that resided in both
+the "regular" and reserved memory block, e.g. the EFI Memory Map. A
+missing entry could result in reserved memory being overwritten.
+It turns out, that arm64, and loongarch had a similar issue a while
+back:
+  commit d91680e687f4 ("arm64: Fix /proc/iomem for reserved but not memory regions")
+  commit 50d7ba36b916 ("arm64: export memblock_reserve()d regions via /proc/iomem")
+--- 改动 ---
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index c174544eefc8..f7c9a1caa83e 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -66,6 +66,9 @@ static struct resource bss_res = { .name = "Kernel bss", };
+ static struct resource elfcorehdr_res = { .name = "ELF Core hdr", };
+ #endif
+ 
++static int num_standard_resources;
++static struct resource *standard_resources;
++
+ static int __init add_resource(struct resource *parent,
+ 				struct resource *res)
+ {
+@@ -139,7 +142,7 @@ static void __init init_resources(void)
+ 	struct resource *res = NULL;
+ 	struct resource *mem_res = NULL;
+ 	size_t mem_res_sz = 0;
+-	int num_resources = 0, res_idx = 0;
++	int num_resources = 0, res_idx = 0, non_resv_res = 0;
+ 	int ret = 0;
+ 
+ 	/* + 1 as memblock_alloc() might increase memblock.reserved.cnt */
+@@ -193,6 +196,7 @@ static void __init init_resources(void)
+ 	/* Add /memory regions to the resource tree */
+ 	for_each_mem_region(region) {
+ 		res = &mem_res[res_idx--];
++		non_resv_res++;
+ 
+ 		if (unlikely(memblock_is_nomap(region))) {
+ 			res->name = "Reserved";
+@@ -210,6 +214,9 @@ static void __init init_resources(void)
+ 			goto error;
+ 	}
+ 
++	num_standard_resources = non_resv_res;
++	standard_resources = &mem_res[res_idx + 1];
++
+ 	/* Clean-up any unused pre-allocated resources */
+ 	if (res_idx >= 0)
+ 		memblock_free(mem_res, (res_idx + 1) * sizeof(*mem_res));
+@@ -221,6 +228,33 @@ static void __init init_resources(void)
+ 	memblock_free(mem_res, mem_res_sz);
+ }
+ 
++static int __init reserve_memblock_reserved_regions(void)
++{
++	u64 i, j;
++
++	for (i = 0; i < num_standard_resources; i++) {
++		struct resource *mem = &standard_resources[i];
++		phys_addr_t r_start, r_end, mem_size = resource_size(mem);
++
++		if (!memblock_is_region_reserved(mem->start, mem_size))
++			continue;
++
++		for_each_reserved_mem_range(j, &r_start, &r_end) {
++			resource_size_t start, end;
++
++			start = max(PFN_PHYS(PFN_DOWN(r_start)), mem->start);
++			end = min(PFN_PHYS(PFN_UP(r_end)) - 1, mem->end);
++
++			if (start > mem->end || end < mem->start)
++				continue;
++
++			reserve_region_with_split(mem, start, end, "Reserved");
++		}
++	}
++
++	return 0;
++}
++arch_initcall(reserve_memblock_reserved_regions);
+ 
+ static void __init parse_dtb(void)
+ {
+
+##### A158 61a74ad25462 riscv: misaligned: fix sleeping function called during misaligned access handling
+样本集标签：M5 K2 S1 掩盖0；对应物：arch/arm/mm/alignment.c:do_alignment（原先开中断的，先开中断再访问用户内存）；理由：未对齐陷入处理中关中断访问用户内存会睡眠（本修复后被撤回）
+--- 说明 ---
+riscv: misaligned: fix sleeping function called during misaligned access handling
+Use copy_from_user_nofault() and copy_to_user_nofault() instead of
+copy_from/to_user functions in the misaligned access trap handlers.
+The following bug report was found when executing misaligned memory
+accesses:
+BUG: sleeping function called from invalid context at ./include/linux/uaccess.h:162
+in_atomic(): 0, irqs_disabled(): 1, non_block: 0, pid: 115, name: two
+preempt_count: 0, expected: 0
+CPU: 0 UID: 0 PID: 115 Comm: two Not tainted 6.14.0-rc5 #24
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+ [<ffffffff800160ea>] dump_backtrace+0x1c/0x24
+ [<ffffffff80002304>] show_stack+0x28/0x34
+ [<ffffffff80010fae>] dump_stack_lvl+0x4a/0x68
+--- 改动 ---
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 4354c87c0376..0173ed80818c 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -441,7 +441,7 @@ static int handle_scalar_misaligned_load(struct pt_regs *regs)
+ 
+ 	val.data_u64 = 0;
+ 	if (user_mode(regs)) {
+-		if (copy_from_user(&val, (u8 __user *)addr, len))
++		if (copy_from_user_nofault(&val, (u8 __user *)addr, len))
+ 			return -1;
+ 	} else {
+ 		memcpy(&val, (u8 *)addr, len);
+@@ -539,7 +539,7 @@ static int handle_scalar_misaligned_store(struct pt_regs *regs)
+ 		return -EOPNOTSUPP;
+ 
+ 	if (user_mode(regs)) {
+-		if (copy_to_user((u8 __user *)addr, &val, len))
++		if (copy_to_user_nofault((u8 __user *)addr, &val, len))
+ 			return -1;
+ 	} else {
+ 		memcpy((u8 *)addr, &val, len);
+
+##### A162 7d1d19a11cfb riscv: uprobes: Add missing fence.i after building the XOL buffer
+样本集标签：M3 K1 S1 掩盖3；对应物：arch/arm64/kernel/probes/uprobes.c:arch_uprobe_copy_ixol（同步指令缓存）；理由：uprobe的XOL缓冲写入后须刷新指令缓存；RISC-V沿用只刷数据缓存的写法，特定核上才出错
+--- 说明 ---
+riscv: uprobes: Add missing fence.i after building the XOL buffer
+The XOL (execute out-of-line) buffer is used to single-step the
+replaced instruction(s) for uprobes. The RISC-V port was missing a
+proper fence.i (i$ flushing) after constructing the XOL buffer, which
+can result in incorrect execution of stale/broken instructions.
+This was found running the BPF selftests "test_progs:
+uprobe_autoattach, attach_probe" on the Spacemit K1/X60, where the
+uprobes tests randomly blew up.
+Reviewed-by: Guo Ren <guoren@kernel.org>
+Fixes: 74784081aac8 ("riscv: Add uprobes supported")
+Signed-off-by: Björn Töpel <bjorn@rivosinc.com>
+Link: https://lore.kernel.org/r/20250419111402.1660267-2-bjorn@kernel.org
+Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/probes/uprobes.c b/arch/riscv/kernel/probes/uprobes.c
+index 4b3dc8beaf77..cc15f7ca6cc1 100644
+--- a/arch/riscv/kernel/probes/uprobes.c
++++ b/arch/riscv/kernel/probes/uprobes.c
+@@ -167,6 +167,7 @@ void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+ 	/* Initialize the slot */
+ 	void *kaddr = kmap_atomic(page);
+ 	void *dst = kaddr + (vaddr & ~PAGE_MASK);
++	unsigned long start = (unsigned long)dst;
+ 
+ 	memcpy(dst, src, len);
+ 
+@@ -176,13 +177,6 @@ void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+ 		*(uprobe_opcode_t *)dst = __BUG_INSN_32;
+ 	}
+ 
++	flush_icache_range(start, start + len);
+ 	kunmap_atomic(kaddr);
+-
+-	/*
+-	 * We probably need flush_icache_user_page() but it needs vma.
+-	 * This should work on most of architectures by default. If
+-	 * architecture needs to do something different it can define
+-	 * its own version of the function.
+-	 */
+-	flush_dcache_page(page);
+ }
+
+##### A167 2b9518684f85 RISC-V: vDSO: Correct inline assembly constraints in the getrandom syscall wrapper
+样本集标签：M10 K2 S1 掩盖2；对应物：arch/arm64/include/asm/vdso/getrandom.h:getrandom_syscall（"=r"）；理由：vDSO系统调用内联汇编约束；其他架构用"=r"，RISC-V用"+r"，只在Clang优化时出错
+--- 说明 ---
+RISC-V: vDSO: Correct inline assembly constraints in the getrandom syscall wrapper
+As recently pointed out by Thomas, if a register is forced for two
+different register variables, among them one is used as "+" (both input
+and output) and another is only used as input, Clang would treat the
+conflicting input parameters as undefined behaviour and optimize away
+the argument assignment.
+Instead use "=r" (only output) for the output parameter and "r" (only
+input) for the input parameter.
+While the example from the GCC documentation uses "0" for the input
+parameter, this is not necessary as confirmed by the GCC developers and "r"
+matches what the other architectures' vDSO implementations are using.
+[ alex: Update log to match v2 (Thomas) ]
+Link: https://lore.kernel.org/all/20250603-loongarch-vdso-syscall-v1-1-6d12d6dfbdd0@linutronix.de/
+Link: https://gcc.gnu.org/onlinedocs/gcc-15.1.0/gcc/Local-Register-Variables.html
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/vdso/getrandom.h b/arch/riscv/include/asm/vdso/getrandom.h
+index 8dc92441702a..c6d66895c1f5 100644
+--- a/arch/riscv/include/asm/vdso/getrandom.h
++++ b/arch/riscv/include/asm/vdso/getrandom.h
+@@ -18,7 +18,7 @@ static __always_inline ssize_t getrandom_syscall(void *_buffer, size_t _len, uns
+ 	register unsigned int flags asm("a2") = _flags;
+ 
+ 	asm volatile ("ecall\n"
+-		      : "+r" (ret)
++		      : "=r" (ret)
+ 		      : "r" (nr), "r" (buffer), "r" (len), "r" (flags)
+ 		      : "memory");
+ 
+
+##### A171 890ba5be6335 Revert "riscv: Define TASK_SIZE_MAX for __access_ok()"
+样本集标签：M7 K1 S1 掩盖0；对应物：include/asm-generic/access_ok.h:__access_ok（TASK_SIZE_MAX默认TASK_SIZE）；mm/gup.c（快速路径只查access_ok）；理由：TASK_SIZE_MAX须是真实用户地址上界；RISC-V设成LONG_MAX，公共GUP快速路径会接受非法地址
+--- 说明 ---
+Revert "riscv: Define TASK_SIZE_MAX for __access_ok()"
+This reverts commit ad5643cf2f69 ("riscv: Define TASK_SIZE_MAX for
+__access_ok()").
+This commit changes TASK_SIZE_MAX to be LONG_MAX to optimize access_ok(),
+because the previous TASK_SIZE_MAX (default to TASK_SIZE) requires some
+computation.
+The reasoning was that all user addresses are less than LONG_MAX, and all
+kernel addresses are greater than LONG_MAX. Therefore access_ok() can
+filter kernel addresses.
+Addresses between TASK_SIZE and LONG_MAX are not valid user addresses, but
+access_ok() let them pass. That was thought to be okay, because they are
+not valid addresses at hardware level.
+Unfortunately, one case is missed: get_user_pages_fast() happily accepts
+addresses between TASK_SIZE and LONG_MAX. futex(), for instance, uses
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index a11816bbf9e7..521a995741cd 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -1075,7 +1075,6 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
+  */
+ #ifdef CONFIG_64BIT
+ #define TASK_SIZE_64	(PGDIR_SIZE * PTRS_PER_PGD / 2)
+-#define TASK_SIZE_MAX	LONG_MAX
+ 
+ #ifdef CONFIG_COMPAT
+ #define TASK_SIZE_32	(_AC(0x80000000, UL) - PAGE_SIZE)
+
+##### A174 2b29be967ae4 riscv: cpu_ops_sbi: Use static array for boot_data
+样本集标签：M1 K2 S1 掩盖2；对应物：arch/arm64/kernel/smp.c:secondary_data（静态变量）；理由：对percpu变量用__pa，假设percpu在线性映射中；按页分配percpu时在vmalloc区
+--- 说明 ---
+riscv: cpu_ops_sbi: Use static array for boot_data
+Since commit 6b9f29b81b15 ("riscv: Enable pcpu page first chunk
+allocator"), if NUMA is enabled, the page percpu allocator may be used
+on very sparse configurations, or when requested on boot with
+percpu_alloc=page.
+In that case, percpu data gets put in the vmalloc area. However,
+sbi_hsm_hart_start() needs the physical address of a sbi_hart_boot_data,
+and simply assumes that __pa() would work. This causes the just started
+hart to immediately access an invalid address and hang.
+Fortunately, struct sbi_hart_boot_data is not too large, so we can
+simply allocate an array for boot_data statically, putting it in the
+kernel image.
+This fixes NUMA=y SMP boot on Sophgo SG2042.
+To reproduce on QEMU: Set CONFIG_NUMA=y and CONFIG_DEBUG_VIRTUAL=y, then
+--- 改动 ---
+diff --git a/arch/riscv/kernel/cpu_ops_sbi.c b/arch/riscv/kernel/cpu_ops_sbi.c
+index e6fbaaf54956..87d655944803 100644
+--- a/arch/riscv/kernel/cpu_ops_sbi.c
++++ b/arch/riscv/kernel/cpu_ops_sbi.c
+@@ -18,10 +18,10 @@ const struct cpu_operations cpu_ops_sbi;
+ 
+ /*
+  * Ordered booting via HSM brings one cpu at a time. However, cpu hotplug can
+- * be invoked from multiple threads in parallel. Define a per cpu data
++ * be invoked from multiple threads in parallel. Define an array of boot data
+  * to handle that.
+  */
+-static DEFINE_PER_CPU(struct sbi_hart_boot_data, boot_data);
++static struct sbi_hart_boot_data boot_data[NR_CPUS];
+ 
+ static int sbi_hsm_hart_start(unsigned long hartid, unsigned long saddr,
+ 			      unsigned long priv)
+@@ -67,7 +67,7 @@ static int sbi_cpu_start(unsigned int cpuid, struct task_struct *tidle)
+ 	unsigned long boot_addr = __pa_symbol(secondary_start_sbi);
+ 	unsigned long hartid = cpuid_to_hartid_map(cpuid);
+ 	unsigned long hsm_data;
+-	struct sbi_hart_boot_data *bdata = &per_cpu(boot_data, cpuid);
++	struct sbi_hart_boot_data *bdata = &boot_data[cpuid];
+ 
+ 	/* Make sure tidle is updated */
+ 	smp_mb();
+
+##### A175 969f028bf2c4 riscv: Enable interrupt during exception handling
+样本集标签：M5 K2 S1 掩盖2；对应物：arch/x86/kernel/traps.c:do_error_trap（cond_local_irq_enable）；理由：处理用户态异常时应开中断再发信号；PREEMPT_RT下自旋锁会睡眠才出错
+--- 说明 ---
+riscv: Enable interrupt during exception handling
+force_sig_fault() takes a spinlock, which is a sleeping lock with
+CONFIG_PREEMPT_RT=y. However, exception handling calls force_sig_fault()
+with interrupt disabled, causing a sleeping in atomic context warning.
+This can be reproduced using userspace programs such as:
+    int main() { asm ("ebreak"); }
+or
+    int main() { asm ("unimp"); }
+There is no reason that interrupt must be disabled while handling
+exceptions from userspace.
+Enable interrupt while handling user exceptions. This also has the added
+benefit of avoiding unnecessary delays in interrupt handling.
+Fixes: f0bddf50586d ("riscv: entry: Convert to generic entry")
+Suggested-by: Sebastian Andrzej Siewior <bigeasy@linutronix.de>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 9c83848797a7..80230de167de 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -6,6 +6,7 @@
+ #include <linux/cpu.h>
+ #include <linux/kernel.h>
+ #include <linux/init.h>
++#include <linux/irqflags.h>
+ #include <linux/randomize_kstack.h>
+ #include <linux/sched.h>
+ #include <linux/sched/debug.h>
+@@ -151,7 +152,9 @@ asmlinkage __visible __trap_section void name(struct pt_regs *regs)		\
+ {										\
+ 	if (user_mode(regs)) {							\
+ 		irqentry_enter_from_user_mode(regs);				\
++		local_irq_enable();						\
+ 		do_trap_error(regs, signo, code, regs->epc, "Oops - " str);	\
++		local_irq_disable();						\
+ 		irqentry_exit_to_user_mode(regs);				\
+ 	} else {								\
+ 		irqentry_state_t state = irqentry_nmi_enter(regs);		\
+@@ -173,17 +176,14 @@ asmlinkage __visible __trap_section void do_trap_insn_illegal(struct pt_regs *re
+ 
+ 	if (user_mode(regs)) {
+ 		irqentry_enter_from_user_mode(regs);
+-
+ 		local_irq_enable();
+ 
+ 		handled = riscv_v_first_use_handler(regs);
+-
+-		local_irq_disable();
+-
+ 		if (!handled)
+ 			do_trap_error(regs, SIGILL, ILL_ILLOPC, regs->epc,
+ 				      "Oops - illegal instruction");
+ 
++		local_irq_disable();
+ 		irqentry_exit_to_user_mode(regs);
+ 	} else {
+ 		irqentry_state_t state = irqentry_nmi_enter(regs);
+@@ -308,9 +308,11 @@ asmlinkage __visible __trap_section void do_trap_break(struct pt_regs *regs)
+ {
+ 	if (user_mode(regs)) {
+ 		irqentry_enter_from_user_mode(regs);
++		local_irq_enable();
+ 
+ 		handle_break(regs);
+ 
++		local_irq_disable();
+ 		irqentry_exit_to_user_mode(regs);
+ 	} else {
+ 		irqentry_state_t state = irqentry_nmi_enter(regs);
+
+##### A181 1046791390af riscv: uaccess: fix __put_user_nocheck for unaligned accesses
+样本集标签：M7 K2 S1 掩盖2；对应物：arch/x86/include/asm/uaccess.h（按__typeof__(*(ptr))定类型）；理由：put_user写入宽度应由目标类型决定；RISC-V按值的类型，只在非对齐目标路径出错
+--- 说明 ---
+riscv: uaccess: fix __put_user_nocheck for unaligned accesses
+The type of the value to write should be determined by the size of the
+destination, not by the value itself, which may be a constant. This
+aligns the behavior with x86_64, where __typeof__(*(__gu_ptr)) is used
+to infer the correct type.
+This fixes an issue in put_cmsg, which was only writing 4 out of 8
+bytes to the cmsg_len field, causing the glibc tst-socket-timestamp test
+to fail.
+Fixes: ca1a66cdd685 ("riscv: uaccess: do not do misaligned accesses in get/put_user()")
+Signed-off-by: Aurelien Jarno <aurelien@aurel32.net>
+Reviewed-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Cc: stable@vger.kernel.org
+Link: https://lore.kernel.org/r/20250724220853.1969954-1-aurelien@aurel32.net
+Signed-off-by: Paul Walmsley <pjw@kernel.org>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index b88a6218b7f2..22e3f52a763d 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -311,7 +311,7 @@ do {								\
+ do {								\
+ 	if (!IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) &&	\
+ 	    !IS_ALIGNED((uintptr_t)__gu_ptr, sizeof(*__gu_ptr))) {	\
+-		__inttype(x) ___val = (__inttype(x))x;			\
++		__typeof__(*(__gu_ptr)) ___val = (x);		\
+ 		if (__asm_copy_to_user_sum_enabled(__gu_ptr, &(___val), sizeof(*__gu_ptr))) \
+ 			goto label;				\
+ 		break;						\
+
+##### A188 668208b161a0 riscv: use an atomic xchg in pudp_huge_get_and_clear()
+样本集标签：M4 K1 S1 掩盖0；对应物：include/linux/pgtable.h:pudp_huge_get_and_clear（通用版非原子）；arch/x86/include/asm/pgtable.h:pudp_huge_get_and_clear（native_pudp_get_and_clear）；理由：PUD大页取出并清空须原子；RISC-V加PUD THP时沿用通用非原子版本
+--- 说明 ---
+riscv: use an atomic xchg in pudp_huge_get_and_clear()
+Make sure we return the right pud value and not a value that could have
+been overwritten in between by a different core.
+Link: https://lkml.kernel.org/r/20250814-dev-alex-thp_pud_xchg-v1-1-b4704dfae206@rivosinc.com
+Fixes: c3cc2a4a3a23 ("riscv: Add support for PUD THP")
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Cc: Andrew Donnellan <ajd@linux.ibm.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 91697fbf1f90..e69346307e78 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -942,6 +942,17 @@ static inline int pudp_test_and_clear_young(struct vm_area_struct *vma,
+ 	return ptep_test_and_clear_young(vma, address, (pte_t *)pudp);
+ }
+ 
++#define __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR
++static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
++					    unsigned long address, pud_t *pudp)
++{
++	pud_t pud = __pud(atomic_long_xchg((atomic_long_t *)pudp, 0));
++
++	page_table_check_pud_clear(mm, pud);
++
++	return pud;
++}
++
+ static inline int pud_young(pud_t pud)
+ {
+ 	return pte_young(pud_pte(pud));
+
+##### A190 8afbd0045922 riscv: kexec: initialize kexec_buf struct
+样本集标签：M8 K3 S2 掩盖0；对应物：kernel/kexec_file.c（读取kexec_buf新增字段）；理由：公共kexec_file给kexec_buf加字段且总被读取，各架构未初始化栈上结构
+--- 说明 ---
+riscv: kexec: initialize kexec_buf struct
+The kexec_buf structure was previously declared without initialization.
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures. This un-initialized field will contain garbage.
+This is also triggering a UBSAN warning when the uninitialized data was
+accessed:
+	------------[ cut here ]------------
+	UBSAN: invalid-load in ./include/linux/kexec.h:210:10
+	load of value 252 is not a valid value for type '_Bool'
+Zero-initializing kexec_buf at declaration ensures all fields are
+cleanly set, preventing future instances of uninitialized memory being
+used.
+Link: https://lkml.kernel.org/r/20250827-kbuf_all-v1-2-1df9882bb01a@debian.org
+--- 改动 ---
+diff --git a/arch/riscv/kernel/kexec_elf.c b/arch/riscv/kernel/kexec_elf.c
+index 56444c7bd34e..531d348db84d 100644
+--- a/arch/riscv/kernel/kexec_elf.c
++++ b/arch/riscv/kernel/kexec_elf.c
+@@ -28,7 +28,7 @@ static int riscv_kexec_elf_load(struct kimage *image, struct elfhdr *ehdr,
+ 	int i;
+ 	int ret = 0;
+ 	size_t size;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 
+ 	kbuf.image = image;
+@@ -66,7 +66,7 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ {
+ 	int i;
+ 	int ret;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 	unsigned long lowest_paddr = ULONG_MAX;
+ 	unsigned long lowest_vaddr = ULONG_MAX;
+diff --git a/arch/riscv/kernel/kexec_image.c b/arch/riscv/kernel/kexec_image.c
+index 26a81774a78a..8f2eb900910b 100644
+--- a/arch/riscv/kernel/kexec_image.c
++++ b/arch/riscv/kernel/kexec_image.c
+@@ -41,7 +41,7 @@ static void *image_load(struct kimage *image,
+ 	struct riscv_image_header *h;
+ 	u64 flags;
+ 	bool be_image, be_kernel;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	int ret;
+ 
+ 	/* Check Image header */
+diff --git a/arch/riscv/kernel/machine_kexec_file.c b/arch/riscv/kernel/machine_kexec_file.c
+index e36104af2e24..b9eb41b0a975 100644
+--- a/arch/riscv/kernel/machine_kexec_file.c
++++ b/arch/riscv/kernel/machine_kexec_file.c
+@@ -261,7 +261,7 @@ int load_extra_segments(struct kimage *image, unsigned long kernel_start,
+ 	int ret;
+ 	void *fdt;
+ 	unsigned long initrd_pbase = 0UL;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	char *modified_cmdline = NULL;
+ 
+ 	kbuf.image = image;
+
+##### A191 95c54cd9c769 riscv: kexec: Initialize kexec_buf struct
+样本集标签：M8 K3 S2 掩盖0；对应物：kernel/kexec_file.c（读取kexec_buf新增字段）；理由：同上（同一补丁的另一份提交）
+--- 说明 ---
+riscv: kexec: Initialize kexec_buf struct
+The kexec_buf structure was previously declared without initialization.
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures. This un-initialized field will contain garbage.
+This is also triggering a UBSAN warning when the uninitialized data was
+accessed:
+	------------[ cut here ]------------
+	UBSAN: invalid-load in ./include/linux/kexec.h:210:10
+	load of value 252 is not a valid value for type '_Bool'
+Zero-initializing kexec_buf at declaration ensures all fields are
+cleanly set, preventing future instances of uninitialized memory being
+used.
+Fixes: bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+--- 改动 ---
+diff --git a/arch/riscv/kernel/kexec_elf.c b/arch/riscv/kernel/kexec_elf.c
+index 56444c7bd34e..531d348db84d 100644
+--- a/arch/riscv/kernel/kexec_elf.c
++++ b/arch/riscv/kernel/kexec_elf.c
+@@ -28,7 +28,7 @@ static int riscv_kexec_elf_load(struct kimage *image, struct elfhdr *ehdr,
+ 	int i;
+ 	int ret = 0;
+ 	size_t size;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 
+ 	kbuf.image = image;
+@@ -66,7 +66,7 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ {
+ 	int i;
+ 	int ret;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 	unsigned long lowest_paddr = ULONG_MAX;
+ 	unsigned long lowest_vaddr = ULONG_MAX;
+diff --git a/arch/riscv/kernel/kexec_image.c b/arch/riscv/kernel/kexec_image.c
+index 26a81774a78a..8f2eb900910b 100644
+--- a/arch/riscv/kernel/kexec_image.c
++++ b/arch/riscv/kernel/kexec_image.c
+@@ -41,7 +41,7 @@ static void *image_load(struct kimage *image,
+ 	struct riscv_image_header *h;
+ 	u64 flags;
+ 	bool be_image, be_kernel;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	int ret;
+ 
+ 	/* Check Image header */
+diff --git a/arch/riscv/kernel/machine_kexec_file.c b/arch/riscv/kernel/machine_kexec_file.c
+index e36104af2e24..b9eb41b0a975 100644
+--- a/arch/riscv/kernel/machine_kexec_file.c
++++ b/arch/riscv/kernel/machine_kexec_file.c
+@@ -261,7 +261,7 @@ int load_extra_segments(struct kimage *image, unsigned long kernel_start,
+ 	int ret;
+ 	void *fdt;
+ 	unsigned long initrd_pbase = 0UL;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	char *modified_cmdline = NULL;
+ 
+ 	kbuf.image = image;
+

@@ -1,0 +1,1133 @@
+
+##### L100
+=== 58aec91efb93 L 2024-08-25 +0/-11
+LoongArch: Remove the unused dma-direct.h
+
+dma-direct.h is introduced in commit d4b6f1562a3c3284 ("LoongArch: Add
+Non-Uniform Memory Access (NUMA) support"). In commit c78c43fe7d42524c
+("LoongArch: Use acpi_arch_dma_setup() and remove ARCH_HAS_PHYS_TO_DMA"),
+ARCH_HAS_PHYS_TO_DMA was deselected and the coresponding phys_to_dma()/
+dma_to_phys() functions were removed. However, the unused dma-direct.h
+was left behind, which is removed by this patch.
+
+Fixes: c78c43fe7d42 ("LoongArch: Use acpi_arch_dma_setup() and remove ARCH_HAS_PHYS_TO_DMA")
+functions: 
+fixes: c78c43fe7d42
+diff --git a/arch/loongarch/include/asm/dma-direct.h b/arch/loongarch/include/asm/dma-direct.h
+deleted file mode 100644
+index 75ccd808a2af..000000000000
+--- a/arch/loongarch/include/asm/dma-direct.h
++++ /dev/null
+@@ -1,11 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0 */
+-/*
+- * Copyright (C) 2020-2022 Loongson Technology Corporation Limited
+- */
+-#ifndef _LOONGARCH_DMA_DIRECT_H
+-#define _LOONGARCH_DMA_DIRECT_H
+-
+-dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr);
+-phys_addr_t dma_to_phys(struct device *dev, dma_addr_t daddr);
+-
+-#endif /* _LOONGARCH_DMA_DIRECT_H */
+
+##### L101
+=== 80376323e2b6 L 2024-08-26 +8/-0
+LoongArch: Add ifdefs to fix LSX and LASX related warnings
+
+There exist some warnings when building kernel if CONFIG_CPU_HAS_LBT is
+set but CONFIG_CPU_HAS_LSX and CONFIG_CPU_HAS_LASX are not set. In this
+case, there are no definitions of _restore_lsx & _restore_lasx and there
+are also no definitions of kvm_restore_lsx & kvm_restore_lasx in fpu.S
+and switch.S respectively, just add some ifdefs to fix these warnings.
+
+  AS      arch/loongarch/kernel/fpu.o
+arch/loongarch/kernel/fpu.o: warning: objtool: unexpected relocation symbol type in .rela.discard.func_stack_frame_non_standard: 0
+arch/loongarch/kernel/fpu.o: warning: objtool: unexpected relocation symbol type in .rela.discard.func_stack_frame_non_standard: 0
+
+  AS [M]  arch/loongarch/kvm/switch.o
+arch/loongarch/kvm/switch.o: warning: objtool: unexpected relocation symbol type in .rela.discard.func_stack_frame_non_standard: 0
+arch/loongarch/kvm/switch.o: warning: objtool: unexpected relocation symbol type in .rela.discard.func_stack_frame_non_standard: 0
+
+  MODPOST Module.symvers
+ERROR: modpost: "kvm_restore_lsx" [arch/loongarch/kvm/kvm.ko] undefined!
+ERROR: modpost: "kvm_restore_lasx" [arch/loongarch/kvm/kvm.ko] undefined!
+
+Fixes: cb8a2ef0848c ("LoongArch: Add ORC stack unwinder support")
+functions: 
+fixes: cb8a2ef0848c
+diff --git a/arch/loongarch/kernel/fpu.S b/arch/loongarch/kernel/fpu.S
+index 69a85f2479fb..6ab640101457 100644
+--- a/arch/loongarch/kernel/fpu.S
++++ b/arch/loongarch/kernel/fpu.S
+@@ -531,5 +531,9 @@ SYM_FUNC_END(_restore_lasx_context)
+ #ifdef CONFIG_CPU_HAS_LBT
+ STACK_FRAME_NON_STANDARD _restore_fp
++#ifdef CONFIG_CPU_HAS_LSX
+ STACK_FRAME_NON_STANDARD _restore_lsx
++#endif
++#ifdef CONFIG_CPU_HAS_LASX
+ STACK_FRAME_NON_STANDARD _restore_lasx
+ #endif
++#endif
+diff --git a/arch/loongarch/kvm/switch.S b/arch/loongarch/kvm/switch.S
+index 80e988985a6a..0c292f818492 100644
+--- a/arch/loongarch/kvm/switch.S
++++ b/arch/loongarch/kvm/switch.S
+@@ -278,5 +278,9 @@ SYM_DATA(kvm_enter_guest_size, .quad kvm_enter_guest_end - kvm_enter_guest)
+ #ifdef CONFIG_CPU_HAS_LBT
+ STACK_FRAME_NON_STANDARD kvm_restore_fpu
++#ifdef CONFIG_CPU_HAS_LSX
+ STACK_FRAME_NON_STANDARD kvm_restore_lsx
++#endif
++#ifdef CONFIG_CPU_HAS_LASX
+ STACK_FRAME_NON_STANDARD kvm_restore_lasx
+ #endif
++#endif
+
+##### L102
+=== 0eb0bd21e838 L 2024-09-17 +0/-4
+LoongArch: Remove STACK_FRAME_NON_STANDARD(do_syscall)
+
+For now, we can remove STACK_FRAME_NON_STANDARD(do_syscall) because
+there is no objtool warning "do_syscall+0x11c: return with modified
+stack frame", then there is handle_syscall() which is the previous
+frame of do_syscall() in the call trace when executing the command
+"echo l > /proc/sysrq-trigger".
+
+Fixes: a0f7085f6a63 ("LoongArch: Add RANDOMIZE_KSTACK_OFFSET support")
+functions: 
+fixes: a0f7085f6a63
+diff --git a/arch/loongarch/kernel/syscall.c b/arch/loongarch/kernel/syscall.c
+index ba5d0930a74f..168bd97540f8 100644
+--- a/arch/loongarch/kernel/syscall.c
++++ b/arch/loongarch/kernel/syscall.c
+@@ -80,6 +80,2 @@ void noinstr __no_stack_protector do_syscall(struct pt_regs *regs)
+ 	syscall_exit_to_user_mode(regs);
+ }
+-
+-#ifdef CONFIG_RANDOMIZE_KSTACK_OFFSET
+-STACK_FRAME_NON_STANDARD(do_syscall);
+-#endif
+
+##### L103
+=== a7e083772456 L 2024-09-17 +1/-1
+LoongArch: Set AS_HAS_THIN_ADD_SUB as y if AS_IS_LLVM
+
+When building kernel with "make CC=clang defconfig", LLVM Assembler is
+used due to LLVM_IAS=0 is not specified, then AS_HAS_THIN_ADD_SUB is not
+set, thus objtool can not be built after enable it for Clang.
+
+config AS_HAS_THIN_ADD_SUB is to check whether -mthin-add-sub option is
+available to know R_LARCH_{32,64}_PCREL are supported for GNU Assembler,
+there is no such an option for LLVM Assembler. The minimal version of
+Clang is 18 for building LoongArch kernel, and Clang >= 17 has already
+supported R_LARCH_{32,64}_PCREL, that is to say, there is no need to
+depend on AS_HAS_THIN_ADD_SUB for Clang, so just set AS_HAS_THIN_ADD_SUB
+as y if AS_IS_LLVM.
+
+Fixes: 120dd4118e58 ("LoongArch: Only allow OBJTOOL & ORC unwinder if toolchain supports -mthin-add-sub")
+functions: 
+fixes: 120dd4118e58
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index 8dff6ddaf9c5..34531dc8a61f 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -267,5 +267,5 @@ config AS_HAS_FCSR_CLASS
+ 
+ config AS_HAS_THIN_ADD_SUB
+-	def_bool $(cc-option,-Wa$(comma)-mthin-add-sub)
++	def_bool $(cc-option,-Wa$(comma)-mthin-add-sub) || AS_IS_LLVM
+ 
+ config AS_HAS_LSX_EXTENSION
+
+##### L104
+=== 134475a9ab84 L 2024-10-21 +9/-7
+LoongArch: Don't crash in stack_top() for tasks without vDSO
+
+Not all tasks have a vDSO mapped, for example kthreads never do. If such
+a task ever ends up calling stack_top(), it will derefence the NULL vdso
+pointer and crash.
+
+This can for example happen when using kunit:
+
+	[<9000000000203874>] stack_top+0x58/0xa8
+	[<90000000002956cc>] arch_pick_mmap_layout+0x164/0x220
+	[<90000000003c284c>] kunit_vm_mmap_init+0x108/0x12c
+	[<90000000003c1fbc>] __kunit_add_resource+0x38/0x8c
+	[<90000000003c2704>] kunit_vm_mmap+0x88/0xc8
+	[<9000000000410b14>] usercopy_test_init+0xbc/0x25c
+	[<90000000003c1db4>] kunit_try_run_case+0x5c/0x184
+	[<90000000003c3d54>] kunit_generic_run_threadfn_adapter+0x24/0x48
+	[<900000000022e4bc>] kthread+0xc8/0xd4
+	[<9000000000200ce8>] ret_from_kernel_thread+0xc/0xa4
+
+Fixes: 803b0fc5c3f2 ("LoongArch: Add process management")
+functions: arch/loongarch/kernel/process.c:stack_top
+fixes: 803b0fc5c3f2
+diff --git a/arch/loongarch/kernel/process.c b/arch/loongarch/kernel/process.c
+index f2ff8b5d591e..6e58f65455c7 100644
+--- a/arch/loongarch/kernel/process.c
++++ b/arch/loongarch/kernel/process.c
+@@ -294,11 +294,13 @@ unsigned long stack_top(void)
+ 	unsigned long top = TASK_SIZE & PAGE_MASK;
+ 
+-	/* Space for the VDSO & data page */
+-	top -= PAGE_ALIGN(current->thread.vdso->size);
+-	top -= VVAR_SIZE;
+-
+-	/* Space to randomize the VDSO base */
+-	if (current->flags & PF_RANDOMIZE)
+-		top -= VDSO_RANDOMIZE_SIZE;
++	if (current->thread.vdso) {
++		/* Space for the VDSO & data page */
++		top -= PAGE_ALIGN(current->thread.vdso->size);
++		top -= VVAR_SIZE;
++
++		/* Space to randomize the VDSO base */
++		if (current->flags & PF_RANDOMIZE)
++			top -= VDSO_RANDOMIZE_SIZE;
++	}
+ 
+ 	return top;
+
+##### L105
+=== 2ed119aef60d L 2024-10-21 +4/-4
+LoongArch: Set correct size for vDSO code mapping
+
+The current size of vDSO code mapping is hardcoded to PAGE_SIZE. This
+cannot work for 4KB page size after commit 18efd0b10e0fd77 ("LoongArch:
+vDSO: Wire up getrandom() vDSO implementation") because the code size
+increases to 8KB. Thus set the code mapping size to its real size, i.e.
+PAGE_ALIGN(vdso_end - vdso_start).
+
+Fixes: 18efd0b10e0fd77 ("LoongArch: vDSO: Wire up getrandom() vDSO implementation")
+functions: arch/loongarch/kernel/vdso.c:init_vdso
+fixes: 18efd0b10e0f
+diff --git a/arch/loongarch/kernel/vdso.c b/arch/loongarch/kernel/vdso.c
+index f6fcc52aefae..2c0d852ca536 100644
+--- a/arch/loongarch/kernel/vdso.c
++++ b/arch/loongarch/kernel/vdso.c
+@@ -35,5 +35,4 @@ static union {
+ } loongarch_vdso_data __page_aligned_data;
+ 
+-static struct page *vdso_pages[] = { NULL };
+ struct vdso_data *vdso_data = generic_vdso_data.data;
+ struct vdso_pcpu_data *vdso_pdata = loongarch_vdso_data.vdata.pdata;
+@@ -86,8 +85,6 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
+ struct loongarch_vdso_info vdso_info = {
+ 	.vdso = vdso_start,
+-	.size = PAGE_SIZE,
+ 	.code_mapping = {
+ 		.name = "[vdso]",
+-		.pages = vdso_pages,
+ 		.mremap = vdso_mremap,
+ 	},
+@@ -104,9 +101,12 @@ static int __init init_vdso(void)
+ 
+ 	BUG_ON(!PAGE_ALIGNED(vdso_info.vdso));
+-	BUG_ON(!PAGE_ALIGNED(vdso_info.size));
+ 
+ 	for_each_possible_cpu(cpu)
+ 		vdso_pdata[cpu].node = cpu_to_node(cpu);
+ 
++	vdso_info.size = PAGE_ALIGN(vdso_end - vdso_start);
++	vdso_info.code_mapping.pages =
++		kcalloc(vdso_info.size / PAGE_SIZE, sizeof(struct page *), GFP_KERNEL);
++
+ 	pfn = __phys_to_pfn(__pa_symbol(vdso_info.vdso));
+ 	for (i = 0; i < vdso_info.size / PAGE_SIZE; i++)
+
+##### L106
+=== 139d42ca5101 L 2024-11-12 +15/-1
+LoongArch: Add WriteCombine shadow mapping in KASAN
+
+Currently, the kernel couldn't boot when ARCH_IOREMAP, ARCH_WRITECOMBINE
+and KASAN are enabled together. Because DMW2 is used by kernel now which
+is configured as 0xa000000000000000 for WriteCombine, but KASAN has no
+segment mapping for it. This patch fix this issue.
+
+Solution: Add the relevant definitions for WriteCombine (DMW2) in KASAN.
+
+Fixes: 8e02c3b782ec ("LoongArch: Add writecombine support for DMW-based ioremap()")
+functions: arch/loongarch/mm/kasan_init.c:kasan_mem_to_shadow, arch/loongarch/mm/kasan_init.c:kasan_shadow_to_mem
+fixes: 8e02c3b782ec
+diff --git a/arch/loongarch/include/asm/kasan.h b/arch/loongarch/include/asm/kasan.h
+index cb74a47f620e..7f52bd31b9d4 100644
+--- a/arch/loongarch/include/asm/kasan.h
++++ b/arch/loongarch/include/asm/kasan.h
+@@ -26,4 +26,5 @@
+ #define XKPRANGE_UC_SEG		(0x8000)
+ #define XKPRANGE_CC_SEG		(0x9000)
++#define XKPRANGE_WC_SEG		(0xa000)
+ #define XKVRANGE_VC_SEG		(0xffff)
+ 
+@@ -42,8 +43,15 @@
+ #define XKPRANGE_UC_SHADOW_END		(XKPRANGE_UC_KASAN_OFFSET + XKPRANGE_UC_SHADOW_SIZE)
+ 
++/* WriteCombine */
++#define XKPRANGE_WC_START		WRITECOMBINE_BASE
++#define XKPRANGE_WC_SIZE		XRANGE_SIZE
++#define XKPRANGE_WC_KASAN_OFFSET	XKPRANGE_UC_SHADOW_END
++#define XKPRANGE_WC_SHADOW_SIZE		(XKPRANGE_WC_SIZE >> KASAN_SHADOW_SCALE_SHIFT)
++#define XKPRANGE_WC_SHADOW_END		(XKPRANGE_WC_KASAN_OFFSET + XKPRANGE_WC_SHADOW_SIZE)
++
+ /* VMALLOC (Cached or UnCached)  */
+ #define XKVRANGE_VC_START		MODULES_VADDR
+ #define XKVRANGE_VC_SIZE		round_up(KFENCE_AREA_END - MODULES_VADDR + 1, PGDIR_SIZE)
+-#define XKVRANGE_VC_KASAN_OFFSET	XKPRANGE_UC_SHADOW_END
++#define XKVRANGE_VC_KASAN_OFFSET	XKPRANGE_WC_SHADOW_END
+ #define XKVRANGE_VC_SHADOW_SIZE		(XKVRANGE_VC_SIZE >> KASAN_SHADOW_SCALE_SHIFT)
+ #define XKVRANGE_VC_SHADOW_END		(XKVRANGE_VC_KASAN_OFFSET + XKVRANGE_VC_SHADOW_SIZE)
+@@ -56,4 +64,5 @@
+ #define XKPRANGE_CC_SHADOW_OFFSET	(KASAN_SHADOW_START + XKPRANGE_CC_KASAN_OFFSET)
+ #define XKPRANGE_UC_SHADOW_OFFSET	(KASAN_SHADOW_START + XKPRANGE_UC_KASAN_OFFSET)
++#define XKPRANGE_WC_SHADOW_OFFSET	(KASAN_SHADOW_START + XKPRANGE_WC_KASAN_OFFSET)
+ #define XKVRANGE_VC_SHADOW_OFFSET	(KASAN_SHADOW_START + XKVRANGE_VC_KASAN_OFFSET)
+ 
+diff --git a/arch/loongarch/mm/kasan_init.c b/arch/loongarch/mm/kasan_init.c
+index 7277b7583e1b..d2681272d8f0 100644
+--- a/arch/loongarch/mm/kasan_init.c
++++ b/arch/loongarch/mm/kasan_init.c
+@@ -63,4 +63,7 @@ void *kasan_mem_to_shadow(const void *addr)
+ 			offset = XKPRANGE_UC_SHADOW_OFFSET;
+ 			break;
++		case XKPRANGE_WC_SEG:
++			offset = XKPRANGE_WC_SHADOW_OFFSET;
++			break;
+ 		case XKVRANGE_VC_SEG:
+ 			offset = XKVRANGE_VC_SHADOW_OFFSET;
+@@ -87,4 +90,6 @@ const void *kasan_shadow_to_mem(const void *shadow_addr)
+ 	if (addr >= XKVRANGE_VC_SHADOW_OFFSET)
+ 		return (void *)(((addr - XKVRANGE_VC_SHADOW_OFFSET) << KASAN_SHADOW_SCALE_SHIFT) + XKVRANGE_VC_START);
++	else if (addr >= XKPRANGE_WC_SHADOW_OFFSET)
++		return (void *)(((addr - XKPRANGE_WC_SHADOW_OFFSET) << KASAN_SHADOW_SCALE_SHIFT) + XKPRANGE_WC_START);
+ 	else if (addr >= XKPRANGE_UC_SHADOW_OFFSET)
+ 		return (void *)(((addr - XKPRANGE_UC_SHADOW_OFFSET) << KASAN_SHADOW_SCALE_SHIFT) + XKPRANGE_UC_START);
+
+##### L107
+=== 30cec747d6bf L 2024-11-12 +1/-1
+LoongArch: Fix early_numa_add_cpu() usage for FDT systems
+
+early_numa_add_cpu() applies on physical CPU id rather than logical CPU
+id, so use cpuid instead of cpu.
+
+Fixes: 3de9c42d02a79a5 ("LoongArch: Add all CPUs enabled by fdt to NUMA node 0")
+functions: arch/loongarch/kernel/smp.c:fdt_smp_setup
+fixes: 3de9c42d02a7
+diff --git a/arch/loongarch/kernel/smp.c b/arch/loongarch/kernel/smp.c
+index c0b498467ffa..5d59e9ce2772 100644
+--- a/arch/loongarch/kernel/smp.c
++++ b/arch/loongarch/kernel/smp.c
+@@ -303,5 +303,5 @@ static void __init fdt_smp_setup(void)
+ 		__cpu_logical_map[cpu] = cpuid;
+ 
+-		early_numa_add_cpu(cpu, 0);
++		early_numa_add_cpu(cpuid, 0);
+ 		set_cpuid_to_node(cpuid, 0);
+ 	}
+
+##### L108
+=== 6ce031e5d6f4 L 2024-11-12 +15/-0
+LoongArch: Fix AP booting issue in VM mode
+
+Native IPI is used for AP booting, because it is the booting interface
+between OS and BIOS firmware. The paravirt IPI is only used inside OS,
+and native IPI is necessary to boot AP.
+
+When booting AP, we write the kernel entry address in the HW mailbox of
+AP and send IPI interrupt to it. AP executes idle instruction and waits
+for interrupts or SW events, then clears IPI interrupt and jumps to the
+kernel entry from HW mailbox.
+
+Between writing HW mailbox and sending IPI, AP can be woken up by SW
+events and jumps to the kernel entry, so ACTION_BOOT_CPU IPI interrupt
+will keep pending during AP booting. And native IPI interrupt handler
+needs be registered so that it can clear pending native IPI, else there
+will be endless interrupts during AP booting stage.
+
+Here native IPI interrupt is initialized even if paravirt IPI is used.
+
+Fixes: 74c16b2e2b0c ("LoongArch: KVM: Add PV IPI support on guest side")
+functions: arch/loongarch/kernel/paravirt.c:pv_send_ipi_single, arch/loongarch/kernel/paravirt.c:pv_send_ipi_mask, arch/loongarch/kernel/paravirt.c:pv_init_ipi, arch/loongarch/kernel/paravirt.c:pv_ipi_init
+fixes: 74c16b2e2b0c
+diff --git a/arch/loongarch/kernel/paravirt.c b/arch/loongarch/kernel/paravirt.c
+index a5fc61f8b348..e5a39bbad078 100644
+--- a/arch/loongarch/kernel/paravirt.c
++++ b/arch/loongarch/kernel/paravirt.c
+@@ -52,4 +52,6 @@ static u64 paravt_steal_clock(int cpu)
+ 
+ #ifdef CONFIG_SMP
++static struct smp_ops native_ops;
++
+ static void pv_send_ipi_single(int cpu, unsigned int action)
+ {
+@@ -57,4 +59,9 @@ static void pv_send_ipi_single(int cpu, unsigned int action)
+ 	irq_cpustat_t *info = &per_cpu(irq_stat, cpu);
+ 
++	if (unlikely(action == ACTION_BOOT_CPU)) {
++		native_ops.send_ipi_single(cpu, action);
++		return;
++	}
++
+ 	old = atomic_fetch_or(BIT(action), &info->message);
+ 	if (old)
+@@ -76,4 +83,9 @@ static void pv_send_ipi_mask(const struct cpumask *mask, unsigned int action)
+ 		return;
+ 
++	if (unlikely(action == ACTION_BOOT_CPU)) {
++		native_ops.send_ipi_mask(mask, action);
++		return;
++	}
++
+ 	action = BIT(action);
+ 	for_each_cpu(i, mask) {
+@@ -148,4 +160,6 @@ static void pv_init_ipi(void)
+ 	int r, swi;
+ 
++	/* Init native ipi irq for ACTION_BOOT_CPU */
++	native_ops.init_ipi();
+ 	swi = get_percpu_irq(INT_SWI0);
+ 	if (swi < 0)
+@@ -194,4 +208,5 @@ int __init pv_ipi_init(void)
+ 
+ #ifdef CONFIG_SMP
++	native_ops		= mp_ops;
+ 	mp_ops.init_ipi		= pv_init_ipi;
+ 	mp_ops.send_ipi_single	= pv_send_ipi_single;
+
+##### L109
+=== 947d5d036c78 L 2024-11-22 +1/-1
+LoongArch: Fix build failure with GCC 15 (-std=gnu23)
+
+Whenever I try to build the kernel with upcoming GCC 15 which defaults
+to -std=gnu23 I get a build failure:
+
+  CC      arch/loongarch/vdso/vgetcpu.o
+In file included from ./include/uapi/linux/posix_types.h:5,
+                 from ./include/uapi/linux/types.h:14,
+                 from ./include/linux/types.h:6,
+                 from ./include/linux/kasan-checks.h:5,
+                 from ./include/asm-generic/rwonce.h:26,
+                 from ./arch/loongarch/include/generated/asm/rwonce.h:1,
+                 from ./include/linux/compiler.h:317,
+                 from ./include/asm-generic/bug.h:5,
+                 from ./arch/loongarch/include/asm/bug.h:60,
+                 from ./include/linux/bug.h:5,
+                 from ./include/linux/mmdebug.h:5,
+                 from ./include/linux/mm.h:6,
+                 from ./arch/loongarch/include/asm/vdso.h:10,
+                 from arch/loongarch/vdso/vgetcpu.c:6:
+./include/linux/stddef.h:11:9: error: expected identifier before 'false'
+   11 |         false   = 0,
+      |         ^~~~~
+./include/linux/types.h:35:33: error: two or more data types in declaration specifiers
+   35 | typedef _Bool                   bool;
+      |                                 ^~~~
+./include/linux/types.h:35:1: warning: useless type name in empty declaration
+   35 | typedef _Bool                   bool;
+      | ^~~~~~~
+
+The kernel builds explicitly with -std=gnu11 in top Makefile, but
+arch/loongarch/vdso does not use KBUILD_CFLAGS from the rest of the
+kernel, just add -std=gnu11 flag to arch/loongarch/vdso/Makefile.
+
+By the way, commit e8c07082a810 ("Kbuild: move to -std=gnu11") did a
+similar change for arch/arm64/kernel/vdso32/Makefile.
+
+Fixes: c6b99bed6b8f ("LoongArch: Add VDSO and VSYSCALL support")
+functions: 
+fixes: c6b99bed6b8f
+diff --git a/arch/loongarch/vdso/Makefile b/arch/loongarch/vdso/Makefile
+index 40c1175823d6..fdde1bcd4e26 100644
+--- a/arch/loongarch/vdso/Makefile
++++ b/arch/loongarch/vdso/Makefile
+@@ -20,5 +20,5 @@ cflags-vdso := $(ccflags-vdso) \
+ 	-isystem $(shell $(CC) -print-file-name=include) \
+ 	$(filter -W%,$(filter-out -Wa$(comma)%,$(KBUILD_CFLAGS))) \
+-	-O2 -g -fno-strict-aliasing -fno-common -fno-builtin \
++	-std=gnu11 -O2 -g -fno-strict-aliasing -fno-common -fno-builtin \
+ 	-fno-stack-protector -fno-jump-tables -DDISABLE_BRANCH_PROFILING \
+ 	$(call cc-option, -fno-asynchronous-unwind-tables) \
+
+##### L110
+=== 1e7e0a2df77d L 2025-07-31 +15/-0
+LoongArch: Update HD-audio codec configs
+
+The HD-audio codec driver configs have been updated again the drivers
+got split with different kconfigs.
+
+Enable all Realtek HD-audio codecs and HDMI codecs (except for
+NVIDIA_MCP and TEGRA) per request.
+
+Fixes: 1d8dd982c409 ("ALSA: hda/realtek: Enable drivers as default")
+Fixes: 81231ad173d8 ("ALSA: hda/hdmi: Enable drivers as default")
+functions: 
+fixes: 1d8dd982c409, 81231ad173d8
+diff --git a/arch/loongarch/configs/loongson3_defconfig b/arch/loongarch/configs/loongson3_defconfig
+index 0d59af6007b7..7993020ffebb 100644
+--- a/arch/loongarch/configs/loongson3_defconfig
++++ b/arch/loongarch/configs/loongson3_defconfig
+@@ -785,6 +785,21 @@ CONFIG_SND_HDA_INPUT_BEEP=y
+ CONFIG_SND_HDA_PATCH_LOADER=y
+ CONFIG_SND_HDA_CODEC_REALTEK=y
++CONFIG_SND_HDA_CODEC_REALTEK_LIB=y
++CONFIG_SND_HDA_CODEC_ALC260=y
++CONFIG_SND_HDA_CODEC_ALC262=y
++CONFIG_SND_HDA_CODEC_ALC268=y
++CONFIG_SND_HDA_CODEC_ALC269=y
++CONFIG_SND_HDA_CODEC_ALC662=y
++CONFIG_SND_HDA_CODEC_ALC680=y
++CONFIG_SND_HDA_CODEC_ALC861=y
++CONFIG_SND_HDA_CODEC_ALC861VD=y
++CONFIG_SND_HDA_CODEC_ALC880=y
++CONFIG_SND_HDA_CODEC_ALC882=y
+ CONFIG_SND_HDA_CODEC_SIGMATEL=y
+ CONFIG_SND_HDA_CODEC_HDMI=y
++CONFIG_SND_HDA_CODEC_HDMI_GENERIC=y
++CONFIG_SND_HDA_CODEC_HDMI_INTEL=y
++CONFIG_SND_HDA_CODEC_HDMI_ATI=y
++CONFIG_SND_HDA_CODEC_HDMI_NVIDIA=y
+ CONFIG_SND_HDA_CODEC_CONEXANT=y
+ CONFIG_SND_USB_AUDIO=m
+
+##### L111
+=== 70a2365e18af L 2025-08-03 +8/-5
+LoongArch: Avoid in-place string operation on FDT content
+
+In init_cpu_fullname(), a constant pointer to "model" property is
+retrieved. It's later modified by the strsep() function, which is
+illegal and corrupts kernel's FDT copy. This is shown by dmesg,
+
+	OF: fdt: not creating '/sys/firmware/fdt': CRC check failed
+
+Create a mutable copy of the model property and do in-place operations
+on the mutable copy instead. loongson_sysconf.cpuname lives across the
+kernel lifetime, thus manually releasing isn't necessary.
+
+Also move the of_node_put() call for the root node after the usage of
+its property, since of_node_put() decreases the reference counter thus
+usage after the call is unsafe.
+
+Fixes: 44a01f1f726a ("LoongArch: Parsing CPU-related information from DTS")
+functions: arch/loongarch/kernel/env.c:init_cpu_fullname
+fixes: 44a01f1f726a
+diff --git a/arch/loongarch/kernel/env.c b/arch/loongarch/kernel/env.c
+index 27144de5c5fe..c0a5dc9aeae2 100644
+--- a/arch/loongarch/kernel/env.c
++++ b/arch/loongarch/kernel/env.c
+@@ -40,14 +40,17 @@ void __init init_environ(void)
+ static int __init init_cpu_fullname(void)
+ {
+-	struct device_node *root;
+ 	int cpu, ret;
+-	char *model;
++	char *cpuname;
++	const char *model;
++	struct device_node *root;
+ 
+ 	/* Parsing cpuname from DTS model property */
+ 	root = of_find_node_by_path("/");
+-	ret = of_property_read_string(root, "model", (const char **)&model);
++	ret = of_property_read_string(root, "model", &model);
++	if (ret == 0) {
++		cpuname = kstrdup(model, GFP_KERNEL);
++		loongson_sysconf.cpuname = strsep(&cpuname, " ");
++	}
+ 	of_node_put(root);
+-	if (ret == 0)
+-		loongson_sysconf.cpuname = strsep(&model, " ");
+ 
+ 	if (loongson_sysconf.cpuname && !strncmp(loongson_sysconf.cpuname, "Loongson", 8)) {
+
+##### L112
+=== 0078e94a4733 L 2025-08-20 +1/-1
+LoongArch: Rename GCC_PLUGIN_STACKLEAK to KSTACK_ERASE
+
+Commit 57fbad15c2eee772 ("stackleak: Rename STACKLEAK to KSTACK_ERASE")
+misses the stackframe.h part for LoongArch, so fix it.
+
+Fixes: 57fbad15c2eee772 ("stackleak: Rename STACKLEAK to KSTACK_ERASE")
+functions: 
+fixes: 57fbad15c2ee
+diff --git a/arch/loongarch/include/asm/stackframe.h b/arch/loongarch/include/asm/stackframe.h
+index 3eda298702b1..5cb568a60cf8 100644
+--- a/arch/loongarch/include/asm/stackframe.h
++++ b/arch/loongarch/include/asm/stackframe.h
+@@ -59,5 +59,5 @@
+ 
+ 	.macro STACKLEAK_ERASE
+-#ifdef CONFIG_GCC_PLUGIN_STACKLEAK
++#ifdef CONFIG_KSTACK_ERASE
+ 	bl	stackleak_erase_on_task_stack
+ #endif
+
+##### L113
+=== 0dfd9ea7bf80 L 2025-08-20 +7/-2
+LoongArch: KVM: Use kvm_get_vcpu_by_id() instead of kvm_get_vcpu()
+
+Since using kvm_get_vcpu() may fail to retrieve the vCPU context,
+kvm_get_vcpu_by_id() should be used instead.
+
+Fixes: 8e3054261bc3 ("LoongArch: KVM: Add IPI user mode read and write function")
+Fixes: 3956a52bc05b ("LoongArch: KVM: Add EIOINTC read and write functions")
+functions: arch/loongarch/kvm/intc/eiointc.c:eiointc_update_irq, arch/loongarch/kvm/intc/ipi.c:kvm_ipi_regs_access
+fixes: 8e3054261bc3, 3956a52bc05b
+diff --git a/arch/loongarch/kvm/intc/eiointc.c b/arch/loongarch/kvm/intc/eiointc.c
+index a3a12af9ecbf..026b139dcff2 100644
+--- a/arch/loongarch/kvm/intc/eiointc.c
++++ b/arch/loongarch/kvm/intc/eiointc.c
+@@ -46,5 +46,10 @@ static void eiointc_update_irq(struct loongarch_eiointc *s, int irq, int level)
+ 
+ 	cpu = s->sw_coremap[irq];
+-	vcpu = kvm_get_vcpu(s->kvm, cpu);
++	vcpu = kvm_get_vcpu_by_id(s->kvm, cpu);
++	if (unlikely(vcpu == NULL)) {
++		kvm_err("%s: invalid target cpu: %d\n", __func__, cpu);
++		return;
++	}
++
+ 	if (level) {
+ 		/* if not enable return false */
+diff --git a/arch/loongarch/kvm/intc/ipi.c b/arch/loongarch/kvm/intc/ipi.c
+index 7925651d2ccf..5a8481dda052 100644
+--- a/arch/loongarch/kvm/intc/ipi.c
++++ b/arch/loongarch/kvm/intc/ipi.c
+@@ -299,5 +299,5 @@ static int kvm_ipi_regs_access(struct kvm_device *dev,
+ 	addr = attr->attr & 0xff;
+ 
+-	vcpu = kvm_get_vcpu(dev->kvm, cpu);
++	vcpu = kvm_get_vcpu_by_id(dev->kvm, cpu);
+ 	if (unlikely(vcpu == NULL)) {
+ 		kvm_err("%s: invalid target cpu: %d\n", __func__, cpu);
+
+##### L114
+=== 5c68549c81bc L 2025-08-20 +3/-3
+LoongArch: KVM: Fix stack protector issue in send_ipi_data()
+
+Function kvm_io_bus_read() is called in function send_ipi_data(), buffer
+size of parameter *val should be at least 8 bytes. Since some emulation
+functions like loongarch_ipi_readl() and kvm_eiointc_read() will write
+the buffer *val with 8 bytes signed extension regardless parameter len.
+
+Otherwise there will be buffer overflow issue when CONFIG_STACKPROTECTOR
+is enabled. The bug report is shown as follows:
+
+Kernel panic - not syncing: stack-protector: Kernel stack is corrupted in: send_ipi_data+0x194/0x1a0 [kvm]
+CPU: 11 UID: 107 PID: 2692 Comm: CPU 0/KVM Not tainted 6.17.0-rc1+ #102 PREEMPT(full)
+Stack : 9000000005901568 0000000000000000 9000000003af371c 900000013c68c000
+        900000013c68f850 900000013c68f858 0000000000000000 900000013c68f998
+        900000013c68f990 900000013c68f990 900000013c68f6c0 fffffffffffdb058
+        fffffffffffdb0e0 900000013c68f858 911e1d4d39cf0ec2 9000000105657a00
+        0000000000000001 fffffffffffffffe 0000000000000578 282049464555206e
+        6f73676e6f6f4c20 0000000000000001 00000000086b4000 0000000000000000
+        0000000000000000 0000000000000000 9000000005709968 90000000058f9000
+        900000013c68fa68 900000013c68fab4 90000000029279f0 900000010153f940
+        900000010001f360 0000000000000000 9000000003af3734 000000004390000c
+        00000000000000b0 0000000000000004 0000000000000000 0000000000071c1d
+        ...
+Call Trace:
+[<9000000003af3734>] show_stack+0x5c/0x180
+[<9000000003aed168>] dump_stack_lvl+0x6c/0x9c
+[<9000000003ad0ab0>] vpanic+0x108/0x2c4
+[<9000000003ad0ca8>] panic+0x3c/0x40
+[<9000000004eb0a1c>] __stack_chk_fail+0x14/0x18
+[<ffff8000023473f8>] send_ipi_data+0x190/0x1a0 [kvm]
+[<ffff8000023313e4>] __kvm_io_bus_write+0xa4/0xe8 [kvm]
+[<ffff80000233147c>] kvm_io_bus_write+0x54/0x90 [kvm]
+[<ffff80000233f9f8>] kvm_emu_iocsr+0x180/0x310 [kvm]
+[<ffff80000233fe08>] kvm_handle_gspr+0x280/0x478 [kvm]
+[<ffff8000023443e8>] kvm_handle_exit+0xc0/0x130 [kvm]
+
+Fixes: daee2f9cae551 ("LoongArch: KVM: Add IPI read and write function")
+functions: arch/loongarch/kvm/intc/ipi.c:send_ipi_data
+fixes: daee2f9cae55
+diff --git a/arch/loongarch/kvm/intc/ipi.c b/arch/loongarch/kvm/intc/ipi.c
+index e658d5b37c04..7925651d2ccf 100644
+--- a/arch/loongarch/kvm/intc/ipi.c
++++ b/arch/loongarch/kvm/intc/ipi.c
+@@ -100,5 +100,5 @@ static int send_ipi_data(struct kvm_vcpu *vcpu, gpa_t addr, uint64_t data)
+ {
+ 	int i, idx, ret;
+-	uint32_t val = 0, mask = 0;
++	uint64_t val = 0, mask = 0;
+ 
+ 	/*
+@@ -109,5 +109,5 @@ static int send_ipi_data(struct kvm_vcpu *vcpu, gpa_t addr, uint64_t data)
+ 		/* Read the old val */
+ 		idx = srcu_read_lock(&vcpu->kvm->srcu);
+-		ret = kvm_io_bus_read(vcpu, KVM_IOCSR_BUS, addr, sizeof(val), &val);
++		ret = kvm_io_bus_read(vcpu, KVM_IOCSR_BUS, addr, 4, &val);
+ 		srcu_read_unlock(&vcpu->kvm->srcu, idx);
+ 		if (unlikely(ret)) {
+@@ -125,5 +125,5 @@ static int send_ipi_data(struct kvm_vcpu *vcpu, gpa_t addr, uint64_t data)
+ 	val |= ((uint32_t)(data >> 32) & ~mask);
+ 	idx = srcu_read_lock(&vcpu->kvm->srcu);
+-	ret = kvm_io_bus_write(vcpu, KVM_IOCSR_BUS, addr, sizeof(val), &val);
++	ret = kvm_io_bus_write(vcpu, KVM_IOCSR_BUS, addr, 4, &val);
+ 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
+ 	if (unlikely(ret))
+
+##### L115
+=== 5dfea6644d20 L 2025-08-20 +6/-0
+LoongArch: Pass annotate-tablejump option if LTO is enabled
+
+When compiling with LLVM and CONFIG_LTO_CLANG is set, there exist many
+objtool warnings "sibling call from callable instruction with modified
+stack frame".
+
+For this special case, the related object file shows that there is no
+generated relocation section '.rela.discard.tablejump_annotate' for the
+table jump instruction jirl, thus objtool can not know that what is the
+actual destination address.
+
+It needs to do something on the LLVM side to make sure that there is the
+relocation section '.rela.discard.tablejump_annotate' if LTO is enabled,
+but in order to maintain compatibility for the current LLVM compiler,
+this can be done in the kernel Makefile for now. Ensure it is aware of
+linker with LTO, '--loongarch-annotate-tablejump' needs to be passed via
+'-mllvm' to ld.lld.
+
+Note that it should also pass the compiler option -mannotate-tablejump
+rather than only pass '-mllvm --loongarch-annotate-tablejump' to ld.lld
+if LTO is enabled, otherwise there are no jump info for some table jump
+instructions.
+
+Fixes: e20ab7d454ee ("LoongArch: Enable jump table for objtool")
+functions: 
+fixes: e20ab7d454ee
+diff --git a/arch/loongarch/Makefile b/arch/loongarch/Makefile
+index b0703a4e02a2..a3a9759414f4 100644
+--- a/arch/loongarch/Makefile
++++ b/arch/loongarch/Makefile
+@@ -103,5 +103,11 @@ KBUILD_CFLAGS			+= $(call cc-option,-mthin-add-sub) $(call cc-option,-Wa$(comma)
+ ifdef CONFIG_OBJTOOL
+ ifdef CONFIG_CC_HAS_ANNOTATE_TABLEJUMP
++# The annotate-tablejump option can not be passed to LLVM backend when LTO is enabled.
++# Ensure it is aware of linker with LTO, '--loongarch-annotate-tablejump' also needs to
++# be passed via '-mllvm' to ld.lld.
+ KBUILD_CFLAGS			+= -mannotate-tablejump
++ifdef CONFIG_LTO_CLANG
++KBUILD_LDFLAGS			+= -mllvm --loongarch-annotate-tablejump
++endif
+ else
+ KBUILD_CFLAGS			+= -fno-jump-tables # keep compatibility with older compilers
+
+##### L116
+=== 677d4a52d4dc L 2025-09-18 +2/-1
+LoongArch: Fix unreliable stack for live patching
+
+When testing the kernel live patching with "modprobe livepatch-sample",
+there is a timeout over 15 seconds from "starting patching transition"
+to "patching complete". The dmesg command shows "unreliable stack" for
+user tasks in debug mode, here is one of the messages:
+
+  livepatch: klp_try_switch_task: bash:1193 has an unreliable stack
+
+The "unreliable stack" is because it can not unwind from do_syscall()
+to its previous frame handle_syscall(). It should use fp to find the
+original stack top due to secondary stack in do_syscall(), but fp is
+not used for some other functions, then fp can not be restored by the
+next frame of do_syscall(), so it is necessary to save fp if task is
+not current, in order to get the stack top of do_syscall().
+
+Here are the call chains:
+
+  klp_enable_patch()
+    klp_try_complete_transition()
+      klp_try_switch_task()
+        klp_check_and_switch_task()
+          klp_check_stack()
+            stack_trace_save_tsk_reliable()
+              arch_stack_walk_reliable()
+
+When executing "rmmod livepatch-sample", there exists a similar issue.
+With this patch, it takes a short time for patching and unpatching.
+
+Before:
+
+  # modprobe livepatch-sample
+  # dmesg -T | tail -3
+  [Sat Sep  6 11:00:20 2025] livepatch: 'livepatch_sample': starting patching transition
+  [Sat Sep  6 11:00:35 2025] livepatch: signaling remaining tasks
+  [Sat Sep  6 11:00:36 2025] livepatch: 'livepatch_sample': patching complete
+
+  # echo 0 > /sys/kernel/livepatch/livepatch_sample/enabled
+  # rmmod livepatch_sample
+  rmmod: ERROR: Module livepatch_sample is in use
+  # rmmod livepatch_sample
+functions: arch/loongarch/kernel/stacktrace.c:arch_stack_walk_reliable
+fixes: 199cc14cb4f1
+diff --git a/arch/loongarch/kernel/stacktrace.c b/arch/loongarch/kernel/stacktrace.c
+index 9a038d1070d7..387dc4d3c486 100644
+--- a/arch/loongarch/kernel/stacktrace.c
++++ b/arch/loongarch/kernel/stacktrace.c
+@@ -52,10 +52,11 @@ int arch_stack_walk_reliable(stack_trace_consume_fn consume_entry,
+ 		regs->regs[3] = (unsigned long)__builtin_frame_address(0);
+ 		regs->csr_era = (unsigned long)__builtin_return_address(0);
++		regs->regs[22] = 0;
+ 	} else {
+ 		regs->regs[3] = thread_saved_fp(task);
+ 		regs->csr_era = thread_saved_ra(task);
++		regs->regs[22] = task->thread.reg22;
+ 	}
+ 	regs->regs[1] = 0;
+-	regs->regs[22] = 0;
+ 
+ 	for (unwind_start(&state, task, regs);
+
+##### L117
+=== ac398f570724 L 2025-09-18 +3/-0
+LoongArch: vDSO: Check kcalloc() result in init_vdso()
+
+Add a NULL-pointer check after the kcalloc() call in init_vdso(). If
+allocation fails, return -ENOMEM to prevent a possible dereference of
+vdso_info.code_mapping.pages when it is NULL.
+
+Fixes: 2ed119aef60d ("LoongArch: Set correct size for vDSO code mapping")
+functions: arch/loongarch/kernel/vdso.c:init_vdso
+fixes: 2ed119aef60d
+diff --git a/arch/loongarch/kernel/vdso.c b/arch/loongarch/kernel/vdso.c
+index 7b888d9085a0..dee1a15d7f4c 100644
+--- a/arch/loongarch/kernel/vdso.c
++++ b/arch/loongarch/kernel/vdso.c
+@@ -55,4 +55,7 @@ static int __init init_vdso(void)
+ 		kcalloc(vdso_info.size / PAGE_SIZE, sizeof(struct page *), GFP_KERNEL);
+ 
++	if (!vdso_info.code_mapping.pages)
++		return -ENOMEM;
++
+ 	pfn = __phys_to_pfn(__pa_symbol(vdso_info.vdso));
+ 	for (i = 0; i < vdso_info.size / PAGE_SIZE; i++)
+
+##### L118
+=== 3ec09344b01a L 2025-09-19 +1/-1
+LoongArch: Fix bitflag conflict for TIF_FIXADE
+
+After LoongArch was converted to use the generic TIF bits in commit
+f9629891d407 ("loongarch: Use generic TIF bits"), its TIF_FIXADE flag
+takes the same bit with TIF_RESTORE_SIGMASK in thread_info.flags.
+
+Such conflict causes TIF_FIXADE being considered cleared when
+TIF_RESTORE_SIGMASK is cleared during deliver of a signal. And since
+TIF_FIXADE determines whether unaligned access emulation works for a
+task, userspace making use of unaligned access will receive unexpected
+SIGBUS (and likely terminate) after receiving its first signal.
+
+This conflict looks like a simple typo, switch it to the free bit 19.
+
+Fixes: f9629891d407 ("loongarch: Use generic TIF bits")
+functions: 
+fixes: f9629891d407
+diff --git a/arch/loongarch/include/asm/thread_info.h b/arch/loongarch/include/asm/thread_info.h
+index def7cb14467e..4d7117fcdc78 100644
+--- a/arch/loongarch/include/asm/thread_info.h
++++ b/arch/loongarch/include/asm/thread_info.h
+@@ -78,5 +78,5 @@ register unsigned long current_stack_pointer __asm__("$sp");
+ #define TIF_USEDFPU		17	/* FPU was used by this task this quantum (SMP) */
+ #define TIF_USEDSIMD		18	/* SIMD has been used this quantum */
+-#define TIF_FIXADE		10	/* Fix address errors in software */
++#define TIF_FIXADE		19	/* Fix address errors in software */
+ #define TIF_LOGADE		20	/* Log address errors to syslog */
+ #define TIF_32BIT_REGS		21	/* 32-bit general purpose registers */
+
+##### L119
+=== 19baac378a5f L 2025-10-02 +1/-1
+LoongArch: Fix build error for LTO with LLVM-18
+
+Commit b15212824a01 ("LoongArch: Make LTO case independent in Makefile")
+moves "KBUILD_LDFLAGS += -mllvm --loongarch-annotate-tablejump" out of
+CONFIG_CC_HAS_ANNOTATE_TABLEJUMP, which breaks the build for LLVM-18, as
+'--loongarch-annotate-tablejump' is unimplemented there:
+
+ld.lld: error: -mllvm: ld.lld: Unknown command line argument '--loongarch-annotate-tablejump'.
+
+Call ld-option to detect '--loongarch-annotate-tablejump' before use, so
+as to fix the build error.
+
+Fixes: b15212824a01 ("LoongArch: Make LTO case independent in Makefile")
+functions: 
+fixes: b15212824a01
+diff --git a/arch/loongarch/Makefile b/arch/loongarch/Makefile
+index f2a585b4a937..dc5bd3f1b8d2 100644
+--- a/arch/loongarch/Makefile
++++ b/arch/loongarch/Makefile
+@@ -116,5 +116,5 @@ ifdef CONFIG_LTO_CLANG
+ # Ensure it is aware of linker with LTO, '--loongarch-annotate-tablejump' also needs to
+ # be passed via '-mllvm' to ld.lld.
+-KBUILD_LDFLAGS			+= -mllvm --loongarch-annotate-tablejump
++KBUILD_LDFLAGS			+= $(call ld-option,-mllvm --loongarch-annotate-tablejump)
+ endif
+ endif
+
+##### L120
+=== 7b6c2d172d02 L 2025-10-02 +4/-5
+LoongArch: BPF: Fix uninitialized symbol 'retval_off'
+
+In __arch_prepare_bpf_trampoline(), retval_off is meaningful only when
+save_ret is not 0, so the current logic is correct. But it may cause a
+build warning:
+
+arch/loongarch/net/bpf_jit.c:1547 __arch_prepare_bpf_trampoline() error: uninitialized symbol 'retval_off'.
+
+So initialize retval_off unconditionally to fix it.
+
+Fixes: f9b6b41f0cf3 ("LoongArch: BPF: Add basic bpf trampoline support")
+functions: arch/loongarch/net/bpf_jit.c:__arch_prepare_bpf_trampoline
+fixes: f9b6b41f0cf3
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 7072db18c6cd..acf5b779c651 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1503,9 +1503,8 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ 
+ 	save_ret = flags & (BPF_TRAMP_F_CALL_ORIG | BPF_TRAMP_F_RET_FENTRY_RET);
+-	if (save_ret) {
+-		/* Save BPF R0 and A0 */
+-		stack_size += 16;
+-		retval_off = stack_size;
+-	}
++	if (save_ret)
++		stack_size += 16; /* Save BPF R0 and A0 */
++
++	retval_off = stack_size;
+ 
+ 	/* Room of trampoline frame to store args */
+
+##### L121
+=== 8b51b11b3d81 L 2025-10-02 +36/-1
+LoongArch: BPF: Sign-extend struct ops return values properly
+
+The ns_bpf_qdisc selftest triggers a kernel panic:
+
+  Oops[#1]:
+  CPU 0 Unable to handle kernel paging request at virtual address 0000000000741d58, era == 90000000851b5ac0, ra == 90000000851b5aa4
+  CPU: 0 UID: 0 PID: 449 Comm: test_progs Tainted: G           OE       6.16.0+ #3 PREEMPT(full)
+  Tainted: [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+  Hardware name: QEMU QEMU Virtual Machine, BIOS unknown 2/2/2022
+  pc 90000000851b5ac0 ra 90000000851b5aa4 tp 90000001076b8000 sp 90000001076bb600
+  a0 0000000000741ce8 a1 0000000000000001 a2 90000001076bb5c0 a3 0000000000000008
+  a4 90000001004c4620 a5 9000000100741ce8 a6 0000000000000000 a7 0100000000000000
+  t0 0000000000000010 t1 0000000000000000 t2 9000000104d24d30 t3 0000000000000001
+  t4 4f2317da8a7e08c4 t5 fffffefffc002f00 t6 90000001004c4620 t7 ffffffffc61c5b3d
+  t8 0000000000000000 u0 0000000000000001 s9 0000000000000050 s0 90000001075bc800
+  s1 0000000000000040 s2 900000010597c400 s3 0000000000000008 s4 90000001075bc880
+  s5 90000001075bc8f0 s6 0000000000000000 s7 0000000000741ce8 s8 0000000000000000
+     ra: 90000000851b5aa4 __qdisc_run+0xac/0x8d8
+    ERA: 90000000851b5ac0 __qdisc_run+0xc8/0x8d8
+   CRMD: 000000b0 (PLV0 -IE -DA +PG DACF=CC DACM=CC -WE)
+   PRMD: 00000004 (PPLV0 +PIE -PWE)
+   EUEN: 00000007 (+FPE +SXE +ASXE -BTE)
+   ECFG: 00071c1d (LIE=0,2-4,10-12 VS=7)
+  ESTAT: 00010000 [PIL] (IS= ECode=1 EsubCode=0)
+   BADV: 0000000000741d58
+   PRID: 0014c010 (Loongson-64bit, Loongson-3A5000)
+  Modules linked in: bpf_testmod(OE) [last unloaded: bpf_testmod(OE)]
+  Process test_progs (pid: 449, threadinfo=000000009af02b3a, task=00000000e9ba4956)
+  Stack : 0000000000000000 90000001075bc8ac 90000000869524a8 9000000100741ce8
+          90000001075bc800 9000000100415300 90000001075bc8ac 0000000000000000
+          900000010597c400 900000008694a000 0000000000000000 9000000105b59000
+          90000001075bc800 9000000100741ce8 0000000000000050 900000008513000c
+          9000000086936000 0000000100094d4c fffffff400676208 0000000000000000
+          9000000105b59000 900000008694a000 9000000086bf0dc0 9000000105b59000
+          9000000086bf0d68 9000000085147010 90000001075be788 0000000000000000
+          9000000086bf0f98 0000000000000001 0000000000000010 9000000006015840
+          0000000000000000 9000000086be6c40 0000000000000000 0000000000000000
+          0000000000000000 4f2317da8a7e08c4 0000000000000101 4f2317da8a7e08c4
+          ...
+  Call Trace:
+  [<90000000851b5ac0>] __qdisc_run+0xc8/0x8d8
+functions: arch/loongarch/net/bpf_jit.c:__arch_prepare_bpf_trampoline
+fixes: 6abf17d690d8
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index fa1a3234e9a6..cbe53d0b7fb0 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1449,4 +1449,35 @@ void arch_free_bpf_trampoline(void *image, unsigned int size)
+ }
+ 
++/*
++ * Sign-extend the register if necessary
++ */
++static void sign_extend(struct jit_ctx *ctx, int rd, int rj, u8 size, bool sign)
++{
++	/* ABI requires unsigned char/short to be zero-extended */
++	if (!sign && (size == 1 || size == 2)) {
++		if (rd != rj)
++			move_reg(ctx, rd, rj);
++		return;
++	}
++
++	switch (size) {
++	case 1:
++		emit_insn(ctx, extwb, rd, rj);
++		break;
++	case 2:
++		emit_insn(ctx, extwh, rd, rj);
++		break;
++	case 4:
++		emit_insn(ctx, addiw, rd, rj, 0);
++		break;
++	case 8:
++		if (rd != rj)
++			move_reg(ctx, rd, rj);
++		break;
++	default:
++		pr_warn("bpf_jit: invalid size %d for sign_extend\n", size);
++	}
++}
++
+ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_image *im,
+ 					 const struct btf_func_model *m, struct bpf_tramp_links *tlinks,
+@@ -1656,6 +1687,10 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ 
+ 	if (save_ret) {
+-		emit_insn(ctx, ldd, LOONGARCH_GPR_A0, LOONGARCH_GPR_FP, -retval_off);
+ 		emit_insn(ctx, ldd, regmap[BPF_REG_0], LOONGARCH_GPR_FP, -(retval_off - 8));
++		if (is_struct_ops)
++			sign_extend(ctx, LOONGARCH_GPR_A0, regmap[BPF_REG_0],
++				    m->ret_size, m->ret_flags & BTF_FMODEL_SIGNED_ARG);
++		else
++			emit_insn(ctx, ldd, LOONGARCH_GPR_A0, LOONGARCH_GPR_FP, -retval_off);
+ 	}
+ 
+
+##### L122
+=== abb2a5572264 L 2025-10-02 +1/-1
+LoongArch: Add cflag -fno-isolate-erroneous-paths-dereference
+
+Currently, when compiling with GCC, there is no "break 7" instruction
+for zero division due to using the option -mno-check-zero-division, but
+the compiler still generates "break 0" instruction for zero division.
+
+Here is a simple example:
+
+  $ cat test.c
+  int div(int a)
+  {
+	  return a / 0;
+  }
+  $ gcc -O2 -S test.c -o test.s
+
+GCC generates "break 0" on LoongArch and "ud2" on x86, objtool decodes
+"ud2" as INSN_BUG for x86, so decode "break 0" as INSN_BUG can fix the
+objtool warnings for LoongArch, but this is not the intention.
+
+When decoding "break 0" as INSN_TRAP in the previous commit, the aim is
+to handle "break 0" as a trap. The generated "break 0" for zero division
+by GCC is not proper, it should generate a break instruction with proper
+bug type, so add the GCC option -fno-isolate-erroneous-paths-dereference
+to avoid generating the unexpected "break 0" instruction for now.
+
+Fixes: baad7830ee9a ("objtool/LoongArch: Mark types based on break immediate code")
+functions: 
+fixes: baad7830ee9a
+diff --git a/arch/loongarch/Makefile b/arch/loongarch/Makefile
+index ae419e32f22e..f2a585b4a937 100644
+--- a/arch/loongarch/Makefile
++++ b/arch/loongarch/Makefile
+@@ -130,5 +130,5 @@ LDFLAGS_vmlinux			+= -static -pie --no-dynamic-linker -z notext $(call ld-option
+ endif
+ 
+-cflags-y += $(call cc-option, -mno-check-zero-division)
++cflags-y += $(call cc-option, -mno-check-zero-division -fno-isolate-erroneous-paths-dereference)
+ 
+ ifndef CONFIG_KASAN
+
+##### L123
+=== e82406c7cbdd L 2025-10-02 +6/-0
+LoongArch: BPF: No support of struct argument in trampoline programs
+
+The current implementation does not support struct argument. This causes
+a oops when running bpf selftest:
+
+  $ ./test_progs -a tracing_struct
+  Oops[#1]:
+  CPU -1 Unable to handle kernel paging request at virtual address 0000000000000018, era == 9000000085bef268, ra == 90000000844f3938
+  rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:
+  rcu:     1-...0: (19 ticks this GP) idle=1094/1/0x4000000000000000 softirq=1380/1382 fqs=801
+  rcu:     (detected by 0, t=5252 jiffies, g=1197, q=52 ncpus=4)
+  Sending NMI from CPU 0 to CPUs 1:
+  rcu: rcu_preempt kthread starved for 2495 jiffies! g1197 f0x0 RCU_GP_DOING_FQS(6) ->state=0x0 ->cpu=2
+  rcu:     Unless rcu_preempt kthread gets sufficient CPU time, OOM is now expected behavior.
+  rcu: RCU grace-period kthread stack dump:
+  task:rcu_preempt     state:I stack:0     pid:15    tgid:15    ppid:2      task_flags:0x208040 flags:0x00000800
+  Stack : 9000000100423e80 0000000000000402 0000000000000010 90000001003b0680
+          9000000085d88000 0000000000000000 0000000000000040 9000000087159350
+          9000000085c2b9b0 0000000000000001 900000008704a000 0000000000000005
+          00000000ffff355b 00000000ffff355b 0000000000000000 0000000000000004
+          9000000085d90510 0000000000000000 0000000000000002 7b5d998f8281e86e
+          00000000ffff355c 7b5d998f8281e86e 000000000000003f 9000000087159350
+          900000008715bf98 0000000000000005 9000000087036000 900000008704a000
+          9000000100407c98 90000001003aff80 900000008715c4c0 9000000085c2b9b0
+          00000000ffff355b 9000000085c33d3c 00000000000000b4 0000000000000000
+          9000000007002150 00000000ffff355b 9000000084615480 0000000007000002
+          ...
+  Call Trace:
+  [<9000000085c2a868>] __schedule+0x410/0x1520
+  [<9000000085c2b9ac>] schedule+0x34/0x190
+  [<9000000085c33d38>] schedule_timeout+0x98/0x140
+  [<90000000845e9120>] rcu_gp_fqs_loop+0x5f8/0x868
+  [<90000000845ed538>] rcu_gp_kthread+0x260/0x2e0
+  [<900000008454e8a4>] kthread+0x144/0x238
+  [<9000000085c26b60>] ret_from_kernel_thread+0x28/0xc8
+  [<90000000844f20e4>] ret_from_kernel_thread_asm+0xc/0x88
+
+  rcu: Stack dump where RCU GP kthread last ran:
+  Sending NMI from CPU 0 to CPUs 2:
+  NMI backtrace for cpu 2 skipped: idling at idle_exit+0x0/0x4
+
+functions: arch/loongarch/net/bpf_jit.c:__arch_prepare_bpf_trampoline
+fixes: f9b6b41f0cf3
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 33e8942cc961..8c3c211983f9 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1493,4 +1493,10 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ 		return -ENOTSUPP;
+ 
++	/* FIXME: No support of struct argument */
++	for (i = 0; i < m->nr_args; i++) {
++		if (m->arg_flags[i] & BTF_FMODEL_STRUCT_ARG)
++			return -ENOTSUPP;
++	}
++
+ 	if (flags & (BPF_TRAMP_F_ORIG_STACK | BPF_TRAMP_F_SHARE_IPMODIFY))
+ 		return -ENOTSUPP;
+
+##### L124
+=== 5001bcf86edf L 2025-11-09 +5/-0
+LoongArch: KVM: Restore guest PMU if it is enabled
+
+On LoongArch system, guest PMU hardware is shared by guest and host but
+PMU interrupt is separated. PMU is pass-through to VM, and there is PMU
+context switch when exit to host and return to guest.
+
+There is optimiation to check whether PMU is enabled by guest. If not,
+it is not necessary to return to guest. However, if it is enabled, PMU
+context for guest need switch on. Now KVM_REQ_PMU notification is set
+on vCPU context switch, but it is missing if there is no vCPU context
+switch while PMU is used by guest VM, so fix it.
+
+Fixes: f4e40ea9f78f ("LoongArch: KVM: Add PMU support for guest")
+functions: arch/loongarch/kvm/vcpu.c:kvm_lose_pmu
+fixes: f4e40ea9f78f
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index 30e3b089a596..b3995ff4b17e 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -133,4 +133,7 @@ static void kvm_lose_pmu(struct kvm_vcpu *vcpu)
+ 	 * exiting the guest, so that the next time trap into the guest.
+ 	 * We don't need to deal with PMU CSRs contexts.
++	 *
++	 * Otherwise set the request bit KVM_REQ_PMU to restore guest PMU
++	 * before entering guest VM
+ 	 */
+ 	val = kvm_read_sw_gcsr(csr, LOONGARCH_CSR_PERFCTRL0);
+@@ -140,4 +143,6 @@ static void kvm_lose_pmu(struct kvm_vcpu *vcpu)
+ 	if (!(val & KVM_PMU_EVENT_ENABLED))
+ 		vcpu->arch.aux_inuse &= ~KVM_LARCH_PMU;
++	else
++		kvm_make_request(KVM_REQ_PMU, vcpu);
+ 
+ 	kvm_restore_host_pmu(vcpu);

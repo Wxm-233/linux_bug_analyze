@@ -1,0 +1,134 @@
+{
+ "note": "Version-4 issues at df2908090cda; all appeared in version 2, labels carried over from rules_v2_forward_end_20261103/manual_review.json. Tuned on that review: not an independent precision estimate.",
+ "summary": {
+  "issues": 7,
+  "labels": {
+   "a2": 1,
+   "b": 2,
+   "c": 3,
+   "a": 1
+  },
+  "a_share": 0.286,
+  "new_issues": 0,
+  "guard_lost": [],
+  "guard_kept": {
+   "v6.12": [
+    "A118",
+    "A122",
+    "A158",
+    "A175",
+    "A215",
+    "A225",
+    "A344"
+   ],
+   "v6.6": [
+    "A068",
+    "A112"
+   ],
+   "end": [
+    "machine_shutdown",
+    "kvm_riscv_vcpu_pmu_ctr_cfg_match event_code"
+   ]
+  },
+  "dropped_inconsistent_hits": [
+   "A032 (v6.6, N2 do_page_fault)",
+   "A202 (v6.12, N2 arch_stack_walk)"
+  ]
+ },
+ "issues": [
+  {
+   "issue": "CTX|sleep|machine_shutdown|smp_shutdown_nonboot_cpus",
+   "label": "a2",
+   "known": "known",
+   "reason": "machine_shutdown calls smp_shutdown_nonboot_cpus with irqs off; confirmed in QEMU (riscv_kexec_shutdown_verify_20261102); kexec path only; arm64 and x86 do not disable irqs before it"
+  },
+  {
+   "issue": "CTX|sleep|flush_tlb_all|on_each_cpu",
+   "label": "b",
+   "known": "",
+   "reason": "flush_tlb_all takes the local path when fewer than two CPUs are online, as during create_image"
+  },
+  {
+   "issue": "CTX|sleep|flush_icache_all|on_each_cpu",
+   "label": "b",
+   "known": "",
+   "reason": "flush_icache_all returns after the local flush when fewer than two CPUs are online"
+  },
+  {
+   "issue": "CTX|noinstr|on_thread_stack|called from noinstr/__cpuidle",
+   "label": "c",
+   "known": "",
+   "reason": "static inline on_thread_stack called from noinstr stackleak code while x86 uses __always_inline; impact not established"
+  },
+  {
+   "issue": "CTX|noinstr|cpu_relax|called from noinstr/__cpuidle",
+   "label": "c",
+   "known": "",
+   "reason": "static inline cpu_relax called from noinstr code while x86 uses __always_inline; impact not established"
+  },
+  {
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_cfg_match",
+   "label": "a",
+   "known": "new",
+   "reason": "event_code = get_event_code(eidx) with eidx = cp->a3 from the guest SBI call; after the bound check it indexes kvpmu->fw_event[event_code] (store) without array_index_nospec; the upstream Spectre-v1 fix 2dda6a9e09ee protected ctr_idx in the same function but not event_code; x86 and arm64 KVM sanitise guest-provided PMU indices"
+  },
+  {
+   "issue": "R10|arch/riscv/kernel/cacheinfo.c:init_cache_level",
+   "label": "c",
+   "known": "",
+   "reason": "arm64 init_cache_level handles ACPI, RISC-V only the DT path; the common fetch_cache_info already sets the ACPI levels early, effect not checked"
+  }
+ ],
+ "dropped_vs_v3": [
+  {
+   "issue": "CTX|rt|do_oops_enter_exit|spin_lock_irqsave",
+   "label": "c",
+   "removed_by": "T4 (arm64/x86 die also call oops_enter)"
+  },
+  {
+   "issue": "CTX|rt|mark_free_pages|spin_lock_irqsave",
+   "label": "c",
+   "removed_by": "T4 (reference swsusp_arch_suspend also calls swsusp_save)"
+  },
+  {
+   "issue": "CTX|noinstr|walk_stackframe|instrumentable callee",
+   "label": "c",
+   "removed_by": "T2"
+  },
+  {
+   "issue": "CTX|noinstr|handle_page_fault|instrumentable callee",
+   "label": "c",
+   "removed_by": "T2"
+  },
+  {
+   "issue": "CTX|noinstr|irq_enter_rcu|instrumentable callee",
+   "label": "c",
+   "removed_by": "T2"
+  },
+  {
+   "issue": "CTX|noinstr|irq_exit_rcu|instrumentable callee",
+   "label": "c",
+   "removed_by": "T2"
+  },
+  {
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:pmu_fw_ctr_read_hi",
+   "label": "b",
+   "removed_by": "T1"
+  },
+  {
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:pmu_ctr_read",
+   "label": "b",
+   "removed_by": "T1"
+  },
+  {
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_start",
+   "label": "b",
+   "removed_by": "T1"
+  },
+  {
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_stop",
+   "label": "b",
+   "removed_by": "T1"
+  }
+ ]
+}

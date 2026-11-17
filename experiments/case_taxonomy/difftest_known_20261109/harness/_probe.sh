@@ -1,0 +1,1 @@
+for t in riscv arm64 x86_64; do echo == $t; grep -E "^CONFIG_(FTRACE|FUNCTION_TRACER|DYNAMIC_FTRACE|KCOV|KPROBES|DEBUG_INFO_BTF|DEBUG_INFO|KALLSYMS_ALL|FUNCTION_GRAPH_TRACER|KVM)=" /root/work/boundary_build/${t}_defconfig/.config; done

@@ -1,0 +1,1115 @@
+
+##### A175
+=== 969f028bf2c4 A 2025-06-25 +6/-4
+riscv: Enable interrupt during exception handling
+
+force_sig_fault() takes a spinlock, which is a sleeping lock with
+CONFIG_PREEMPT_RT=y. However, exception handling calls force_sig_fault()
+with interrupt disabled, causing a sleeping in atomic context warning.
+
+This can be reproduced using userspace programs such as:
+    int main() { asm ("ebreak"); }
+or
+    int main() { asm ("unimp"); }
+
+There is no reason that interrupt must be disabled while handling
+exceptions from userspace.
+
+Enable interrupt while handling user exceptions. This also has the added
+benefit of avoiding unnecessary delays in interrupt handling.
+
+Fixes: f0bddf50586d ("riscv: entry: Convert to generic entry")
+functions: arch/riscv/kernel/traps.c:do_trap_insn_illegal, arch/riscv/kernel/traps.c:do_trap_break
+fixes: f0bddf50586d(riscv)
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 9c83848797a7..80230de167de 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -7,4 +7,5 @@
+ #include <linux/kernel.h>
+ #include <linux/init.h>
++#include <linux/irqflags.h>
+ #include <linux/randomize_kstack.h>
+ #include <linux/sched.h>
+@@ -152,5 +153,7 @@ asmlinkage __visible __trap_section void name(struct pt_regs *regs)		\
+ 	if (user_mode(regs)) {							\
+ 		irqentry_enter_from_user_mode(regs);				\
++		local_irq_enable();						\
+ 		do_trap_error(regs, signo, code, regs->epc, "Oops - " str);	\
++		local_irq_disable();						\
+ 		irqentry_exit_to_user_mode(regs);				\
+ 	} else {								\
+@@ -174,15 +177,12 @@ asmlinkage __visible __trap_section void do_trap_insn_illegal(struct pt_regs *re
+ 	if (user_mode(regs)) {
+ 		irqentry_enter_from_user_mode(regs);
+-
+ 		local_irq_enable();
+ 
+ 		handled = riscv_v_first_use_handler(regs);
+-
+-		local_irq_disable();
+-
+ 		if (!handled)
+ 			do_trap_error(regs, SIGILL, ILL_ILLOPC, regs->epc,
+ 				      "Oops - illegal instruction");
+ 
++		local_irq_disable();
+ 		irqentry_exit_to_user_mode(regs);
+ 	} else {
+@@ -309,7 +309,9 @@ asmlinkage __visible __trap_section void do_trap_break(struct pt_regs *regs)
+ 	if (user_mode(regs)) {
+ 		irqentry_enter_from_user_mode(regs);
++		local_irq_enable();
+ 
+ 		handle_break(regs);
+ 
++		local_irq_disable();
+ 		irqentry_exit_to_user_mode(regs);
+ 	} else {
+
+##### A176
+=== 4cec89db80ba A 2025-07-07 +58/-55
+RISC-V: KVM: Move HGEI[E|P] CSR access to IMSIC virtualization
+
+Currently, the common AIA functions kvm_riscv_vcpu_aia_has_interrupts()
+and kvm_riscv_aia_wakeon_hgei() lookup HGEI line using an array of VCPU
+pointers before accessing HGEI[E|P] CSR which is slow and prone to race
+conditions because there is a separate per-hart lock for the VCPU pointer
+array and a separate per-VCPU rwlock for IMSIC VS-file (including HGEI
+line) used by the VCPU. Due to these race conditions, it is observed
+on QEMU RISC-V host that Guest VCPUs sleep in WFI and never wakeup even
+with interrupt pending in the IMSIC VS-file because VCPUs were waiting
+for HGEI wakeup on the wrong host CPU.
+
+The IMSIC virtualization already keeps track of the HGEI line and the
+associated IMSIC VS-file used by each VCPU so move the HGEI[E|P] CSR
+access to IMSIC virtualization so that costly HGEI line lookup can be
+avoided and likelihood of race-conditions when updating HGEI[E|P] CSR
+is also reduced.
+
+Fixes: 3385339296d1 ("RISC-V: KVM: Use IMSIC guest files when available")
+functions: arch/riscv/kvm/aia.c:aia_find_hgei, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_has_interrupts, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_load, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_put, arch/riscv/kvm/aia.c:kvm_riscv_aia_wakeon_hgei, arch/riscv/kvm/aia_imsic.c:kvm_riscv_vcpu_aia_imsic_update, arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_blocking, arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_unblocking
+fixes: 3385339296d1(riscv)
+ arch/riscv/include/asm/kvm_aia.h  |  4 +++-
+ arch/riscv/include/asm/kvm_host.h |  3 +++
+ arch/riscv/kvm/aia.c              | 51 +++++++--------------------------------------------
+ arch/riscv/kvm/aia_imsic.c        | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ arch/riscv/kvm/vcpu.c             | 10 ----------
+ 5 files changed, 58 insertions(+), 55 deletions(-)
+diff --git a/arch/riscv/include/asm/kvm_aia.h b/arch/riscv/include/asm/kvm_aia.h
+index 3b643b9efc07..5acce285e56e 100644
+--- a/arch/riscv/include/asm/kvm_aia.h
++++ b/arch/riscv/include/asm/kvm_aia.h
+@@ -88,4 +88,7 @@ DECLARE_STATIC_KEY_FALSE(kvm_riscv_aia_available);
+ extern struct kvm_device_ops kvm_riscv_aia_device_ops;
+ 
++bool kvm_riscv_vcpu_aia_imsic_has_interrupt(struct kvm_vcpu *vcpu);
++void kvm_riscv_vcpu_aia_imsic_load(struct kvm_vcpu *vcpu, int cpu);
++void kvm_riscv_vcpu_aia_imsic_put(struct kvm_vcpu *vcpu);
+ void kvm_riscv_vcpu_aia_imsic_release(struct kvm_vcpu *vcpu);
+ int kvm_riscv_vcpu_aia_imsic_update(struct kvm_vcpu *vcpu);
+@@ -162,5 +165,4 @@ int kvm_riscv_aia_alloc_hgei(int cpu, struct kvm_vcpu *owner,
+ 			     void __iomem **hgei_va, phys_addr_t *hgei_pa);
+ void kvm_riscv_aia_free_hgei(int cpu, int hgei);
+-void kvm_riscv_aia_wakeon_hgei(struct kvm_vcpu *owner, bool enable);
+ 
+ void kvm_riscv_aia_enable(void);
+diff --git a/arch/riscv/include/asm/kvm_host.h b/arch/riscv/include/asm/kvm_host.h
+index 85cfebc32e4c..bcbf8b1ec115 100644
+--- a/arch/riscv/include/asm/kvm_host.h
++++ b/arch/riscv/include/asm/kvm_host.h
+@@ -307,4 +307,7 @@ static inline bool kvm_arch_pmi_in_guest(struct kvm_vcpu *vcpu)
+ }
+ 
++static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
++static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
++
+ #define KVM_RISCV_GSTAGE_TLB_MIN_ORDER		12
+ 
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index 19afd1f23537..dad318185660 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -31,26 +31,4 @@ unsigned int kvm_riscv_aia_max_ids;
+ DEFINE_STATIC_KEY_FALSE(kvm_riscv_aia_available);
+ 
+-static int aia_find_hgei(struct kvm_vcpu *owner)
+-{
+-	int i, hgei;
+-	unsigned long flags;
+-	struct aia_hgei_control *hgctrl = get_cpu_ptr(&aia_hgei);
+-
+-	raw_spin_lock_irqsave(&hgctrl->lock, flags);
+-
+-	hgei = -1;
+-	for (i = 1; i <= kvm_riscv_aia_nr_hgei; i++) {
+-		if (hgctrl->owners[i] == owner) {
+-			hgei = i;
+-			break;
+-		}
+-	}
+-
+-	raw_spin_unlock_irqrestore(&hgctrl->lock, flags);
+-
+-	put_cpu_ptr(&aia_hgei);
+-	return hgei;
+-}
+-
+ static inline unsigned long aia_hvictl_value(bool ext_irq_pending)
+... (133 more diff lines)
+
+##### A177
+=== 493e9b085299 A 2025-07-08 +0/-1
+riscv: defconfig: Remove CONFIG_SND_SOC_STARFIVE=m
+
+The SND_SOC_STARFIVE Kconfig symbol was removed, but it is still enabled
+in the RISC-V defconfig.  Just remove it, as it is no longer needed.
+
+Fixes: acc317e5254a739e ("ASoC: starfive: Standardize ASoC menu")
+functions: 
+fixes: acc317e5254a(common)
+diff --git a/arch/riscv/configs/defconfig b/arch/riscv/configs/defconfig
+index fe8bd8afb418..27a441657dc4 100644
+--- a/arch/riscv/configs/defconfig
++++ b/arch/riscv/configs/defconfig
+@@ -192,5 +192,4 @@ CONFIG_SND=y
+ CONFIG_SND_SOC=y
+ CONFIG_SND_DESIGNWARE_I2S=m
+-CONFIG_SND_SOC_STARFIVE=m
+ CONFIG_SND_SOC_JH7110_PWMDAC=m
+ CONFIG_SND_SOC_JH7110_TDM=m
+
+##### A178
+=== 41f9049cff32 A 2025-07-10 +1/-1
+riscv: Only allow LTO with CMODEL_MEDANY
+
+When building with CONFIG_CMODEL_MEDLOW and CONFIG_LTO_CLANG, there is a
+series of errors due to some files being unconditionally compiled with
+'-mcmodel=medany', mismatching with the rest of the kernel built with
+'-mcmodel=medlow':
+
+  ld.lld: error: Function Import: link error: linking module flags 'Code Model': IDs have conflicting values: 'i32 3' from vmlinux.a(init.o at 899908), and 'i32 1' from vmlinux.a(net-traces.o at 1014628)
+
+Only allow LTO to be performed when CONFIG_CMODEL_MEDANY is enabled to
+ensure there will be no code model mismatch errors. An alternative
+solution would be disabling LTO for the files with a different code
+model than the main kernel like some specialized areas of the kernel do
+but doing that for individual files is not as sustainable than
+forbidding the combination altogether.
+
+Fixes: 021d23428bdb ("RISC-V: build: Allow LTO to be selected")
+functions: 
+fixes: 021d23428bdb(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index a4b233a0659e..51dcd8eaa243 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -66,5 +66,5 @@ config RISCV
+ 	select ARCH_SUPPORTS_HUGETLBFS if MMU
+ 	# LLD >= 14: https://github.com/llvm/llvm-project/issues/50505
+-	select ARCH_SUPPORTS_LTO_CLANG if LLD_VERSION >= 140000
++	select ARCH_SUPPORTS_LTO_CLANG if LLD_VERSION >= 140000 && CMODEL_MEDANY
+ 	select ARCH_SUPPORTS_LTO_CLANG_THIN if LLD_VERSION >= 140000
+ 	select ARCH_SUPPORTS_MSEAL_SYSTEM_MAPPINGS if 64BIT && MMU
+
+##### A179
+=== b65ca21835ed A 2025-07-15 +2/-2
+riscv: uaccess: Fix -Wuninitialized and -Wshadow in __put_user_nocheck
+
+After a recent change in clang to strengthen uninitialized warnings [1],
+there is a warning from val being uninitialized in __put_user_nocheck
+when called from futex_put_value():
+
+  kernel/futex/futex.h:326:18: warning: variable 'val' is uninitialized when used within its own initialization [-Wuninitialized]
+    326 |         unsafe_put_user(val, to, Efault);
+        |         ~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+  arch/riscv/include/asm/uaccess.h:464:21: note: expanded from macro 'unsafe_put_user'
+    464 |         __put_user_nocheck(x, (ptr), label)
+        |         ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+  arch/riscv/include/asm/uaccess.h:314:36: note: expanded from macro '__put_user_nocheck'
+    314 |                 __inttype(x) val = (__inttype(x))x;                     \
+        |                              ~~~                 ^
+
+While not on by default, -Wshadow flags the same mistake:
+
+  kernel/futex/futex.h:326:2: warning: declaration shadows a local variable [-Wshadow]
+    326 |         unsafe_put_user(val, to, Efault);
+        |         ^
+  arch/riscv/include/asm/uaccess.h:464:2: note: expanded from macro 'unsafe_put_user'
+    464 |         __put_user_nocheck(x, (ptr), label)
+        |         ^
+  arch/riscv/include/asm/uaccess.h:314:16: note: expanded from macro '__put_user_nocheck'
+    314 |                 __inttype(x) val = (__inttype(x))x;                     \
+        |                              ^
+  kernel/futex/futex.h:320:48: note: previous declaration is here
+    320 | static __always_inline int futex_put_value(u32 val, u32 __user *to)
+        |                                                ^
+
+Use a three underscore prefix for the val variable in __put_user_nocheck
+to avoid clashing with either val or __val, which are both used within
+the put_user macros, clearing up all warnings.
+
+Fixes: ca1a66cdd685 ("riscv: uaccess: do not do misaligned accesses in get/put_user()")
+functions: 
+fixes: ca1a66cdd685(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index 525e50db24f7..b88a6218b7f2 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -312,6 +312,6 @@ do {								\
+ 	if (!IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) &&	\
+ 	    !IS_ALIGNED((uintptr_t)__gu_ptr, sizeof(*__gu_ptr))) {	\
+-		__inttype(x) val = (__inttype(x))x;			\
+-		if (__asm_copy_to_user_sum_enabled(__gu_ptr, &(val), sizeof(*__gu_ptr))) \
++		__inttype(x) ___val = (__inttype(x))x;			\
++		if (__asm_copy_to_user_sum_enabled(__gu_ptr, &(___val), sizeof(*__gu_ptr))) \
+ 			goto label;				\
+ 		break;						\
+
+##### A180
+=== 5874ca4c6280 A 2025-07-16 +2/-1
+riscv: Stop supporting static ftrace
+
+Now that DYNAMIC_FTRACE was introduced, there is no need to support
+static ftrace as it is way less performant. This simplifies the code and
+prevents build failures as reported by kernel test robot when
+!DYNAMIC_FTRACE.
+
+Also make sure that FUNCTION_TRACER can only be selected if
+DYNAMIC_FTRACE is supported (we have a dependency on the toolchain).
+
+Fixes: b2137c3b6d7a ("riscv: ftrace: prepare ftrace for atomic code patching")
+functions: 
+fixes: b2137c3b6d7a(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index d71ea0f4466f..1c5544401530 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -99,4 +99,5 @@ config RISCV
+ 	select COMMON_CLK
+ 	select CPU_PM if CPU_IDLE || HIBERNATION || SUSPEND
++	select DYNAMIC_FTRACE if FUNCTION_TRACER
+ 	select EDAC_SUPPORT
+ 	select FRAME_POINTER if PERF_EVENTS || (FUNCTION_TRACER && !DYNAMIC_FTRACE)
+@@ -163,5 +164,5 @@ config RISCV
+ 	select HAVE_FUNCTION_GRAPH_TRACER if HAVE_DYNAMIC_FTRACE_WITH_ARGS
+ 	select HAVE_FUNCTION_GRAPH_FREGS
+-	select HAVE_FUNCTION_TRACER if !XIP_KERNEL
++	select HAVE_FUNCTION_TRACER if !XIP_KERNEL && HAVE_DYNAMIC_FTRACE
+ 	select HAVE_EBPF_JIT if MMU
+ 	select HAVE_GUP_FAST if MMU
+
+##### A181
+=== 1046791390af A 2025-07-25 +1/-1
+riscv: uaccess: fix __put_user_nocheck for unaligned accesses
+
+The type of the value to write should be determined by the size of the
+destination, not by the value itself, which may be a constant. This
+aligns the behavior with x86_64, where __typeof__(*(__gu_ptr)) is used
+to infer the correct type.
+
+This fixes an issue in put_cmsg, which was only writing 4 out of 8
+bytes to the cmsg_len field, causing the glibc tst-socket-timestamp test
+to fail.
+
+Fixes: ca1a66cdd685 ("riscv: uaccess: do not do misaligned accesses in get/put_user()")
+functions: 
+fixes: ca1a66cdd685(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index b88a6218b7f2..22e3f52a763d 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -312,5 +312,5 @@ do {								\
+ 	if (!IS_ENABLED(CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS) &&	\
+ 	    !IS_ALIGNED((uintptr_t)__gu_ptr, sizeof(*__gu_ptr))) {	\
+-		__inttype(x) ___val = (__inttype(x))x;			\
++		__typeof__(*(__gu_ptr)) ___val = (x);		\
+ 		if (__asm_copy_to_user_sum_enabled(__gu_ptr, &(___val), sizeof(*__gu_ptr))) \
+ 			goto label;				\
+
+##### A182
+=== e108c8a94f3f A 2025-07-25 +1/-1
+riscv: use lw when reading int cpu in new_vmalloc_check
+
+REG_L is wrong, because thread_info.cpu is 32-bit, not xlen-bit wide.
+The struct currently has a hole after cpu, so little endian accesses
+seemed fine.
+
+Fixes: 503638e0babf ("riscv: Stop emitting preventive sfence.vma for new vmalloc mappings")
+functions: 
+fixes: 503638e0babf(riscv)
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index 3a0ec6fd5956..d0ded2438533 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -47,5 +47,5 @@
+ 	 * a1 = BIT_MASK(cpu)
+ 	 */
+-	REG_L 	a2, TASK_TI_CPU(tp)
++	lw	a2, TASK_TI_CPU(tp)
+ 	/*
+ 	 * Compute the new_vmalloc element position:
+
+##### A183
+=== f4ea67a722e8 A 2025-07-25 +1/-1
+riscv: use lw when reading int cpu in asm_per_cpu
+
+REG_L is wrong, because thread_info.cpu is 32-bit, not xlen-bit wide.
+The struct currently has a hole after cpu, so little endian accesses
+seemed fine.
+
+Fixes: be97d0db5f44 ("riscv: VMAP_STACK overflow detection thread-safe")
+functions: 
+fixes: be97d0db5f44(riscv)
+diff --git a/arch/riscv/include/asm/asm.h b/arch/riscv/include/asm/asm.h
+index a8a2af6dfe9d..2a16e88e13de 100644
+--- a/arch/riscv/include/asm/asm.h
++++ b/arch/riscv/include/asm/asm.h
+@@ -92,5 +92,5 @@
+ 
+ .macro asm_per_cpu dst sym tmp
+-	REG_L \tmp, TASK_TI_CPU_NUM(tp)
++	lw    \tmp, TASK_TI_CPU_NUM(tp)
+ 	slli  \tmp, \tmp, PER_CPU_OFFSET_SHIFT
+ 	la    \dst, __per_cpu_offset
+
+##### A184
+=== 5d15d2ad36b0 A 2025-08-11 +79/-15
+riscv: hwprobe: Fix stale vDSO data for late-initialized keys at boot
+
+The hwprobe vDSO data for some keys, like MISALIGNED_VECTOR_PERF,
+is determined by an asynchronous kthread. This can create a race
+condition where the kthread finishes after the vDSO data has
+already been populated, causing userspace to read stale values.
+
+To fix this race, a new 'ready' flag is added to the vDSO data,
+initialized to 'false' during arch_initcall_sync. This flag is
+checked by both the vDSO's user-space code and the riscv_hwprobe
+syscall. The syscall serves as a one-time gate, using a completion
+to wait for any pending probes before populating the data and
+setting the flag to 'true', thus ensuring userspace reads fresh
+values on its first request.
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+[pjw@kernel.org: fix checkpatch issues]
+functions: arch/riscv/kernel/sys_hwprobe.c:do_riscv_hwprobe, arch/riscv/kernel/sys_hwprobe.c:init_hwprobe_vdso_data, arch/riscv/kernel/unaligned_access_speed.c:vec_check_unaligned_access_speed_all_cpus, arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_all_cpus, arch/riscv/kernel/vdso/hwprobe.c:riscv_vdso_get_values
+fixes: e7c9d66e313b(riscv)
+ arch/riscv/include/asm/hwprobe.h           |  7 +++++
+ arch/riscv/include/asm/vdso/arch_data.h    |  6 +++++
+ arch/riscv/kernel/sys_hwprobe.c            | 70 +++++++++++++++++++++++++++++++++++++++++---------
+ arch/riscv/kernel/unaligned_access_speed.c |  9 +++++--
+ arch/riscv/kernel/vdso/hwprobe.c           |  2 +-
+ 5 files changed, 79 insertions(+), 15 deletions(-)
+diff --git a/arch/riscv/include/asm/hwprobe.h b/arch/riscv/include/asm/hwprobe.h
+index 948d2b34e94e..58f8dda73259 100644
+--- a/arch/riscv/include/asm/hwprobe.h
++++ b/arch/riscv/include/asm/hwprobe.h
+@@ -43,3 +43,10 @@ static inline bool riscv_hwprobe_pair_cmp(struct riscv_hwprobe *pair,
+ }
+ 
++#ifdef CONFIG_MMU
++void riscv_hwprobe_register_async_probe(void);
++void riscv_hwprobe_complete_async_probe(void);
++#else
++static inline void riscv_hwprobe_register_async_probe(void) {}
++static inline void riscv_hwprobe_complete_async_probe(void) {}
++#endif
+ #endif
+diff --git a/arch/riscv/include/asm/vdso/arch_data.h b/arch/riscv/include/asm/vdso/arch_data.h
+index da57a3786f7a..88b37af55175 100644
+--- a/arch/riscv/include/asm/vdso/arch_data.h
++++ b/arch/riscv/include/asm/vdso/arch_data.h
+@@ -13,4 +13,10 @@ struct vdso_arch_data {
+ 	/* Boolean indicating all CPUs have the same static hwprobe values. */
+ 	__u8 homogeneous_cpus;
++
++	/*
++	 * A gate to check and see if the hwprobe data is actually ready, as
++	 * probing is deferred to avoid boot slowdowns.
++	 */
++	__u8 ready;
+ };
+ 
+diff --git a/arch/riscv/kernel/sys_hwprobe.c b/arch/riscv/kernel/sys_hwprobe.c
+index 000f4451a9d8..bc87bb9725fd 100644
+--- a/arch/riscv/kernel/sys_hwprobe.c
++++ b/arch/riscv/kernel/sys_hwprobe.c
+@@ -6,4 +6,7 @@
+  */
+ #include <linux/syscalls.h>
++#include <linux/completion.h>
++#include <linux/atomic.h>
++#include <linux/once.h>
+ #include <asm/cacheflush.h>
+ #include <asm/cpufeature.h>
+@@ -455,20 +458,21 @@ static int hwprobe_get_cpus(struct riscv_hwprobe __user *pairs,
+ }
+ 
+-static int do_riscv_hwprobe(struct riscv_hwprobe __user *pairs,
+-			    size_t pair_count, size_t cpusetsize,
+-			    unsigned long __user *cpus_user,
+-			    unsigned int flags)
+-{
+-	if (flags & RISCV_HWPROBE_WHICH_CPUS)
+-		return hwprobe_get_cpus(pairs, pair_count, cpusetsize,
+-					cpus_user, flags);
++#ifdef CONFIG_MMU
+ 
+-	return hwprobe_get_values(pairs, pair_count, cpusetsize,
+-				  cpus_user, flags);
++static DECLARE_COMPLETION(boot_probes_done);
++static atomic_t pending_boot_probes = ATOMIC_INIT(1);
++
+... (109 more diff lines)
+
+##### A185
+=== e61a12a4baf0 A 2025-08-11 +1/-1
+RISC-V: KVM: Correct kvm_riscv_check_vcpu_requests() comment
+
+Correct `check_vcpu_requests` to `kvm_riscv_check_vcpu_requests` in
+comments.
+
+Fixes: f55ffaf89636 ("RISC-V: KVM: Enable ring-based dirty memory tracking")
+functions: 
+fixes: f55ffaf89636(riscv)
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index f001e56403f9..3ebcfffaa978 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -684,5 +684,5 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
+ 
+ /**
+- * check_vcpu_requests - check and handle pending vCPU requests
++ * kvm_riscv_check_vcpu_requests - check and handle pending vCPU requests
+  * @vcpu:	the VCPU pointer
+  *
+
+##### A186
+=== 8a16586fa7b8 A 2025-08-12 +1/-1
+riscv, bpf: use lw when reading int cpu in bpf_get_smp_processor_id
+
+emit_ld is wrong, because thread_info.cpu is 32-bit, not xlen-bit wide.
+The struct currently has a hole after cpu, so little endian accesses
+seemed fine.
+
+Fixes: 2ddec2c80b44 ("riscv, bpf: inline bpf_get_smp_processor_id()")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_emit_insn
+fixes: 2ddec2c80b44(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 6e1554d89681..9883a55d61b5 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1764,5 +1764,5 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
+ 			/* Load current CPU number in R0 */
+-			emit_ld(bpf_to_rv_reg(BPF_REG_0, ctx), offsetof(struct thread_info, cpu),
++			emit_lw(bpf_to_rv_reg(BPF_REG_0, ctx), offsetof(struct thread_info, cpu),
+ 				RV_REG_TP, ctx);
+ 			break;
+
+##### A187
+=== ad5348c76591 A 2025-08-12 +1/-1
+riscv, bpf: use lw when reading int cpu in BPF_MOV64_PERCPU_REG
+
+emit_ld is wrong, because thread_info.cpu is 32-bit, not xlen-bit wide.
+The struct currently has a hole after cpu, so little endian accesses
+seemed fine.
+
+Fixes: 19c56d4e5be1 ("riscv, bpf: add internal-only MOV instruction to resolve per-CPU addrs")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_emit_insn
+fixes: 19c56d4e5be1(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 10e01ff06312..6e1554d89681 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1357,5 +1357,5 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ #ifdef CONFIG_SMP
+ 			/* Load current CPU number in T1 */
+-			emit_ld(RV_REG_T1, offsetof(struct thread_info, cpu),
++			emit_lw(RV_REG_T1, offsetof(struct thread_info, cpu),
+ 				RV_REG_TP, ctx);
+ 			/* Load address of __per_cpu_offset array in T2 */
+
+##### A188
+=== 668208b161a0 A 2025-08-14 +11/-0
+riscv: use an atomic xchg in pudp_huge_get_and_clear()
+
+Make sure we return the right pud value and not a value that could have
+been overwritten in between by a different core.
+
+Fixes: c3cc2a4a3a23 ("riscv: Add support for PUD THP")
+functions: 
+fixes: c3cc2a4a3a23(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 91697fbf1f90..e69346307e78 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -943,4 +943,15 @@ static inline int pudp_test_and_clear_young(struct vm_area_struct *vma,
+ }
+ 
++#define __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR
++static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
++					    unsigned long address, pud_t *pudp)
++{
++	pud_t pud = __pud(atomic_long_xchg((atomic_long_t *)pudp, 0));
++
++	page_table_check_pud_clear(mm, pud);
++
++	return pud;
++}
++
+ static inline int pud_young(pud_t pud)
+ {
+
+##### A189
+=== 2b351e3d04be A 2025-08-21 +2/-1
+RISC-V: KVM: Write hgatp register with valid mode bits
+
+According to the RISC-V Privileged Architecture Spec, when MODE=Bare
+is selected,software must write zero to the remaining fields of hgatp.
+
+We have detected the valid mode supported by the HW before, So using a
+valid mode to detect how many vmid bits are supported.
+
+Fixes: fd7bb4a251df ("RISC-V: KVM: Implement VMID allocator")
+functions: arch/riscv/kvm/vmid.c:kvm_riscv_gstage_vmid_detect
+fixes: fd7bb4a251df(riscv)
+diff --git a/arch/riscv/kvm/vmid.c b/arch/riscv/kvm/vmid.c
+index 3b426c800480..5f33625f4070 100644
+--- a/arch/riscv/kvm/vmid.c
++++ b/arch/riscv/kvm/vmid.c
+@@ -15,4 +15,5 @@
+ #include <linux/kvm_host.h>
+ #include <asm/csr.h>
++#include <asm/kvm_mmu.h>
+ #include <asm/kvm_tlb.h>
+ #include <asm/kvm_vmid.h>
+@@ -29,5 +30,5 @@ void __init kvm_riscv_gstage_vmid_detect(void)
+ 	/* Figure-out number of VMID bits in HW */
+ 	old = csr_read(CSR_HGATP);
+-	csr_write(CSR_HGATP, old | HGATP_VMID);
++	csr_write(CSR_HGATP, (kvm_riscv_gstage_mode << HGATP_MODE_SHIFT) | HGATP_VMID);
+ 	vmid_bits = csr_read(CSR_HGATP);
+ 	vmid_bits = (vmid_bits & HGATP_VMID) >> HGATP_VMID_SHIFT;
+
+##### A190
+=== 8afbd0045922 A 2025-08-27 +4/-4
+riscv: kexec: initialize kexec_buf struct
+
+The kexec_buf structure was previously declared without initialization.
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures. This un-initialized field will contain garbage.
+
+This is also triggering a UBSAN warning when the uninitialized data was
+accessed:
+
+	------------[ cut here ]------------
+	UBSAN: invalid-load in ./include/linux/kexec.h:210:10
+	load of value 252 is not a valid value for type '_Bool'
+
+Zero-initializing kexec_buf at declaration ensures all fields are
+cleanly set, preventing future instances of uninitialized memory being
+used.
+
+Fixes: bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+functions: arch/riscv/kernel/kexec_elf.c:riscv_kexec_elf_load, arch/riscv/kernel/kexec_elf.c:elf_find_pbase, arch/riscv/kernel/kexec_image.c:image_load, arch/riscv/kernel/machine_kexec_file.c:load_extra_segments
+fixes: bf454ec31add(common)
+diff --git a/arch/riscv/kernel/kexec_elf.c b/arch/riscv/kernel/kexec_elf.c
+index 56444c7bd34e..531d348db84d 100644
+--- a/arch/riscv/kernel/kexec_elf.c
++++ b/arch/riscv/kernel/kexec_elf.c
+@@ -29,5 +29,5 @@ static int riscv_kexec_elf_load(struct kimage *image, struct elfhdr *ehdr,
+ 	int ret = 0;
+ 	size_t size;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 
+@@ -67,5 +67,5 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ 	int i;
+ 	int ret;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 	unsigned long lowest_paddr = ULONG_MAX;
+diff --git a/arch/riscv/kernel/kexec_image.c b/arch/riscv/kernel/kexec_image.c
+index 26a81774a78a..8f2eb900910b 100644
+--- a/arch/riscv/kernel/kexec_image.c
++++ b/arch/riscv/kernel/kexec_image.c
+@@ -42,5 +42,5 @@ static void *image_load(struct kimage *image,
+ 	u64 flags;
+ 	bool be_image, be_kernel;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	int ret;
+ 
+diff --git a/arch/riscv/kernel/machine_kexec_file.c b/arch/riscv/kernel/machine_kexec_file.c
+index e36104af2e24..b9eb41b0a975 100644
+--- a/arch/riscv/kernel/machine_kexec_file.c
++++ b/arch/riscv/kernel/machine_kexec_file.c
+@@ -262,5 +262,5 @@ int load_extra_segments(struct kimage *image, unsigned long kernel_start,
+ 	void *fdt;
+ 	unsigned long initrd_pbase = 0UL;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	char *modified_cmdline = NULL;
+ 
+
+##### A191
+=== 95c54cd9c769 A 2025-08-27 +4/-4
+riscv: kexec: Initialize kexec_buf struct
+
+The kexec_buf structure was previously declared without initialization.
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures. This un-initialized field will contain garbage.
+
+This is also triggering a UBSAN warning when the uninitialized data was
+accessed:
+
+	------------[ cut here ]------------
+	UBSAN: invalid-load in ./include/linux/kexec.h:210:10
+	load of value 252 is not a valid value for type '_Bool'
+
+Zero-initializing kexec_buf at declaration ensures all fields are
+cleanly set, preventing future instances of uninitialized memory being
+used.
+
+Fixes: bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+functions: arch/riscv/kernel/kexec_elf.c:riscv_kexec_elf_load, arch/riscv/kernel/kexec_elf.c:elf_find_pbase, arch/riscv/kernel/kexec_image.c:image_load, arch/riscv/kernel/machine_kexec_file.c:load_extra_segments
+fixes: bf454ec31add(common)
+diff --git a/arch/riscv/kernel/kexec_elf.c b/arch/riscv/kernel/kexec_elf.c
+index 56444c7bd34e..531d348db84d 100644
+--- a/arch/riscv/kernel/kexec_elf.c
++++ b/arch/riscv/kernel/kexec_elf.c
+@@ -29,5 +29,5 @@ static int riscv_kexec_elf_load(struct kimage *image, struct elfhdr *ehdr,
+ 	int ret = 0;
+ 	size_t size;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 
+@@ -67,5 +67,5 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ 	int i;
+ 	int ret;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	const struct elf_phdr *phdr;
+ 	unsigned long lowest_paddr = ULONG_MAX;
+diff --git a/arch/riscv/kernel/kexec_image.c b/arch/riscv/kernel/kexec_image.c
+index 26a81774a78a..8f2eb900910b 100644
+--- a/arch/riscv/kernel/kexec_image.c
++++ b/arch/riscv/kernel/kexec_image.c
+@@ -42,5 +42,5 @@ static void *image_load(struct kimage *image,
+ 	u64 flags;
+ 	bool be_image, be_kernel;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	int ret;
+ 
+diff --git a/arch/riscv/kernel/machine_kexec_file.c b/arch/riscv/kernel/machine_kexec_file.c
+index e36104af2e24..b9eb41b0a975 100644
+--- a/arch/riscv/kernel/machine_kexec_file.c
++++ b/arch/riscv/kernel/machine_kexec_file.c
+@@ -262,5 +262,5 @@ int load_extra_segments(struct kimage *image, unsigned long kernel_start,
+ 	void *fdt;
+ 	unsigned long initrd_pbase = 0UL;
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	char *modified_cmdline = NULL;
+ 
+
+##### A192
+=== bbc46b23af5b A 2025-09-01 +27/-27
+arch: copy_thread: pass clone_flags as u64
+
+With the introduction of clone3 in commit 7f192e3cd316 ("fork: add
+clone3") the effective bit width of clone_flags on all architectures was
+increased from 32-bit to 64-bit, with a new type of u64 for the flags.
+However, for most consumers of clone_flags the interface was not
+changed from the previous type of unsigned long.
+
+While this works fine as long as none of the new 64-bit flag bits
+(CLONE_CLEAR_SIGHAND and CLONE_INTO_CGROUP) are evaluated, this is still
+undesirable in terms of the principle of least surprise.
+
+Thus, this commit fixes all relevant interfaces of the copy_thread
+function that is called from copy_process to consistently pass
+clone_flags as u64, so that no truncation to 32-bit integers occurs on
+32-bit architectures.
+
+Fixes: c5febea0956fd387 ("fork: Pass struct kernel_clone_args into copy_thread")
+functions: arch/alpha/kernel/process.c:copy_thread, arch/arc/kernel/process.c:copy_thread, arch/arm/kernel/process.c:copy_thread, arch/arm64/kernel/process.c:copy_thread, arch/csky/kernel/process.c:copy_thread, arch/hexagon/kernel/process.c:copy_thread, arch/loongarch/kernel/process.c:copy_thread, arch/m68k/kernel/process.c:copy_thread, arch/microblaze/kernel/process.c:copy_thread, arch/mips/kernel/process.c:copy_thread, arch/nios2/kernel/process.c:copy_thread, arch/openrisc/kernel/process.c:copy_thread
+fixes: c5febea0956f(riscv)
+ arch/s390/kernel/process.c       | 2 +-
+ arch/sh/kernel/process_32.c      | 2 +-
+ arch/sparc/kernel/process_32.c   | 2 +-
+ arch/sparc/kernel/process_64.c   | 2 +-
+ arch/um/kernel/process.c         | 2 +-
+ arch/x86/include/asm/fpu/sched.h | 2 +-
+ arch/x86/include/asm/shstk.h     | 4 ++--
+ arch/x86/kernel/fpu/core.c       | 2 +-
+ arch/x86/kernel/process.c        | 2 +-
+ arch/x86/kernel/shstk.c          | 2 +-
+ arch/xtensa/kernel/process.c     | 2 +-
+ 26 files changed, 27 insertions(+), 27 deletions(-)
+diff --git a/arch/alpha/kernel/process.c b/arch/alpha/kernel/process.c
+index 582d96548385..06522451f018 100644
+--- a/arch/alpha/kernel/process.c
++++ b/arch/alpha/kernel/process.c
+@@ -232,5 +232,5 @@ flush_thread(void)
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+diff --git a/arch/arc/kernel/process.c b/arch/arc/kernel/process.c
+index 186ceab661eb..8166d0908713 100644
+--- a/arch/arc/kernel/process.c
++++ b/arch/arc/kernel/process.c
+@@ -167,5 +167,5 @@ asmlinkage void ret_from_fork(void);
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+diff --git a/arch/arm/kernel/process.c b/arch/arm/kernel/process.c
+index e16ed102960c..d7aa95225c70 100644
+--- a/arch/arm/kernel/process.c
++++ b/arch/arm/kernel/process.c
+@@ -235,5 +235,5 @@ asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long stack_start = args->stack;
+ 	unsigned long tls = args->tls;
+diff --git a/arch/arm64/kernel/process.c b/arch/arm64/kernel/process.c
+index 96482a1412c6..fba7ca102a8c 100644
+--- a/arch/arm64/kernel/process.c
++++ b/arch/arm64/kernel/process.c
+@@ -410,5 +410,5 @@ asmlinkage void ret_from_fork(void) asm("ret_from_fork");
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long stack_start = args->stack;
+ 	unsigned long tls = args->tls;
+diff --git a/arch/csky/kernel/process.c b/arch/csky/kernel/process.c
+index 0c6e4b17fe00..a7a90340042a 100644
+--- a/arch/csky/kernel/process.c
++++ b/arch/csky/kernel/process.c
+@@ -33,5 +33,5 @@ void flush_thread(void){}
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+diff --git a/arch/hexagon/kernel/process.c b/arch/hexagon/kernel/process.c
+index 2a77bfd75694..15b4992bfa29 100644
+--- a/arch/hexagon/kernel/process.c
++++ b/arch/hexagon/kernel/process.c
+@@ -53,5 +53,5 @@ void arch_cpu_idle(void)
+... (233 more diff lines)
+
+##### A193
+=== a03ee11b8f85 A 2025-09-03 +2/-2
+riscv: Fix sparse warning about different address spaces
+
+We did not propagate the __user attribute of the pointers in
+__get_kernel_nofault() and __put_kernel_nofault(), which results in
+sparse complaining:
+
+>> mm/maccess.c:41:17: sparse: sparse: incorrect type in argument 2 (different address spaces) @@     expected void const [noderef] __user *from @@     got unsigned long long [usertype] * @@
+   mm/maccess.c:41:17: sparse:     expected void const [noderef] __user *from
+   mm/maccess.c:41:17: sparse:     got unsigned long long [usertype] *
+
+So fix this by correctly casting those pointers.
+
+Fixes: f6bff7827a48 ("riscv: uaccess: use 'asm_goto_output' for get_user()")
+functions: 
+fixes: f6bff7827a48(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index 551e7490737e..f5f4f7f85543 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -439,8 +439,8 @@ unsigned long __must_check clear_user(void __user *to, unsigned long n)
+ 
+ #define __get_kernel_nofault(dst, src, type, err_label)			\
+-	__get_user_nocheck(*((type *)(dst)), (type *)(src), err_label)
++	__get_user_nocheck(*((type *)(dst)), (__force __user type *)(src), err_label)
+ 
+ #define __put_kernel_nofault(dst, src, type, err_label)			\
+-	__put_user_nocheck(*((type *)(src)), (type *)(dst), err_label)
++	__put_user_nocheck(*((type *)(src)), (__force __user type *)(dst), err_label)
+ 
+ static __must_check __always_inline bool user_access_begin(const void __user *ptr, size_t len)
+
+##### A194
+=== fef7ded169ed A 2025-09-03 +1/-1
+riscv: Fix sparse warning in __get_user_error()
+
+We used to assign 0 to x without an appropriate cast which results in
+sparse complaining when x is a pointer:
+
+>> block/ioctl.c:72:39: sparse: sparse: Using plain integer as NULL pointer
+
+So fix this by casting 0 to the correct type of x.
+
+Fixes: f6bff7827a48 ("riscv: uaccess: use 'asm_goto_output' for get_user()")
+functions: 
+fixes: f6bff7827a48(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index 22e3f52a763d..551e7490737e 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -210,5 +210,5 @@ do {									\
+ 		break;							\
+ __gu_failed:								\
+-		x = 0;							\
++		x = (__typeof__(x))0;					\
+ 		err = -EFAULT;						\
+ } while (0)
+
+##### A195
+=== fd2e08128944 A 2025-09-08 +41/-1
+riscv, bpf: Sign extend struct ops return values properly
+
+The ns_bpf_qdisc selftest triggers a kernel panic:
+
+    Unable to handle kernel paging request at virtual address ffffffffa38dbf58
+    Current test_progs pgtable: 4K pagesize, 57-bit VAs, pgdp=0x00000001109cc000
+    [ffffffffa38dbf58] pgd=000000011fffd801, p4d=000000011fffd401, pud=000000011fffd001, pmd=0000000000000000
+    Oops [#1]
+    Modules linked in: bpf_testmod(OE) xt_conntrack nls_iso8859_1 [...] [last unloaded: bpf_testmod(OE)]
+    CPU: 1 UID: 0 PID: 23584 Comm: test_progs Tainted: G        W  OE       6.17.0-rc1-g2465bb83e0b4 #1 NONE
+    Tainted: [W]=WARN, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+    Hardware name: Unknown Unknown Product/Unknown Product, BIOS 2024.01+dfsg-1ubuntu5.1 01/01/2024
+    epc : __qdisc_run+0x82/0x6f0
+     ra : __qdisc_run+0x6e/0x6f0
+    epc : ffffffff80bd5c7a ra : ffffffff80bd5c66 sp : ff2000000eecb550
+     gp : ffffffff82472098 tp : ff60000096895940 t0 : ffffffff8001f180
+     t1 : ffffffff801e1664 t2 : 0000000000000000 s0 : ff2000000eecb5d0
+     s1 : ff60000093a6a600 a0 : ffffffffa38dbee8 a1 : 0000000000000001
+     a2 : ff2000000eecb510 a3 : 0000000000000001 a4 : 0000000000000000
+     a5 : 0000000000000010 a6 : 0000000000000000 a7 : 0000000000735049
+     s2 : ffffffffa38dbee8 s3 : 0000000000000040 s4 : ff6000008bcda000
+     s5 : 0000000000000008 s6 : ff60000093a6a680 s7 : ff60000093a6a6f0
+     s8 : ff60000093a6a6ac s9 : ff60000093140000 s10: 0000000000000000
+     s11: ff2000000eecb9d0 t3 : 0000000000000000 t4 : 0000000000ff0000
+     t5 : 0000000000000000 t6 : ff60000093a6a8b6
+    status: 0000000200000120 badaddr: ffffffffa38dbf58 cause: 000000000000000d
+    [<ffffffff80bd5c7a>] __qdisc_run+0x82/0x6f0
+    [<ffffffff80b6fe58>] __dev_queue_xmit+0x4c0/0x1128
+    [<ffffffff80b80ae0>] neigh_resolve_output+0xd0/0x170
+    [<ffffffff80d2daf6>] ip6_finish_output2+0x226/0x6c8
+    [<ffffffff80d31254>] ip6_finish_output+0x10c/0x2a0
+    [<ffffffff80d31446>] ip6_output+0x5e/0x178
+    [<ffffffff80d2e232>] ip6_xmit+0x29a/0x608
+    [<ffffffff80d6f4c6>] inet6_csk_xmit+0xe6/0x140
+    [<ffffffff80c985e4>] __tcp_transmit_skb+0x45c/0xaa8
+    [<ffffffff80c995fe>] tcp_connect+0x9ce/0xd10
+    [<ffffffff80d66524>] tcp_v6_connect+0x4ac/0x5e8
+    [<ffffffff80cc19b8>] __inet_stream_connect+0xd8/0x318
+    [<ffffffff80cc1c36>] inet_stream_connect+0x3e/0x68
+    [<ffffffff80b42b20>] __sys_connect_file+0x50/0x88
+    [<ffffffff80b42bee>] __sys_connect+0x96/0xc8
+functions: arch/riscv/net/bpf_jit_comp64.c:__arch_prepare_bpf_trampoline
+fixes: 25ad10658dc1(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 886b647dc206..14d7aab61fcb 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -712,4 +712,37 @@ static int emit_atomic_rmw(u8 rd, u8 rs, const struct bpf_insn *insn,
+ }
+ 
++/*
++ * Sign-extend the register if necessary
++ */
++static int sign_extend(u8 rd, u8 rs, u8 sz, bool sign, struct rv_jit_context *ctx)
++{
++	if (!sign && (sz == 1 || sz == 2)) {
++		if (rd != rs)
++			emit_mv(rd, rs, ctx);
++		return 0;
++	}
++
++	switch (sz) {
++	case 1:
++		emit_sextb(rd, rs, ctx);
++		break;
++	case 2:
++		emit_sexth(rd, rs, ctx);
++		break;
++	case 4:
++		emit_sextw(rd, rs, ctx);
++		break;
++	case 8:
++		if (rd != rs)
++			emit_mv(rd, rs, ctx);
++		break;
++	default:
++		pr_err("bpf-jit: invalid size %d for sign_extend\n", sz);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
+ #define BPF_FIXUP_OFFSET_MASK   GENMASK(26, 0)
+ #define BPF_FIXUP_REG_MASK      GENMASK(31, 27)
+@@ -1176,6 +1209,13 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 
+ 	if (save_ret) {
+-		emit_ld(RV_REG_A0, -retval_off, RV_REG_FP, ctx);
+ 		emit_ld(regmap[BPF_REG_0], -(retval_off - 8), RV_REG_FP, ctx);
++		if (is_struct_ops) {
++			ret = sign_extend(RV_REG_A0, regmap[BPF_REG_0], m->ret_size,
++					  m->ret_flags & BTF_FMODEL_SIGNED_ARG, ctx);
++			if (ret)
++				goto out;
++		} else {
++			emit_ld(RV_REG_A0, -retval_off, RV_REG_FP, ctx);
++		}
+ 	}
+ 
+
+##### A196
+=== 9e68bd803fac A 2025-09-10 +9/-4
+riscv: kprobes: Fix probe address validation
+
+When adding a kprobe such as "p:probe/tcp_sendmsg _text+15392192",
+arch_check_kprobe would start iterating all instructions starting from
+_text until the probed address. Not only is this very inefficient, but
+literal values in there (e.g. left by function patching) are
+misinterpreted in a way that causes a desync.
+
+Fix this by doing it like x86: start the iteration at the closest
+preceding symbol instead of the given starting point.
+
+Fixes: 87f48c7ccc73 ("riscv: kprobe: Fixup kernel panic when probing an illegal position")
+functions: arch/riscv/kernel/probes/kprobes.c:arch_check_kprobe, arch/riscv/kernel/probes/kprobes.c:arch_prepare_kprobe
+fixes: 87f48c7ccc73(riscv)
+diff --git a/arch/riscv/kernel/probes/kprobes.c b/arch/riscv/kernel/probes/kprobes.c
+index c0738d6c6498..8723390c7cad 100644
+--- a/arch/riscv/kernel/probes/kprobes.c
++++ b/arch/riscv/kernel/probes/kprobes.c
+@@ -50,8 +50,13 @@ static void __kprobes arch_simulate_insn(struct kprobe *p, struct pt_regs *regs)
+ }
+ 
+-static bool __kprobes arch_check_kprobe(struct kprobe *p)
++static bool __kprobes arch_check_kprobe(unsigned long addr)
+ {
+-	unsigned long tmp  = (unsigned long)p->addr - p->offset;
+-	unsigned long addr = (unsigned long)p->addr;
++	unsigned long tmp, offset;
++
++	/* start iterating at the closest preceding symbol */
++	if (!kallsyms_lookup_size_offset(addr, NULL, &offset))
++		return false;
++
++	tmp = addr - offset;
+ 
+ 	while (tmp <= addr) {
+@@ -72,5 +77,5 @@ int __kprobes arch_prepare_kprobe(struct kprobe *p)
+ 		return -EILSEQ;
+ 
+-	if (!arch_check_kprobe(p))
++	if (!arch_check_kprobe((unsigned long)p->addr))
+ 		return -EILSEQ;
+ 
+
+##### A197
+=== 546e42c8c6d9 A 2025-09-23 +17/-0
+riscv: Use an atomic xchg in pudp_huge_get_and_clear()
+
+Make sure we return the right pud value and not a value that could
+have been overwritten in between by a different core.
+
+Fixes: c3cc2a4a3a23 ("riscv: Add support for PUD THP")
+[pjw@kernel.org: use xchg rather than atomic_long_xchg; avoid atomic op for !CONFIG_SMP like x86]
+functions: 
+fixes: c3cc2a4a3a23(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 91697fbf1f90..815067742939 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -943,4 +943,21 @@ static inline int pudp_test_and_clear_young(struct vm_area_struct *vma,
+ }
+ 
++#define __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR
++static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
++					    unsigned long address,  pud_t *pudp)
++{
++#ifdef CONFIG_SMP
++	pud_t pud = __pud(xchg(&pudp->pud, 0));
++#else
++	pud_t pud = *pudp;
++
++	pud_clear(pudp);
++#endif
++
++	page_table_check_pud_clear(mm, pud);
++
++	return pud;
++}
++
+ static inline int pud_young(pud_t pud)
+ {
+
+##### A198
+=== 7882d2c45ccb A 2025-10-09 +1/-1
+riscv: Respect dependencies of ARCH_HAS_ELF_CORE_EFLAGS
+
+This kconfig symbol has dependencies and is only selectable if those
+dependencies are also enabled.
+
+Respect the dependencies.
+
+Fixes the following warning when configuring an 'allnoconfig':
+
+WARNING: unmet direct dependencies detected for ARCH_HAS_ELF_CORE_EFLAGS
+  Depends on [n]: BINFMT_ELF [=n] && ELF_CORE [=y]
+  Selected by [y]:
+  - RISCV [=y]
+
+Fixes: 8c94db0ae97c ("binfmt_elf: preserve original ELF e_flags for core dumps")
+functions: 
+fixes: 8c94db0ae97c(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 0c6038dc5dfd..22cda9c452d2 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -30,5 +30,5 @@ config RISCV
+ 	select ARCH_HAS_DEBUG_VM_PGTABLE
+ 	select ARCH_HAS_DEBUG_WX
+-	select ARCH_HAS_ELF_CORE_EFLAGS
++	select ARCH_HAS_ELF_CORE_EFLAGS if BINFMT_ELF && ELF_CORE
+ 	select ARCH_HAS_FAST_MULTIPLIER
+ 	select ARCH_HAS_FORTIFY_SOURCE
+
+##### A199
+=== ea138a607709 A 2025-10-15 +1/-1
+RISC-V: KVM: Fix check for local interrupts on riscv32
+
+To set all 64 bits in the mask on a 32-bit system, the constant must
+have type `unsigned long long`.
+
+Fixes: 6b1e8ba4bac4 ("RISC-V: KVM: Use bitmap for irqs_pending and irqs_pending_mask")
+functions: arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_runnable
+fixes: 6b1e8ba4bac4(riscv)
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index bccb919ca615..5ce35aba6069 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -213,5 +213,5 @@ int kvm_cpu_has_pending_timer(struct kvm_vcpu *vcpu)
+ int kvm_arch_vcpu_runnable(struct kvm_vcpu *vcpu)
+ {
+-	return (kvm_riscv_vcpu_has_interrupts(vcpu, -1UL) &&
++	return (kvm_riscv_vcpu_has_interrupts(vcpu, -1ULL) &&
+ 		!kvm_riscv_vcpu_stopped(vcpu) && !vcpu->arch.pause);
+ }

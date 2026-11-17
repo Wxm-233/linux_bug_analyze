@@ -1,0 +1,1096 @@
+##### A192 bbc46b23af5b arch: copy_thread: pass clone_flags as u64
+样本集标签：M7 K1 S2 掩盖2；对应物：include/linux/sched/task.h:kernel_clone_args.flags（u64）；理由：clone3后标志为64位，各架构copy_thread用unsigned long，32位上截断
+--- 说明 ---
+arch: copy_thread: pass clone_flags as u64
+With the introduction of clone3 in commit 7f192e3cd316 ("fork: add
+clone3") the effective bit width of clone_flags on all architectures was
+increased from 32-bit to 64-bit, with a new type of u64 for the flags.
+However, for most consumers of clone_flags the interface was not
+changed from the previous type of unsigned long.
+While this works fine as long as none of the new 64-bit flag bits
+(CLONE_CLEAR_SIGHAND and CLONE_INTO_CGROUP) are evaluated, this is still
+undesirable in terms of the principle of least surprise.
+Thus, this commit fixes all relevant interfaces of the copy_thread
+function that is called from copy_process to consistently pass
+clone_flags as u64, so that no truncation to 32-bit integers occurs on
+32-bit architectures.
+Signed-off-by: Simon Schuster <schuster.simon@siemens-energy.com>
+--- 改动 ---
+diff --git a/arch/alpha/kernel/process.c b/arch/alpha/kernel/process.c
+index 582d96548385..06522451f018 100644
+--- a/arch/alpha/kernel/process.c
++++ b/arch/alpha/kernel/process.c
+@@ -231,7 +231,7 @@ flush_thread(void)
+  */
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	extern void ret_from_fork(void);
+diff --git a/arch/arc/kernel/process.c b/arch/arc/kernel/process.c
+index 186ceab661eb..8166d0908713 100644
+--- a/arch/arc/kernel/process.c
++++ b/arch/arc/kernel/process.c
+@@ -166,7 +166,7 @@ asmlinkage void ret_from_fork(void);
+  */
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct pt_regs *c_regs;        /* child's pt_regs */
+diff --git a/arch/arm/kernel/process.c b/arch/arm/kernel/process.c
+index e16ed102960c..d7aa95225c70 100644
+--- a/arch/arm/kernel/process.c
++++ b/arch/arm/kernel/process.c
+@@ -234,7 +234,7 @@ asmlinkage void ret_from_fork(void) __asm__("ret_from_fork");
+ 
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long stack_start = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct thread_info *thread = task_thread_info(p);
+diff --git a/arch/arm64/kernel/process.c b/arch/arm64/kernel/process.c
+index 96482a1412c6..fba7ca102a8c 100644
+--- a/arch/arm64/kernel/process.c
++++ b/arch/arm64/kernel/process.c
+@@ -409,7 +409,7 @@ asmlinkage void ret_from_fork(void) asm("ret_from_fork");
+ 
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long stack_start = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct pt_regs *childregs = task_pt_regs(p);
+diff --git a/arch/csky/kernel/process.c b/arch/csky/kernel/process.c
+index 0c6e4b17fe00..a7a90340042a 100644
+--- a/arch/csky/kernel/process.c
++++ b/arch/csky/kernel/process.c
+@@ -32,7 +32,7 @@ void flush_thread(void){}
+ 
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct switch_stack *childstack;
+diff --git a/arch/hexagon/kernel/process.c b/arch/hexagon/kernel/process.c
+index 2a77bfd75694..15b4992bfa29 100644
+--- a/arch/hexagon/kernel/process.c
++++ b/arch/hexagon/kernel/process.c
+@@ -52,7 +52,7 @@ void arch_cpu_idle(void)
+  */
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct thread_info *ti = task_thread_info(p);
+diff --git a/arch/loongarch/kernel/process.c b/arch/loongarch/kernel/process.c
+index 3582f591bab2..efd9edf65603 100644
+--- a/arch/loongarch/kernel/process.c
++++ b/arch/loongarch/kernel/process.c
+@@ -167,7 +167,7 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 	unsigned long childksp;
+ 	unsigned long tls = args->tls;
+ 	unsigned long usp = args->stack;
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	struct pt_regs *childregs, *regs = current_pt_regs();
+ 
+ 	childksp = (unsigned long)task_stack_page(p) + THREAD_SIZE;
+diff --git a/arch/m68k/kernel/process.c b/arch/m68k/kernel/process.c
+index fda7eac23f87..f5a07a70e938 100644
+--- a/arch/m68k/kernel/process.c
++++ b/arch/m68k/kernel/process.c
+@@ -141,7 +141,7 @@ asmlinkage int m68k_clone3(struct pt_regs *regs)
+ 
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct fork_frame {
+diff --git a/arch/microblaze/kernel/process.c b/arch/microblaze/kernel/process.c
+index 56342e11442d..6cbf642d7b80 100644
+--- a/arch/microblaze/kernel/process.c
++++ b/arch/microblaze/kernel/process.c
+@@ -54,7 +54,7 @@ void flush_thread(void)
+ 
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct pt_regs *childregs = task_pt_regs(p);
+diff --git a/arch/mips/kernel/process.c b/arch/mips/kernel/process.c
+index 02aa6a04a21d..29191fa1801e 100644
+--- a/arch/mips/kernel/process.c
++++ b/arch/mips/kernel/process.c
+@@ -107,7 +107,7 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
+  */
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct thread_info *ti = task_thread_info(p);
+diff --git a/arch/nios2/kernel/process.c b/arch/nios2/kernel/process.c
+index f84021303f6a..151404139085 100644
+--- a/arch/nios2/kernel/process.c
++++ b/arch/nios2/kernel/process.c
+@@ -101,7 +101,7 @@ void flush_thread(void)
+ 
+ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct pt_regs *childregs = task_pt_regs(p);
+diff --git a/arch/openrisc/kernel/process.c b/arch/openrisc/kernel/process.c
+index eef99fee2110..73ffb9fa3118 100644
+--- a/arch/openrisc/kernel/process.c
++++ b/arch/openrisc/kernel/process.c
+@@ -165,7 +165,7 @@ extern asmlinkage void ret_from_fork(void);
+ int
+ copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ {
+-	unsigned long clone_flags = args->flags;
++	u64 clone_flags = args->flags;
+ 	unsigned long usp = args->stack;
+ 	unsigned long tls = args->tls;
+ 	struct pt_regs *userregs;
+diff --git a/arch/parisc/kernel/process.c b/arch/parisc/kernel/process.c
+index ed93bd8c1545..e64ab5d2a40d 100644
+--- a/arch/parisc/kernel/process.c
++++ b/arch/parisc/kernel/process.c
+（改动共347行，只列前160行）
+
+##### A195 fd2e08128944 riscv, bpf: Sign extend struct ops return values properly
+样本集标签：M7 K2 S1 掩盖1；对应物：arch/loongarch/net/bpf_jit.c:build_insn（BPF_CALL处按调用约定sign_extend）；理由：struct_ops返回值须按RV64调用约定符号扩展
+--- 说明 ---
+riscv, bpf: Sign extend struct ops return values properly
+The ns_bpf_qdisc selftest triggers a kernel panic:
+    Unable to handle kernel paging request at virtual address ffffffffa38dbf58
+    Current test_progs pgtable: 4K pagesize, 57-bit VAs, pgdp=0x00000001109cc000
+    [ffffffffa38dbf58] pgd=000000011fffd801, p4d=000000011fffd401, pud=000000011fffd001, pmd=0000000000000000
+    Oops [#1]
+    Modules linked in: bpf_testmod(OE) xt_conntrack nls_iso8859_1 [...] [last unloaded: bpf_testmod(OE)]
+    CPU: 1 UID: 0 PID: 23584 Comm: test_progs Tainted: G        W  OE       6.17.0-rc1-g2465bb83e0b4 #1 NONE
+    Tainted: [W]=WARN, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+    Hardware name: Unknown Unknown Product/Unknown Product, BIOS 2024.01+dfsg-1ubuntu5.1 01/01/2024
+    epc : __qdisc_run+0x82/0x6f0
+     ra : __qdisc_run+0x6e/0x6f0
+    epc : ffffffff80bd5c7a ra : ffffffff80bd5c66 sp : ff2000000eecb550
+     gp : ffffffff82472098 tp : ff60000096895940 t0 : ffffffff8001f180
+--- 改动 ---
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 886b647dc206..14d7aab61fcb 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -711,6 +711,39 @@ static int emit_atomic_rmw(u8 rd, u8 rs, const struct bpf_insn *insn,
+ 	return 0;
+ }
+ 
++/*
++ * Sign-extend the register if necessary
++ */
++static int sign_extend(u8 rd, u8 rs, u8 sz, bool sign, struct rv_jit_context *ctx)
++{
++	if (!sign && (sz == 1 || sz == 2)) {
++		if (rd != rs)
++			emit_mv(rd, rs, ctx);
++		return 0;
++	}
++
++	switch (sz) {
++	case 1:
++		emit_sextb(rd, rs, ctx);
++		break;
++	case 2:
++		emit_sexth(rd, rs, ctx);
++		break;
++	case 4:
++		emit_sextw(rd, rs, ctx);
++		break;
++	case 8:
++		if (rd != rs)
++			emit_mv(rd, rs, ctx);
++		break;
++	default:
++		pr_err("bpf-jit: invalid size %d for sign_extend\n", sz);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
+ #define BPF_FIXUP_OFFSET_MASK   GENMASK(26, 0)
+ #define BPF_FIXUP_REG_MASK      GENMASK(31, 27)
+ #define REG_DONT_CLEAR_MARKER	0	/* RV_REG_ZERO unused in pt_regmap */
+@@ -1175,8 +1208,15 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 		restore_args(min_t(int, nr_arg_slots, RV_MAX_REG_ARGS), args_off, ctx);
+ 
+ 	if (save_ret) {
+-		emit_ld(RV_REG_A0, -retval_off, RV_REG_FP, ctx);
+ 		emit_ld(regmap[BPF_REG_0], -(retval_off - 8), RV_REG_FP, ctx);
++		if (is_struct_ops) {
++			ret = sign_extend(RV_REG_A0, regmap[BPF_REG_0], m->ret_size,
++					  m->ret_flags & BTF_FMODEL_SIGNED_ARG, ctx);
++			if (ret)
++				goto out;
++		} else {
++			emit_ld(RV_REG_A0, -retval_off, RV_REG_FP, ctx);
++		}
+ 	}
+ 
+ 	emit_ld(RV_REG_S1, -sreg_off, RV_REG_FP, ctx);
+
+##### A196 9e68bd803fac riscv: kprobes: Fix probe address validation
+样本集标签：M10 K2 S1 掩盖0；对应物：arch/x86/kernel/kprobes/core.c:can_probe（从最近符号起解码）；理由：校验探测地址应从最近的前一个符号开始解码；RISC-V从_text起，遇到字面量会失步
+--- 说明 ---
+riscv: kprobes: Fix probe address validation
+When adding a kprobe such as "p:probe/tcp_sendmsg _text+15392192",
+arch_check_kprobe would start iterating all instructions starting from
+_text until the probed address. Not only is this very inefficient, but
+literal values in there (e.g. left by function patching) are
+misinterpreted in a way that causes a desync.
+Fix this by doing it like x86: start the iteration at the closest
+preceding symbol instead of the given starting point.
+Fixes: 87f48c7ccc73 ("riscv: kprobe: Fixup kernel panic when probing an illegal position")
+Signed-off-by: Fabian Vogt <fvogt@suse.de>
+Signed-off-by: Marvin Friedrich <marvin.friedrich@suse.com>
+Acked-by: Guo Ren <guoren@kernel.org>
+Link: https://lore.kernel.org/r/6191817.lOV4Wx5bFT@fvogt-thinkpad
+Signed-off-by: Paul Walmsley <pjw@kernel.org>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/probes/kprobes.c b/arch/riscv/kernel/probes/kprobes.c
+index c0738d6c6498..8723390c7cad 100644
+--- a/arch/riscv/kernel/probes/kprobes.c
++++ b/arch/riscv/kernel/probes/kprobes.c
+@@ -49,10 +49,15 @@ static void __kprobes arch_simulate_insn(struct kprobe *p, struct pt_regs *regs)
+ 	post_kprobe_handler(p, kcb, regs);
+ }
+ 
+-static bool __kprobes arch_check_kprobe(struct kprobe *p)
++static bool __kprobes arch_check_kprobe(unsigned long addr)
+ {
+-	unsigned long tmp  = (unsigned long)p->addr - p->offset;
+-	unsigned long addr = (unsigned long)p->addr;
++	unsigned long tmp, offset;
++
++	/* start iterating at the closest preceding symbol */
++	if (!kallsyms_lookup_size_offset(addr, NULL, &offset))
++		return false;
++
++	tmp = addr - offset;
+ 
+ 	while (tmp <= addr) {
+ 		if (tmp == addr)
+@@ -71,7 +76,7 @@ int __kprobes arch_prepare_kprobe(struct kprobe *p)
+ 	if ((unsigned long)insn & 0x1)
+ 		return -EILSEQ;
+ 
+-	if (!arch_check_kprobe(p))
++	if (!arch_check_kprobe((unsigned long)p->addr))
+ 		return -EILSEQ;
+ 
+ 	/* copy instruction */
+
+##### A197 546e42c8c6d9 riscv: Use an atomic xchg in pudp_huge_get_and_clear()
+样本集标签：M4 K1 S1 掩盖0；对应物：arch/x86/include/asm/pgtable.h:pudp_huge_get_and_clear；理由：同A188（修订后再次提交）
+--- 说明 ---
+riscv: Use an atomic xchg in pudp_huge_get_and_clear()
+Make sure we return the right pud value and not a value that could
+have been overwritten in between by a different core.
+Fixes: c3cc2a4a3a23 ("riscv: Add support for PUD THP")
+Cc: stable@vger.kernel.org
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/r/20250814-dev-alex-thp_pud_xchg-v1-1-b4704dfae206@rivosinc.com
+[pjw@kernel.org: use xchg rather than atomic_long_xchg; avoid atomic op for !CONFIG_SMP like x86]
+Signed-off-by: Paul Walmsley <pjw@kernel.org>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 91697fbf1f90..815067742939 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -942,6 +942,23 @@ static inline int pudp_test_and_clear_young(struct vm_area_struct *vma,
+ 	return ptep_test_and_clear_young(vma, address, (pte_t *)pudp);
+ }
+ 
++#define __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR
++static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
++					    unsigned long address,  pud_t *pudp)
++{
++#ifdef CONFIG_SMP
++	pud_t pud = __pud(xchg(&pudp->pud, 0));
++#else
++	pud_t pud = *pudp;
++
++	pud_clear(pudp);
++#endif
++
++	page_table_check_pud_clear(mm, pud);
++
++	return pud;
++}
++
+ static inline int pud_young(pud_t pud)
+ {
+ 	return pte_young(pud_pte(pud));
+
+##### A200 ca525d53f994 RISC-V: Define pgprot_dmacoherent() for non-coherent devices
+样本集标签：M1 K1 S1 掩盖3；对应物：include/linux/pgtable.h:pgprot_dmacoherent（默认等于noncached）；arch/arm64/include/asm/pgtable.h:pgprot_dmacoherent；理由：公共默认把一致性DMA内存映射成IO属性，RISC-V开Svpbmt后应像arm64那样自定义；只影响性能
+--- 说明 ---
+RISC-V: Define pgprot_dmacoherent() for non-coherent devices
+The pgprot_dmacoherent() is used when allocating memory for
+non-coherent devices and by default pgprot_dmacoherent() is
+same as pgprot_noncached() unless architecture overrides it.
+Currently, there is no pgprot_dmacoherent() definition for
+RISC-V hence non-coherent device memory is being mapped as
+IO thereby making CPU access to such memory slow.
+Define pgprot_dmacoherent() to be same as pgprot_writecombine()
+for RISC-V so that CPU access non-coherent device memory as
+NOCACHE which is better than accessing it as IO.
+Fixes: ff689fd21cb1 ("riscv: add RISC-V Svpbmt extension support")
+Signed-off-by: Anup Patel <apatel@ventanamicro.com>
+Tested-by: Han Gao <rabenda.cn@gmail.com>
+Tested-by: Guo Ren (Alibaba DAMO Academy) <guoren@kernel.org>
+--- 改动 ---
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 29e994a9afb6..5a08eb5fe99f 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -654,6 +654,8 @@ static inline pgprot_t pgprot_writecombine(pgprot_t _prot)
+ 	return __pgprot(prot);
+ }
+ 
++#define pgprot_dmacoherent pgprot_writecombine
++
+ /*
+  * Both Svade and Svadu control the hardware behavior when the PTE A/D bits need to be set. By
+  * default the M-mode firmware enables the hardware updating scheme when only Svadu is present in
+
+##### A202 060ea84a484e riscv: stacktrace: Disable KASAN checks for non-current tasks
+样本集标签：M10 K2 S1 掩盖4；对应物：arch/x86/kernel/unwind_frame.c（READ_ONCE_TASK_STACK）；理由：回溯其他任务的栈时须关KASAN检查；x86早已修过
+--- 说明 ---
+riscv: stacktrace: Disable KASAN checks for non-current tasks
+Unwinding the stack of a task other than current, KASAN would report
+"BUG: KASAN: out-of-bounds in walk_stackframe+0x41c/0x460"
+There is a same issue on x86 and has been resolved by the commit
+84936118bdf3 ("x86/unwind: Disable KASAN checks for non-current tasks")
+The solution could be applied to RISC-V too.
+This patch also can solve the issue:
+https://seclists.org/oss-sec/2025/q4/23
+Fixes: 5d8544e2d007 ("RISC-V: Generic library routines and assembly")
+Co-developed-by: Jiakai Xu <xujiakai2025@iscas.ac.cn>
+Signed-off-by: Jiakai Xu <xujiakai2025@iscas.ac.cn>
+Signed-off-by: Chunyan Zhang <zhangchunyan@iscas.ac.cn>
+Link: https://lore.kernel.org/r/20251022072608.743484-1-zhangchunyan@iscas.ac.cn
+[pjw@kernel.org: clean up checkpatch issues]
+--- 改动 ---
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index 3fe9e6edef8f..b41b6255751c 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -16,6 +16,22 @@
+ 
+ #ifdef CONFIG_FRAME_POINTER
+ 
++/*
++ * This disables KASAN checking when reading a value from another task's stack,
++ * since the other task could be running on another CPU and could have poisoned
++ * the stack in the meantime.
++ */
++#define READ_ONCE_TASK_STACK(task, x)			\
++({							\
++	unsigned long val;				\
++	unsigned long addr = x;				\
++	if ((task) == current)				\
++		val = READ_ONCE(addr);			\
++	else						\
++		val = READ_ONCE_NOCHECK(addr);		\
++	val;						\
++})
++
+ extern asmlinkage void handle_exception(void);
+ extern unsigned long ret_from_exception_end;
+ 
+@@ -69,8 +85,9 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			fp = frame->ra;
+ 			pc = regs->ra;
+ 		} else {
+-			fp = frame->fp;
+-			pc = ftrace_graph_ret_addr(current, &graph_idx, frame->ra,
++			fp = READ_ONCE_TASK_STACK(task, frame->fp);
++			pc = READ_ONCE_TASK_STACK(task, frame->ra);
++			pc = ftrace_graph_ret_addr(current, &graph_idx, pc,
+ 						   &frame->ra);
+ 			if (pc >= (unsigned long)handle_exception &&
+ 			    pc < (unsigned long)&ret_from_exception_end) {
+
+##### A211 8f3e00af8e52 riscv, bpf: Fix incorrect usage of BPF_TRAMP_F_ORIG_STACK
+样本集标签：M8 K1 S1 掩盖0；对应物：arch/x86/net/bpf_jit_comp.c:__arch_prepare_bpf_trampoline（按CALL_ORIG跳过补丁指令）；理由：公共BPF修复改动各架构标志用法时，把RISC-V的跳过入口改成了ORIG_STACK
+--- 说明 ---
+riscv, bpf: Fix incorrect usage of BPF_TRAMP_F_ORIG_STACK
+The usage of BPF_TRAMP_F_ORIG_STACK in __arch_prepare_bpf_trampoline() is
+wrong, and it should be BPF_TRAMP_F_CALL_ORIG, which caused crash as
+Andreas reported:
+  Insufficient stack space to handle exception!
+  Task stack:     [0xff20000000010000..0xff20000000014000]
+  Overflow stack: [0xff600000ffdad070..0xff600000ffdae070]
+  CPU: 1 UID: 0 PID: 1 Comm: systemd Not tainted 6.18.0-rc5+ #15 PREEMPT(voluntary)
+  Hardware name: riscv-virtio qemu/qemu, BIOS 2025.10 10/01/2025
+  epc : copy_from_kernel_nofault+0xa/0x198
+   ra : bpf_probe_read_kernel+0x20/0x60
+  epc : ffffffff802b732a ra : ffffffff801e6070 sp : ff2000000000ffe0
+   gp : ffffffff82262ed0 tp : 0000000000000000 t0 : ffffffff80022320
+   t1 : ffffffff801e6056 t2 : 0000000000000000 s0 : ff20000000010040
+--- 改动 ---
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 5f9457e910e8..37888abee70c 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1133,10 +1133,6 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 
+ 	store_args(nr_arg_slots, args_off, ctx);
+ 
+-	/* skip to actual body of traced function */
+-	if (flags & BPF_TRAMP_F_ORIG_STACK)
+-		orig_call += RV_FENTRY_NINSNS * 4;
+-
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
+ 		emit_imm(RV_REG_A0, ctx->insns ? (const s64)im : RV_MAX_COUNT_IMM, ctx);
+ 		ret = emit_call((const u64)__bpf_tramp_enter, true, ctx);
+@@ -1171,6 +1167,8 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	}
+ 
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
++		/* skip to actual body of traced function */
++		orig_call += RV_FENTRY_NINSNS * 4;
+ 		restore_args(min_t(int, nr_arg_slots, RV_MAX_REG_ARGS), args_off, ctx);
+ 		restore_stack_args(nr_arg_slots - RV_MAX_REG_ARGS, args_off, stk_arg_off, ctx);
+ 		ret = emit_call((const u64)orig_call, true, ctx);
+
+##### A213 66562b66dcbc riscv: boot: Always make Image from vmlinux, not vmlinux.unstripped
+样本集标签：M8 K2 S1 掩盖0；对应物：arch/arm64/boot/Makefile（$(obj)/Image: vmlinux）；理由：公共kbuild让vmlinux.unstripped带.modinfo后，RISC-V可重定位内核从它生成Image，镜像大小超出头部记录
+--- 说明 ---
+riscv: boot: Always make Image from vmlinux, not vmlinux.unstripped
+Since commit 4b47a3aefb29 ("kbuild: Restore pattern to avoid stripping
+.rela.dyn from vmlinux") vmlinux has .rel*.dyn preserved. Therefore, use
+vmlinux to produce Image, not vmlinux.unstripped.
+Doing so fixes booting a RELOCATABLE=y Image with kexec. The problem is
+caused by this chain of events:
+- Since commit 3e86e4d74c04 ("kbuild: keep .modinfo section in
+  vmlinux.unstripped"), vmlinux.unstripped gets a .modinfo section.
+- The .modinfo section has SHF_ALLOC, so it ends up in Image, at the end
+  of it.
+- The Image header's image_size field does not expect to include
+  .modinfo and does not account for it, since it should not be in Image.
+- If .modinfo is large enough, the file size of Image ends up larger
+  than image_size, which eventually leads to it failing
+--- 改动 ---
+diff --git a/arch/riscv/boot/Makefile b/arch/riscv/boot/Makefile
+index bfc3d0b75b9b..5301adf5f3f5 100644
+--- a/arch/riscv/boot/Makefile
++++ b/arch/riscv/boot/Makefile
+@@ -31,11 +31,7 @@ $(obj)/xipImage: vmlinux FORCE
+ 
+ endif
+ 
+-ifdef CONFIG_RELOCATABLE
+-$(obj)/Image: vmlinux.unstripped FORCE
+-else
+ $(obj)/Image: vmlinux FORCE
+-endif
+ 	$(call if_changed,objcopy)
+ 
+ $(obj)/Image.gz: $(obj)/Image FORCE
+
+##### A215 8565617a8599 KVM: riscv: Fix Spectre-v1 in APLIC interrupt handling
+样本集标签：M7 K2 S1 掩盖3；对应物：arch/arm64/kvm/vgic/vgic.c:vgic_get_irq（array_index_nospec）；理由：客户机可控的中断号下标须防推测越界；arm64、x86已做
+--- 说明 ---
+KVM: riscv: Fix Spectre-v1 in APLIC interrupt handling
+Guests can control IRQ indices via MMIO. Sanitize them with
+array_index_nospec() to prevent speculative out-of-bounds access
+to the aplic->irqs[] array.
+Similar to arm64 commit 41b87599c743 ("KVM: arm/arm64: vgic: fix possible
+spectre-v1 in vgic_get_irq()") and x86 commit 8c86405f606c ("KVM: x86:
+Protect ioapic_read_indirect() from Spectre-v1/L1TF attacks").
+Fixes: 74967aa208e2 ("RISC-V: KVM: Add in-kernel emulation of AIA APLIC")
+Signed-off-by: Lukas Gerlach <lukas.gerlach@cispa.de>
+Reviewed-by: Nutty Liu <nutty.liu@hotmail.com>
+Reviewed-by: Anup Patel <anup@brainfault.org>
+Link: https://lore.kernel.org/r/20260116095731.24555-1-lukas.gerlach@cispa.de
+Signed-off-by: Anup Patel <anup@brainfault.org>
+--- 改动 ---
+diff --git a/arch/riscv/kvm/aia_aplic.c b/arch/riscv/kvm/aia_aplic.c
+index d1e50bf5c351..3464f3351df7 100644
+--- a/arch/riscv/kvm/aia_aplic.c
++++ b/arch/riscv/kvm/aia_aplic.c
+@@ -10,6 +10,7 @@
+ #include <linux/irqchip/riscv-aplic.h>
+ #include <linux/kvm_host.h>
+ #include <linux/math.h>
++#include <linux/nospec.h>
+ #include <linux/spinlock.h>
+ #include <linux/swab.h>
+ #include <kvm/iodev.h>
+@@ -45,7 +46,7 @@ static u32 aplic_read_sourcecfg(struct aplic *aplic, u32 irq)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return 0;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 	ret = irqd->sourcecfg;
+@@ -61,7 +62,7 @@ static void aplic_write_sourcecfg(struct aplic *aplic, u32 irq, u32 val)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	if (val & APLIC_SOURCECFG_D)
+ 		val = 0;
+@@ -81,7 +82,7 @@ static u32 aplic_read_target(struct aplic *aplic, u32 irq)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return 0;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 	ret = irqd->target;
+@@ -97,7 +98,7 @@ static void aplic_write_target(struct aplic *aplic, u32 irq, u32 val)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	val &= APLIC_TARGET_EIID_MASK |
+ 	       (APLIC_TARGET_HART_IDX_MASK << APLIC_TARGET_HART_IDX_SHIFT) |
+@@ -116,7 +117,7 @@ static bool aplic_read_pending(struct aplic *aplic, u32 irq)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return false;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 	ret = (irqd->state & APLIC_IRQ_STATE_PENDING) ? true : false;
+@@ -132,7 +133,7 @@ static void aplic_write_pending(struct aplic *aplic, u32 irq, bool pending)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 
+@@ -170,7 +171,7 @@ static bool aplic_read_enabled(struct aplic *aplic, u32 irq)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return false;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 	ret = (irqd->state & APLIC_IRQ_STATE_ENABLED) ? true : false;
+@@ -186,7 +187,7 @@ static void aplic_write_enabled(struct aplic *aplic, u32 irq, bool enabled)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 	if (enabled)
+@@ -205,7 +206,7 @@ static bool aplic_read_input(struct aplic *aplic, u32 irq)
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return false;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+ 
+@@ -254,7 +255,7 @@ static void aplic_update_irq_range(struct kvm *kvm, u32 first, u32 last)
+ 	for (irq = first; irq <= last; irq++) {
+ 		if (!irq || aplic->nr_irqs <= irq)
+ 			continue;
+-		irqd = &aplic->irqs[irq];
++		irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 		raw_spin_lock_irqsave(&irqd->lock, flags);
+ 
+@@ -283,7 +284,7 @@ int kvm_riscv_aia_aplic_inject(struct kvm *kvm, u32 source, bool level)
+ 
+ 	if (!aplic || !source || (aplic->nr_irqs <= source))
+ 		return -ENODEV;
+-	irqd = &aplic->irqs[source];
++	irqd = &aplic->irqs[array_index_nospec(source, aplic->nr_irqs)];
+ 	ie = (aplic->domaincfg & APLIC_DOMAINCFG_IE) ? true : false;
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+
+##### A225 2dda6a9e09ee KVM: riscv: Fix Spectre-v1 in PMU counter access
+样本集标签：M7 K2 S1 掩盖3；对应物：arch/x86/kvm/pmu.h（array_index_nospec）；理由：客户机可控的计数器下标须防推测越界；x86已做
+--- 说明 ---
+KVM: riscv: Fix Spectre-v1 in PMU counter access
+Guest-controlled counter indices received via SBI ecalls are used to
+index into the PMC array. Sanitize them with array_index_nospec()
+to prevent speculative out-of-bounds access.
+Similar to x86 commit 13c5183a4e64 ("KVM: x86: Protect MSR-based
+index computations in pmu.h from Spectre-v1/L1TF attacks").
+Fixes: 8f0153ecd3bf ("RISC-V: KVM: Add skeleton support for perf")
+Reviewed-by: Radim Krčmář <radim.krcmar@oss.qualcomm.com>
+Signed-off-by: Lukas Gerlach <lukas.gerlach@cispa.de>
+Link: https://lore.kernel.org/r/20260303-kvm-riscv-spectre-v1-v2-4-192caab8e0dc@cispa.de
+Signed-off-by: Anup Patel <anup@brainfault.org>
+--- 改动 ---
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index aec6b293968b..e873430e596b 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -10,6 +10,7 @@
+ #include <linux/errno.h>
+ #include <linux/err.h>
+ #include <linux/kvm_host.h>
++#include <linux/nospec.h>
+ #include <linux/perf/riscv_pmu.h>
+ #include <asm/csr.h>
+ #include <asm/kvm_vcpu_sbi.h>
+@@ -87,7 +88,8 @@ static void kvm_pmu_release_perf_event(struct kvm_pmc *pmc)
+ 
+ static u64 kvm_pmu_get_perf_event_hw_config(u32 sbi_event_code)
+ {
+-	return hw_event_perf_map[sbi_event_code];
++	return hw_event_perf_map[array_index_nospec(sbi_event_code,
++						    SBI_PMU_HW_GENERAL_MAX)];
+ }
+ 
+ static u64 kvm_pmu_get_perf_event_cache_config(u32 sbi_event_code)
+@@ -218,6 +220,7 @@ static int pmu_fw_ctr_read_hi(struct kvm_vcpu *vcpu, unsigned long cidx,
+ 		return -EINVAL;
+ 	}
+ 
++	cidx = array_index_nospec(cidx, RISCV_KVM_MAX_COUNTERS);
+ 	pmc = &kvpmu->pmc[cidx];
+ 
+ 	if (pmc->cinfo.type != SBI_PMU_CTR_TYPE_FW)
+@@ -244,6 +247,7 @@ static int pmu_ctr_read(struct kvm_vcpu *vcpu, unsigned long cidx,
+ 		return -EINVAL;
+ 	}
+ 
++	cidx = array_index_nospec(cidx, RISCV_KVM_MAX_COUNTERS);
+ 	pmc = &kvpmu->pmc[cidx];
+ 
+ 	if (pmc->cinfo.type == SBI_PMU_CTR_TYPE_FW) {
+@@ -525,6 +529,7 @@ int kvm_riscv_vcpu_pmu_ctr_info(struct kvm_vcpu *vcpu, unsigned long cidx,
+ 		return 0;
+ 	}
+ 
++	cidx = array_index_nospec(cidx, RISCV_KVM_MAX_COUNTERS);
+ 	retdata->out_val = kvpmu->pmc[cidx].cinfo.value;
+ 
+ 	return 0;
+@@ -559,7 +564,8 @@ int kvm_riscv_vcpu_pmu_ctr_start(struct kvm_vcpu *vcpu, unsigned long ctr_base,
+ 	}
+ 	/* Start the counters that have been configured and requested by the guest */
+ 	for_each_set_bit(i, &ctr_mask, RISCV_MAX_COUNTERS) {
+-		pmc_index = i + ctr_base;
++		pmc_index = array_index_nospec(i + ctr_base,
++					       RISCV_KVM_MAX_COUNTERS);
+ 		if (!test_bit(pmc_index, kvpmu->pmc_in_use))
+ 			continue;
+ 		/* The guest started the counter again. Reset the overflow status */
+@@ -630,7 +636,8 @@ int kvm_riscv_vcpu_pmu_ctr_stop(struct kvm_vcpu *vcpu, unsigned long ctr_base,
+ 
+ 	/* Stop the counters that have been configured and requested by the guest */
+ 	for_each_set_bit(i, &ctr_mask, RISCV_MAX_COUNTERS) {
+-		pmc_index = i + ctr_base;
++		pmc_index = array_index_nospec(i + ctr_base,
++					       RISCV_KVM_MAX_COUNTERS);
+ 		if (!test_bit(pmc_index, kvpmu->pmc_in_use))
+ 			continue;
+ 		pmc = &kvpmu->pmc[pmc_index];
+@@ -761,6 +768,7 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 		}
+ 	}
+ 
++	ctr_idx = array_index_nospec(ctr_idx, RISCV_KVM_MAX_COUNTERS);
+ 	pmc = &kvpmu->pmc[ctr_idx];
+ 	pmc->idx = ctr_idx;
+ 
+
+##### A238 f2abc305aa93 riscv: Define __riscv_copy_{,vec_}{words,bytes}_unaligned() using SYM_TYPED_FUNC_START
+样本集标签：M9 K2 S1 掩盖2；对应物：arch/arm64/kernel/entry-ftrace.S:ftrace_stub（间接调用的汇编函数用SYM_TYPED_FUNC_START）；理由：间接调用的汇编函数须带CFI类型
+--- 说明 ---
+riscv: Define __riscv_copy_{,vec_}{words,bytes}_unaligned() using SYM_TYPED_FUNC_START
+After commit 67bdd7b01387 ("riscv: Split out measure_cycles() for
+reuse") and commit c03ad15f7cf6 ("riscv: Reuse measure_cycles() in
+check_vector_unaligned_access()"), there are CFI failure when booting
+kernels with CONFIG_CFI=y:
+  CFI failure at measure_cycles+0x38/0xe0 (target: __riscv_copy_words_unaligned+0x0/0x50; expected type: ...)
+  CFI failure at measure_cycles+0x38/0xe0 (target: __riscv_copy_vec_words_unaligned+0x0/0x24; expected type: ...)
+The __riscv_copy_*_unaligned() functions are now called indirectly but
+they are not defined with SYM_TYPED_FUNC_START, which is required for
+assembly functions called indirectly from C to pass CFI checking. Switch
+to SYM_TYPED_FUNC_START to clear up the CFI failures.
+Fixes: 67bdd7b01387 ("riscv: Split out measure_cycles() for reuse")
+Fixes: c03ad15f7cf6 ("riscv: Reuse measure_cycles() in check_vector_unaligned_access()")
+Signed-off-by: Nathan Chancellor <nathan@kernel.org>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/copy-unaligned.S b/arch/riscv/kernel/copy-unaligned.S
+index 2b3d9398c113..90f3549621f7 100644
+--- a/arch/riscv/kernel/copy-unaligned.S
++++ b/arch/riscv/kernel/copy-unaligned.S
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0 */
+ /* Copyright (C) 2023 Rivos Inc. */
+ 
++#include <linux/cfi_types.h>
+ #include <linux/linkage.h>
+ #include <asm/asm.h>
+ 
+@@ -9,7 +10,7 @@
+ /* void __riscv_copy_words_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using word loads and stores. */
+ /* Note: The size is truncated to a multiple of 8 * SZREG */
+-SYM_FUNC_START(__riscv_copy_words_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_words_unaligned)
+ 	andi  a4, a2, ~((8*SZREG)-1)
+ 	beqz  a4, 2f
+ 	add   a3, a1, a4
+@@ -41,7 +42,7 @@ SYM_FUNC_END(__riscv_copy_words_unaligned)
+ /* void __riscv_copy_bytes_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using only byte accesses. */
+ /* Note: The size is truncated to a multiple of 8 */
+-SYM_FUNC_START(__riscv_copy_bytes_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_bytes_unaligned)
+ 	andi a4, a2, ~(8-1)
+ 	beqz a4, 2f
+ 	add  a3, a1, a4
+diff --git a/arch/riscv/kernel/vec-copy-unaligned.S b/arch/riscv/kernel/vec-copy-unaligned.S
+index 7ce4de6f6e69..361039f7b944 100644
+--- a/arch/riscv/kernel/vec-copy-unaligned.S
++++ b/arch/riscv/kernel/vec-copy-unaligned.S
+@@ -2,6 +2,7 @@
+ /* Copyright (C) 2024 Rivos Inc. */
+ 
+ #include <linux/args.h>
++#include <linux/cfi_types.h>
+ #include <linux/linkage.h>
+ #include <asm/asm.h>
+ 
+@@ -16,7 +17,7 @@
+ /* void __riscv_copy_vec_words_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using word loads and stores. */
+ /* Note: The size is truncated to a multiple of WORD_EEW */
+-SYM_FUNC_START(__riscv_copy_vec_words_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_vec_words_unaligned)
+ 	andi  a4, a2, ~(WORD_EEW-1)
+ 	beqz  a4, 2f
+ 	add   a3, a1, a4
+@@ -38,7 +39,7 @@ SYM_FUNC_END(__riscv_copy_vec_words_unaligned)
+ /* void __riscv_copy_vec_bytes_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using only byte accesses. */
+ /* Note: The size is truncated to a multiple of 8 */
+-SYM_FUNC_START(__riscv_copy_vec_bytes_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_vec_bytes_unaligned)
+ 	andi a4, a2, ~(8-1)
+ 	beqz a4, 2f
+ 	add  a3, a1, a4
+
+##### A241 c7832534a816 RISC-V: KVM: Fix sign extension for MMIO loads
+样本集标签：M7 K2 S1 掩盖2；对应物：arch/arm64/kvm/mmio.c:kvm_handle_mmio_return（按访问宽度符号扩展）；理由：模拟MMIO有符号读须符号扩展；设备返回负值时才出错
+--- 说明 ---
+RISC-V: KVM: Fix sign extension for MMIO loads
+The kvm_riscv_vcpu_mmio_return() function handles MMIO read results
+by writing the data back to the guest register. For signed load
+instructions (LB, LH, LW on RV64), the value needs sign-extension
+from a smaller integer to unsigned long.
+The current code uses:
+    (ulong)data << shift >> shift
+but (ulong) makes the right shift a logical shift (zero-extend)
+rather than an arithmetic shift (sign-extend), causing incorrect
+results when the MMIO device returns a negative value. For example,
+LB reading 0x80 would return 128 instead of -128.
+Fix this by casting to (long) after the left shift so that the
+subsequent right shift is arithmetic and correctly propagates
+the sign bit:
+--- 改动 ---
+diff --git a/arch/riscv/kvm/vcpu_insn.c b/arch/riscv/kvm/vcpu_insn.c
+index 4d89b94128ae..f09f9251d1f0 100644
+--- a/arch/riscv/kvm/vcpu_insn.c
++++ b/arch/riscv/kvm/vcpu_insn.c
+@@ -415,7 +415,6 @@ int kvm_riscv_vcpu_mmio_load(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 		shift = 8 * (sizeof(ulong) - len);
+ 	} else if ((insn & INSN_MASK_LBU) == INSN_MATCH_LBU) {
+ 		len = 1;
+-		shift = 8 * (sizeof(ulong) - len);
+ #ifdef CONFIG_64BIT
+ 	} else if ((insn & INSN_MASK_LD) == INSN_MATCH_LD) {
+ 		len = 8;
+@@ -649,22 +648,22 @@ int kvm_riscv_vcpu_mmio_return(struct kvm_vcpu *vcpu, struct kvm_run *run)
+ 	case 1:
+ 		data8 = *((u8 *)run->mmio.data);
+ 		SET_RD(insn, &vcpu->arch.guest_context,
+-			(ulong)data8 << shift >> shift);
++			(long)((ulong)data8 << shift) >> shift);
+ 		break;
+ 	case 2:
+ 		data16 = *((u16 *)run->mmio.data);
+ 		SET_RD(insn, &vcpu->arch.guest_context,
+-			(ulong)data16 << shift >> shift);
++			(long)((ulong)data16 << shift) >> shift);
+ 		break;
+ 	case 4:
+ 		data32 = *((u32 *)run->mmio.data);
+ 		SET_RD(insn, &vcpu->arch.guest_context,
+-			(ulong)data32 << shift >> shift);
++			(long)((ulong)data32 << shift) >> shift);
+ 		break;
+ 	case 8:
+ 		data64 = *((u64 *)run->mmio.data);
+ 		SET_RD(insn, &vcpu->arch.guest_context,
+-			(ulong)data64 << shift >> shift);
++			(long)((ulong)data64 << shift) >> shift);
+ 		break;
+ 	default:
+ 		return -EOPNOTSUPP;
+
+##### A243 e3573f739e3d riscv/ptrace: Use USER_REGSET_NOTE_TYPE for REGSET_CFI
+样本集标签：M10 K1 S1 掩盖4；对应物：arch/arm64/kernel/ptrace.c（USER_REGSET_NOTE_TYPE）；理由：公共ELF转储改为要求regset带note名后，RISC-V新加的CFI regset仍用旧写法
+--- 说明 ---
+riscv/ptrace: Use USER_REGSET_NOTE_TYPE for REGSET_CFI
+Fixes a warning while dumping core:
+[54983.546369][    C7] WARNING: [!note_name] fs/binfmt_elf.c:1771 at elf_core_dump+0x910/0xf68, CPU#7: abort01/31982
+Fixes: 2af7c9cf021c ("riscv/ptrace: expose riscv CFI status and state via ptrace and in core files")
+Signed-off-by: Andreas Schwab <schwab@suse.de>
+Link: https://patch.msgid.link/87y0hcxuh5.fsf@igel.home
+Signed-off-by: Paul Walmsley <pjw@kernel.org>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/ptrace.c b/arch/riscv/kernel/ptrace.c
+index 793bcee46182..f336a183667e 100644
+--- a/arch/riscv/kernel/ptrace.c
++++ b/arch/riscv/kernel/ptrace.c
+@@ -413,7 +413,7 @@ static struct user_regset riscv_user_regset[] __ro_after_init = {
+ #endif
+ #ifdef CONFIG_RISCV_USER_CFI
+ 	[REGSET_CFI] = {
+-		.core_note_type = NT_RISCV_USER_CFI,
++		USER_REGSET_NOTE_TYPE(RISCV_USER_CFI),
+ 		.align = sizeof(__u64),
+ 		.n = sizeof(struct user_cfi_state) / sizeof(__u64),
+ 		.size = sizeof(__u64),
+
+##### A247 49476d58f217 KVM: riscv: Check hugetlb block mappings against memslot bounds
+样本集标签：M7 K2 S1 掩盖5；对应物：arch/arm64/kvm/mmu.c（hugetlb按PUD/PMD逐级用fault_supports_stage2_huge_mapping检查memslot边界）；理由：KVM二级块映射须在memslot内且对齐；RISC-V只在THP路径检查，hugetlb路径漏了
+--- 说明 ---
+KVM: riscv: Check hugetlb block mappings against memslot bounds
+RISC-V KVM has used the hugetlb VMA size directly as the G-stage
+mapping size since stage-2 page table support was added. That is safe
+only if the block covered by the fault is fully contained in the
+memslot and the userspace address has the same offset as the GPA
+within that block.
+The THP path already checks those constraints before installing a PMD
+block mapping. The hugetlb path did not, so an unaligned memslot could
+make KVM install a PMD or PUD sized G-stage block that covers memory
+outside the slot or maps the wrong host pages.
+Pass the target mapping size into fault_supports_gstage_huge_mapping().
+The same helper can be used for both THP PMD mappings and hugetlb
+PMD/PUD mappings.
+Select hugetlb mapping sizes through the same memslot-boundary check,
+--- 改动 ---
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index 38d3eaa1c5e5..082f9b261733 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -302,7 +302,8 @@ bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
+ }
+ 
+ static bool fault_supports_gstage_huge_mapping(struct kvm_memory_slot *memslot,
+-					       unsigned long hva)
++					       unsigned long hva,
++					       unsigned long map_size)
+ {
+ 	hva_t uaddr_start, uaddr_end;
+ 	gpa_t gpa_start;
+@@ -316,8 +317,8 @@ static bool fault_supports_gstage_huge_mapping(struct kvm_memory_slot *memslot,
+ 
+ 	/*
+ 	 * Pages belonging to memslots that don't have the same alignment
+-	 * within a PMD for userspace and GPA cannot be mapped with g-stage
+-	 * PMD entries, because we'll end up mapping the wrong pages.
++	 * within a huge page for userspace and GPA cannot be mapped with
++	 * g-stage block entries, because we'll end up mapping the wrong pages.
+ 	 *
+ 	 * Consider a layout like the following:
+ 	 *
+@@ -337,7 +338,7 @@ static bool fault_supports_gstage_huge_mapping(struct kvm_memory_slot *memslot,
+ 	 *   e -> g
+ 	 *   f -> h
+ 	 */
+-	if ((gpa_start & (PMD_SIZE - 1)) != (uaddr_start & (PMD_SIZE - 1)))
++	if ((gpa_start & (map_size - 1)) != (uaddr_start & (map_size - 1)))
+ 		return false;
+ 
+ 	/*
+@@ -352,7 +353,8 @@ static bool fault_supports_gstage_huge_mapping(struct kvm_memory_slot *memslot,
+ 	 * userspace_addr or the base_gfn, as both are equally aligned (per
+ 	 * the check above) and equally sized.
+ 	 */
+-	return (hva >= ALIGN(uaddr_start, PMD_SIZE)) && (hva < ALIGN_DOWN(uaddr_end, PMD_SIZE));
++	return (hva >= ALIGN(uaddr_start, map_size)) &&
++	       (hva < ALIGN_DOWN(uaddr_end, map_size));
+ }
+ 
+ static int get_hva_mapping_size(struct kvm *kvm,
+@@ -420,7 +422,7 @@ static unsigned long transparent_hugepage_adjust(struct kvm *kvm,
+ 	 * sure that the HVA and GPA are sufficiently aligned and that the
+ 	 * block map is contained within the memslot.
+ 	 */
+-	if (fault_supports_gstage_huge_mapping(memslot, hva)) {
++	if (fault_supports_gstage_huge_mapping(memslot, hva, PMD_SIZE)) {
+ 		int sz;
+ 
+ 		sz = get_hva_mapping_size(kvm, hva);
+@@ -437,6 +439,28 @@ static unsigned long transparent_hugepage_adjust(struct kvm *kvm,
+ 	return PAGE_SIZE;
+ }
+ 
++static unsigned long hugetlb_mapping_size(struct kvm_memory_slot *memslot,
++					  unsigned long hva,
++					  unsigned long map_size)
++{
++	switch (map_size) {
++#ifndef CONFIG_32BIT
++	case PUD_SIZE:
++		if (fault_supports_gstage_huge_mapping(memslot, hva, PUD_SIZE))
++			return PUD_SIZE;
++		fallthrough;
++#endif
++	case PMD_SIZE:
++		if (fault_supports_gstage_huge_mapping(memslot, hva, PMD_SIZE))
++			return PMD_SIZE;
++		fallthrough;
++	case PAGE_SIZE:
++		return PAGE_SIZE;
++	default:
++		return map_size;
++	}
++}
++
+ static bool kvm_riscv_mmu_dirty_log_write_fault_fast(struct kvm *kvm,
+ 						     struct kvm_memory_slot *memslot,
+ 						     gpa_t gpa,
+@@ -514,6 +538,7 @@ int kvm_riscv_mmu_map(struct kvm_vcpu *vcpu, struct kvm_memory_slot *memslot,
+ {
+ 	int ret;
+ 	kvm_pfn_t hfn;
++	bool is_hugetlb;
+ 	bool writable;
+ 	short vma_pageshift;
+ 	gfn_t gfn = gpa >> PAGE_SHIFT;
+@@ -551,16 +576,23 @@ int kvm_riscv_mmu_map(struct kvm_vcpu *vcpu, struct kvm_memory_slot *memslot,
+ 		return -EFAULT;
+ 	}
+ 
+-	if (is_vm_hugetlb_page(vma))
++	is_hugetlb = is_vm_hugetlb_page(vma);
++	if (is_hugetlb)
+ 		vma_pageshift = huge_page_shift(hstate_vma(vma));
+ 	else
+ 		vma_pageshift = PAGE_SHIFT;
+ 	vma_pagesize = 1ULL << vma_pageshift;
+ 	if (logging || (vma->vm_flags & VM_PFNMAP))
+ 		vma_pagesize = PAGE_SIZE;
++	else if (is_hugetlb)
++		vma_pagesize = hugetlb_mapping_size(memslot, hva, vma_pagesize);
+ 
++	/*
++	 * For hugetlb mappings, vma_pagesize might have been reduced from the
++	 * VMA size to a smaller safe mapping size.
++	 */
+ 	if (vma_pagesize == PMD_SIZE || vma_pagesize == PUD_SIZE)
+-		gfn = (gpa & huge_page_mask(hstate_vma(vma))) >> PAGE_SHIFT;
++		gfn = ALIGN_DOWN(gpa, vma_pagesize) >> PAGE_SHIFT;
+ 
+ 	/*
+ 	 * Read mmu_invalidate_seq so that KVM can detect if the results of
+@@ -602,8 +634,12 @@ int kvm_riscv_mmu_map(struct kvm_vcpu *vcpu, struct kvm_memory_slot *memslot,
+ 	if (mmu_invalidate_retry(kvm, mmu_seq))
+ 		goto out_unlock;
+ 
+-	/* Check if we are backed by a THP and thus use block mapping if possible */
+-	if (!logging && (vma_pagesize == PAGE_SIZE))
++	/*
++	 * Check if we are backed by a THP and thus use block mapping if
++	 * possible. Hugetlb mappings already selected their target size above,
++	 * so do not promote them through the THP helper.
++	 */
++	if (!logging && !is_hugetlb && vma_pagesize == PAGE_SIZE)
+ 		vma_pagesize = transparent_hugepage_adjust(kvm, memslot, hva, &hfn, &gpa);
+ 
+ 	if (writable) {
+
+##### A251 e4bf6eb4c7b6 arch/riscv: vdso: remove CFI landing pad from rt_sigreturn
+样本集标签：M10 K2 S1 掩盖4；对应物：arch/arm64/kernel/vdso/sigreturn.S（不带BTI C，注释说明原因）；理由：sigreturn跳板开头不能加CFI着陆指令，否则展开器识别失败；arm64早已为BTI修过
+--- 说明 ---
+arch/riscv: vdso: remove CFI landing pad from rt_sigreturn
+When CONFIG_RISCV_USER_CFI is enabled, the CFI version of the vDSO, has
+a CFI landing pad instruction at the start of __vdso_rt_sigreturn. This
+breaks libgcc's unwinding code which matches on the first two
+instructions. Other unwinders that rely on similar instruction matching
+may also be affected.
+Since __vdso_rt_sigreturn is reached as part of signal-return handling
+rather than via an indirect call/jump from userspace, it does not need a
+CFI landing pad. Remove it and restore the instruction sequence expected
+by existing unwinding code.
+This matches what was done on arm64 in commit 9a964285572b ("arm64:
+vdso: Don't prefix sigreturn trampoline with a BTI C instruction") for a
+similar issue.
+Cc: stable@vger.kernel.org
+--- 改动 ---
+diff --git a/arch/riscv/kernel/vdso/rt_sigreturn.S b/arch/riscv/kernel/vdso/rt_sigreturn.S
+index e82987dc3739..d6f96b1abe40 100644
+--- a/arch/riscv/kernel/vdso/rt_sigreturn.S
++++ b/arch/riscv/kernel/vdso/rt_sigreturn.S
+@@ -7,11 +7,19 @@
+ #include <asm/unistd.h>
+ #include <asm/assembler.h>
+ 
++/*
++ * WARNING: Do NOT add a CFI landing pad at the start of this function.
++ * Unwinders such as libgcc identify the sigreturn trampoline by matching the
++ * instruction sequence. Adding a landing pad here would break unwinding from
++ * signal handlers.
++ *
++ * This trampoline is used only for signal return and not via an indirect
++ * call/jump from userspace, so adding CFI landing pad is unnecessary.
++ */
+ 	.text
+ SYM_FUNC_START(__vdso_rt_sigreturn)
+ 	.cfi_startproc
+ 	.cfi_signal_frame
+-	vdso_lpad
+ 	li a7, __NR_rt_sigreturn
+ 	ecall
+ 	.cfi_endproc
+

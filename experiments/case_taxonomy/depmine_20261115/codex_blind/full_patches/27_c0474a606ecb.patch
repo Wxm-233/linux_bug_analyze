@@ -1,0 +1,149 @@
+commit c0474a606ecb9326227b4d68059942f9db88a897
+Author:     Lu Baolu <baolu.lu@linux.intel.com>
+AuthorDate: Sat Mar 20 10:54:13 2021 +0800
+Commit:     Joerg Roedel <jroedel@suse.de>
+CommitDate: Wed Apr 7 11:55:47 2021 +0200
+
+    iommu/vt-d: Invalidate PASID cache when root/context entry changed
+    
+    When the Intel IOMMU is operating in the scalable mode, some information
+    from the root and context table may be used to tag entries in the PASID
+    cache. Software should invalidate the PASID-cache when changing root or
+    context table entries.
+    
+    Suggested-by: Ashok Raj <ashok.raj@intel.com>
+    Fixes: 7373a8cc38197 ("iommu/vt-d: Setup context and enable RID2PASID support")
+    Signed-off-by: Lu Baolu <baolu.lu@linux.intel.com>
+    Link: https://lore.kernel.org/r/20210320025415.641201-4-baolu.lu@linux.intel.com
+    Signed-off-by: Joerg Roedel <jroedel@suse.de>
+
+diff --git a/drivers/iommu/intel/iommu.c b/drivers/iommu/intel/iommu.c
+index b0f901ee6358..c981e69bc107 100644
+--- a/drivers/iommu/intel/iommu.c
++++ b/drivers/iommu/intel/iommu.c
+@@ -1342,16 +1342,21 @@ static void iommu_set_root_entry(struct intel_iommu *iommu)
+ 
+ 	writel(iommu->gcmd | DMA_GCMD_SRTP, iommu->reg + DMAR_GCMD_REG);
+ 
+ 	/* Make sure hardware complete it */
+ 	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG,
+ 		      readl, (sts & DMA_GSTS_RTPS), sts);
+ 
+ 	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
++
++	iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
++	if (sm_supported(iommu))
++		qi_flush_pasid_cache(iommu, 0, QI_PC_GLOBAL, 0);
++	iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+ }
+ 
+ void iommu_flush_write_buffer(struct intel_iommu *iommu)
+ {
+ 	u32 val;
+ 	unsigned long flag;
+ 
+ 	if (!rwbf_quirk && !cap_rwbf(iommu->cap))
+@@ -2425,16 +2430,20 @@ static void domain_context_clear_one(struct intel_iommu *iommu, u8 bus, u8 devfn
+ 	context_clear_entry(context);
+ 	__iommu_flush_cache(iommu, context, sizeof(*context));
+ 	spin_unlock_irqrestore(&iommu->lock, flags);
+ 	iommu->flush.flush_context(iommu,
+ 				   did_old,
+ 				   (((u16)bus) << 8) | devfn,
+ 				   DMA_CCMD_MASK_NOBIT,
+ 				   DMA_CCMD_DEVICE_INVL);
++
++	if (sm_supported(iommu))
++		qi_flush_pasid_cache(iommu, did_old, QI_PC_ALL_PASIDS, 0);
++
+ 	iommu->flush.flush_iotlb(iommu,
+ 				 did_old,
+ 				 0,
+ 				 0,
+ 				 DMA_TLB_DSI_FLUSH);
+ }
+ 
+ static inline void unlink_domain_info(struct device_domain_info *info)
+@@ -3273,18 +3282,16 @@ static int __init init_dmars(void)
+ 	 * flush_context function will loop forever and the boot hangs.
+ 	 */
+ 	for_each_active_iommu(iommu, drhd) {
+ 		iommu_flush_write_buffer(iommu);
+ #ifdef CONFIG_INTEL_IOMMU_SVM
+ 		register_pasid_allocator(iommu);
+ #endif
+ 		iommu_set_root_entry(iommu);
+-		iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
+-		iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+ 	}
+ 
+ #ifdef CONFIG_INTEL_IOMMU_BROKEN_GFX_WA
+ 	dmar_map_gfx = 0;
+ #endif
+ 
+ 	if (!dmar_map_gfx)
+ 		iommu_identity_mapping |= IDENTMAP_GFX;
+@@ -3464,22 +3471,17 @@ static int init_iommu_hw(void)
+ 			 * this device
+ 			 */
+ 			if (force_on)
+ 				iommu_disable_protect_mem_regions(iommu);
+ 			continue;
+ 		}
+ 
+ 		iommu_flush_write_buffer(iommu);
+-
+ 		iommu_set_root_entry(iommu);
+-
+-		iommu->flush.flush_context(iommu, 0, 0, 0,
+-					   DMA_CCMD_GLOBAL_INVL);
+-		iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+ 		iommu_enable_translation(iommu);
+ 		iommu_disable_protect_mem_regions(iommu);
+ 	}
+ 
+ 	return 0;
+ }
+ 
+ static void iommu_flush_all(void)
+@@ -3852,18 +3854,16 @@ static int intel_iommu_add(struct dmar_drhd_unit *dmaru)
+ 			goto disable_iommu;
+ 	}
+ #endif
+ 	ret = dmar_set_interrupt(iommu);
+ 	if (ret)
+ 		goto disable_iommu;
+ 
+ 	iommu_set_root_entry(iommu);
+-	iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
+-	iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+ 	iommu_enable_translation(iommu);
+ 
+ 	iommu_disable_protect_mem_regions(iommu);
+ 	return 0;
+ 
+ disable_iommu:
+ 	disable_dmar_iommu(iommu);
+ out:
+diff --git a/include/linux/intel-iommu.h b/include/linux/intel-iommu.h
+index e0f8c2ade3e8..03faf20a6817 100644
+--- a/include/linux/intel-iommu.h
++++ b/include/linux/intel-iommu.h
+@@ -373,16 +373,17 @@ enum {
+ 
+ #define QI_PC_PASID(pasid)	(((u64)pasid) << 32)
+ #define QI_PC_DID(did)		(((u64)did) << 16)
+ #define QI_PC_GRAN(gran)	(((u64)gran) << 4)
+ 
+ /* PASID cache invalidation granu */
+ #define QI_PC_ALL_PASIDS	0
+ #define QI_PC_PASID_SEL		1
++#define QI_PC_GLOBAL		3
+ 
+ #define QI_EIOTLB_ADDR(addr)	((u64)(addr) & VTD_PAGE_MASK)
+ #define QI_EIOTLB_IH(ih)	(((u64)ih) << 6)
+ #define QI_EIOTLB_AM(am)	(((u64)am) & 0x3f)
+ #define QI_EIOTLB_PASID(pasid) 	(((u64)pasid) << 32)
+ #define QI_EIOTLB_DID(did)	(((u64)did) << 16)
+ #define QI_EIOTLB_GRAN(gran) 	(((u64)gran) << 4)
+ 

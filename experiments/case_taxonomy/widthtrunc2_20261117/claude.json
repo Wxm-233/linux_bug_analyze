@@ -1,0 +1,182 @@
+[
+ {
+  "k": 1,
+  "loc": "fs/squashfs/file.c:580",
+  "verdict": "可能",
+  "why": "size_t mask 在 32 位上 ~mask 只有 32 位，零扩展后清掉 readahead_pos 的高 32 位；32 位设备上读超过 4GB 的 squashfs 文件时 readahead 范围错误。标准的 C 形态。"
+ },
+ {
+  "k": 2,
+  "loc": "fs/ntfs3/dir.c:581",
+  "verdict": "不可能",
+  "why": "bit << idx2vbn_bits 要超过 32 位需要极大的目录索引（远超实际），值的范围小。"
+ },
+ {
+  "k": 3,
+  "loc": "fs/ntfs3/dir.c:706",
+  "verdict": "不可能",
+  "why": "同 2。"
+ },
+ {
+  "k": 4,
+  "loc": "fs/ntfs3/index.c:1443",
+  "verdict": "不可能",
+  "why": "同 2。"
+ },
+ {
+  "k": 5,
+  "loc": "fs/orangefs/dir.c:157",
+  "verdict": "可能",
+  "why": "count << PART_SHIFT（24 位），count 超过 255 后在 32 位上溢出，od->end 回绕，超大目录的 readdir 位置出错。orangefs 在 32 位上少见。"
+ },
+ {
+  "k": 6,
+  "loc": "fs/proc/meminfo.c:30",
+  "verdict": "不可能",
+  "why": "num << 2 要溢出需要 2^30 页（4TB），32 位机器达不到。"
+ },
+ {
+  "k": 7,
+  "loc": "fs/proc/task_mmu.c:2063",
+  "verdict": "不可能",
+  "why": "offset << 5 要溢出需要 2^27 以上的交换偏移或页框号，32 位架构的交换项偏移位数达不到。"
+ },
+ {
+  "k": 8,
+  "loc": "fs/ufs/dir.c:445",
+  "verdict": "不可能",
+  "why": "同 ext2：ufs 用 dir_pages()，32 位上页数先被截断，循环里的 n << PAGE_SHIFT 不溢出。"
+ },
+ {
+  "k": 9,
+  "loc": "kernel/bpf/arena.c:867",
+  "verdict": "不可能",
+  "why": "bpf arena 在 kernel/bpf/Makefile 里只在 CONFIG_MMU、CONFIG_64BIT 都开时编译（ifeq 块，分析器的 Makefile 解析没识别）。"
+ },
+ {
+  "k": 10,
+  "loc": "kernel/bpf/stackmap.c:165",
+  "verdict": "可能",
+  "why": "vm_pgoff << PAGE_SHIFT 在 32 位上对文件偏移超过 4GB 的映射溢出，stack map 报出的 build_id 偏移错误。"
+ },
+ {
+  "k": 11,
+  "loc": "kernel/events/uprobes.c:2453",
+  "verdict": "可能",
+  "why": "(loff_t)(vma_start_pgoff(vma) << PAGE_SHIFT)：强制转换写在移位之后，32 位上移位已经溢出，对超过 4GB 偏移处的映射找错 uprobe。"
+ },
+ {
+  "k": 12,
+  "loc": "arch/arc/mm/init.c:61",
+  "verdict": "不可能",
+  "why": "arc 没开 PAE40 时 phys_addr_t 是 32 位，4GB 以上的内存本来就不能用；设计如此。"
+ },
+ {
+  "k": 13,
+  "loc": "arch/arc/mm/init.c:67",
+  "verdict": "不可能",
+  "why": "同 12。"
+ },
+ {
+  "k": 14,
+  "loc": "arch/arc/mm/init.c:68",
+  "verdict": "不可能",
+  "why": "同 12。"
+ },
+ {
+  "k": 15,
+  "loc": "arch/arm/kernel/setup.c:1018",
+  "verdict": "不可能",
+  "why": "arm 不开 LPAE 时 phys_addr_t 32 位，crash_size 不会超过 4GB。"
+ },
+ {
+  "k": 16,
+  "loc": "arch/arm/kernel/setup.c:1028",
+  "verdict": "不可能",
+  "why": "同 15。"
+ },
+ {
+  "k": 17,
+  "loc": "arch/arm/kernel/setup.c:1057",
+  "verdict": "不可能",
+  "why": "同 15。"
+ },
+ {
+  "k": 18,
+  "loc": "arch/arm/kernel/sys_oabi-compat.c:128",
+  "verdict": "不可能",
+  "why": "oldabi_stat64 的 __st_ino 是旧 ABI 规定的 32 位字段，另有 64 位 st_ino；截断是 ABI 本身的定义。"
+ },
+ {
+  "k": 19,
+  "loc": "arch/arm/kernel/sys_oabi-compat.c:138",
+  "verdict": "不可能",
+  "why": "旧 ABI 的时间字段本来就是 32 位（y2038 限制），ABI 定义。"
+ },
+ {
+  "k": 20,
+  "loc": "arch/arm/kernel/sys_oabi-compat.c:140",
+  "verdict": "不可能",
+  "why": "同 19。"
+ },
+ {
+  "k": 21,
+  "loc": "arch/arm/kernel/sys_oabi-compat.c:142",
+  "verdict": "不可能",
+  "why": "同 19。"
+ },
+ {
+  "k": 22,
+  "loc": "arch/arm/mm/dma-mapping.c:1663",
+  "verdict": "不可能",
+  "why": "arm 不开 LPAE 时 dma_addr_t 32 位，DMA 范围不会超过 4GB。"
+ },
+ {
+  "k": 23,
+  "loc": "arch/arm/mm/flush.c:235",
+  "verdict": "不可能",
+  "why": "flush_pfn_alias 的第二个参数只用来取缓存颜色（低位），截断不影响。"
+ },
+ {
+  "k": 24,
+  "loc": "arch/arm/mm/mmu.c:1155",
+  "verdict": "不可能",
+  "why": "vmalloc= 参数超过 4GB 在 32 位上本来就无意义，后面还会夹到上限。"
+ },
+ {
+  "k": 25,
+  "loc": "arch/loongarch/kernel/mem.c:32",
+  "verdict": "说不清",
+  "why": "loongarch 32 位（LA32）上 phys_addr_t 是 32 位，EFI 内存图里 4GB 以上的段会被截断后加入 memblock；不确定 LA32 平台会不会有这种内存布局。"
+ },
+ {
+  "k": 26,
+  "loc": "arch/loongarch/kernel/mem.c:37",
+  "verdict": "说不清",
+  "why": "同 25。"
+ },
+ {
+  "k": 27,
+  "loc": "arch/loongarch/kernel/mem.c:44",
+  "verdict": "说不清",
+  "why": "同 25。"
+ },
+ {
+  "k": 28,
+  "loc": "arch/loongarch/kernel/time.c:128",
+  "verdict": "不可能",
+  "why": "lpj 经 do_div 除以 HZ 后很小。"
+ },
+ {
+  "k": 29,
+  "loc": "arch/loongarch/mm/tlb.c:152",
+  "verdict": "不可能",
+  "why": "大页 TLB 处理，LA32 上 pte 是 32 位、不支持这种大页，实际只在 64 位上用。"
+ },
+ {
+  "k": 30,
+  "loc": "arch/mips/kernel/ptrace32.c:73",
+  "verdict": "不可能",
+  "why": "ptrace32.c 是 MIPS32 compat 代码，只在 64 位内核上编译（分析器没识别出来）。"
+ }
+]

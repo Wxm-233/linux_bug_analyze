@@ -1,0 +1,1274 @@
+
+##### B450
+=== 6bad1bef26ca B 2024-07-15 +0/-1
+MAINTAINERS: drop riscv list from cache controllers
+
+When adding the bindings for cache controllers to the MAINTAINERS entry,
+I forgot to drop the riscv mailing list - and so completely unrelated to
+riscv stuff is now being sent there. Drop it.
+
+Fixes: 4ca47d8bcca0 ("MAINTAINERS: add cache binding directory to cache driver entry")
+functions: 
+fixes: 4ca47d8bcca0(common)
+diff --git a/MAINTAINERS b/MAINTAINERS
+index a96ec04cc0c2..68948843ace2 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -21294,5 +21294,4 @@ F:	drivers/staging/
+ STANDALONE CACHE CONTROLLER DRIVERS
+ M:	Conor Dooley <conor@kernel.org>
+-L:	linux-riscv@lists.infradead.org
+ S:	Maintained
+ T:	git https://git.kernel.org/pub/scm/linux/kernel/git/conor/linux.git/
+
+##### B451
+=== 63ba5b0fb4f5 B 2024-07-19 +5/-5
+perf arch events: Fix duplicate RISC-V SBI firmware event name
+
+Currently, the RISC-V firmware JSON file has duplicate event name
+"FW_SFENCE_VMA_RECEIVED". According to the RISC-V SBI PMU extension[1],
+the event name should be "FW_SFENCE_VMA_ASID_SENT".
+
+Before this patch:
+$ perf list
+
+firmware:
+  fw_access_load
+       [Load access trap event. Unit: cpu]
+  fw_access_store
+       [Store access trap event. Unit: cpu]
+....
+ fw_set_timer
+       [Set timer event. Unit: cpu]
+  fw_sfence_vma_asid_received
+       [Received SFENCE.VMA with ASID request from other HART event. Unit: cpu]
+  fw_sfence_vma_received
+       [Sent SFENCE.VMA with ASID request to other HART event. Unit: cpu]
+
+After this patch:
+$ perf list
+
+firmware:
+  fw_access_load
+       [Load access trap event. Unit: cpu]
+  fw_access_store
+       [Store access trap event. Unit: cpu]
+.....
+  fw_set_timer
+       [Set timer event. Unit: cpu]
+  fw_sfence_vma_asid_received
+       [Received SFENCE.VMA with ASID request from other HART event. Unit: cpu]
+  fw_sfence_vma_asid_sent
+       [Sent SFENCE.VMA with ASID request to other HART event. Unit: cpu]
+  fw_sfence_vma_received
+       [Received SFENCE.VMA request from other HART event. Unit: cpu]
+
+Fixes: 8f0dcb4e7364 ("perf arch events: riscv sbi firmware std event files")
+functions: 
+fixes: 8f0dcb4e7364(common), c4f769d4093d(common), acbf6de674ef(common), 7340c6df49df(common), f5102e31c209(common)
+diff --git a/tools/perf/pmu-events/arch/riscv/andes/ax45/firmware.json b/tools/perf/pmu-events/arch/riscv/andes/ax45/firmware.json
+index 9b4a032186a7..7149caec4f80 100644
+--- a/tools/perf/pmu-events/arch/riscv/andes/ax45/firmware.json
++++ b/tools/perf/pmu-events/arch/riscv/andes/ax45/firmware.json
+@@ -37,5 +37,5 @@
+   },
+   {
+-    "ArchStdEvent": "FW_SFENCE_VMA_RECEIVED"
++    "ArchStdEvent": "FW_SFENCE_VMA_ASID_SENT"
+   },
+   {
+diff --git a/tools/perf/pmu-events/arch/riscv/riscv-sbi-firmware.json b/tools/perf/pmu-events/arch/riscv/riscv-sbi-firmware.json
+index a9939823b14b..0c9b9a2d2958 100644
+--- a/tools/perf/pmu-events/arch/riscv/riscv-sbi-firmware.json
++++ b/tools/perf/pmu-events/arch/riscv/riscv-sbi-firmware.json
+@@ -75,5 +75,5 @@
+     "PublicDescription": "Sent SFENCE.VMA with ASID request to other HART event",
+     "ConfigCode": "0x800000000000000c",
+-    "EventName": "FW_SFENCE_VMA_RECEIVED",
++    "EventName": "FW_SFENCE_VMA_ASID_SENT",
+     "BriefDescription": "Sent SFENCE.VMA with ASID request to other HART event"
+   },
+diff --git a/tools/perf/pmu-events/arch/riscv/sifive/u74/firmware.json b/tools/perf/pmu-events/arch/riscv/sifive/u74/firmware.json
+index 9b4a032186a7..7149caec4f80 100644
+--- a/tools/perf/pmu-events/arch/riscv/sifive/u74/firmware.json
++++ b/tools/perf/pmu-events/arch/riscv/sifive/u74/firmware.json
+@@ -37,5 +37,5 @@
+   },
+   {
+-    "ArchStdEvent": "FW_SFENCE_VMA_RECEIVED"
++    "ArchStdEvent": "FW_SFENCE_VMA_ASID_SENT"
+   },
+   {
+diff --git a/tools/perf/pmu-events/arch/riscv/starfive/dubhe-80/firmware.json b/tools/perf/pmu-events/arch/riscv/starfive/dubhe-80/firmware.json
+index 9b4a032186a7..7149caec4f80 100644
+--- a/tools/perf/pmu-events/arch/riscv/starfive/dubhe-80/firmware.json
++++ b/tools/perf/pmu-events/arch/riscv/starfive/dubhe-80/firmware.json
+@@ -37,5 +37,5 @@
+   },
+   {
+-    "ArchStdEvent": "FW_SFENCE_VMA_RECEIVED"
++    "ArchStdEvent": "FW_SFENCE_VMA_ASID_SENT"
+   },
+   {
+diff --git a/tools/perf/pmu-events/arch/riscv/thead/c900-legacy/firmware.json b/tools/perf/pmu-events/arch/riscv/thead/c900-legacy/firmware.json
+index 9b4a032186a7..7149caec4f80 100644
+--- a/tools/perf/pmu-events/arch/riscv/thead/c900-legacy/firmware.json
++++ b/tools/perf/pmu-events/arch/riscv/thead/c900-legacy/firmware.json
+@@ -37,5 +37,5 @@
+   },
+   {
+-    "ArchStdEvent": "FW_SFENCE_VMA_RECEIVED"
++    "ArchStdEvent": "FW_SFENCE_VMA_ASID_SENT"
+   },
+   {
+
+##### B452
+=== dd4a799bcc13 B 2024-07-26 +4/-4
+KVM: riscv: selftests: Fix compile error
+
+Fix compile error introduced by commit d27c34a73514 ("KVM: riscv:
+selftests: Add some Zc* extensions to get-reg-list test"). These
+4 lines should be end with ";".
+
+Fixes: d27c34a73514 ("KVM: riscv: selftests: Add some Zc* extensions to get-reg-list test")
+functions: 
+fixes: d27c34a73514(common)
+diff --git a/tools/testing/selftests/kvm/riscv/get-reg-list.c b/tools/testing/selftests/kvm/riscv/get-reg-list.c
+index f92c2fb23fcd..8e34f7fa44e9 100644
+--- a/tools/testing/selftests/kvm/riscv/get-reg-list.c
++++ b/tools/testing/selftests/kvm/riscv/get-reg-list.c
+@@ -962,8 +962,8 @@ KVM_ISA_EXT_SIMPLE_CONFIG(zbkc, ZBKC);
+ KVM_ISA_EXT_SIMPLE_CONFIG(zbkx, ZBKX);
+ KVM_ISA_EXT_SIMPLE_CONFIG(zbs, ZBS);
+-KVM_ISA_EXT_SIMPLE_CONFIG(zca, ZCA),
+-KVM_ISA_EXT_SIMPLE_CONFIG(zcb, ZCB),
+-KVM_ISA_EXT_SIMPLE_CONFIG(zcd, ZCD),
+-KVM_ISA_EXT_SIMPLE_CONFIG(zcf, ZCF),
++KVM_ISA_EXT_SIMPLE_CONFIG(zca, ZCA);
++KVM_ISA_EXT_SIMPLE_CONFIG(zcb, ZCB);
++KVM_ISA_EXT_SIMPLE_CONFIG(zcd, ZCD);
++KVM_ISA_EXT_SIMPLE_CONFIG(zcf, ZCF);
+ KVM_ISA_EXT_SIMPLE_CONFIG(zcmop, ZCMOP);
+ KVM_ISA_EXT_SIMPLE_CONFIG(zfa, ZFA);
+
+##### B453
+=== 941a8e9b7a86 B 2024-07-29 +1/-1
+perf: riscv: Fix selecting counters in legacy mode
+
+It is required to check event type before checking event config.
+Events with the different types can have the same config.
+This check is missed for legacy mode code
+
+For such perf usage:
+    sysctl -w kernel.perf_user_access=2
+    perf stat -e cycles,L1-dcache-loads --
+driver will try to force both events to CYCLE counter.
+
+This commit implements event type check before forcing
+events on the special counters.
+
+Fixes: cc4c07c89aad ("drivers: perf: Implement perf event mmap support in the SBI backend")
+functions: drivers/perf/riscv_pmu_sbi.c:pmu_sbi_ctr_get_idx
+fixes: cc4c07c89aad(common)
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 44d3951d009f..31a17a56eb3b 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -417,5 +417,5 @@ static int pmu_sbi_ctr_get_idx(struct perf_event *event)
+ 	 * that support sampling/filtering.
+ 	 */
+-	if (hwc->flags & PERF_EVENT_FLAG_LEGACY) {
++	if ((hwc->flags & PERF_EVENT_FLAG_LEGACY) && (event->attr.type == PERF_TYPE_HARDWARE)) {
+ 		if (event->attr.config == PERF_COUNT_HW_CPU_CYCLES) {
+ 			cflags |= SBI_PMU_CFG_FLAG_SKIP_MATCH;
+
+##### B454
+=== 54233a425403 B 2024-07-30 +3/-7
+uretprobe: change syscall number, again
+
+Despite multiple attempts to get the syscall number assignment right
+for the newly added uretprobe syscall, we ended up with a bit of a mess:
+
+ - The number is defined as 467 based on the assumption that the
+   xattrat family of syscalls would use 463 through 466, but those
+   did not make it into 6.11.
+
+ - The include/uapi/asm-generic/unistd.h file still lists the number
+   463, but the new scripts/syscall.tbl that was supposed to have the
+   same data lists 467 instead as the number for arc, arm64, csky,
+   hexagon, loongarch, nios2, openrisc and riscv. None of these
+   architectures actually provide a uretprobe syscall.
+
+ - All the other architectures (powerpc, arm, mips, ...) don't list
+   this syscall at all.
+
+There are two ways to make it consistent again: either list it with
+the same syscall number on all architectures, or only list it on x86
+but not in scripts/syscall.tbl and asm-generic/unistd.h.
+
+Based on the most recent discussion, it seems like we won't need it
+anywhere else, so just remove the inconsistent assignment and instead
+move the x86 number to the next available one in the architecture
+specific range, which is 335.
+
+Fixes: 5c28424e9a34 ("syscalls: Fix to add sys_uretprobe to syscall.tbl")
+Fixes: 190fec72df4a ("uprobe: Wire up uretprobe system call")
+Fixes: 63ded110979b ("uprobe: Change uretprobe syscall scope and number")
+functions: 
+fixes: 5c28424e9a34(common), 190fec72df4a(common), 63ded110979b(common)
+diff --git a/arch/x86/entry/syscalls/syscall_64.tbl b/arch/x86/entry/syscalls/syscall_64.tbl
+index 83073fa3c989..7093ee21c0d1 100644
+--- a/arch/x86/entry/syscalls/syscall_64.tbl
++++ b/arch/x86/entry/syscalls/syscall_64.tbl
+@@ -345,4 +345,5 @@
+ 333	common	io_pgetevents		sys_io_pgetevents
+ 334	common	rseq			sys_rseq
++335	common	uretprobe		sys_uretprobe
+ # don't use numbers 387 through 423, add new calls after the last
+ # 'common' entry
+@@ -386,5 +387,4 @@
+ 461	common	lsm_list_modules	sys_lsm_list_modules
+ 462 	common  mseal			sys_mseal
+-467	common	uretprobe		sys_uretprobe
+ 
+ #
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index 985a262d0f9e..5bf6148cac2b 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -842,9 +842,6 @@ __SYSCALL(__NR_lsm_list_modules, sys_lsm_list_modules)
+ __SYSCALL(__NR_mseal, sys_mseal)
+ 
+-#define __NR_uretprobe 463
+-__SYSCALL(__NR_uretprobe, sys_uretprobe)
+-
+ #undef __NR_syscalls
+-#define __NR_syscalls 464
++#define __NR_syscalls 463
+ 
+ /*
+diff --git a/scripts/syscall.tbl b/scripts/syscall.tbl
+index 591d85e8ca7e..797e20ea99a2 100644
+--- a/scripts/syscall.tbl
++++ b/scripts/syscall.tbl
+@@ -403,3 +403,2 @@
+ 461	common	lsm_list_modules		sys_lsm_list_modules
+ 462	common	mseal				sys_mseal
+-467	common	uretprobe			sys_uretprobe
+diff --git a/tools/testing/selftests/bpf/prog_tests/uprobe_syscall.c b/tools/testing/selftests/bpf/prog_tests/uprobe_syscall.c
+index bd8c75b620c2..5f78edca6540 100644
+--- a/tools/testing/selftests/bpf/prog_tests/uprobe_syscall.c
++++ b/tools/testing/selftests/bpf/prog_tests/uprobe_syscall.c
+@@ -217,5 +217,5 @@ static void test_uretprobe_regs_change(void)
+ 
+ #ifndef __NR_uretprobe
+-#define __NR_uretprobe 467
++#define __NR_uretprobe 335
+ #endif
+ 
+
+##### B455
+=== 3eb3cd5992f7 B 2024-08-07 +3/-1
+binfmt_flat: Fix corruption when not offsetting data start
+
+Commit 04d82a6d0881 ("binfmt_flat: allow not offsetting data start")
+introduced a RISC-V specific variant of the FLAT format which does
+not allocate any space for the (obsolete) array of shared library
+pointers. However, it did not disable the code which initializes the
+array, resulting in the corruption of sizeof(long) bytes before the DATA
+segment, generally the end of the TEXT segment.
+
+Introduce MAX_SHARED_LIBS_UPDATE which depends on the state of
+CONFIG_BINFMT_FLAT_NO_DATA_START_OFFSET to guard the initialization of
+the shared library pointer region so that it will only be initialized
+if space is reserved for it.
+
+Fixes: 04d82a6d0881 ("binfmt_flat: allow not offsetting data start")
+functions: fs/binfmt_flat.c:load_flat_binary
+fixes: 04d82a6d0881(common)
+diff --git a/fs/binfmt_flat.c b/fs/binfmt_flat.c
+index c26545d71d39..cd6d5bbb4b9d 100644
+--- a/fs/binfmt_flat.c
++++ b/fs/binfmt_flat.c
+@@ -73,6 +73,8 @@
+ #ifdef CONFIG_BINFMT_FLAT_NO_DATA_START_OFFSET
+ #define DATA_START_OFFSET_WORDS		(0)
++#define MAX_SHARED_LIBS_UPDATE		(0)
+ #else
+ #define DATA_START_OFFSET_WORDS		(MAX_SHARED_LIBS)
++#define MAX_SHARED_LIBS_UPDATE		(MAX_SHARED_LIBS)
+ #endif
+ 
+@@ -881,5 +883,5 @@ static int load_flat_binary(struct linux_binprm *bprm)
+ 
+ 	/* Update data segment pointers for all libraries */
+-	for (i = 0; i < MAX_SHARED_LIBS; i++) {
++	for (i = 0; i < MAX_SHARED_LIBS_UPDATE; i++) {
+ 		if (!libinfo.lib_list[i].loaded)
+ 			continue;
+
+##### B456
+=== 11c2dbd7f241 B 2024-08-08 +4/-2
+selftests: riscv: Allow mmap test to compile on 32-bit
+
+Macros needed for 32-bit compilations were hidden behind 64-bit riscv
+ifdefs. Fix the 32-bit compilations by moving macros to allow the
+memory_layout test to run on 32-bit.
+
+Fixes: 73d05262a2ca ("selftests: riscv: Generalize mm selftests")
+functions: 
+fixes: 73d05262a2ca(common)
+diff --git a/tools/testing/selftests/riscv/mm/mmap_test.h b/tools/testing/selftests/riscv/mm/mmap_test.h
+index 3b29ca3bb3d4..1c3313c201d5 100644
+--- a/tools/testing/selftests/riscv/mm/mmap_test.h
++++ b/tools/testing/selftests/riscv/mm/mmap_test.h
+@@ -49,9 +49,9 @@ uint32_t random_addresses[] = {
+ #endif
+ 
+-// Only works on 64 bit
+-#if __riscv_xlen == 64
+ #define PROT (PROT_READ | PROT_WRITE)
+ #define FLAGS (MAP_PRIVATE | MAP_ANONYMOUS)
+ 
++// Only works on 64 bit
++#if __riscv_xlen == 64
+ /* mmap must return a value that doesn't use more bits than the hint address. */
+ static inline unsigned long get_max_value(unsigned long input)
+@@ -81,4 +81,6 @@ static inline unsigned long get_max_value(unsigned long input)
+ #endif /* __riscv_xlen == 64 */
+ 
++#define TEST_MMAPS do { } while (0)
++
+ static inline int memory_layout(void)
+ {
+
+##### B457
+=== 03f9885c60ad B 2024-08-09 +25/-7
+irqchip/riscv-aplic: Retrigger MSI interrupt on source configuration
+
+The section 4.5.2 of the RISC-V AIA specification says that "any write
+to a sourcecfg register of an APLIC might (or might not) cause the
+corresponding interrupt-pending bit to be set to one if the rectified
+input value is high (= 1) under the new source mode."
+
+When the interrupt type is changed in the sourcecfg register, the APLIC
+device might not set the corresponding pending bit, so the interrupt might
+never become pending.
+
+To handle sourcecfg register changes for level-triggered interrupts in MSI
+mode, manually set the pending bit for retriggering interrupt so it gets
+retriggered if it was already asserted.
+
+Fixes: ca8df97fe679 ("irqchip/riscv-aplic: Add support for MSI-mode")
+functions: drivers/irqchip/irq-riscv-aplic-msi.c:aplic_msi_irq_eoi
+fixes: ca8df97fe679(common)
+diff --git a/drivers/irqchip/irq-riscv-aplic-msi.c b/drivers/irqchip/irq-riscv-aplic-msi.c
+index 028444af48bd..d7773f76e5d0 100644
+--- a/drivers/irqchip/irq-riscv-aplic-msi.c
++++ b/drivers/irqchip/irq-riscv-aplic-msi.c
+@@ -33,13 +33,8 @@ static void aplic_msi_irq_unmask(struct irq_data *d)
+ }
+ 
+-static void aplic_msi_irq_eoi(struct irq_data *d)
++static void aplic_msi_irq_retrigger_level(struct irq_data *d)
+ {
+ 	struct aplic_priv *priv = irq_data_get_irq_chip_data(d);
+ 
+-	/*
+-	 * EOI handling is required only for level-triggered interrupts
+-	 * when APLIC is in MSI mode.
+-	 */
+-
+ 	switch (irqd_get_trigger_type(d)) {
+ 	case IRQ_TYPE_LEVEL_LOW:
+@@ -60,4 +55,27 @@ static void aplic_msi_irq_eoi(struct irq_data *d)
+ }
+ 
++static void aplic_msi_irq_eoi(struct irq_data *d)
++{
++	/*
++	 * EOI handling is required only for level-triggered interrupts
++	 * when APLIC is in MSI mode.
++	 */
++	aplic_msi_irq_retrigger_level(d);
++}
++
++static int aplic_msi_irq_set_type(struct irq_data *d, unsigned int type)
++{
++	int rc = aplic_irq_set_type(d, type);
++
++	if (rc)
++		return rc;
++	/*
++	 * Updating sourcecfg register for level-triggered interrupts
++	 * requires interrupt retriggering when APLIC is in MSI mode.
++	 */
++	aplic_msi_irq_retrigger_level(d);
++	return 0;
++}
++
+ static void aplic_msi_write_msg(struct irq_data *d, struct msi_msg *msg)
+ {
+@@ -131,5 +149,5 @@ static const struct msi_domain_template aplic_msi_template = {
+ 		.irq_mask		= aplic_msi_irq_mask,
+ 		.irq_unmask		= aplic_msi_irq_unmask,
+-		.irq_set_type		= aplic_irq_set_type,
++		.irq_set_type		= aplic_msi_irq_set_type,
+ 		.irq_eoi		= aplic_msi_irq_eoi,
+ #ifdef CONFIG_SMP
+
+##### B458
+=== 7c5e8d212d7d B 2024-08-09 +5/-0
+selftests: memfd_secret: don't build memfd_secret test on unsupported arches
+
+[1] mentions that memfd_secret is only supported on arm64, riscv, x86 and
+x86_64 for now.  It doesn't support other architectures.  I found the
+build error on arm and decided to send the fix as it was creating noise on
+KernelCI:
+
+memfd_secret.c: In function 'memfd_secret':
+memfd_secret.c:42:24: error: '__NR_memfd_secret' undeclared (first use in this function);
+did you mean 'memfd_secret'?
+   42 |         return syscall(__NR_memfd_secret, flags);
+      |                        ^~~~~~~~~~~~~~~~~
+      |                        memfd_secret
+
+Hence I'm adding condition that memfd_secret should only be compiled on
+supported architectures.
+
+Also check in run_vmtests script if memfd_secret binary is present before
+executing it.
+
+Fixes: 76fe17ef588a ("secretmem: test: add basic selftest for memfd_secret(2)")
+functions: 
+fixes: 76fe17ef588a(common)
+diff --git a/tools/testing/selftests/mm/Makefile b/tools/testing/selftests/mm/Makefile
+index 7b8a5def54a1..cfad627e8d94 100644
+--- a/tools/testing/selftests/mm/Makefile
++++ b/tools/testing/selftests/mm/Makefile
+@@ -54,5 +54,7 @@ TEST_GEN_FILES += map_fixed_noreplace
+ TEST_GEN_FILES += map_hugetlb
+ TEST_GEN_FILES += map_populate
++ifneq (,$(filter $(ARCH),arm64 riscv riscv64 x86 x86_64))
+ TEST_GEN_FILES += memfd_secret
++endif
+ TEST_GEN_FILES += migration
+ TEST_GEN_FILES += mkdirty
+diff --git a/tools/testing/selftests/mm/run_vmtests.sh b/tools/testing/selftests/mm/run_vmtests.sh
+index 03ac4f2e1cce..36045edb10de 100755
+--- a/tools/testing/selftests/mm/run_vmtests.sh
++++ b/tools/testing/selftests/mm/run_vmtests.sh
+@@ -375,6 +375,9 @@ CATEGORY="hmm" run_test bash ./test_hmm.sh smoke
+ CATEGORY="madv_populate" run_test ./madv_populate
+ 
++if [ -x ./memfd_secret ]
++then
+ (echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope 2>&1) | tap_prefix
+ CATEGORY="memfd_secret" run_test ./memfd_secret
++fi
+ 
+ # KSM KSM_MERGE_TIME_HUGE_PAGES test with size of 100
+
+##### B459
+=== 4d936f10ff80 B 2024-08-20 +71/-44
+irqchip/sifive-plic: Probe plic driver early for Allwinner D1 platform
+
+The latest Linux RISC-V no longer boots on the Allwinner D1 platform
+because the sun4i_timer driver fails to get an interrupt from PLIC due to
+the recent conversion of the PLIC to a platform driver. Converting the
+sun4i timer to a platform driver does not work either because the D1 does
+not have a SBI timer available so early boot hangs. See the 'Closes:'
+link for deeper analysis.
+
+The real fix requires enabling the SBI time extension in the platform
+firmware (OpenSBI) and convert sun4i_timer into platform driver.
+Unfortunately, the real fix involves changing multiple places and can't be
+achieved in a short duration and aside of that requires users to update
+firmware.
+
+As a work-around, retrofit PLIC probing such that the PLIC is probed early
+only for the Allwinner D1 platform and probed as a regular platform driver
+for rest of the RISC-V platforms. In the process, partially revert some of
+the previous changes because the PLIC device pointer is not available in
+all probing paths.
+
+Fixes: e306a894bd51 ("irqchip/sifive-plic: Chain to parent IRQ after handlers are ready")
+Fixes: 8ec99b033147 ("irqchip/sifive-plic: Convert PLIC driver into a platform driver")
+functions: drivers/irqchip/irq-sifive-plic.c:plic_handle_irq, drivers/irqchip/irq-sifive-plic.c:plic_starting_cpu, drivers/irqchip/irq-sifive-plic.c:plic_parse_nr_irqs_and_contexts, drivers/irqchip/irq-sifive-plic.c:plic_parse_context_parent, drivers/irqchip/irq-sifive-plic.c:plic_probe
+fixes: e306a894bd51(common), 8ec99b033147(common)
+ drivers/irqchip/irq-sifive-plic.c | 115 ++++++++++++++++++++++++++++++++++++----------------------
+ 1 file changed, 71 insertions(+), 44 deletions(-)
+diff --git a/drivers/irqchip/irq-sifive-plic.c b/drivers/irqchip/irq-sifive-plic.c
+index 9e22f7e378f5..4d9ea718086d 100644
+--- a/drivers/irqchip/irq-sifive-plic.c
++++ b/drivers/irqchip/irq-sifive-plic.c
+@@ -4,4 +4,5 @@
+  * Copyright (C) 2018 Christoph Hellwig
+  */
++#define pr_fmt(fmt) "riscv-plic: " fmt
+ #include <linux/cpu.h>
+ #include <linux/interrupt.h>
+@@ -64,5 +65,5 @@
+ 
+ struct plic_priv {
+-	struct device *dev;
++	struct fwnode_handle *fwnode;
+ 	struct cpumask lmask;
+ 	struct irq_domain *irqdomain;
+@@ -379,6 +380,6 @@ static void plic_handle_irq(struct irq_desc *desc)
+ 						    hwirq);
+ 		if (unlikely(err)) {
+-			dev_warn_ratelimited(handler->priv->dev,
+-					     "can't find mapping for hwirq %lu\n", hwirq);
++			pr_warn_ratelimited("%pfwP: can't find mapping for hwirq %lu\n",
++					    handler->priv->fwnode, hwirq);
+ 		}
+ 	}
+@@ -409,5 +410,6 @@ static int plic_starting_cpu(unsigned int cpu)
+ 				  irq_get_trigger_type(plic_parent_irq));
+ 	else
+-		dev_warn(handler->priv->dev, "cpu%d: parent irq not available\n", cpu);
++		pr_warn("%pfwP: cpu%d: parent irq not available\n",
++			handler->priv->fwnode, cpu);
+ 	plic_set_threshold(handler, PLIC_ENABLE_THRESHOLD);
+ 
+@@ -425,8 +427,7 @@ static const struct of_device_id plic_match[] = {
+ };
+ 
+-static int plic_parse_nr_irqs_and_contexts(struct platform_device *pdev,
++static int plic_parse_nr_irqs_and_contexts(struct fwnode_handle *fwnode,
+ 					   u32 *nr_irqs, u32 *nr_contexts)
+ {
+-	struct device *dev = &pdev->dev;
+ 	int rc;
+ 
+@@ -435,16 +436,16 @@ static int plic_parse_nr_irqs_and_contexts(struct platform_device *pdev,
+ 	 * function for ACPI support.
+ 	 */
+-	if (!is_of_node(dev->fwnode))
++	if (!is_of_node(fwnode))
+ 		return -EINVAL;
+ 
+-	rc = of_property_read_u32(to_of_node(dev->fwnode), "riscv,ndev", nr_irqs);
++	rc = of_property_read_u32(to_of_node(fwnode), "riscv,ndev", nr_irqs);
+ 	if (rc) {
+-		dev_err(dev, "riscv,ndev property not available\n");
++		pr_err("%pfwP: riscv,ndev property not available\n", fwnode);
+ 		return rc;
+ 	}
+ 
+-	*nr_contexts = of_irq_count(to_of_node(dev->fwnode));
+... (183 more diff lines)
+
+##### B460
+=== a309320ddbac B 2024-08-20 +7/-14
+cpuidle: riscv-sbi: Use scoped device node handling to fix missing of_node_put
+
+Two return statements in sbi_cpuidle_dt_init_states() did not drop the
+OF node reference count.  Solve the issue and simplify entire error
+handling with scoped/cleanup.h.
+
+Fixes: 6abf32f1d9c5 ("cpuidle: Add RISC-V SBI CPU idle driver")
+functions: drivers/cpuidle/cpuidle-riscv-sbi.c:sbi_cpuidle_dt_init_states
+fixes: 6abf32f1d9c5(common)
+diff --git a/drivers/cpuidle/cpuidle-riscv-sbi.c b/drivers/cpuidle/cpuidle-riscv-sbi.c
+index a6e123dfe394..5bb3401220d2 100644
+--- a/drivers/cpuidle/cpuidle-riscv-sbi.c
++++ b/drivers/cpuidle/cpuidle-riscv-sbi.c
+@@ -9,4 +9,5 @@
+ #define pr_fmt(fmt) "cpuidle-riscv-sbi: " fmt
+ 
++#include <linux/cleanup.h>
+ #include <linux/cpuhotplug.h>
+ #include <linux/cpuidle.h>
+@@ -237,17 +238,14 @@ static int sbi_cpuidle_dt_init_states(struct device *dev,
+ 	struct sbi_cpuidle_data *data = per_cpu_ptr(&sbi_cpuidle_data, cpu);
+ 	struct device_node *state_node;
+-	struct device_node *cpu_node;
+ 	u32 *states;
+ 	int i, ret;
+ 
+-	cpu_node = of_cpu_device_node_get(cpu);
++	struct device_node *cpu_node __free(device_node) = of_cpu_device_node_get(cpu);
+ 	if (!cpu_node)
+ 		return -ENODEV;
+ 
+ 	states = devm_kcalloc(dev, state_count, sizeof(*states), GFP_KERNEL);
+-	if (!states) {
+-		ret = -ENOMEM;
+-		goto fail;
+-	}
++	if (!states)
++		return -ENOMEM;
+ 
+ 	/* Parse SBI specific details from state DT nodes */
+@@ -265,8 +263,6 @@ static int sbi_cpuidle_dt_init_states(struct device *dev,
+ 		pr_debug("sbi-state %#x index %d\n", states[i], i);
+ 	}
+-	if (i != state_count) {
+-		ret = -ENODEV;
+-		goto fail;
+-	}
++	if (i != state_count)
++		return -ENODEV;
+ 
+ 	/* Initialize optional data, used for the hierarchical topology. */
+@@ -278,8 +274,5 @@ static int sbi_cpuidle_dt_init_states(struct device *dev,
+ 	data->states = states;
+ 
+-fail:
+-	of_node_put(cpu_node);
+-
+-	return ret;
++	return 0;
+ }
+ 
+
+##### B461
+=== efe81b7bdf7d B 2024-08-20 +2/-2
+irqchip/riscv-aplic: Fix an IS_ERR() vs NULL bug in probe()
+
+The devm_platform_ioremap_resource() function doesn't return NULL, it
+returns error pointers.  Fix the error handling to match.
+
+Fixes: 2333df5ae51e ("irqchip: Add RISC-V advanced PLIC driver for direct-mode")
+functions: drivers/irqchip/irq-riscv-aplic-main.c:aplic_probe
+fixes: 2333df5ae51e(common)
+diff --git a/drivers/irqchip/irq-riscv-aplic-main.c b/drivers/irqchip/irq-riscv-aplic-main.c
+index 28dd175b5764..981fad6fb8f7 100644
+--- a/drivers/irqchip/irq-riscv-aplic-main.c
++++ b/drivers/irqchip/irq-riscv-aplic-main.c
+@@ -176,7 +176,7 @@ static int aplic_probe(struct platform_device *pdev)
+ 	/* Map the MMIO registers */
+ 	regs = devm_platform_ioremap_resource(pdev, 0);
+-	if (!regs) {
++	if (IS_ERR(regs)) {
+ 		dev_err(dev, "failed map MMIO registers\n");
+-		return -ENOMEM;
++		return PTR_ERR(regs);
+ 	}
+ 
+
+##### B462
+=== ec1f77f6557b B 2024-08-23 +5/-4
+selftests/bpf: test_loader.c:get_current_arch() should not return 0
+
+At the moment, when test_loader.c:get_current_arch() can't determine
+the arch, it returns 0. The arch check in run_subtest() looks as
+follows:
+
+	if ((get_current_arch() & spec->arch_mask) == 0) {
+		test__skip();
+		return;
+	}
+
+Which means that all test_loader based tests would be skipped if arch
+could not be determined. get_current_arch() recognizes x86_64, arm64
+and riscv64. Which means that CI skips test_loader tests for s390.
+
+Fix this by making sure that get_current_arch() always returns
+non-zero value. In combination with default spec->arch_mask == -1 this
+should cover all possibilities.
+
+Fixes: f406026fefa7 ("selftests/bpf: by default use arch mask allowing all archs")
+Fixes: 7d743e4c759c ("selftests/bpf: __jited test tag to check disassembly after jit")
+functions: tools/testing/selftests/bpf/test_loader.c:get_current_arch
+fixes: f406026fefa7(common), 7d743e4c759c(common)
+diff --git a/tools/testing/selftests/bpf/test_loader.c b/tools/testing/selftests/bpf/test_loader.c
+index 2ca9b73e5a6b..4223cffc090e 100644
+--- a/tools/testing/selftests/bpf/test_loader.c
++++ b/tools/testing/selftests/bpf/test_loader.c
+@@ -337,7 +337,8 @@ static const char *skip_dynamic_pfx(const char *s, const char *pfx)
+ 
+ enum arch {
+-	ARCH_X86_64	= 0x1,
+-	ARCH_ARM64	= 0x2,
+-	ARCH_RISCV64	= 0x4,
++	ARCH_UNKNOWN	= 0x1,
++	ARCH_X86_64	= 0x2,
++	ARCH_ARM64	= 0x4,
++	ARCH_RISCV64	= 0x8,
+ };
+ 
+@@ -351,5 +352,5 @@ static int get_current_arch(void)
+ 	return ARCH_RISCV64;
+ #endif
+-	return 0;
++	return ARCH_UNKNOWN;
+ }
+ 
+
+##### B463
+=== b14e40f5dc7c B 2024-08-25 +2/-1
+reset: k210: fix OF node leak in probe() error path
+
+Driver is leaking OF node reference on memory allocation failure.
+Acquire the OF node reference after memory allocation to fix this and
+keep it simple.
+
+Fixes: 5a2308da9f60 ("riscv: Add Canaan Kendryte K210 reset controller")
+functions: drivers/reset/reset-k210.c:k210_rst_probe
+fixes: 5a2308da9f60(riscv)
+diff --git a/drivers/reset/reset-k210.c b/drivers/reset/reset-k210.c
+index b62a2fd44e4e..e77e4cca377d 100644
+--- a/drivers/reset/reset-k210.c
++++ b/drivers/reset/reset-k210.c
+@@ -91,5 +91,5 @@ static int k210_rst_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+-	struct device_node *parent_np = of_get_parent(dev->of_node);
++	struct device_node *parent_np;
+ 	struct k210_rst *ksr;
+ 
+@@ -100,4 +100,5 @@ static int k210_rst_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 
++	parent_np = of_get_parent(dev->of_node);
+ 	ksr->map = syscon_node_to_regmap(parent_np);
+ 	of_node_put(parent_np);
+
+##### B464
+=== 2840dadf0dde B 2024-08-26 +6/-1
+drivers: perf: Fix smp_processor_id() use in preemptible code
+
+As reported in [1], the use of smp_processor_id() in
+pmu_sbi_device_probe() must be protected by disabling the preemption, so
+simple use get_cpu()/put_cpu() instead.
+
+Fixes: a8625217a054 ("drivers/perf: riscv: Implement SBI PMU snapshot function")
+functions: drivers/perf/riscv_pmu_sbi.c:pmu_sbi_device_probe
+fixes: a8625217a054(common)
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 31a17a56eb3b..25b1b699b3e2 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -1374,9 +1374,13 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
+ 	/* SBI PMU Snapsphot is only available in SBI v2.0 */
+ 	if (sbi_v2_available) {
++		int cpu;
++
+ 		ret = pmu_sbi_snapshot_alloc(pmu);
+ 		if (ret)
+ 			goto out_unregister;
+ 
+-		ret = pmu_sbi_snapshot_setup(pmu, smp_processor_id());
++		cpu = get_cpu();
++
++		ret = pmu_sbi_snapshot_setup(pmu, cpu);
+ 		if (ret) {
+ 			/* Snapshot is an optional feature. Continue if not available */
+@@ -1392,4 +1396,5 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
+ 			static_branch_enable(&sbi_pmu_snapshot_available);
+ 		}
++		put_cpu();
+ 	}
+ 
+
+##### B465
+=== 538d5477b252 B 2024-08-26 +32/-1
+clk: starfive: jh7110-sys: Add notifier for PLL0 clock
+
+Add notifier function for PLL0 clock. In the function, the cpu_root clock
+should be operated by saving its current parent and setting a new safe
+parent (osc clock) before setting the PLL0 clock rate. After setting PLL0
+rate, it should be switched back to the original parent clock.
+
+Fixes: e2c510d6d630 ("riscv: dts: starfive: Add cpu scaling for JH7110 SoC")
+functions: drivers/clk/starfive/clk-starfive-jh7110-sys.c:jh7110_syscrg_probe
+fixes: e2c510d6d630(riscv)
+diff --git a/drivers/clk/starfive/clk-starfive-jh7110-sys.c b/drivers/clk/starfive/clk-starfive-jh7110-sys.c
+index 8f5e5abfa178..17325f17696f 100644
+--- a/drivers/clk/starfive/clk-starfive-jh7110-sys.c
++++ b/drivers/clk/starfive/clk-starfive-jh7110-sys.c
+@@ -386,4 +386,30 @@ int jh7110_reset_controller_register(struct jh71x0_clk_priv *priv,
+ EXPORT_SYMBOL_GPL(jh7110_reset_controller_register);
+ 
++/*
++ * This clock notifier is called when the rate of PLL0 clock is to be changed.
++ * The cpu_root clock should save the curent parent clock and switch its parent
++ * clock to osc before PLL0 rate will be changed. Then switch its parent clock
++ * back after the PLL0 rate is completed.
++ */
++static int jh7110_pll0_clk_notifier_cb(struct notifier_block *nb,
++				       unsigned long action, void *data)
++{
++	struct jh71x0_clk_priv *priv = container_of(nb, struct jh71x0_clk_priv, pll_clk_nb);
++	struct clk *cpu_root = priv->reg[JH7110_SYSCLK_CPU_ROOT].hw.clk;
++	int ret = 0;
++
++	if (action == PRE_RATE_CHANGE) {
++		struct clk *osc = clk_get(priv->dev, "osc");
++
++		priv->original_clk = clk_get_parent(cpu_root);
++		ret = clk_set_parent(cpu_root, osc);
++		clk_put(osc);
++	} else if (action == POST_RATE_CHANGE) {
++		ret = clk_set_parent(cpu_root, priv->original_clk);
++	}
++
++	return notifier_from_errno(ret);
++}
++
+ static int __init jh7110_syscrg_probe(struct platform_device *pdev)
+ {
+@@ -414,5 +440,8 @@ static int __init jh7110_syscrg_probe(struct platform_device *pdev)
+ 			return PTR_ERR(priv->pll[0]);
+ 	} else {
+-		clk_put(pllclk);
++		priv->pll_clk_nb.notifier_call = jh7110_pll0_clk_notifier_cb;
++		ret = clk_notifier_register(pllclk, &priv->pll_clk_nb);
++		if (ret)
++			return ret;
+ 		priv->pll[0] = NULL;
+ 	}
+diff --git a/drivers/clk/starfive/clk-starfive-jh71x0.h b/drivers/clk/starfive/clk-starfive-jh71x0.h
+index 23e052fc1549..e3f441393e48 100644
+--- a/drivers/clk/starfive/clk-starfive-jh71x0.h
++++ b/drivers/clk/starfive/clk-starfive-jh71x0.h
+@@ -115,4 +115,6 @@ struct jh71x0_clk_priv {
+ 	struct device *dev;
+ 	void __iomem *base;
++	struct clk *original_clk;
++	struct notifier_block pll_clk_nb;
+ 	struct clk_hw *pll[3];
+ 	struct jh71x0_clk reg[];
+
+##### B466
+=== 83dae72ac038 B 2024-08-26 +0/-71
+riscv: selftests: Remove mmap hint address checks
+
+The mmap behavior that restricts the addresses returned by mmap caused
+unexpected behavior, so get rid of the test cases that check that
+behavior.
+
+Fixes: 73d05262a2ca ("selftests: riscv: Generalize mm selftests")
+functions: tools/testing/selftests/riscv/mm/mmap_bottomup.c:TEST, tools/testing/selftests/riscv/mm/mmap_default.c:TEST
+fixes: 73d05262a2ca(common)
+ tools/testing/selftests/riscv/mm/mmap_bottomup.c |  2 --
+ tools/testing/selftests/riscv/mm/mmap_default.c  |  2 --
+ tools/testing/selftests/riscv/mm/mmap_test.h     | 67 --------------------------------------------
+ 3 files changed, 71 deletions(-)
+diff --git a/tools/testing/selftests/riscv/mm/mmap_bottomup.c b/tools/testing/selftests/riscv/mm/mmap_bottomup.c
+index 7f7d3eb8b9c9..f9ccae50349b 100644
+--- a/tools/testing/selftests/riscv/mm/mmap_bottomup.c
++++ b/tools/testing/selftests/riscv/mm/mmap_bottomup.c
+@@ -8,6 +8,4 @@ TEST(infinite_rlimit)
+ {
+ 	EXPECT_EQ(BOTTOM_UP, memory_layout());
+-
+-	TEST_MMAPS;
+ }
+ 
+diff --git a/tools/testing/selftests/riscv/mm/mmap_default.c b/tools/testing/selftests/riscv/mm/mmap_default.c
+index 2ba3ec990006..3f53b6ecc326 100644
+--- a/tools/testing/selftests/riscv/mm/mmap_default.c
++++ b/tools/testing/selftests/riscv/mm/mmap_default.c
+@@ -8,6 +8,4 @@ TEST(default_rlimit)
+ {
+ 	EXPECT_EQ(TOP_DOWN, memory_layout());
+-
+-	TEST_MMAPS;
+ }
+ 
+diff --git a/tools/testing/selftests/riscv/mm/mmap_test.h b/tools/testing/selftests/riscv/mm/mmap_test.h
+index 3b29ca3bb3d4..75918d15919f 100644
+--- a/tools/testing/selftests/riscv/mm/mmap_test.h
++++ b/tools/testing/selftests/riscv/mm/mmap_test.h
+@@ -11,74 +11,7 @@
+ #define BOTTOM_UP 1
+ 
+-#if __riscv_xlen == 64
+-uint64_t random_addresses[] = {
+-	0x19764f0d73b3a9f0, 0x016049584cecef59, 0x3580bdd3562f4acd,
+-	0x1164219f20b17da0, 0x07d97fcb40ff2373, 0x76ec528921272ee7,
+-	0x4dd48c38a3de3f70, 0x2e11415055f6997d, 0x14b43334ac476c02,
+-	0x375a60795aff19f6, 0x47f3051725b8ee1a, 0x4e697cf240494a9f,
+-	0x456b59b5c2f9e9d1, 0x101724379d63cb96, 0x7fe9ad31619528c1,
+-	0x2f417247c495c2ea, 0x329a5a5b82943a5e, 0x06d7a9d6adcd3827,
+-	0x327b0b9ee37f62d5, 0x17c7b1851dfd9b76, 0x006ebb6456ec2cd9,
+-	0x00836cd14146a134, 0x00e5c4dcde7126db, 0x004c29feadf75753,
+-	0x00d8b20149ed930c, 0x00d71574c269387a, 0x0006ebe4a82acb7a,
+-	0x0016135df51f471b, 0x00758bdb55455160, 0x00d0bdd949b13b32,
+-	0x00ecea01e7c5f54b, 0x00e37b071b9948b1, 0x0011fdd00ff57ab3,
+-	0x00e407294b52f5ea, 0x00567748c200ed20, 0x000d073084651046,
+-	0x00ac896f4365463c, 0x00eb0d49a0b26216, 0x0066a2564a982a31,
+-	0x002e0d20237784ae, 0x0000554ff8a77a76, 0x00006ce07a54c012,
+-	0x000009570516d799, 0x00000954ca15b84d, 0x0000684f0d453379,
+-	0x00002ae5816302b5, 0x0000042403fb54bf, 0x00004bad7392bf30,
+-	0x00003e73bfa4b5e3, 0x00005442c29978e0, 0x00002803f11286b6,
+-	0x000073875d745fc6, 0x00007cede9cb8240, 0x000027df84cc6a4f,
+-	0x00006d7e0e74242a, 0x00004afd0b836e02, 0x000047d0e837cd82,
+-	0x00003b42405efeda, 0x00001531bafa4c95, 0x00007172cae34ac4,
+-};
+-#else
+-uint32_t random_addresses[] = {
+-	0x8dc302e0, 0x929ab1e0, 0xb47683ba, 0xea519c73, 0xa19f1c90, 0xc49ba213,
+-	0x8f57c625, 0xadfe5137, 0x874d4d95, 0xaa20f09d, 0xcf21ebfc, 0xda7737f1,
+-	0xcedf392a, 0x83026c14, 0xccedca52, 0xc6ccf826, 0xe0cd9415, 0x997472ca,
+-	0xa21a44c1, 0xe82196f5, 0xa23fd66b, 0xc28d5590, 0xd009cdce, 0xcf0be646,
+-	0x8fc8c7ff, 0xe2a85984, 0xa3d3236b, 0x89a0619d, 0xc03db924, 0xb5d4cc1b,
+-	0xb96ee04c, 0xd191da48, 0xb432a000, 0xaa2bebbc, 0xa2fcb289, 0xb0cca89b,
+... (41 more diff lines)
+
+##### B467
+=== c625154993d0 B 2024-08-31 +4/-4
+drivers/perf: riscv: Align errno for unsupported perf event
+
+RISC-V perf driver does not yet support PERF_TYPE_BREAKPOINT. It would
+be more appropriate to return -EOPNOTSUPP or -ENOENT for this type in
+pmu_sbi_event_map. Considering that other implementations return -ENOENT
+for unsupported perf types, let's synchronize this behavior. Due to this
+reason, a riscv bpf testcases perf_skip fail. Meanwhile, align that
+behavior to the rest of proper place.
+
+Fixes: 9b3e150e310e ("RISC-V: Add a simple platform driver for RISC-V legacy perf")
+Fixes: 16d3b1af0944 ("perf: RISC-V: Check standard event availability")
+Fixes: e9991434596f ("RISC-V: Add perf platform driver based on SBI PMU extension")
+functions: drivers/perf/riscv_pmu_legacy.c:pmu_legacy_ctr_get_idx, drivers/perf/riscv_pmu_sbi.c:pmu_sbi_check_event, drivers/perf/riscv_pmu_sbi.c:pmu_sbi_event_map
+fixes: 9b3e150e310e(common), 16d3b1af0944(riscv), e9991434596f(common)
+diff --git a/drivers/perf/riscv_pmu_legacy.c b/drivers/perf/riscv_pmu_legacy.c
+index 04487ad7fba0..93c8e0fdb589 100644
+--- a/drivers/perf/riscv_pmu_legacy.c
++++ b/drivers/perf/riscv_pmu_legacy.c
+@@ -23,5 +23,5 @@ static int pmu_legacy_ctr_get_idx(struct perf_event *event)
+ 
+ 	if (event->attr.type != PERF_TYPE_HARDWARE)
+-		return -EOPNOTSUPP;
++		return -ENOENT;
+ 	if (attr->config == PERF_COUNT_HW_CPU_CYCLES)
+ 		return RISCV_PMU_LEGACY_CYCLE;
+@@ -29,5 +29,5 @@ static int pmu_legacy_ctr_get_idx(struct perf_event *event)
+ 		return RISCV_PMU_LEGACY_INSTRET;
+ 	else
+-		return -EOPNOTSUPP;
++		return -ENOENT;
+ }
+ 
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 5c39fbd8ed04..391ca1422cae 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -310,5 +310,5 @@ static void pmu_sbi_check_event(struct sbi_pmu_event_data *edata)
+ 	} else if (ret.error == SBI_ERR_NOT_SUPPORTED) {
+ 		/* This event cannot be monitored by any counter */
+-		edata->event_idx = -EINVAL;
++		edata->event_idx = -ENOENT;
+ 	}
+ }
+@@ -557,5 +557,5 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
+ 		break;
+ 	default:
+-		ret = -EINVAL;
++		ret = -ENOENT;
+ 		break;
+ 	}
+
+##### B468
+=== 4a1361e9a5c5 B 2024-09-09 +1/-1
+irqchip/riscv-imsic: Fix output text of base address
+
+The "per-CPU IDs ... at base ..." info log is outputting a physical
+address, not a PPN.
+
+Fixes: 027e125acdba ("irqchip/riscv-imsic: Add device MSI domain support for platform devices")
+functions: drivers/irqchip/irq-riscv-imsic-platform.c:imsic_irqdomain_init
+fixes: 027e125acdba(common)
+diff --git a/drivers/irqchip/irq-riscv-imsic-platform.c b/drivers/irqchip/irq-riscv-imsic-platform.c
+index 64905e6f52d7..c708780e8760 100644
+--- a/drivers/irqchip/irq-riscv-imsic-platform.c
++++ b/drivers/irqchip/irq-riscv-imsic-platform.c
+@@ -342,5 +342,5 @@ int imsic_irqdomain_init(void)
+ 	pr_info("%pfwP: group-index-bits: %d, group-index-shift: %d\n",
+ 		imsic->fwnode, global->group_index_bits, global->group_index_shift);
+-	pr_info("%pfwP: per-CPU IDs %d at base PPN %pa\n",
++	pr_info("%pfwP: per-CPU IDs %d at base address %pa\n",
+ 		imsic->fwnode, global->nr_ids, &global->base_addr);
+ 	pr_info("%pfwP: total %d interrupts available\n",
+
+##### B469
+=== 19090f0306f1 B 2024-09-27 +2/-1
+selftests: bpf: Add missing per-arch include path
+
+The prog_tests programs do not include the per-arch tools include
+path, e.g. tools/arch/riscv/include. Some architectures depend those
+files to build properly.
+
+Include tools/arch/$(SUBARCH)/include in the selftests bpf build.
+
+Fixes: 6d74d178fe6e ("tools: Add riscv barrier implementation")
+functions: 
+fixes: 6d74d178fe6e(common)
+diff --git a/tools/testing/selftests/bpf/Makefile b/tools/testing/selftests/bpf/Makefile
+index e295e3df5ec6..28a76baa854d 100644
+--- a/tools/testing/selftests/bpf/Makefile
++++ b/tools/testing/selftests/bpf/Makefile
+@@ -11,4 +11,5 @@ LIBDIR := $(TOOLSDIR)/lib
+ BPFDIR := $(LIBDIR)/bpf
+ TOOLSINCDIR := $(TOOLSDIR)/include
++TOOLSARCHINCDIR := $(TOOLSDIR)/arch/$(SRCARCH)/include
+ BPFTOOLDIR := $(TOOLSDIR)/bpf/bpftool
+ APIDIR := $(TOOLSINCDIR)/uapi
+@@ -45,5 +46,5 @@ CFLAGS += -g $(OPT_FLAGS) -rdynamic					\
+ 	  $(GENFLAGS) $(SAN_CFLAGS) $(LIBELF_CFLAGS)			\
+ 	  -I$(CURDIR) -I$(INCLUDE_DIR) -I$(GENDIR) -I$(LIBDIR)		\
+-	  -I$(TOOLSINCDIR) -I$(APIDIR) -I$(OUTPUT)
++	  -I$(TOOLSINCDIR) -I$(TOOLSARCHINCDIR) -I$(APIDIR) -I$(OUTPUT)
+ LDFLAGS += $(SAN_LDFLAGS)
+ LDLIBS += $(LIBELF_LIBS) -lz -lrt -lpthread
+
+##### B470
+=== 710fbca820c7 B 2024-09-27 +2/-1
+libbpf: Add missing per-arch include path
+
+libbpf does not include the per-arch tools include path, e.g.
+tools/arch/riscv/include. Some architectures depend those files to
+build properly.
+
+Include tools/arch/$(SUBARCH)/include in the libbpf build.
+
+Fixes: 6d74d178fe6e ("tools: Add riscv barrier implementation")
+functions: 
+fixes: 6d74d178fe6e(common)
+diff --git a/tools/lib/bpf/Makefile b/tools/lib/bpf/Makefile
+index 1b22f0f37288..857a5f7b413d 100644
+--- a/tools/lib/bpf/Makefile
++++ b/tools/lib/bpf/Makefile
+@@ -62,5 +62,6 @@ endif
+ 
+ INCLUDES = -I$(or $(OUTPUT),.) \
+-	   -I$(srctree)/tools/include -I$(srctree)/tools/include/uapi
++	   -I$(srctree)/tools/include -I$(srctree)/tools/include/uapi \
++	   -I$(srctree)/tools/arch/$(SRCARCH)/include
+ 
+ export prefix libdir src obj
+
+##### B471
+=== 6c4e1ef46c9d B 2024-09-28 +16/-2
+usb: misc: onboard_usb_dev: introduce new config symbol for usb5744 SMBus support
+
+Introduce new kernel config symbol for Microchip usb5744 SMBus programming
+support. Since usb5744 i2c initialization routine uses i2c SMBus APIs these
+APIs should only be invoked when kernel has I2C support. This new kernel
+config describes the dependency on I2C kernel support and fix the below
+build issues when USB_ONBOARD_DEV=y and CONFIG_I2C=m.
+
+riscv64-linux-ld: drivers/usb/misc/onboard_usb_dev.o:
+undefined reference to `i2c_find_device_by_fwnode'
+drivers/usb/misc/onboard_usb_dev.c:408:(.text+0xb24): undefined
+reference to `i2c_smbus_write_block_data'
+<snip>
+
+Parsing of the i2c-bus bus handle is not put under usb5744 kernel config
+check as the intention is to report an error when DT is configured for
+usb5744 SMBus support and kernel has USB_ONBOARD_DEV_USB5744 disabled.
+
+Fixes: 6782311d04df ("usb: misc: onboard_usb_dev: add Microchip usb5744 SMBus programming support")
+functions: drivers/usb/misc/onboard_usb_dev.c:onboard_dev_5744_i2c_init, drivers/usb/misc/onboard_usb_dev.c:onboard_dev_probe
+fixes: 6782311d04df(common)
+diff --git a/drivers/usb/misc/Kconfig b/drivers/usb/misc/Kconfig
+index 50b86d531701..6497c4e81e95 100644
+--- a/drivers/usb/misc/Kconfig
++++ b/drivers/usb/misc/Kconfig
+@@ -332,2 +332,14 @@ config USB_ONBOARD_DEV
+ 	  match the state of the USB subsystem. If this driver is a
+ 	  module it will be called onboard_usb_dev.
++
++config USB_ONBOARD_DEV_USB5744
++	bool "Onboard USB Microchip usb5744 hub with SMBus support"
++	depends on (USB_ONBOARD_DEV && I2C=y) || (USB_ONBOARD_DEV=m && I2C=m)
++	help
++	  Say Y here if you want to support onboard USB Microchip usb5744
++	  hub that requires SMBus initialization.
++
++	  This options enables usb5744 i2c default initialization sequence
++	  during hub start-up configuration stage. It is must to enable this
++	  option on AMD Kria KR260 Robotics Starter Kit as this hub is
++	  connected to USB-SD converter which mounts the root filesystem.
+diff --git a/drivers/usb/misc/onboard_usb_dev.c b/drivers/usb/misc/onboard_usb_dev.c
+index 560591e02d6a..75dfdca04ff1 100644
+--- a/drivers/usb/misc/onboard_usb_dev.c
++++ b/drivers/usb/misc/onboard_usb_dev.c
+@@ -312,5 +312,5 @@ static void onboard_dev_attach_usb_driver(struct work_struct *work)
+ static int onboard_dev_5744_i2c_init(struct i2c_client *client)
+ {
+-#if IS_ENABLED(CONFIG_I2C)
++#if IS_ENABLED(CONFIG_USB_ONBOARD_DEV_USB5744)
+ 	struct device *dev = &client->dev;
+ 	int ret;
+@@ -395,7 +395,9 @@ static int onboard_dev_probe(struct platform_device *pdev)
+ 	i2c_node = of_parse_phandle(pdev->dev.of_node, "i2c-bus", 0);
+ 	if (i2c_node) {
+-		struct i2c_client *client;
++		struct i2c_client *client = NULL;
+ 
++#if IS_ENABLED(CONFIG_USB_ONBOARD_DEV_USB5744)
+ 		client = of_find_i2c_device_by_node(i2c_node);
++#endif
+ 		of_node_put(i2c_node);
+ 
+
+##### B472
+=== faa34159d080 B 2024-09-30 +2/-0
+net/9p/usbg: Fix build error
+
+When CONFIG_NET_9P_USBG=y but CONFIG_USB_LIBCOMPOSITE=m and
+CONFIG_CONFIGFS_FS=m, the following build error occurs:
+
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_free_func':
+	trans_usbg.c:(.text+0x124): undefined reference to `usb_free_all_descriptors'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_rx_complete':
+	trans_usbg.c:(.text+0x2d8): undefined reference to `usb_interface_id'
+	riscv64-unknown-linux-gnu-ld: trans_usbg.c:(.text+0x2f6): undefined reference to `usb_string_id'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_func_bind':
+	trans_usbg.c:(.text+0x31c): undefined reference to `usb_ep_autoconfig'
+	riscv64-unknown-linux-gnu-ld: trans_usbg.c:(.text+0x336): undefined reference to `usb_ep_autoconfig'
+	riscv64-unknown-linux-gnu-ld: trans_usbg.c:(.text+0x378): undefined reference to `usb_assign_descriptors'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `f_usb9pfs_opts_buflen_store':
+	trans_usbg.c:(.text+0x49e): undefined reference to `usb_put_function_instance'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_alloc_instance':
+	trans_usbg.c:(.text+0x5fe): undefined reference to `config_group_init_type_name'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_alloc':
+	trans_usbg.c:(.text+0x7aa): undefined reference to `config_ep_by_speed'
+	riscv64-unknown-linux-gnu-ld: trans_usbg.c:(.text+0x7ea): undefined reference to `config_ep_by_speed'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_set_alt':
+	trans_usbg.c:(.text+0x828): undefined reference to `alloc_ep_req'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_modexit':
+	trans_usbg.c:(.exit.text+0x10): undefined reference to `usb_function_unregister'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_modinit':
+	trans_usbg.c:(.init.text+0x1e): undefined reference to `usb_function_register'
+
+Select the config for NET_9P_USBG to fix it.
+
+Fixes: a3be076dc174 ("net/9p/usbg: Add new usb gadget function transport")
+functions: 
+fixes: a3be076dc174(common)
+diff --git a/net/9p/Kconfig b/net/9p/Kconfig
+index 63f988f0c9e8..ee967fd25312 100644
+--- a/net/9p/Kconfig
++++ b/net/9p/Kconfig
+@@ -44,4 +44,6 @@ config NET_9P_USBG
+ 	bool "9P USB Gadget Transport"
+ 	depends on USB_GADGET=y || USB_GADGET=NET_9P
++	select CONFIGFS_FS
++	select USB_LIBCOMPOSITE
+ 	help
+ 	  This builds support for a transport for 9pfs over
+
+##### B473
+=== 27e8fe0da3b7 B 2024-10-08 +8/-0
+mmc: sdhci-of-dwcmshc: Prevent stale command interrupt handling
+
+While working with the T-Head 1520 LicheePi4A SoC, certain conditions
+arose that allowed me to reproduce a race issue in the sdhci code.
+
+To reproduce the bug, you need to enable the sdio1 controller in the
+device tree file
+`arch/riscv/boot/dts/thead/th1520-lichee-module-4a.dtsi` as follows:
+
+&sdio1 {
+	bus-width = <4>;
+	max-frequency = <100000000>;
+	no-sd;
+	no-mmc;
+	broken-cd;
+	cap-sd-highspeed;
+	post-power-on-delay-ms = <50>;
+	status = "okay";
+	wakeup-source;
+	keep-power-in-suspend;
+};
+
+When resetting the SoC using the reset button, the following messages
+appear in the dmesg log:
+
+[    8.164898] mmc2: Got command interrupt 0x00000001 even though no
+command operation was in progress.
+[    8.174054] mmc2: sdhci: ============ SDHCI REGISTER DUMP ===========
+[    8.180503] mmc2: sdhci: Sys addr:  0x00000000 | Version:  0x00000005
+[    8.186950] mmc2: sdhci: Blk size:  0x00000000 | Blk cnt:  0x00000000
+[    8.193395] mmc2: sdhci: Argument:  0x00000000 | Trn mode: 0x00000000
+[    8.199841] mmc2: sdhci: Present:   0x03da0000 | Host ctl: 0x00000000
+[    8.206287] mmc2: sdhci: Power:     0x0000000f | Blk gap:  0x00000000
+[    8.212733] mmc2: sdhci: Wake-up:   0x00000000 | Clock:    0x0000decf
+[    8.219178] mmc2: sdhci: Timeout:   0x00000000 | Int stat: 0x00000000
+[    8.225622] mmc2: sdhci: Int enab:  0x00ff1003 | Sig enab: 0x00ff1003
+[    8.232068] mmc2: sdhci: ACmd stat: 0x00000000 | Slot int: 0x00000000
+[    8.238513] mmc2: sdhci: Caps:      0x3f69c881 | Caps_1:   0x08008177
+[    8.244959] mmc2: sdhci: Cmd:       0x00000502 | Max curr: 0x00191919
+[    8.254115] mmc2: sdhci: Resp[0]:   0x00001009 | Resp[1]:  0x00000000
+[    8.260561] mmc2: sdhci: Resp[2]:   0x00000000 | Resp[3]:  0x00000000
+functions: drivers/mmc/host/sdhci-of-dwcmshc.c:th1520_sdhci_reset
+fixes: 43658a542ebf(common)
+diff --git a/drivers/mmc/host/sdhci-of-dwcmshc.c b/drivers/mmc/host/sdhci-of-dwcmshc.c
+index 8999b97263af..8fd80dac11bf 100644
+--- a/drivers/mmc/host/sdhci-of-dwcmshc.c
++++ b/drivers/mmc/host/sdhci-of-dwcmshc.c
+@@ -853,4 +853,12 @@ static void th1520_sdhci_reset(struct sdhci_host *host, u8 mask)
+ 	sdhci_reset(host, mask);
+ 
++	/* The T-Head 1520 SoC does not comply with the SDHCI specification
++	 * regarding the "Software Reset for CMD line should clear 'Command
++	 * Complete' in the Normal Interrupt Status Register." Clear the bit
++	 * here to compensate for this quirk.
++	 */
++	if (mask & SDHCI_RESET_CMD)
++		sdhci_writel(host, SDHCI_INT_RESPONSE, SDHCI_INT_STATUS);
++
+ 	if (priv->flags & FLAG_IO_FIXED_1V8) {
+ 		ctrl_2 = sdhci_readw(host, SDHCI_HOST_CONTROL2);
+
+##### B474
+=== a98a0f050ced B 2024-10-14 +18/-1
+irqchip/riscv-intc: Fix SMP=n boot with ACPI
+
+When CONFIG_SMP is disabled, the static array rintc_acpi_data with size
+NR_CPUS is not sufficient to hold all RINTC structures passed from the
+firmware.
+
+All RINTC structures are required to configure IMSIC/APLIC/PLIC properly
+irrespective of SMP in the OS. So, allocate dynamic memory based on the
+number of RINTC structures in MADT to fix this issue.
+
+Fixes: f8619b66bdb1 ("irqchip/riscv-intc: Add ACPI support for AIA")
+functions: drivers/irqchip/irq-riscv-intc.c:riscv_intc_acpi_init
+fixes: f8619b66bdb1(riscv)
+diff --git a/drivers/irqchip/irq-riscv-intc.c b/drivers/irqchip/irq-riscv-intc.c
+index 8c5411386220..f653c13de62b 100644
+--- a/drivers/irqchip/irq-riscv-intc.c
++++ b/drivers/irqchip/irq-riscv-intc.c
+@@ -266,5 +266,5 @@ struct rintc_data {
+ 
+ static u32 nr_rintc;
+-static struct rintc_data *rintc_acpi_data[NR_CPUS];
++static struct rintc_data **rintc_acpi_data;
+ 
+ #define for_each_matching_plic(_plic_id)				\
+@@ -330,4 +330,10 @@ int acpi_rintc_get_imsic_mmio_info(u32 index, struct resource *res)
+ }
+ 
++static int __init riscv_intc_acpi_match(union acpi_subtable_headers *header,
++					const unsigned long end)
++{
++	return 0;
++}
++
+ static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
+ 				       const unsigned long end)
+@@ -335,6 +341,17 @@ static int __init riscv_intc_acpi_init(union acpi_subtable_headers *header,
+ 	struct acpi_madt_rintc *rintc;
+ 	struct fwnode_handle *fn;
++	int count;
+ 	int rc;
+ 
++	if (!rintc_acpi_data) {
++		count = acpi_table_parse_madt(ACPI_MADT_TYPE_RINTC, riscv_intc_acpi_match, 0);
++		if (count <= 0)
++			return -EINVAL;
++
++		rintc_acpi_data = kcalloc(count, sizeof(*rintc_acpi_data), GFP_KERNEL);
++		if (!rintc_acpi_data)
++			return -ENOMEM;
++	}
++
+ 	rintc = (struct acpi_madt_rintc *)header;
+ 	rintc_acpi_data[nr_rintc] = kzalloc(sizeof(*rintc_acpi_data[0]), GFP_KERNEL);

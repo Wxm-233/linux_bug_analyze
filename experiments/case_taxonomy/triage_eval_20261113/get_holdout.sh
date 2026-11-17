@@ -1,0 +1,2 @@
+cd /root/repos/linux
+for spec in $(cat /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/heldout_v2_20261111/data/batch1.txt | tr -d '\015'); do IFS=: read g p f <<< "$spec"; git show $f > /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/triage_eval_20261113/data/$g.patch; echo $g $(wc -l < /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/triage_eval_20261113/data/$g.patch); done

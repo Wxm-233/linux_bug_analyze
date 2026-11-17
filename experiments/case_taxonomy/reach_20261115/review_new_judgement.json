@@ -1,0 +1,103 @@
+{
+ "_note": "Claude's judgement before reading Codex",
+ "items": [
+  {
+   "k": 1,
+   "loc": "mm/memory.c:873",
+   "verdict": "不可能",
+   "why": "vm_normal_page_pmd 约定调用者传 present 的 PMD，调用点都先查过。",
+   "extra": false
+  },
+  {
+   "k": 2,
+   "loc": "mm/gup.c:1068",
+   "verdict": "不可能",
+   "why": "gate 区域是内核提供的特殊映射，pte 非空即 present，不会有交换项、迁移项。",
+   "extra": false
+  },
+  {
+   "k": 3,
+   "loc": "mm/hmm.c:578",
+   "verdict": "不可能",
+   "why": "非 present 时 pte_to_hmm_pfn_flags 给出的标志里没有 VALID，读出的错误页框号写进 hmm_pfns 后也不会被当成有效项使用。",
+   "extra": false
+  },
+  {
+   "k": 4,
+   "loc": "mm/khugepaged.c:654",
+   "verdict": "不可能",
+   "why": "khugepaged 隔离阶段已确保这些 pte 都是 present（VM_WARN_ON_ONCE 也写明了），none 已单独跳过。",
+   "extra": false
+  },
+  {
+   "k": 5,
+   "loc": "mm/ksm.c:1464",
+   "verdict": "不可能",
+   "why": "ptep 在前面已用 pte_same 和 write_protect_page 得到的 present orig_pte 比对过。",
+   "extra": false
+  },
+  {
+   "k": 6,
+   "loc": "mm/mapping_dirty_helpers.c:96",
+   "verdict": "不可能",
+   "why": "同 wp_pte：唯一使用者 vmwgfx 映射的是 VM_PFNMAP 的设备内存，不会有交换项、迁移项。",
+   "extra": false
+  },
+  {
+   "k": 7,
+   "loc": "mm/memory.c:2494",
+   "verdict": "不可能",
+   "why": "mkwrite 路径只用于 fsdax 等 ZONE_DEVICE 页的共享映射，这些页不会被换出或迁移，非空即 present。",
+   "extra": false
+  },
+  {
+   "k": 8,
+   "loc": "mm/memory.c:2495",
+   "verdict": "不可能",
+   "why": "同 7。",
+   "extra": false
+  },
+  {
+   "k": 9,
+   "loc": "mm/memory.c:2824",
+   "verdict": "不可能",
+   "why": "同 7（vmf_insert_pfn_mkwrite 等，PFNMAP/MIXEDMAP 不会有交换项、迁移项）。",
+   "extra": false
+  },
+  {
+   "k": 10,
+   "loc": "mm/memory.c:2825",
+   "verdict": "不可能",
+   "why": "同 9。",
+   "extra": false
+  },
+  {
+   "k": 11,
+   "loc": "mm/migrate_device.c:1093",
+   "verdict": "不可能",
+   "why": "flush 只在前面 pte_present(orig_pte) 分支里置为真，布尔守卫；检查器没识别这种写法。",
+   "extra": false
+  },
+  {
+   "k": 12,
+   "loc": "mm/mprotect.c:733",
+   "verdict": "不可能",
+   "why": "只对 VM_PFNMAP 区域遍历，pte 要么为空（pte_pfn 为 0，无害），要么 present。",
+   "extra": false
+  },
+  {
+   "k": 13,
+   "loc": "mm/vmscan.c:3610",
+   "verdict": "不可能",
+   "why": "get_pte_pfn() 先查 pte_present，非 present 返回 -1，被 continue 跳过；守卫在被调函数的返回值里。",
+   "extra": true
+  },
+  {
+   "k": 14,
+   "loc": "mm/vmscan.c:4350",
+   "verdict": "不可能",
+   "why": "同 13。",
+   "extra": true
+  }
+ ]
+}

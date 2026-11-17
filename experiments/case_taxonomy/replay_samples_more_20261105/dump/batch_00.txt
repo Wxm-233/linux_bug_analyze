@@ -1,0 +1,1582 @@
+
+##### V000
+=== e5973191a8e3 RV2 2023-01-19 +4/-0
+riscv: vmlinux.lds.S: explicitly catch .rela.dyn symbols
+
+When enabling linker orphan section warning, I got warnings similar as
+below:
+riscv64-linux-gnu-ld: warning: orphan section `.rela.text' from
+`init/main.o' being placed in section `.rela.dyn'
+
+Use the approach similar as ARM64 does and declare it in vmlinux.lds.S
+functions: 
+fixes: 
+diff --git a/arch/riscv/kernel/vmlinux.lds.S b/arch/riscv/kernel/vmlinux.lds.S
+index 07c19f2a288c..6a250313b752 100644
+--- a/arch/riscv/kernel/vmlinux.lds.S
++++ b/arch/riscv/kernel/vmlinux.lds.S
+@@ -98,4 +98,8 @@ SECTIONS
+ 	}
+ 
++	.rela.dyn : {
++		*(.rela*)
++	}
++
+ 	__init_data_end = .;
+ 
+
+##### V001
+=== 07863871dfb1 RV2 2023-09-12 +2/-0
+riscv: defconfig : add CONFIG_MMC_DW for starfive
+
+If these config not set, mmc can't run for jh7110, rootfs can't
+be found when using SD card. So set CONFIG_MMC_DW=y like arm64
+defconfig, and set CONFIG_MMC_DW_STARFIVE=y for starfive. Then
+starfive vf2 board can start SD card rootfs with mainline defconfig
+and dtb.
+functions: 
+fixes: 
+diff --git a/arch/riscv/configs/defconfig b/arch/riscv/configs/defconfig
+index 1e81c865a271..d56d52e2ef87 100644
+--- a/arch/riscv/configs/defconfig
++++ b/arch/riscv/configs/defconfig
+@@ -215,4 +215,6 @@ CONFIG_MMC_SDHCI_PLTFM=y
+ CONFIG_MMC_SDHCI_CADENCE=y
+ CONFIG_MMC_SPI=y
++CONFIG_MMC_DW=y
++CONFIG_MMC_DW_STARFIVE=y
+ CONFIG_MMC_SDHI=y
+ CONFIG_MMC_SUNXI=y
+
+##### V002
+=== 8f8c1ff879fa RV2 2023-09-12 +8/-9
+riscv: vdso.lds.S: remove hardcoded 0x800 .text start addr
+
+I believe the hardcoded 0x800 and related comments come from the long
+history VDSO_TEXT_OFFSET in x86 vdso code, but commit 5b9304933730
+("x86 vDSO: generate vdso-syms.lds") and commit f6b46ebf904f ("x86
+vDSO: new layout") removes the comment and hard coding for x86.
+
+Similar as x86 and other arch, riscv doesn't need the rigid layout
+using VDSO_TEXT_OFFSET since it "no longer matters to the kernel".
+so we could remove the hard coding now, and removing it brings a
+small vdso.so and aligns with other architectures.
+
+Also, having enough separation between data and text is important for
+I-cache, so similar as x86, move .note, .eh_frame_hdr, and .eh_frame
+between .rodata and .text.
+functions: 
+fixes: 
+diff --git a/arch/riscv/kernel/vdso/vdso.lds.S b/arch/riscv/kernel/vdso/vdso.lds.S
+index 671aa21769bc..cbe2a179331d 100644
+--- a/arch/riscv/kernel/vdso/vdso.lds.S
++++ b/arch/riscv/kernel/vdso/vdso.lds.S
+@@ -24,10 +24,6 @@ SECTIONS
+ 	.gnu.version_r	: { *(.gnu.version_r) }
+ 
+-	.note		: { *(.note.*) }		:text	:note
+ 	.dynamic	: { *(.dynamic) }		:text	:dynamic
+ 
+-	.eh_frame_hdr	: { *(.eh_frame_hdr) }		:text	:eh_frame_hdr
+-	.eh_frame	: { KEEP (*(.eh_frame)) }	:text
+-
+ 	.rodata		: {
+ 		*(.rodata .rodata.* .gnu.linkonce.r.*)
+@@ -38,11 +34,14 @@ SECTIONS
+ 	}
+ 
++	.note		: { *(.note.*) }		:text	:note
++
++	.eh_frame_hdr	: { *(.eh_frame_hdr) }		:text	:eh_frame_hdr
++	.eh_frame	: { KEEP (*(.eh_frame)) }	:text
++
+ 	/*
+-	 * This linker script is used both with -r and with -shared.
+-	 * For the layouts to match, we need to skip more than enough
+-	 * space for the dynamic symbol table, etc. If this amount is
+-	 * insufficient, ld -shared will error; simply increase it here.
++	 * Text is well-separated from actual data: there's plenty of
++	 * stuff that isn't used at runtime in between.
+ 	 */
+-	. = 0x800;
++	. = ALIGN(16);
+ 	.text		: { *(.text .text.*) }		:text
+ 
+
+##### V003
+=== 653301077c1f RV2 2023-09-29 +52/-0
+riscv: configs: defconfig: Enable configs required for RZ/Five SoC
+
+Enable the configs required by the below IP blocks which are
+present on RZ/Five SoC:
+* ADC
+* CANFD
+* DMAC
+* eMMC/SDHI
+* OSTM
+* RAVB (+ Micrel PHY)
+* RIIC
+* RSPI
+* SSI (Sound+WM8978 codec)
+* Thermal
+* USB (PHY/RESET/OTG)
+
+Along with the above some core configs are enabled too,
+-> CPU frequency scaling as RZ/Five does support this.
+-> MTD is enabled as RSPI can be connected to flash chips
+-> Enabled I2C chardev so that it enables userspace to read/write
+   i2c devices (similar to arm64)
+-> Thermal configs as RZ/Five SoC does have thermal unit
+-> GPIO regulator as we might have IP blocks for which voltage
+   levels are controlled by GPIOs
+-> OTG configs as RZ/Five USB can support host/function
+-> Gadget configs so that we can test USB function (as done in arm64
+   all the gadget configs are enabled)
+functions: 
+fixes: 
+ arch/riscv/configs/defconfig | 52 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+diff --git a/arch/riscv/configs/defconfig b/arch/riscv/configs/defconfig
+index ab86ec3b9eab..1e81c865a271 100644
+--- a/arch/riscv/configs/defconfig
++++ b/arch/riscv/configs/defconfig
+@@ -37,4 +37,11 @@ CONFIG_HOTPLUG_CPU=y
+ CONFIG_PM=y
+ CONFIG_CPU_IDLE=y
++CONFIG_CPU_FREQ=y
++CONFIG_CPU_FREQ_STAT=y
++CONFIG_CPU_FREQ_GOV_POWERSAVE=m
++CONFIG_CPU_FREQ_GOV_USERSPACE=y
++CONFIG_CPU_FREQ_GOV_ONDEMAND=y
++CONFIG_CPU_FREQ_GOV_CONSERVATIVE=m
++CONFIG_CPUFREQ_DT=y
+ CONFIG_VIRTUALIZATION=y
+ CONFIG_KVM=m
+@@ -95,4 +102,5 @@ CONFIG_CGROUP_NET_PRIO=y
+ CONFIG_NET_9P=y
+ CONFIG_NET_9P_VIRTIO=y
++CONFIG_CAN=m
+ CONFIG_PCI=y
+ CONFIG_PCIEPORTBUS=y
+@@ -102,4 +110,9 @@ CONFIG_PCIE_FU740=y
+ CONFIG_DEVTMPFS=y
+ CONFIG_DEVTMPFS_MOUNT=y
++CONFIG_MTD=y
++CONFIG_MTD_BLOCK=y
++CONFIG_MTD_CFI=y
++CONFIG_MTD_CFI_ADV_OPTIONS=y
++CONFIG_MTD_SPI_NOR=y
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_VIRTIO_BLK=y
+@@ -124,6 +137,9 @@ CONFIG_MACB=y
+ CONFIG_E1000E=y
+ CONFIG_R8169=y
++CONFIG_RAVB=y
+ CONFIG_STMMAC_ETH=m
++CONFIG_MICREL_PHY=y
+ CONFIG_MICROSEMI_PHY=y
++CONFIG_CAN_RCAR_CANFD=m
+ CONFIG_INPUT_MOUSEDEV=y
+ CONFIG_KEYBOARD_SUN4I_LRADC=m
+@@ -136,14 +152,22 @@ CONFIG_VIRTIO_CONSOLE=y
+ CONFIG_HW_RANDOM=y
+ CONFIG_HW_RANDOM_VIRTIO=y
++CONFIG_I2C_CHARDEV=m
+ CONFIG_I2C_MV64XXX=m
++CONFIG_I2C_RIIC=y
+ CONFIG_SPI=y
++CONFIG_SPI_RSPI=m
+ CONFIG_SPI_SIFIVE=y
+ CONFIG_SPI_SUN6I=y
+ # CONFIG_PTP_1588_CLOCK is not set
+ CONFIG_GPIO_SIFIVE=y
++CONFIG_CPU_THERMAL=y
++CONFIG_DEVFREQ_THERMAL=y
++CONFIG_RZG2L_THERMAL=y
+ CONFIG_WATCHDOG=y
+ CONFIG_SUNXI_WATCHDOG=y
++CONFIG_RENESAS_RZG2LWDT=y
+... (69 more diff lines)
+
+##### V004
+=== 14c3ec67236b RV2 2024-07-09 +1/-0
+RISC-V: pi: Force hidden visibility for all symbol references
+
+Eliminate all GOT entries in the .pi section, by forcing hidden
+visibility for all symbol references, which informs the compiler that
+such references will be resolved at link time without the need for
+allocating GOT entries.
+
+Include linux/hidden.h in Makefile, like arm64, for the
+hidden visibility attribute.
+functions: 
+fixes: 
+diff --git a/arch/riscv/kernel/pi/Makefile b/arch/riscv/kernel/pi/Makefile
+index 50bc5ef7dd2f..1ef7584be0c3 100644
+--- a/arch/riscv/kernel/pi/Makefile
++++ b/arch/riscv/kernel/pi/Makefile
+@@ -6,4 +6,5 @@ KBUILD_CFLAGS	:= $(subst $(CC_FLAGS_FTRACE),,$(KBUILD_CFLAGS)) -fpie \
+ 		   $(call cc-option,-mbranch-protection=none) \
+ 		   -I$(srctree)/scripts/dtc/libfdt -fno-stack-protector \
++		   -include $(srctree)/include/linux/hidden.h \
+ 		   -D__DISABLE_EXPORTS -ffreestanding \
+ 		   -fno-asynchronous-unwind-tables -fno-unwind-tables \
+
+##### V005
+=== f30d7ccd13f0 RV2 2025-08-18 +2/-0
+RISC-V: Enable GPIO keyboard and event device in RV64 defconfig
+
+The GPIO keyboard and event device can be used to receive graceful
+shutdown or reboot input keys so let us enable it by default for
+RV64 (just like ARM64).
+functions: 
+fixes: 
+diff --git a/arch/riscv/configs/defconfig b/arch/riscv/configs/defconfig
+index 7b5eed17611a..021baecb253a 100644
+--- a/arch/riscv/configs/defconfig
++++ b/arch/riscv/configs/defconfig
+@@ -140,4 +140,6 @@ CONFIG_MICROSEMI_PHY=y
+ CONFIG_MOTORCOMM_PHY=y
+ CONFIG_INPUT_MOUSEDEV=y
++CONFIG_INPUT_EVDEV=y
++CONFIG_KEYBOARD_GPIO=y
+ CONFIG_KEYBOARD_SUN4I_LRADC=m
+ CONFIG_SERIAL_8250=y
+
+##### V006
+=== 425cc087fbaf RV2 2025-11-17 +6/-0
+riscv: mm: ptep_get_and_clear(): avoid atomic ops when !CONFIG_SMP
+
+When !CONFIG_SMP, there's no need for atomic operations in
+ptep_get_and_clear(), so, similar to x86, let's not use atomics in
+this case.
+functions: 
+fixes: 
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 1df8a6adb407..ebab8ecd78b2 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -661,5 +661,11 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+ 				       unsigned long address, pte_t *ptep)
+ {
++#ifdef CONFIG_SMP
+ 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
++#else
++	pte_t pte = *ptep;
++
++	set_pte(ptep, __pte(0));
++#endif
+ 
+ 	page_table_check_pte_clear(mm, pte);
+
+##### V007
+=== ec87a82ca874 RV2 2026-03-03 +9/-2
+KVM: riscv: Fix Spectre-v1 in AIA CSR access
+
+User-controlled indices are used to access AIA CSR registers.
+Sanitize them with array_index_nospec() to prevent speculative
+out-of-bounds access.
+
+Similar to x86 commit 8c86405f606c ("KVM: x86: Protect
+ioapic_read_indirect() from Spectre-v1/L1TF attacks") and arm64
+commit 41b87599c743 ("KVM: arm/arm64: vgic: fix possible spectre-v1
+in vgic_get_irq()").
+functions: arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_get_csr, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_set_csr
+fixes: 
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index cac3c2b51d72..38de97d2f5b8 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -14,4 +14,5 @@
+ #include <linux/irqdomain.h>
+ #include <linux/kvm_host.h>
++#include <linux/nospec.h>
+ #include <linux/percpu.h>
+ #include <linux/spinlock.h>
+@@ -183,8 +184,11 @@ int kvm_riscv_vcpu_aia_get_csr(struct kvm_vcpu *vcpu,
+ {
+ 	struct kvm_vcpu_aia_csr *csr = &vcpu->arch.aia_context.guest_csr;
++	unsigned long regs_max = sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long);
+ 
+-	if (reg_num >= sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long))
++	if (reg_num >= regs_max)
+ 		return -ENOENT;
+ 
++	reg_num = array_index_nospec(reg_num, regs_max);
++
+ 	*out_val = 0;
+ 	if (kvm_riscv_aia_available())
+@@ -199,8 +203,11 @@ int kvm_riscv_vcpu_aia_set_csr(struct kvm_vcpu *vcpu,
+ {
+ 	struct kvm_vcpu_aia_csr *csr = &vcpu->arch.aia_context.guest_csr;
++	unsigned long regs_max = sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long);
+ 
+-	if (reg_num >= sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long))
++	if (reg_num >= regs_max)
+ 		return -ENOENT;
+ 
++	reg_num = array_index_nospec(reg_num, regs_max);
++
+ 	if (kvm_riscv_aia_available()) {
+ 		((unsigned long *)csr)[reg_num] = val;
+
+##### V008
+=== 6ad36f39a769 RV2 2026-03-30 +130/-0
+RISC-V: KVM: Split huge pages during fault handling for dirty logging
+
+During dirty logging, all huge pages are write-protected. When the guest
+writes to a write-protected huge page, a page fault is triggered. Before
+recovering the write permission, the huge page must be split into smaller
+pages (e.g., 4K). After splitting, the normal mapping process proceeds,
+allowing write permission to be restored at the smaller page granularity.
+
+If dirty logging is disabled because migration failed or was cancelled,
+only recover the write permission at the 4K level, and skip recovering the
+huge page mapping at this time to avoid the overhead of freeing page tables.
+The huge page mapping can be recovered in the ioctl context, similar to x86,
+in a later patch.
+functions: arch/riscv/kvm/gstage.c:kvm_riscv_gstage_map_page
+fixes: 
+ arch/riscv/include/asm/kvm_gstage.h |   4 ++
+ arch/riscv/kvm/gstage.c             | 126 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 130 insertions(+)
+diff --git a/arch/riscv/include/asm/kvm_gstage.h b/arch/riscv/include/asm/kvm_gstage.h
+index 595e2183173e..a89d1422cc84 100644
+--- a/arch/riscv/include/asm/kvm_gstage.h
++++ b/arch/riscv/include/asm/kvm_gstage.h
+@@ -54,4 +54,8 @@ int kvm_riscv_gstage_map_page(struct kvm_gstage *gstage,
+ 			      struct kvm_gstage_mapping *out_map);
+ 
++int kvm_riscv_gstage_split_huge(struct kvm_gstage *gstage,
++				struct kvm_mmu_memory_cache *pcache,
++				gpa_t addr, u32 target_level, bool flush);
++
+ enum kvm_riscv_gstage_op {
+ 	GSTAGE_OP_NOP = 0,	/* Nothing */
+diff --git a/arch/riscv/kvm/gstage.c b/arch/riscv/kvm/gstage.c
+index d2001d508046..ffec3e5ddcaf 100644
+--- a/arch/riscv/kvm/gstage.c
++++ b/arch/riscv/kvm/gstage.c
+@@ -164,4 +164,20 @@ int kvm_riscv_gstage_set_pte(struct kvm_gstage *gstage,
+ }
+ 
++static void kvm_riscv_gstage_update_pte_prot(struct kvm_gstage *gstage, u32 level,
++					     gpa_t addr, pte_t *ptep, pgprot_t prot)
++{
++	pte_t new_pte;
++
++	if (pgprot_val(pte_pgprot(ptep_get(ptep))) == pgprot_val(prot))
++		return;
++
++	new_pte = pfn_pte(pte_pfn(ptep_get(ptep)), prot);
++	new_pte = pte_mkdirty(new_pte);
++
++	set_pte(ptep, new_pte);
++
++	gstage_tlb_flush(gstage, level, addr);
++}
++
+ int kvm_riscv_gstage_map_page(struct kvm_gstage *gstage,
+ 			      struct kvm_mmu_memory_cache *pcache,
+@@ -170,5 +186,8 @@ int kvm_riscv_gstage_map_page(struct kvm_gstage *gstage,
+ 			      struct kvm_gstage_mapping *out_map)
+ {
++	bool found_leaf;
++	u32 ptep_level;
+ 	pgprot_t prot;
++	pte_t *ptep;
+ 	int ret;
+ 
+@@ -204,4 +223,41 @@ int kvm_riscv_gstage_map_page(struct kvm_gstage *gstage,
+ 			prot = PAGE_WRITE;
+ 	}
++
++	found_leaf = kvm_riscv_gstage_get_leaf(gstage, gpa, &ptep, &ptep_level);
++	if (found_leaf) {
++		/*
++		 * ptep_level is the current gstage mapping level of addr, out_map->level
++		 * is the required mapping level during fault handling.
++		 *
++		 * 1) ptep_level > out_map->level
++		 * This happens when dirty logging is enabled and huge pages are used.
++		 * KVM must track the pages at 4K level, and split the huge mapping
+... (104 more diff lines)
+
+##### V009
+=== 3b60f96b852a RV2 2026-05-03 +1/-1
+riscv: replace select with dependency for visible RELOCATABLE
+
+RANDOMIZE_BASE currently selects RELOCATABLE even though RELOCATABLE
+is visible to users. Some other architectures, like x86, use 'depends on'
+for RELOCATABLE in their definition of RANDOMIZE_BASE, so let's do the same
+here.
+
+This select-visible Kconfig misusage was detected by Kconfirm, a static
+analysis tool for Kconfig.
+functions: 
+fixes: 
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index a5e4f438e381..b1101c336c7c 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -1165,5 +1165,5 @@ config RELOCATABLE
+ config RANDOMIZE_BASE
+         bool "Randomize the address of the kernel image"
+-        select RELOCATABLE
++        depends on RELOCATABLE
+         depends on MMU && 64BIT
+         help
+
+##### V010
+=== 9090ba2e7cf8 RV2 2026-05-17 +2/-7
+KVM: riscv: Rely on common MMU notifier locking
+
+The common KVM invalidation paths call kvm_unmap_gfn_range() with
+mmu_lock already held for write.
+
+For the standard MMU notifier path, the call chain is:
+
+  kvm_mmu_notifier_invalidate_range_start()
+    kvm_handle_hva_range()
+      kvm_unmap_gfn_range()
+
+kvm_mmu_notifier_invalidate_range_start() leaves range.lockless clear.
+kvm_handle_hva_range() therefore takes KVM_MMU_LOCK(kvm) before invoking
+the handler.
+
+The guest_memfd path has the same locking contract:
+
+  __kvm_gmem_invalidate_begin()
+    kvm_mmu_unmap_gfn_range()
+      kvm_unmap_gfn_range()
+
+__kvm_gmem_invalidate_begin() explicitly takes KVM_MMU_LOCK(kvm) before
+calling kvm_mmu_unmap_gfn_range().
+
+So remove the local trylock and make the common locking contract explicit
+with lockdep_assert_held_write() like x86.
+functions: arch/riscv/kvm/mmu.c:kvm_unmap_gfn_range
+fixes: 
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index 8469ed932421..da944cb68404 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -246,5 +246,4 @@ bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
+ {
+ 	struct kvm_gstage gstage;
+-	bool mmu_locked;
+ 	bool flush;
+ 
+@@ -252,14 +251,10 @@ bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
+ 		return false;
+ 
+-	kvm_riscv_gstage_init(&gstage, kvm);
+-	mmu_locked = spin_trylock(&kvm->mmu_lock);
++	lockdep_assert_held_write(&kvm->mmu_lock);
+ 
++	kvm_riscv_gstage_init(&gstage, kvm);
+ 	flush = kvm_riscv_gstage_unmap_range(&gstage, range->start << PAGE_SHIFT,
+ 					     (range->end - range->start) << PAGE_SHIFT,
+ 					     range->may_block);
+-
+-	if (mmu_locked)
+-		spin_unlock(&kvm->mmu_lock);
+-
+ 	if (flush)
+ 		kvm_flush_remote_tlbs_range(kvm, range->start,
+
+##### V011
+=== cc98f006c63c RV2 2026-05-17 +15/-13
+KVM: riscv: Use an rwlock for mmu_lock
+
+RISC-V KVM currently uses a spinlock for mmu_lock. That serializes all
+G-stage MMU operations, including permission-only updates that do not
+allocate or free page-table pages.
+
+Use KVM's rwlock form of mmu_lock, as x86 and arm64 already do. Keep the
+existing map, unmap and teardown paths on the write side. This prepares
+RISC-V for read-side handling of G-stage permission updates.
+functions: arch/riscv/kvm/gstage.c:kvm_riscv_gstage_unmap_range, arch/riscv/kvm/mmu.c:mmu_wp_memory_region, arch/riscv/kvm/mmu.c:kvm_riscv_mmu_ioremap, arch/riscv/kvm/mmu.c:kvm_riscv_mmu_iounmap, arch/riscv/kvm/mmu.c:kvm_arch_flush_shadow_memslot, arch/riscv/kvm/mmu.c:kvm_riscv_mmu_map, arch/riscv/kvm/mmu.c:kvm_riscv_mmu_free_pgd
+fixes: 
+ arch/riscv/include/asm/kvm_host.h |  2 ++
+ arch/riscv/kvm/gstage.c           |  2 +-
+ arch/riscv/kvm/mmu.c              | 24 ++++++++++++------------
+ 3 files changed, 15 insertions(+), 13 deletions(-)
+diff --git a/arch/riscv/include/asm/kvm_host.h b/arch/riscv/include/asm/kvm_host.h
+index 75b0a951c1bc..60017ceec9d2 100644
+--- a/arch/riscv/include/asm/kvm_host.h
++++ b/arch/riscv/include/asm/kvm_host.h
+@@ -49,4 +49,6 @@
+ #define __KVM_HAVE_ARCH_FLUSH_REMOTE_TLBS_RANGE
+ 
++#define KVM_HAVE_MMU_RWLOCK
++
+ #define KVM_DIRTY_LOG_MANUAL_CAPS	(KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE | \
+ 					 KVM_DIRTY_LOG_INITIALLY_SET)
+diff --git a/arch/riscv/kvm/gstage.c b/arch/riscv/kvm/gstage.c
+index e020b334ae6f..d4ce5e76989c 100644
+--- a/arch/riscv/kvm/gstage.c
++++ b/arch/riscv/kvm/gstage.c
+@@ -415,5 +415,5 @@ bool kvm_riscv_gstage_unmap_range(struct kvm_gstage *gstage,
+ 		 */
+ 		if (!(gstage->flags & KVM_GSTAGE_FLAGS_LOCAL) && may_block && addr < end)
+-			cond_resched_lock(&gstage->kvm->mmu_lock);
++			cond_resched_rwlock_write(&gstage->kvm->mmu_lock);
+ 	}
+ 
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index da944cb68404..514f06a1f688 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -28,7 +28,7 @@ static void mmu_wp_memory_region(struct kvm *kvm, int slot)
+ 	kvm_riscv_gstage_init(&gstage, kvm);
+ 
+-	spin_lock(&kvm->mmu_lock);
++	write_lock(&kvm->mmu_lock);
+ 	flush = kvm_riscv_gstage_wp_range(&gstage, start, end);
+-	spin_unlock(&kvm->mmu_lock);
++	write_unlock(&kvm->mmu_lock);
+ 	if (flush)
+ 		kvm_flush_remote_tlbs_memslot(kvm, memslot);
+@@ -68,7 +68,7 @@ int kvm_riscv_mmu_ioremap(struct kvm *kvm, gpa_t gpa, phys_addr_t hpa,
+ 			goto out;
+ 
+-		spin_lock(&kvm->mmu_lock);
++		write_lock(&kvm->mmu_lock);
+ 		ret = kvm_riscv_gstage_set_pte(&gstage, &pcache, &map);
+-		spin_unlock(&kvm->mmu_lock);
++		write_unlock(&kvm->mmu_lock);
+ 		if (ret)
+ 			goto out;
+@@ -89,7 +89,7 @@ void kvm_riscv_mmu_iounmap(struct kvm *kvm, gpa_t gpa, unsigned long size)
+ 	kvm_riscv_gstage_init(&gstage, kvm);
+ 
+-	spin_lock(&kvm->mmu_lock);
++	write_lock(&kvm->mmu_lock);
+ 	flush = kvm_riscv_gstage_unmap_range(&gstage, gpa, size, false);
+-	spin_unlock(&kvm->mmu_lock);
++	write_unlock(&kvm->mmu_lock);
+ 
+ 	if (flush)
+@@ -144,7 +144,7 @@ void kvm_arch_flush_shadow_memslot(struct kvm *kvm,
+ 	kvm_riscv_gstage_init(&gstage, kvm);
+ 
+-	spin_lock(&kvm->mmu_lock);
+... (34 more diff lines)
+
+##### A012
+=== 732ea9db9d8a LA2 2022-10-11 +121/-94
+efi: libstub: Move screen_info handling to common code
+
+Currently, arm64, RISC-V and LoongArch rely on the fact that struct
+screen_info can be accessed directly, due to the fact that the EFI stub
+and the core kernel are part of the same image. This will change after a
+future patch, so let's ensure that the screen_info handling is able to
+deal with this, by adopting the arm32 approach of passing it as a
+configuration table. While at it, switch to ACPI reclaim memory to hold
+the screen_info data, which is more appropriate for this kind of
+allocation.
+functions: arch/arm/kernel/efi.c:load_screen_info_table, arch/arm/kernel/efi.c:arm_efi_init, arch/loongarch/kernel/efi.c:efi_init, drivers/firmware/efi/efi-init.c:init_screen_info, drivers/firmware/efi/libstub/arm32-stub.c:alloc_screen_info, drivers/firmware/efi/libstub/arm32-stub.c:free_screen_info
+fixes: 
+ arch/loongarch/include/asm/efi.h           |  9 --------
+ arch/loongarch/kernel/efi.c                | 24 ++++++++++++++++++++--
+ arch/riscv/include/asm/efi.h               |  6 ------
+ drivers/firmware/efi/efi-init.c            | 21 ++++++++++++++++---
+ drivers/firmware/efi/efi.c                 |  5 +++++
+ drivers/firmware/efi/libstub/Makefile      |  3 ++-
+ drivers/firmware/efi/libstub/arm32-stub.c  | 37 ---------------------------------
+ drivers/firmware/efi/libstub/efi-stub.c    |  9 ++++++++
+ drivers/firmware/efi/libstub/efistub.h     |  3 +++
+ drivers/firmware/efi/libstub/screen_info.c | 56 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ include/linux/efi.h                        |  2 +-
+ 14 files changed, 121 insertions(+), 94 deletions(-)
+diff --git a/arch/arm/include/asm/efi.h b/arch/arm/include/asm/efi.h
+index 4bdd930167c0..b95241b1ca65 100644
+--- a/arch/arm/include/asm/efi.h
++++ b/arch/arm/include/asm/efi.h
+@@ -44,7 +44,4 @@ void efi_virtmap_unload(void);
+ /* arch specific definitions used by the stub code */
+ 
+-struct screen_info *alloc_screen_info(void);
+-void free_screen_info(struct screen_info *si);
+-
+ /*
+  * A reasonable upper bound for the uncompressed kernel size is 32 MBytes,
+diff --git a/arch/arm/kernel/efi.c b/arch/arm/kernel/efi.c
+index e50ad7eefc02..882104f43b3b 100644
+--- a/arch/arm/kernel/efi.c
++++ b/arch/arm/kernel/efi.c
+@@ -76,36 +76,11 @@ int __init efi_create_mapping(struct mm_struct *mm, efi_memory_desc_t *md)
+ }
+ 
+-static unsigned long __initdata screen_info_table = EFI_INVALID_TABLE_ADDR;
+ static unsigned long __initdata cpu_state_table = EFI_INVALID_TABLE_ADDR;
+ 
+ const efi_config_table_type_t efi_arch_tables[] __initconst = {
+-	{LINUX_EFI_ARM_SCREEN_INFO_TABLE_GUID, &screen_info_table},
+ 	{LINUX_EFI_ARM_CPU_STATE_TABLE_GUID, &cpu_state_table},
+ 	{}
+ };
+ 
+-static void __init load_screen_info_table(void)
+-{
+-	struct screen_info *si;
+-
+-	if (screen_info_table != EFI_INVALID_TABLE_ADDR) {
+-		si = early_memremap_ro(screen_info_table, sizeof(*si));
+-		if (!si) {
+-			pr_err("Could not map screen_info config table\n");
+-			return;
+-		}
+-		screen_info = *si;
+-		early_memunmap(si, sizeof(*si));
+-
+-		/* dummycon on ARM needs non-zero values for columns/lines */
+-		screen_info.orig_video_cols = 80;
+-		screen_info.orig_video_lines = 25;
+-
+-		if (memblock_is_map_memory(screen_info.lfb_base))
+-			memblock_mark_nomap(screen_info.lfb_base,
+-					    screen_info.lfb_size);
+-	}
+-}
+-
+ static void __init load_cpu_state_table(void)
+ {
+@@ -146,5 +121,9 @@ void __init arm_efi_init(void)
+ 	efi_init();
+ 
+-	load_screen_info_table();
++	if (screen_info.orig_video_isVGA == VIDEO_TYPE_EFI) {
++		/* dummycon on ARM needs non-zero values for columns/lines */
++		screen_info.orig_video_cols = 80;
+... (304 more diff lines)
+
+##### A013
+=== e025ab842ec3 LA2 2022-10-18 +11/-210
+mm: remove kern_addr_valid() completely
+
+Most architectures (except arm64/x86/sparc) simply return 1 for
+kern_addr_valid(), which is only used in read_kcore(), and it calls
+copy_from_kernel_nofault() which could check whether the address is a
+valid kernel address.  So as there is no need for kern_addr_valid(), let's
+remove it.
+functions: arch/arm64/mm/mmu.c:kern_addr_valid, arch/x86/mm/init_64.c:kern_addr_valid, fs/proc/kcore.c:read_kcore
+fixes: 
+ arch/s390/include/asm/pgtable.h           |  2 --
+ arch/sh/include/asm/pgtable.h             |  2 --
+ arch/sparc/include/asm/pgtable_32.h       |  6 ------
+ arch/sparc/mm/init_32.c                   |  3 +--
+ arch/sparc/mm/init_64.c                   |  1 -
+ arch/um/include/asm/pgtable.h             |  2 --
+ arch/x86/include/asm/pgtable_32.h         |  9 ---------
+ arch/x86/include/asm/pgtable_64.h         |  1 -
+ arch/x86/mm/init_64.c                     | 41 -----------------------------------------
+ arch/xtensa/include/asm/pgtable.h         |  2 --
+ fs/proc/kcore.c                           | 26 +++++++++-----------------
+ 31 files changed, 11 insertions(+), 210 deletions(-)
+diff --git a/arch/alpha/include/asm/pgtable.h b/arch/alpha/include/asm/pgtable.h
+index 3ea9661c09ff..9e45f6735d5d 100644
+--- a/arch/alpha/include/asm/pgtable.h
++++ b/arch/alpha/include/asm/pgtable.h
+@@ -314,6 +314,4 @@ extern inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
+ #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
+ 
+-#define kern_addr_valid(addr)	(1)
+-
+ #define pte_ERROR(e) \
+ 	printk("%s:%d: bad pte %016lx.\n", __FILE__, __LINE__, pte_val(e))
+diff --git a/arch/arc/include/asm/pgtable-bits-arcv2.h b/arch/arc/include/asm/pgtable-bits-arcv2.h
+index b23be557403e..515e82db519f 100644
+--- a/arch/arc/include/asm/pgtable-bits-arcv2.h
++++ b/arch/arc/include/asm/pgtable-bits-arcv2.h
+@@ -121,6 +121,4 @@ void update_mmu_cache(struct vm_area_struct *vma, unsigned long address,
+ #define __swp_entry_to_pte(x)		((pte_t) { (x).val })
+ 
+-#define kern_addr_valid(addr)	(1)
+-
+ #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+ #include <asm/hugepage.h>
+diff --git a/arch/arm/include/asm/pgtable-nommu.h b/arch/arm/include/asm/pgtable-nommu.h
+index d16aba48fa0a..25d8c7bb07e0 100644
+--- a/arch/arm/include/asm/pgtable-nommu.h
++++ b/arch/arm/include/asm/pgtable-nommu.h
+@@ -22,6 +22,4 @@
+ #define pgd_bad(pgd)		(0)
+ #define pgd_clear(pgdp)
+-#define kern_addr_valid(addr)	(1)
+-/* FIXME */
+ /*
+  * PMD_SHIFT determines the size of the area a second-level page table can map
+diff --git a/arch/arm/include/asm/pgtable.h b/arch/arm/include/asm/pgtable.h
+index 78a532068fec..00954ab1a039 100644
+--- a/arch/arm/include/asm/pgtable.h
++++ b/arch/arm/include/asm/pgtable.h
+@@ -299,8 +299,4 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
+ #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > __SWP_TYPE_BITS)
+ 
+-/* Needs to be defined here and not in linux/mm.h, as it is arch dependent */
+-/* FIXME: this is not correct */
+-#define kern_addr_valid(addr)	(1)
+-
+ /*
+  * We provide our own arch_get_unmapped_area to cope with VIPT caches.
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index 71a1af42f0e8..4873c1d6e7d0 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -1022,6 +1022,4 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
+ #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > __SWP_TYPE_BITS)
+ 
+-extern int kern_addr_valid(unsigned long addr);
+-
+ #ifdef CONFIG_ARM64_MTE
+ 
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index 9a7c38965154..556154d821bf 100644
+--- a/arch/arm64/mm/mmu.c
+... (442 more diff lines)
+
+##### A014
+=== 2045a3b8911b LA2 2022-10-27 +132/-143
+mm/sparse-vmemmap: generalise vmemmap_populate_hugepages()
+
+Generalise vmemmap_populate_hugepages() so ARM64 & X86 & LoongArch can
+share its implementation.
+functions: arch/arm64/mm/mmu.c:vmemmap_populate, arch/loongarch/mm/init.c:vmemmap_populate_hugepages, arch/x86/mm/init_64.c:vmemmap_populate_hugepages
+fixes: 
+ arch/arm64/mm/mmu.c      | 55 +++++++++++------------------------------
+ arch/loongarch/mm/init.c | 59 ++++++++++++-------------------------------
+ arch/x86/mm/init_64.c    | 92 ++++++++++++++++++++++++--------------------------------------------
+ include/linux/mm.h       |  6 +++++
+ mm/sparse-vmemmap.c      | 63 ++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 132 insertions(+), 143 deletions(-)
+diff --git a/arch/arm64/mm/mmu.c b/arch/arm64/mm/mmu.c
+index 556154d821bf..27217ba12e57 100644
+--- a/arch/arm64/mm/mmu.c
++++ b/arch/arm64/mm/mmu.c
+@@ -1138,51 +1138,26 @@ static void free_empty_tables(unsigned long addr, unsigned long end,
+ #endif
+ 
++void __meminit vmemmap_set_pmd(pmd_t *pmdp, void *p, int node,
++			       unsigned long addr, unsigned long next)
++{
++	pmd_set_huge(pmdp, __pa(p), __pgprot(PROT_SECT_NORMAL));
++}
++
++int __meminit vmemmap_check_pmd(pmd_t *pmdp, int node,
++				unsigned long addr, unsigned long next)
++{
++	vmemmap_verify((pte_t *)pmdp, node, addr, next);
++	return 1;
++}
++
+ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
+ 		struct vmem_altmap *altmap)
+ {
+-	unsigned long addr = start;
+-	unsigned long next;
+-	pgd_t *pgdp;
+-	p4d_t *p4dp;
+-	pud_t *pudp;
+-	pmd_t *pmdp;
+-
+ 	WARN_ON((start < VMEMMAP_START) || (end > VMEMMAP_END));
+ 
+ 	if (!ARM64_KERNEL_USES_PMD_MAPS)
+ 		return vmemmap_populate_basepages(start, end, node, altmap);
+-
+-	do {
+-		next = pmd_addr_end(addr, end);
+-
+-		pgdp = vmemmap_pgd_populate(addr, node);
+-		if (!pgdp)
+-			return -ENOMEM;
+-
+-		p4dp = vmemmap_p4d_populate(pgdp, addr, node);
+-		if (!p4dp)
+-			return -ENOMEM;
+-
+-		pudp = vmemmap_pud_populate(p4dp, addr, node);
+-		if (!pudp)
+-			return -ENOMEM;
+-
+-		pmdp = pmd_offset(pudp, addr);
+-		if (pmd_none(READ_ONCE(*pmdp))) {
+-			void *p = NULL;
+-
+-			p = vmemmap_alloc_block_buf(PMD_SIZE, node, altmap);
+-			if (!p) {
+-				if (vmemmap_populate_basepages(addr, next, node, altmap))
+-					return -ENOMEM;
+-				continue;
+-			}
+... (278 more diff lines)
+
+##### A015
+=== 22c4e80466eb LA2 2022-10-27 +46/-57
+MIPS&LoongArch&NIOS2: adjust prototypes of p?d_init()
+
+Patch series "mm/sparse-vmemmap: Generalise helpers and enable for
+LoongArch", v14.
+
+This series is in order to enable sparse-vmemmap for LoongArch.  But
+LoongArch cannot use generic helpers directly because MIPS&LoongArch need
+to call pgd_init()/pud_init()/pmd_init() when populating page tables.  So
+we adjust the prototypes of p?d_init() to make generic helpers can call
+them, then enable sparse-vmemmap with generic helpers, and to be further,
+generalise vmemmap_populate_hugepages() for ARM64, X86 and LoongArch.
+
+
+This patch (of 4):
+
+We are preparing to add sparse vmemmap support to LoongArch.  MIPS and
+LoongArch need to call pgd_init()/pud_init()/pmd_init() when populating
+page tables, so adjust their prototypes to make generic helpers can call
+them.
+
+NIOS2 declares pmd_init() but doesn't use, just remove it to avoid build
+errors.
+functions: arch/loongarch/kernel/numa.c:pcpu_populate_pte, arch/loongarch/mm/pgtable.c:pgd_alloc, arch/loongarch/mm/pgtable.c:pgd_init, arch/loongarch/mm/pgtable.c:pmd_init, arch/loongarch/mm/pgtable.c:pud_init, arch/loongarch/mm/pgtable.c:pagetable_init, arch/mips/kvm/mmu.c:kvm_mips_walk_pgd, arch/mips/mm/pgtable-32.c:pgd_init, arch/mips/mm/pgtable-32.c:pagetable_init, arch/mips/mm/pgtable-64.c:pgd_init, arch/mips/mm/pgtable-64.c:pmd_init, arch/mips/mm/pgtable-64.c:pud_init
+fixes: 
+ arch/loongarch/include/asm/pgalloc.h | 13 ++-----------
+ arch/loongarch/include/asm/pgtable.h |  8 ++++----
+ arch/loongarch/kernel/numa.c         |  4 ++--
+ arch/loongarch/mm/pgtable.c          | 23 +++++++++++++----------
+ arch/mips/include/asm/pgalloc.h      | 10 +++++-----
+ arch/mips/include/asm/pgtable-64.h   |  8 ++++----
+ arch/mips/kvm/mmu.c                  |  3 +--
+ arch/mips/mm/pgtable-32.c            |  9 ++++-----
+ arch/mips/mm/pgtable-64.c            | 18 ++++++++++--------
+ arch/mips/mm/pgtable.c               |  2 +-
+ arch/nios2/include/asm/pgalloc.h     |  5 -----
+ 11 files changed, 46 insertions(+), 57 deletions(-)
+diff --git a/arch/loongarch/include/asm/pgalloc.h b/arch/loongarch/include/asm/pgalloc.h
+index 4bfeb3c9c9ac..af1d1e4a6965 100644
+--- a/arch/loongarch/include/asm/pgalloc.h
++++ b/arch/loongarch/include/asm/pgalloc.h
+@@ -43,13 +43,4 @@ static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
+ extern void pagetable_init(void);
+ 
+-/*
+- * Initialize a new pmd table with invalid pointers.
+- */
+-extern void pmd_init(unsigned long page, unsigned long pagetable);
+-
+-/*
+- * Initialize a new pgd / pmd table with invalid pointers.
+- */
+-extern void pgd_init(unsigned long page);
+ extern pgd_t *pgd_alloc(struct mm_struct *mm);
+ 
+@@ -77,5 +68,5 @@ static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long address)
+ 
+ 	pmd = (pmd_t *)page_address(pg);
+-	pmd_init((unsigned long)pmd, (unsigned long)invalid_pte_table);
++	pmd_init(pmd);
+ 	return pmd;
+ }
+@@ -93,5 +84,5 @@ static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long address)
+ 	pud = (pud_t *) __get_free_page(GFP_KERNEL);
+ 	if (pud)
+-		pud_init((unsigned long)pud, (unsigned long)invalid_pmd_table);
++		pud_init(pud);
+ 	return pud;
+ }
+diff --git a/arch/loongarch/include/asm/pgtable.h b/arch/loongarch/include/asm/pgtable.h
+index b8d837ee6910..9e6651846db9 100644
+--- a/arch/loongarch/include/asm/pgtable.h
++++ b/arch/loongarch/include/asm/pgtable.h
+@@ -238,9 +238,9 @@ extern void set_pmd_at(struct mm_struct *mm, unsigned long addr, pmd_t *pmdp, pm
+ 
+ /*
+- * Initialize a new pgd / pmd table with invalid pointers.
++ * Initialize a new pgd / pud / pmd table with invalid pointers.
+  */
+-extern void pgd_init(unsigned long page);
+-extern void pud_init(unsigned long page, unsigned long pagetable);
+-extern void pmd_init(unsigned long page, unsigned long pagetable);
++extern void pgd_init(void *addr);
++extern void pud_init(void *addr);
++extern void pmd_init(void *addr);
+ 
+ /*
+diff --git a/arch/loongarch/kernel/numa.c b/arch/loongarch/kernel/numa.c
+index a13f92593cfd..eb5d3a4c8a7a 100644
+--- a/arch/loongarch/kernel/numa.c
++++ b/arch/loongarch/kernel/numa.c
+@@ -79,5 +79,5 @@ void __init pcpu_populate_pte(unsigned long addr)
+ 		pgd_populate(&init_mm, pgd, new);
+ #ifndef __PAGETABLE_PUD_FOLDED
+-		pud_init((unsigned long)new, (unsigned long)invalid_pmd_table);
++		pud_init(new);
+ #endif
+... (247 more diff lines)
+
+##### A016
+=== c5a303a51b9c LA2 2022-10-27 +1/-0
+LoongArch: enable ARCH_WANT_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
+
+The feature of minimizing overhead of struct page associated with each
+HugeTLB page is implemented on x86_64.  However, the infrastructure of
+this feature is already there, so just select ARCH_WANT_HUGETLB_PAGE_
+OPTIMIZE_VMEMMAP is enough to enable this feature for LoongArch.
+functions: 
+fixes: 
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index 6f7fa0c0ca08..0a6ef613124c 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -53,4 +53,5 @@ config LOONGARCH
+ 	select ARCH_USE_QUEUED_SPINLOCKS
+ 	select ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT
++	select ARCH_WANT_HUGETLB_PAGE_OPTIMIZE_VMEMMAP
+ 	select ARCH_WANT_LD_ORPHAN_WARN
+ 	select ARCH_WANTS_NO_INSTR
+
+##### A017
+=== 29636a5ce87b LA2 2022-11-09 +13/-3
+efi: Put Linux specific magic number in the DOS header
+
+GRUB currently relies on the magic number in the image header of ARM and
+arm64 EFI kernel images to decide whether or not the image in question
+is a bootable kernel.
+
+However, the purpose of the magic number is to identify the image as one
+that implements the bare metal boot protocol, and so GRUB, which only
+does EFI boot, is limited unnecessarily to booting images that could
+potentially be booted in a non-EFI manner as well.
+
+This is problematic for the new zboot decompressor image format, as it
+can only boot in EFI mode, and must therefore not use the bare metal
+boot magic number in its header.
+
+For this reason, the strict magic number was dropped from GRUB, to
+permit essentially any kind of EFI executable to be booted via the
+'linux' command, blurring the line between the linux loader and the
+chainloader.
+
+So let's use the same field in the DOS header that RISC-V and arm64
+already use for their 'bare metal' magic numbers to store a 'generic
+Linux kernel' magic number, which can be used to identify bootable
+kernel images in PE format which don't necessarily implement a bare
+metal boot protocol in the same binary. Note that, in the context of
+EFI, the MS-DOS header is only described in terms of the fields that it
+shares with the hybrid PE/COFF image format, (i.e., the MS-DOS EXE magic
+number at offset #0 and the PE header offset at byte offset #0x3c).
+Since we aim for compatibility with EFI only, and not with MS-DOS or
+MS-Windows, we can use the remaining space in the MS-DOS header however
+we want.
+
+Let's set the generic magic number for x86 images as well: existing
+bootloaders already have their own methods to identify x86 Linux images
+that can be booted in a non-EFI manner, and having the magic number in
+place there will ease any future transitions in loader implementations
+to merge the x86 and non-x86 EFI boot paths.
+
+Note that 32-bit ARM already uses the same location in the header for a
+different purpose, but the ARM support is already widely implemented and
+the EFI zboot decompressor is not available on ARM anyway, so we just
+functions: 
+fixes: 
+diff --git a/arch/loongarch/kernel/head.S b/arch/loongarch/kernel/head.S
+index 84970e266658..57bada6b4e93 100644
+--- a/arch/loongarch/kernel/head.S
++++ b/arch/loongarch/kernel/head.S
+@@ -26,5 +26,6 @@ _head:
+ 	.dword	_end - _text		/* Kernel image effective size */
+ 	.quad	0			/* Kernel image load offset from start of RAM */
+-	.org	0x3c			/* 0x20 ~ 0x3b reserved */
++	.org	0x38			/* 0x20 ~ 0x37 reserved */
++	.long	LINUX_PE_MAGIC
+ 	.long	pe_header - _head	/* Offset to the PE header */
+ 
+diff --git a/arch/x86/boot/header.S b/arch/x86/boot/header.S
+index f912d7770130..be8f78a7ee32 100644
+--- a/arch/x86/boot/header.S
++++ b/arch/x86/boot/header.S
+@@ -81,8 +81,9 @@ bs_die:
+ 
+ #ifdef CONFIG_EFI_STUB
+-	.org	0x3c
++	.org	0x38
+ 	#
+ 	# Offset to the PE header.
+ 	#
++	.long	LINUX_PE_MAGIC
+ 	.long	pe_header
+ #endif /* CONFIG_EFI_STUB */
+diff --git a/drivers/firmware/efi/libstub/zboot-header.S b/drivers/firmware/efi/libstub/zboot-header.S
+index bc2d7750d7f1..ec4525d40e0c 100644
+--- a/drivers/firmware/efi/libstub/zboot-header.S
++++ b/drivers/firmware/efi/libstub/zboot-header.S
+@@ -21,5 +21,6 @@ __efistub_efi_zboot_header:
+ 	.long		0, 0					// reserved
+ 	.asciz		COMP_TYPE				// compression type
+-	.org		.Ldoshdr + 0x3c
++	.org		.Ldoshdr + 0x38
++	.long		LINUX_PE_MAGIC
+ 	.long		.Lpehdr - .Ldoshdr			// PE header offset
+ 
+diff --git a/include/linux/pe.h b/include/linux/pe.h
+index 056a1762de90..6ffabf1e6d03 100644
+--- a/include/linux/pe.h
++++ b/include/linux/pe.h
+@@ -32,4 +32,11 @@
+ #define LINUX_EFISTUB_MINOR_VERSION		0x1
+ 
++/*
++ * LINUX_PE_MAGIC appears at offset 0x38 into the MS-DOS header of EFI bootable
++ * Linux kernel images that target the architecture as specified by the PE/COFF
++ * header machine type field.
++ */
++#define LINUX_PE_MAGIC	0x818223cd
++
+ #define MZ_MAGIC	0x5a4d	/* "MZ" */
+ 
+
+##### A018
+=== 9151dde40356 LA2 2022-12-10 +68/-47
+LoongArch: module: Use got/plt section indices for relocations
+
+Instead of saving a pointer to the .got, .plt and .plt_idx sections to
+apply {got,plt}-based relocations, save and use their section indices
+instead.
+
+The mod->arch.{core,init}.{got,plt} pointers were problematic for live-
+patch because they pointed within temporary section headers (provided by
+the module loader via info->sechdrs) that would be freed after module
+load. Since livepatch modules may need to apply relocations post-module-
+load (for example, to patch a module that is loaded later), using section
+indices to offset into the section headers (instead of accessing them
+through a saved pointer) allows livepatch modules on LoongArch to pass
+in their own copy of the section headers to apply_relocate_add() to
+apply delayed relocations.
+
+The method used is same as commit c8ebf64eab743 ("arm64/module: use plt
+section indices for relocations").
+functions: arch/loongarch/kernel/module-sections.c:module_emit_got_entry, arch/loongarch/kernel/module-sections.c:module_emit_plt_entry, arch/loongarch/kernel/module-sections.c:module_frob_arch_sections, arch/loongarch/kernel/module.c:apply_r_larch_sop_push_plt_pcrel, arch/loongarch/kernel/module.c:apply_r_larch_b26, arch/loongarch/kernel/module.c:apply_r_larch_got_pc, arch/loongarch/kernel/module.c:apply_relocate_add
+fixes: 
+ arch/loongarch/include/asm/module.h     | 22 ++++++++++++----------
+ arch/loongarch/kernel/module-sections.c | 54 ++++++++++++++++++++++++++++-------------------------
+ arch/loongarch/kernel/module.c          | 39 ++++++++++++++++++++++++++------------
+ 3 files changed, 68 insertions(+), 47 deletions(-)
+diff --git a/arch/loongarch/include/asm/module.h b/arch/loongarch/include/asm/module.h
+index b29b19a46f42..60dc62a1146e 100644
+--- a/arch/loongarch/include/asm/module.h
++++ b/arch/loongarch/include/asm/module.h
+@@ -12,5 +12,5 @@
+ 
+ struct mod_section {
+-	Elf_Shdr *shdr;
++	int shndx;
+ 	int num_entries;
+ 	int max_entries;
+@@ -38,6 +38,6 @@ struct plt_idx_entry {
+ };
+ 
+-Elf_Addr module_emit_got_entry(struct module *mod, Elf_Addr val);
+-Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Addr val);
++Elf_Addr module_emit_got_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr val);
++Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr val);
+ 
+ static inline struct got_entry emit_got_entry(Elf_Addr val)
+@@ -63,8 +63,8 @@ static inline struct plt_idx_entry emit_plt_idx_entry(unsigned long val)
+ }
+ 
+-static inline int get_plt_idx(unsigned long val, const struct mod_section *sec)
++static inline int get_plt_idx(unsigned long val, Elf_Shdr *sechdrs, const struct mod_section *sec)
+ {
+ 	int i;
+-	struct plt_idx_entry *plt_idx = (struct plt_idx_entry *)sec->shdr->sh_addr;
++	struct plt_idx_entry *plt_idx = (struct plt_idx_entry *)sechdrs[sec->shndx].sh_addr;
+ 
+ 	for (i = 0; i < sec->num_entries; i++) {
+@@ -77,9 +77,10 @@ static inline int get_plt_idx(unsigned long val, const struct mod_section *sec)
+ 
+ static inline struct plt_entry *get_plt_entry(unsigned long val,
+-				      const struct mod_section *sec_plt,
+-				      const struct mod_section *sec_plt_idx)
++					      Elf_Shdr *sechdrs,
++					      const struct mod_section *sec_plt,
++					      const struct mod_section *sec_plt_idx)
+ {
+-	int plt_idx = get_plt_idx(val, sec_plt_idx);
+-	struct plt_entry *plt = (struct plt_entry *)sec_plt->shdr->sh_addr;
++	int plt_idx = get_plt_idx(val, sechdrs, sec_plt_idx);
++	struct plt_entry *plt = (struct plt_entry *)sechdrs[sec_plt->shndx].sh_addr;
+ 
+ 	if (plt_idx < 0)
+@@ -90,8 +91,9 @@ static inline struct plt_entry *get_plt_entry(unsigned long val,
+ 
+ static inline struct got_entry *get_got_entry(Elf_Addr val,
++					      Elf_Shdr *sechdrs,
+ 					      const struct mod_section *sec)
+ {
+-	struct got_entry *got = (struct got_entry *)sec->shdr->sh_addr;
+ 	int i;
++	struct got_entry *got = (struct got_entry *)sechdrs[sec->shndx].sh_addr;
+ 
+ 	for (i = 0; i < sec->num_entries; i++)
+diff --git a/arch/loongarch/kernel/module-sections.c b/arch/loongarch/kernel/module-sections.c
+index d296a70b758f..13d9a427325a 100644
+--- a/arch/loongarch/kernel/module-sections.c
+... (202 more diff lines)
+
+##### A019
+=== 068550631fbe LA2 2023-01-18 +54/-54
+locking/arch: Rename all internal __xchg() names to __arch_xchg()
+
+Decrease the probability of this internal facility to be used by
+driver code.
+functions: 
+fixes: 
+ arch/mips/include/asm/cmpxchg.h      |  4 ++--
+ arch/openrisc/include/asm/cmpxchg.h  | 10 +++++-----
+ arch/parisc/include/asm/cmpxchg.h    |  4 ++--
+ arch/powerpc/include/asm/cmpxchg.h   |  4 ++--
+ arch/riscv/include/asm/atomic.h      |  2 +-
+ arch/riscv/include/asm/cmpxchg.h     |  4 ++--
+ arch/s390/include/asm/cmpxchg.h      |  8 ++++----
+ arch/sh/include/asm/cmpxchg.h        |  4 ++--
+ arch/sparc/include/asm/cmpxchg_32.h  |  4 ++--
+ arch/sparc/include/asm/cmpxchg_64.h  |  6 +++---
+ arch/xtensa/include/asm/cmpxchg.h    |  4 ++--
+ 20 files changed, 54 insertions(+), 54 deletions(-)
+diff --git a/arch/alpha/include/asm/cmpxchg.h b/arch/alpha/include/asm/cmpxchg.h
+index 6e0a850aa9d3..91d4a4d9258c 100644
+--- a/arch/alpha/include/asm/cmpxchg.h
++++ b/arch/alpha/include/asm/cmpxchg.h
+@@ -7,5 +7,5 @@
+  */
+ 
+-#define ____xchg(type, args...)		__xchg ## type ## _local(args)
++#define ____xchg(type, args...)		__arch_xchg ## type ## _local(args)
+ #define ____cmpxchg(type, args...)	__cmpxchg ## type ## _local(args)
+ #include <asm/xchg.h>
+@@ -14,6 +14,6 @@
+ ({									\
+ 	__typeof__(*(ptr)) _x_ = (x);					\
+-	(__typeof__(*(ptr))) __xchg_local((ptr), (unsigned long)_x_,	\
+-				       sizeof(*(ptr)));			\
++	(__typeof__(*(ptr))) __arch_xchg_local((ptr), (unsigned long)_x_,\
++					       sizeof(*(ptr)));		\
+ })
+ 
+@@ -35,5 +35,5 @@
+ #undef ____xchg
+ #undef ____cmpxchg
+-#define ____xchg(type, args...)		__xchg ##type(args)
++#define ____xchg(type, args...)		__arch_xchg ##type(args)
+ #define ____cmpxchg(type, args...)	__cmpxchg ##type(args)
+ #include <asm/xchg.h>
+@@ -49,5 +49,5 @@
+ 	smp_mb();							\
+ 	__ret = (__typeof__(*(ptr)))					\
+-		__xchg((ptr), (unsigned long)_x_, sizeof(*(ptr)));	\
++		__arch_xchg((ptr), (unsigned long)_x_, sizeof(*(ptr)));	\
+ 	smp_mb();							\
+ 	__ret;								\
+diff --git a/arch/arc/include/asm/cmpxchg.h b/arch/arc/include/asm/cmpxchg.h
+index c5b544a5fe81..e138fde067de 100644
+--- a/arch/arc/include/asm/cmpxchg.h
++++ b/arch/arc/include/asm/cmpxchg.h
+@@ -86,5 +86,5 @@
+ #ifdef CONFIG_ARC_HAS_LLSC
+ 
+-#define __xchg(ptr, val)						\
++#define __arch_xchg(ptr, val)						\
+ ({									\
+ 	__asm__ __volatile__(						\
+@@ -103,5 +103,5 @@
+ 	switch(sizeof(*(_p_))) {					\
+ 	case 4:								\
+-		_val_ = __xchg(_p_, _val_);				\
++		_val_ = __arch_xchg(_p_, _val_);			\
+ 		break;							\
+ 	default:							\
+diff --git a/arch/arm/include/asm/cmpxchg.h b/arch/arm/include/asm/cmpxchg.h
+index 4dfe538dfc68..44667bdb4707 100644
+--- a/arch/arm/include/asm/cmpxchg.h
++++ b/arch/arm/include/asm/cmpxchg.h
+@@ -26,5 +26,6 @@
+ #endif
+ 
+-static inline unsigned long __xchg(unsigned long x, volatile void *ptr, int size)
+... (338 more diff lines)
+
+##### A020
+=== 071c44e42781 LA2 2023-02-13 +18/-17
+sched/idle: Mark arch_cpu_idle_dead() __noreturn
+
+Before commit 076cbf5d2163 ("x86/xen: don't let xen_pv_play_dead()
+return"), in Xen, when a previously offlined CPU was brought back
+online, it unexpectedly resumed execution where it left off in the
+middle of the idle loop.
+
+There were some hacks to make that work, but the behavior was surprising
+as do_idle() doesn't expect an offlined CPU to return from the dead (in
+arch_cpu_idle_dead()).
+
+Now that Xen has been fixed, and the arch-specific implementations of
+arch_cpu_idle_dead() also don't return, give it a __noreturn attribute.
+
+This will cause the compiler to complain if an arch-specific
+implementation might return.  It also improves code generation for both
+caller and callee.
+
+Also fixes the following warning:
+
+  vmlinux.o: warning: objtool: do_idle+0x25f: unreachable instruction
+functions: kernel/sched/idle.c:arch_cpu_idle_dead, tools/objtool/check.c:__dead_end_function
+fixes: 
+ arch/parisc/kernel/process.c    | 2 +-
+ arch/powerpc/kernel/smp.c       | 2 +-
+ arch/riscv/kernel/cpu-hotplug.c | 2 +-
+ arch/s390/kernel/idle.c         | 2 +-
+ arch/sh/kernel/idle.c           | 2 +-
+ arch/sparc/kernel/process_64.c  | 2 +-
+ arch/x86/kernel/process.c       | 2 +-
+ arch/xtensa/kernel/smp.c        | 2 +-
+ include/linux/cpu.h             | 2 +-
+ kernel/sched/idle.c             | 2 +-
+ tools/objtool/check.c           | 1 +
+ 18 files changed, 18 insertions(+), 17 deletions(-)
+diff --git a/arch/alpha/kernel/process.c b/arch/alpha/kernel/process.c
+index a82fefa31bdb..582d96548385 100644
+--- a/arch/alpha/kernel/process.c
++++ b/arch/alpha/kernel/process.c
+@@ -61,5 +61,5 @@ void arch_cpu_idle(void)
+ }
+ 
+-void arch_cpu_idle_dead(void)
++void __noreturn arch_cpu_idle_dead(void)
+ {
+ 	wtint(INT_MAX);
+diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
+index 441ea5cff390..d6be4507d22d 100644
+--- a/arch/arm/kernel/smp.c
++++ b/arch/arm/kernel/smp.c
+@@ -321,5 +321,5 @@ void __cpu_die(unsigned int cpu)
+  * out of idle fixes this.
+  */
+-void arch_cpu_idle_dead(void)
++void __noreturn arch_cpu_idle_dead(void)
+ {
+ 	unsigned int cpu = smp_processor_id();
+diff --git a/arch/arm64/kernel/process.c b/arch/arm64/kernel/process.c
+index 71d59b5abede..089ced6d6bd6 100644
+--- a/arch/arm64/kernel/process.c
++++ b/arch/arm64/kernel/process.c
+@@ -70,5 +70,5 @@ EXPORT_SYMBOL_GPL(pm_power_off);
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+-void arch_cpu_idle_dead(void)
++void __noreturn arch_cpu_idle_dead(void)
+ {
+        cpu_die();
+diff --git a/arch/csky/kernel/smp.c b/arch/csky/kernel/smp.c
+index 0ec20efaf5fd..9c7a20b73ac6 100644
+--- a/arch/csky/kernel/smp.c
++++ b/arch/csky/kernel/smp.c
+@@ -301,5 +301,5 @@ void __cpu_die(unsigned int cpu)
+ }
+ 
+-void arch_cpu_idle_dead(void)
++void __noreturn arch_cpu_idle_dead(void)
+ {
+ 	idle_task_exit();
+diff --git a/arch/ia64/kernel/process.c b/arch/ia64/kernel/process.c
+index 78f5794b2dde..9a5cd9fad3a9 100644
+--- a/arch/ia64/kernel/process.c
++++ b/arch/ia64/kernel/process.c
+@@ -226,5 +226,5 @@ static inline void __noreturn play_dead(void)
+ #endif /* CONFIG_HOTPLUG_CPU */
+ 
+-void arch_cpu_idle_dead(void)
++void __noreturn arch_cpu_idle_dead(void)
+ {
+ 	play_dead();
+diff --git a/arch/loongarch/kernel/process.c b/arch/loongarch/kernel/process.c
+index fa2443c7afb2..b71e17c1cc0c 100644
+--- a/arch/loongarch/kernel/process.c
++++ b/arch/loongarch/kernel/process.c
+@@ -63,5 +63,5 @@ EXPORT_SYMBOL(boot_option_idle_override);
+... (137 more diff lines)
+
+##### A021
+=== 35c94fab6eee LA2 2023-02-25 +11/-3
+LoongArch: kdump: Add crashkernel=YM handling
+
+When the kernel crashkernel parameter is specified with just a size,
+we are supposed to allocate a region from RAM to store the crashkernel,
+"crashkernel=512M" would be recommended for kdump.
+
+Fix this by lifting similar code from x86, importing it to LoongArch
+with LoongArch specific parameters added. We allocate the crashkernel
+region from the first 4GB of physical memory (because SWIOTLB should be
+allocated below 4GB). However, LoongArch currently does not implement
+crashkernel_low and crashkernel_high the same as x86.
+
+When X is not specified, crash_base defaults to 0 (crashkernel=YM@XM).
+functions: arch/loongarch/kernel/setup.c:arch_parse_crashkernel
+fixes: 
+diff --git a/arch/loongarch/kernel/setup.c b/arch/loongarch/kernel/setup.c
+index 4344502c0b31..bae84ccf6d36 100644
+--- a/arch/loongarch/kernel/setup.c
++++ b/arch/loongarch/kernel/setup.c
+@@ -235,9 +235,12 @@ static void __init arch_reserve_vmcore(void)
+ }
+ 
++/* 2MB alignment for crash kernel regions */
++#define CRASH_ALIGN	SZ_2M
++#define CRASH_ADDR_MAX	SZ_4G
++
+ static void __init arch_parse_crashkernel(void)
+ {
+ #ifdef CONFIG_KEXEC
+ 	int ret;
+-	unsigned long long start;
+ 	unsigned long long total_mem;
+ 	unsigned long long crash_base, crash_size;
+@@ -248,6 +251,11 @@ static void __init arch_parse_crashkernel(void)
+ 		return;
+ 
+-	start = memblock_phys_alloc_range(crash_size, 1, crash_base, crash_base + crash_size);
+-	if (start != crash_base) {
++	if (crash_base <= 0) {
++		crash_base = memblock_phys_alloc_range(crash_size, CRASH_ALIGN, CRASH_ALIGN, CRASH_ADDR_MAX);
++		if (!crash_base) {
++			pr_warn("crashkernel reservation failed - No suitable area found.\n");
++			return;
++		}
++	} else if (!memblock_phys_alloc_range(crash_size, CRASH_ALIGN, crash_base, crash_base + crash_size)) {
+ 		pr_warn("Invalid memory region reserved for crash kernel\n");
+ 		return;
+
+##### A022
+=== 4c8c3c7f70a6 LA2 2023-03-07 +53/-26
+treewide: Trace IPIs sent via smp_send_reschedule()
+
+To be able to trace invocations of smp_send_reschedule(), rename the
+arch-specific definitions of it to arch_smp_send_reschedule() and wrap it
+into an smp_send_reschedule() that contains a tracepoint.
+
+Changes to include the declaration of the tracepoint were driven by the
+following coccinelle script:
+
+  @func_use@
+  @@
+  smp_send_reschedule(...);
+
+  @include@
+  @@
+  #include <trace/events/ipi.h>
+
+  @no_include depends on func_use && !include@
+  @@
+    #include <...>
+  +
+  + #include <trace/events/ipi.h>
+
+[csky bits]
+[riscv bits]
+functions: arch/parisc/kernel/smp.c:smp_send_reschedule
+fixes: 
+ arch/riscv/kernel/smp.c                  |  4 ++--
+ arch/s390/kernel/smp.c                   |  2 +-
+ arch/sh/kernel/smp.c                     |  2 +-
+ arch/sparc/kernel/smp_32.c               |  2 +-
+ arch/sparc/kernel/smp_64.c               |  2 +-
+ arch/x86/include/asm/smp.h               |  2 +-
+ arch/x86/kvm/svm/svm.c                   |  4 ++++
+ arch/x86/kvm/x86.c                       |  2 ++
+ arch/xtensa/kernel/smp.c                 |  2 +-
+ include/linux/smp.h                      | 11 +++++++++--
+ virt/kvm/kvm_main.c                      |  3 +++
+ 27 files changed, 53 insertions(+), 26 deletions(-)
+diff --git a/arch/alpha/kernel/smp.c b/arch/alpha/kernel/smp.c
+index 0ede4b044e86..7439b2377df5 100644
+--- a/arch/alpha/kernel/smp.c
++++ b/arch/alpha/kernel/smp.c
+@@ -563,5 +563,5 @@ handle_ipi(struct pt_regs *regs)
+ 
+ void
+-smp_send_reschedule(int cpu)
++arch_smp_send_reschedule(int cpu)
+ {
+ #ifdef DEBUG_IPI_MSG
+diff --git a/arch/arc/kernel/smp.c b/arch/arc/kernel/smp.c
+index ad93fe6e4b77..409cfa4675b4 100644
+--- a/arch/arc/kernel/smp.c
++++ b/arch/arc/kernel/smp.c
+@@ -293,5 +293,5 @@ static void ipi_send_msg(const struct cpumask *callmap, enum ipi_msg_type msg)
+ }
+ 
+-void smp_send_reschedule(int cpu)
++void arch_smp_send_reschedule(int cpu)
+ {
+ 	ipi_send_msg_one(cpu, IPI_RESCHEDULE);
+diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
+index 5edf09237b2f..b350bfc9d1f8 100644
+--- a/arch/arm/kernel/smp.c
++++ b/arch/arm/kernel/smp.c
+@@ -747,5 +747,5 @@ void __init set_smp_ipi_range(int ipi_base, int n)
+ }
+ 
+-void smp_send_reschedule(int cpu)
++void arch_smp_send_reschedule(int cpu)
+ {
+ 	smp_cross_call(cpumask_of(cpu), IPI_RESCHEDULE);
+diff --git a/arch/arm/mach-actions/platsmp.c b/arch/arm/mach-actions/platsmp.c
+index f26618b43514..7b208e96fbb6 100644
+--- a/arch/arm/mach-actions/platsmp.c
++++ b/arch/arm/mach-actions/platsmp.c
+@@ -21,4 +21,6 @@
+ #include <asm/smp_scu.h>
+ 
++#include <trace/events/ipi.h>
++
+ #define OWL_CPU1_ADDR	0x50
+ #define OWL_CPU1_FLAG	0x5c
+diff --git a/arch/arm64/kernel/smp.c b/arch/arm64/kernel/smp.c
+index 438c16fc4463..66f2745062dd 100644
+--- a/arch/arm64/kernel/smp.c
++++ b/arch/arm64/kernel/smp.c
+@@ -977,5 +977,5 @@ void __init set_smp_ipi_range(int ipi_base, int n)
+ }
+ 
+-void smp_send_reschedule(int cpu)
++void arch_smp_send_reschedule(int cpu)
+ {
+ 	smp_cross_call(cpumask_of(cpu), IPI_RESCHEDULE);
+diff --git a/arch/csky/kernel/smp.c b/arch/csky/kernel/smp.c
+index b45d1073307f..be77383acb5f 100644
+--- a/arch/csky/kernel/smp.c
++++ b/arch/csky/kernel/smp.c
+@@ -141,5 +141,5 @@ void smp_send_stop(void)
+... (294 more diff lines)
+
+##### A023
+=== aff69273af61 LA2 2023-03-10 +14/-39
+vdso: Improve cmd_vdso_check to check all dynamic relocations
+
+The actual intention is that no dynamic relocation exists in the VDSO. For
+this the VDSO build validates that the resulting .so file does not have any
+relocations which are specified via $(ARCH_REL_TYPE_ABS) per architecture,
+which is fragile as e.g. ARM64 lacks an entry for R_AARCH64_RELATIVE. Aside
+of that ARCH_REL_TYPE_ABS is a misnomer as it checks for relative
+relocations too.
+
+However, some GNU ld ports produce unneeded R_*_NONE relocation entries. If
+a port fails to determine the exact .rel[a].dyn size, the trailing zeros
+become R_*_NONE relocations. E.g. ld's powerpc port recently fixed
+https://sourceware.org/bugzilla/show_bug.cgi?id=29540). R_*_NONE are
+generally a no-op in the dynamic loaders. So just ignore them.
+
+Remove the ARCH_REL_TYPE_ABS defines and just validate that the resulting
+.so file does not contain any R_* relocation entries except R_*_NONE.
+functions: 
+fixes: 
+ arch/arm64/kernel/vdso/Makefile   |  4 +---
+ arch/arm64/kernel/vdso32/Makefile |  3 ---
+ arch/csky/kernel/vdso/Makefile    |  4 +---
+ arch/loongarch/vdso/Makefile      |  4 +---
+ arch/mips/vdso/Makefile           |  4 +---
+ arch/powerpc/kernel/vdso/Makefile |  2 +-
+ arch/riscv/kernel/vdso/Makefile   |  4 +---
+ arch/s390/kernel/vdso32/Makefile  |  3 +--
+ arch/s390/kernel/vdso64/Makefile  |  3 +--
+ arch/x86/entry/vdso/Makefile      |  5 +----
+ lib/vdso/Makefile                 | 13 ++++---------
+ 12 files changed, 14 insertions(+), 39 deletions(-)
+diff --git a/arch/arm/vdso/Makefile b/arch/arm/vdso/Makefile
+index a7ec06ce3785..515ca33b854c 100644
+--- a/arch/arm/vdso/Makefile
++++ b/arch/arm/vdso/Makefile
+@@ -1,7 +1,5 @@
+ # SPDX-License-Identifier: GPL-2.0
+ 
+-# Absolute relocation type $(ARCH_REL_TYPE_ABS) needs to be defined before
+-# the inclusion of generic Makefile.
+-ARCH_REL_TYPE_ABS := R_ARM_JUMP_SLOT|R_ARM_GLOB_DAT|R_ARM_ABS32
++# Include the generic Makefile to check the built vdso.
+ include $(srctree)/lib/vdso/Makefile
+ 
+diff --git a/arch/arm64/kernel/vdso/Makefile b/arch/arm64/kernel/vdso/Makefile
+index beaf9586338f..fe7a53c6781f 100644
+--- a/arch/arm64/kernel/vdso/Makefile
++++ b/arch/arm64/kernel/vdso/Makefile
+@@ -7,7 +7,5 @@
+ #
+ 
+-# Absolute relocation type $(ARCH_REL_TYPE_ABS) needs to be defined before
+-# the inclusion of generic Makefile.
+-ARCH_REL_TYPE_ABS := R_AARCH64_JUMP_SLOT|R_AARCH64_GLOB_DAT|R_AARCH64_ABS64
++# Include the generic Makefile to check the built vdso.
+ include $(srctree)/lib/vdso/Makefile
+ 
+diff --git a/arch/arm64/kernel/vdso32/Makefile b/arch/arm64/kernel/vdso32/Makefile
+index f59bd1a4ead6..d014162c5c71 100644
+--- a/arch/arm64/kernel/vdso32/Makefile
++++ b/arch/arm64/kernel/vdso32/Makefile
+@@ -4,7 +4,4 @@
+ #
+ 
+-# Absolute relocation type $(ARCH_REL_TYPE_ABS) needs to be defined before
+-# the inclusion of generic Makefile.
+-ARCH_REL_TYPE_ABS := R_ARM_JUMP_SLOT|R_ARM_GLOB_DAT|R_ARM_ABS32
+ include $(srctree)/lib/vdso/Makefile
+ 
+diff --git a/arch/csky/kernel/vdso/Makefile b/arch/csky/kernel/vdso/Makefile
+index 0b6909f10667..299e4e41ebc5 100644
+--- a/arch/csky/kernel/vdso/Makefile
++++ b/arch/csky/kernel/vdso/Makefile
+@@ -1,7 +1,5 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ 
+-# Absolute relocation type $(ARCH_REL_TYPE_ABS) needs to be defined before
+-# the inclusion of generic Makefile.
+-ARCH_REL_TYPE_ABS := R_CKCORE_ADDR32|R_CKCORE_JUMP_SLOT
++# Include the generic Makefile to check the built vdso.
+ include $(srctree)/lib/vdso/Makefile
+ 
+diff --git a/arch/loongarch/vdso/Makefile b/arch/loongarch/vdso/Makefile
+index d89e2ac75f7b..461240ab4436 100644
+--- a/arch/loongarch/vdso/Makefile
++++ b/arch/loongarch/vdso/Makefile
+@@ -2,7 +2,5 @@
+ # Objects to go into the VDSO.
+ 
+-# Absolute relocation type $(ARCH_REL_TYPE_ABS) needs to be defined before
+-# the inclusion of generic Makefile.
+... (107 more diff lines)
+
+##### A024
+=== 93eb1215ed79 LA2 2023-04-18 +4/-4
+LoongArch: module: set section addresses to 0x0
+
+These got*, plt* and .text.ftrace_trampoline sections specified for
+LoongArch have non-zero addressses. Non-zero section addresses in a
+relocatable ELF would confuse GDB when it tries to compute the section
+offsets and it ends up printing wrong symbol addresses. Therefore, set
+them to zero, which mirrors the change in commit 5d8591bc0fbaeb6ded
+("arm64 module: set plt* section addresses to 0x0").
+functions: 
+fixes: 
+diff --git a/arch/loongarch/include/asm/module.lds.h b/arch/loongarch/include/asm/module.lds.h
+index 438f09d4ccf4..88554f92e010 100644
+--- a/arch/loongarch/include/asm/module.lds.h
++++ b/arch/loongarch/include/asm/module.lds.h
+@@ -3,7 +3,7 @@
+ SECTIONS {
+ 	. = ALIGN(4);
+-	.got : { BYTE(0) }
+-	.plt : { BYTE(0) }
+-	.plt.idx : { BYTE(0) }
+-	.ftrace_trampoline : { BYTE(0) }
++	.got 0 : { BYTE(0) }
++	.plt 0 : { BYTE(0) }
++	.plt.idx 0 : { BYTE(0) }
++	.ftrace_trampoline 0 : { BYTE(0) }
+ }

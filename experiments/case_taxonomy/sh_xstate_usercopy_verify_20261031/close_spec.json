@@ -1,0 +1,7 @@
+{
+ "log_date": "2026-10-31",
+ "section": "## 10月31日 最新进展：sh浮点上下文与加固用户拷贝疑点经运行验证已排除\n\n用户同意后安装gcc-sh4-linux-gnu（及sh4 C库）。计划plan.md（0f9d3126…）运行前写定。终点版本内核基于rts7751r2dplus_defconfig（QEMU r2d，SH7751R带硬件浮点），初始文件系统内置测试程序fpsig.c（先浮点运算再给自己发SIGUSR1）。三组：实验组（开启CONFIG_HARDENED_USERCOPY，已核对配置）、对照1（开启，不用浮点）、对照2（关闭，用浮点），全部正常结束，信号已处理，浮点结果一致（g_milli=529142），无usercopy报错。排查原因：终点版本check_object_size（include/linux/ucopysize.h）仅在拷贝长度不是编译时常量时才做运行时检查（!__builtin_constant_p(n)），而sh保存与恢复浮点上下文的拷贝长度sizeof(long)*(16*2+2)是常量，加固用户拷贝不检查这两次拷贝；研究者与模型此前读代码均漏看此条件。结论：该疑点排除，原记录保留并在ccp_judge_model_20261030/README.md追加更正。教训：读代码得到的疑点必须运行验证。统计：Kimi 0次，构建sh内核3次，QEMU运行3次，新确认缺陷0，排除疑点1条。证据linux_bug_analyze/experiments/case_taxonomy/sh_xstate_usercopy_verify_20261031/。日志、待办、进展、交接及家族规划同轮更新，三份WSL镜像以本轮notes_sync收据为准。",
+ "plan_replacements": [],
+ "plan_row": "| 2026-10-31 | 疑点验证／sh task_xstate加固拷贝 | QEMU三组均正常，check_object_size对常量长度不检查，疑点排除；linux_bug_analyze/experiments/case_taxonomy/sh_xstate_usercopy_verify_20261031/ | — |",
+ "order_paragraph": "方法一（公共钩子多数做法比较）已完成，按事先标准无用（回溯召回10/100，v6.6多数做法补上率7.3%，为少数做法2.2%的3.3倍但未达10%），召回到的均为真问题；sh的task_xstate加固拷贝疑点经QEMU运行验证已排除（check_object_size对编译时常量长度不做运行时检查）。下一步待用户决定：①方法一改为只比较有语义的关键步骤（屏障、刷新、有效性检查、加锁、释放）并展开更深调用；②针对层级折叠做RISC-V内部一致性检查；③核实show_pte、pud_free_pmd_page等剩余疑点（同样需运行验证）；④与老师、师兄讨论论文定位（机制刻画＋有条件的指导作用），并把方向4机制结论写入论文与《实验总结》（同时更正79%→74%、18对→16对）。模型试点中的x86 sgx待查项仍只记录。实验总结已按师兄反馈重写（Word 7页），待用户转交；新稿待老师和师兄审阅。SPARC与ACPI上游报告草稿待用户核对后自行发送（未查重）。4c87905之后的新记录目录未提交；5个旧修改文件未提交。各接口未决项挂账；表示/R3暂缓、VT-d后置不变。"
+}

@@ -1,0 +1,182 @@
+[
+  {
+    "k": 1,
+    "loc": "fs/squashfs/file.c:580",
+    "verdict": "可能",
+    "why": "32 位内核上 mask 是 32 位 size_t，~mask 零扩展为 loff_t 后会清掉预读位置的高 32 位；大文件中达到 4 GiB 的预读即可触发。截低的 start 随后用于 read_blocklist 的块号和 page actor 的文件位置，可能把低偏移的数据当作高偏移页面的数据读取。"
+  },
+  {
+    "k": 2,
+    "loc": "fs/ntfs3/dir.c:581",
+    "verdict": "不可能",
+    "why": "indx_read_ra 的 vbn 参数实际是 CLST，而 ntfs.h 在 CONFIG_NTFS3_64BIT_CLUSTER=n 时将 CLST 定义为 u32；该选项又依赖 64BIT，因此 32 位内核的目标参数不是报告声称的 64 位。超过 u32 簇号域时，64 位内核关闭此选项也会在传参时丢位，属于固定 u32 域的限制，不能作为本条所报的跨架构位宽截断。"
+  },
+  {
+    "k": 3,
+    "loc": "fs/ntfs3/dir.c:706",
+    "verdict": "不可能",
+    "why": "ntfs_fs.h 中 indx_read 的 vbn 参数是 CLST，32 位构建只能使用 u32 的 CLST，并直接转交 indx_read_ra。CONFIG_NTFS3_64BIT_CLUSTER 需要 64BIT，故不能把只在该配置下存在的 64 位簇号域套到 32 位目录计数路径；此处并非先截低再传给 64 位参数。"
+  },
+  {
+    "k": 4,
+    "loc": "fs/ntfs3/index.c:1443",
+    "verdict": "不可能",
+    "why": "next_used_vbn 的类型是 CLST，32 位内核中它为 u32，而不是恒为 64 位的量。64 位 CLST 仅在依赖 64BIT 的 NTFS3_64BIT_CLUSTER 下启用；关闭该选项的 64 位内核同样会将超域结果截成 u32，故本条不成立为报告描述的跨架构截断。"
+  },
+  {
+    "k": 5,
+    "loc": "fs/orangefs/dir.c:157",
+    "verdict": "可能",
+    "why": "PART_SHIFT 为 24，count 是 32 位 size_t；缓存到第 255 个响应 part 时 count=256，count<<24 从应有的 4 GiB 回绕为 0，再存入 loff_t 的 od->end。后续 iterate 和 llseek 用 od->end 判断剩余数据及目录结束，因而会错误补读、漏掉缓存数据或返回 EIO；每个 part 最多 512 项的限制并不限制 part 总数。"
+  },
+  {
+    "k": 6,
+    "loc": "fs/proc/meminfo.c:30",
+    "verdict": "可能",
+    "why": "例如 4 KiB 页的 32 位内核中，num 达到 2^30 页时，num<<2 的 kB 数在 32 位中回绕，再扩宽传给输出函数已无法恢复。meminfo 也用此函数输出跨进程汇总的 Committed_AS，OVERCOMMIT_ALWAYS 下许多进程的匿名映射可使承诺量达到 4 TiB，故不能用单进程地址空间或实际 RAM 大小排除，结果是该统计值错误变小。"
+  },
+  {
+    "k": 7,
+    "loc": "fs/proc/task_mmu.c:2063",
+    "verdict": "不可能",
+    "why": "32 位上 BITS_PER_XA_VALUE=31、MAX_SWAPFILES_SHIFT=5，因此 SWP_TYPE_SHIFT=26，swp_offset 通过 SWP_OFFSET_MASK 保证 offset<2^26。PFN 分支的 softleaf_to_pfn 也先取 swp_offset 再掩码，所以 offset 左移 5 位后小于 2^31，不会丢失高位。"
+  },
+  {
+    "k": 8,
+    "loc": "fs/ufs/dir.c:445",
+    "verdict": "可能",
+    "why": "UFS 的目录大小和 ctx->pos 可超过 4 GiB，n 却是 unsigned long；32 位上当读取此范围、目录版本变化且页内 offset 非零时，会进入重新校验分支。n<<PAGE_SHIFT 在 32 位中先截低，随后计算出的 ctx->pos 回到低偏移，导致返回的目录位置错误，后续读取可能重复或跳错目录项。"
+  },
+  {
+    "k": 9,
+    "loc": "kernel/bpf/arena.c:867",
+    "verdict": "不可能",
+    "why": "arena_map_alloc 首先要求 bpf_jit_supports_arena() 为真，否则返回 EOPNOTSUPP；32 位 JIT 使用返回 false 的弱实现，PowerPC 的实现也明确只允许 PPC64。虽然公共函数源码可参与 32 位编译，但该内核无法建立可供此释放路径使用的 arena，不能构造这里 long 为 32 位的实际释放操作。"
+  },
+  {
+    "k": 10,
+    "loc": "kernel/bpf/stackmap.c:165",
+    "verdict": "可能",
+    "why": "32 位进程可通过按页传偏移的 mmap 接口映射大文件中 4 GiB 以上的位置，vm_pgoff 的页号仍能放入 unsigned long，但左移 PAGE_SHIFT 换成字节时会截低。build_id_parse 从对应文件头解析 build ID，并不要求当前 VMA 的文件偏移为零，故可成功返回带错误 offset 的 BPF_STACK_BUILD_ID_VALID 记录，导致栈地址归因错误。"
+  },
+  {
+    "k": 11,
+    "loc": "kernel/events/uprobes.c:2453",
+    "verdict": "可能",
+    "why": "i386 等可启用 PER_VMA_LOCK 的 32 位 SMP 内核上，vma_start_pgoff 返回 pgoff_t，强转位于左移之后，映射起点达到 4 GiB 就会先丢高位。若同一 inode 的高偏移和相差 4 GiB 的低偏移同时注册了 uprobe，推测路径会找到并返回低偏移的错误探针，绕过正确的加锁回退路径，可能执行错误的探针处理。"
+  },
+  {
+    "k": 12,
+    "loc": "arch/arc/mm/init.c:61",
+    "verdict": "不可能",
+    "why": "该调用位于第一个低端内存块分支，调用前完整的 u64 base 必须等于 static const unsigned long low_mem_start，否则直接 panic。ARC 的 unsigned long 为 32 位，这个相等检查保证所报的第一个实参 base 不含高 32 位；size 是另一实参，不是本条标记的位置。"
+  },
+  {
+    "k": 13,
+    "loc": "arch/arc/mm/init.c:67",
+    "verdict": "可能",
+    "why": "可配置 HIGHMEM=y、ARC_HAS_PAE40=n，此时 phys_addr_t 为 32 位，而 FDT 扫描仍用 u64 传入各内存块，ARC 覆盖函数也没有通用实现中排除 base>MAX_MEMBLOCK_ADDR 的检查。若支持 PAE40 的机器以该配置启动且 DT 保留 4 GiB 以上的第二个内存块，base 会在传入 memblock_add_node 时回绕到低地址，将错误物理区间登记成高端 RAM；启用 PAE40 的配置不触发此截断。"
+  },
+  {
+    "k": 14,
+    "loc": "arch/arc/mm/init.c:68",
+    "verdict": "可能",
+    "why": "在 HIGHMEM=y、ARC_HAS_PAE40=n 的 32 位物理地址配置中，第二个 DT 内存块的 u64 base 没有经过高地址排除检查，仍直接传给接收 phys_addr_t 的 memblock_reserve。若启动描述包含 4 GiB 以上的高端块，此调用会保留其低 32 位对应的错误区间，而不是所描述的高端块，并与随后使用已截低 high_mem_start 的释放和内存初始化一起破坏内存区间管理。"
+  },
+  {
+    "k": 15,
+    "loc": "arch/arm/kernel/setup.c:1018",
+    "verdict": "不可能",
+    "why": "parse_crashkernel 在成功返回前要求 crash_size<system_ram；当 ARM 的 phys_addr_t 为 32 位时，实际 RAM 总量不超过 4 GiB，所以所报的 crash_size 必能放入该参数。ARM_LPAE 则选择 PHYS_ADDR_T_64BIT，memblock_phys_alloc_range 的 size 也变为 64 位，不能只按 ARM32 的 long 位宽推断这里截断。"
+  },
+  {
+    "k": 16,
+    "loc": "arch/arm/kernel/setup.c:1028",
+    "verdict": "不可能",
+    "why": "本条标记的是第一个参数 crash_size，它已通过 parse_crashkernel 的 crash_size<system_ram 检查；在 32 位 phys_addr_t 配置下该大小小于 4 GiB。可管理更大物理内存的 ARM_LPAE 配置使用 64 位 phys_addr_t，因此这个参数不会因内核为 32 位而缩窄。"
+  },
+  {
+    "k": 17,
+    "loc": "arch/arm/kernel/setup.c:1057",
+    "verdict": "不可能",
+    "why": "该赋值只有 arm_has_idmap_alias() 为真才执行，当前树中非零别名偏移来自 Keystone 的 pv_fixup，并由 ARM_PV_FIXUP 路径激活。ARM_PV_FIXUP 依赖 ARM_LPAE，后者选择 64 位 phys_addr_t，而 resource_size_t 就是 phys_addr_t，因此实际执行该表达式时 crashk_boot_res.end 为 64 位。"
+  },
+  {
+    "k": 18,
+    "loc": "arch/arm/kernel/sys_oabi-compat.c:128",
+    "verdict": "不可能",
+    "why": "oldabi_stat64 的 __st_ino 是旧布局中的 32 位兼容副本，结构尾部另有 unsigned long long st_ino。该函数第 144 行把 stat->ino 完整写入真正的 64 位 st_ino，所以此处有意填写低位兼容字段，不会使 stat64 的 inode 号丢失高位。"
+  },
+  {
+    "k": 19,
+    "loc": "arch/arm/kernel/sys_oabi-compat.c:138",
+    "verdict": "可能",
+    "why": "ARM OABI 上 st_atime 只有 32 位，stat->atime.tv_sec 却是 time64_t，且这里没有范围检查或另存高位；例如读取支持扩展时间戳的 ext4 inode，atime 秒数为 0x100000001 时会返回 1。结果中的访问时间错误，这是旧 time32 ABI 的固有限制；本判定仅确认截断及可见后果，不表示发现了新的内部运算回归。"
+  },
+  {
+    "k": 20,
+    "loc": "arch/arm/kernel/sys_oabi-compat.c:140",
+    "verdict": "可能",
+    "why": "32 位 ARM 的 OABI stat64 仍用 unsigned long 保存 st_mtime，支持扩展时间戳的文件系统可提供超过 0xffffffff 秒的 time64_t 修改时间。此赋值会只返回低 32 位，例如 0x100000001 变成 1，且无溢出错误；这是旧 time32 ABI 的范围限制，stat64 名称并不代表其时间字段有 64 位。"
+  },
+  {
+    "k": 21,
+    "loc": "arch/arm/kernel/sys_oabi-compat.c:142",
+    "verdict": "可能",
+    "why": "当文件系统 inode 保存了超过 0xffffffff 秒的 ctime（例如系统时间已进入该范围后生成的扩展时间戳）时，time64_t 的秒数会被 ARM OABI 的 32 位 st_ctime 截低。该结构没有对应的 64 位 ctime 副本，用户会得到回绕的状态变更时间且调用仍成功；这是旧 time32 ABI 的固有限制。"
+  },
+  {
+    "k": 22,
+    "loc": "arch/arm/mm/dma-mapping.c:1663",
+    "verdict": "不可能",
+    "why": "被标记的 base 参数类型是 dma_addr_t；dma_base 虽声明为 u64，但只可能为初始值 0 或 dma_range_map_min 的结果，而该函数本身就返回 dma_addr_t。在 dma_addr_t 为 32 位的配置中，该值已保证可表示，传回同类型不丢位；ARM_LPAE 等通过 PHYS_ADDR_T_64BIT 又使 dma_addr_t 成为 64 位。"
+  },
+  {
+    "k": 23,
+    "loc": "arch/arm/mm/flush.c:235",
+    "verdict": "不可能",
+    "why": "flush_pfn_alias 对第二个参数只计算 CACHE_COLOUR(vaddr)，定义为 (vaddr & (SHMLBA-1))>>PAGE_SHIFT，且 ARM 的 SHMLBA=4*PAGE_SIZE。它只需文件位置的低位来选择缓存颜色，folio_pos 丢掉的高 32 位不会改变所选别名地址或刷缓存效果。"
+  },
+  {
+    "k": 24,
+    "loc": "arch/arm/mm/mmu.c:1155",
+    "verdict": "可能",
+    "why": "ARM32 的 vmalloc_reserve 是 32 位 unsigned long，memparse 却允许解析 64 位大小，且大小上下限检查发生在窄化之后。例如 vmalloc=4G 会先回绕为 0，再被当作过小请求限制到 16 MiB，而不是按原始大请求限制到 vmalloc_max，导致实际保留的 vmalloc 区域及诊断都错误。"
+  },
+  {
+    "k": 25,
+    "loc": "arch/loongarch/kernel/mem.c:32",
+    "verdict": "说不清",
+    "why": "目标树的 LoongArch 已有 32BIT 选项，mem.o 也无 64 位构建限制，故不能以架构名排除；32 位 phys_addr_t 会截低 EFI 描述中的高地址 RAM 起点，并可能错误登记低地址 RAM。但 LA32 路径把 cpu_pabits 固定为 31，尚不能确认可运行的 32 位配置会实际收到含 4 GiB 以上 RAM 的 EFI 图，也未找到输入裁剪保证，因此真实触发可达性未定。"
+  },
+  {
+    "k": 26,
+    "loc": "arch/loongarch/kernel/mem.c:37",
+    "verdict": "说不清",
+    "why": "此文件能进入 LoongArch 32BIT 构建，EFI_PAL_CODE、EFI_UNUSABLE_MEMORY 或 EFI_ACPI_RECLAIM_MEMORY 的 u64 起点若达到 4 GiB，会被 memblock_add 的 32 位 phys_addr_t 截低，随后又会按同一错误区间保留。但 LA32 当前只管理 32 位物理地址，源码未证明这种高地址描述在可运行的 32 位启动流程中真实存在，不能确认后果所需输入是否可达。"
+  },
+  {
+    "k": 27,
+    "loc": "arch/loongarch/kernel/mem.c:44",
+    "verdict": "说不清",
+    "why": "32BIT 的 LoongArch 会编译该调用，且这里没有在把 EFI 的 u64 起点交给 phys_addr_t 前排除高地址；若保留区或 MMIO 描述起点达到 4 GiB，会回绕并错误保留低地址区间。当前 LA32 的物理位宽固定为 32，未能确认其实际 EFI 启动图能包含这种范围，故保留为输入可达性不明确，而不误称该架构只有 64 位。"
+  },
+  {
+    "k": 28,
+    "loc": "arch/loongarch/kernel/time.c:128",
+    "verdict": "不可能",
+    "why": "启动先执行的 cpu_probe_common 无条件设置 LOONGARCH_CPU_CPUCFG 支持位，因此 time_init 实际选择返回 unsigned int 的 calc_const_freq，而不使用 cpu_clock_freq 的回退分支。const_clock_freq 在此路径上不超过 UINT_MAX，再除以正的 HZ 后 lpj 必能放入 32 位 unsigned long，u64 临时变量并不意味着结果会用到高 32 位。"
+  },
+  {
+    "k": 29,
+    "loc": "arch/loongarch/mm/tlb.c:152",
+    "verdict": "不可能",
+    "why": "该行位于 CONFIG_HUGETLB_PAGE 条件块；HUGETLB_PAGE 来自 HUGETLBFS，而 LoongArch 仅在 64BIT 时选择 ARCH_SUPPORTS_HUGETLBFS。故即使该架构已有 32 位内核选项，这段赋值也只进入 64 位构建，其中 unsigned long 为 64 位。"
+  },
+  {
+    "k": 30,
+    "loc": "arch/mips/kernel/ptrace32.c:73",
+    "verdict": "不可能",
+    "why": "arch/mips/kernel/Makefile 仅在 MIPS32_COMPAT 下编入 ptrace32.o，而该隐藏选项由都依赖 64BIT 的 MIPS32_O32 或 MIPS32_N32 选择。这里的 32 指被兼容的用户 ABI，执行代码的 MIPS 内核仍为 64 位，ptrace_access_vm 的 unsigned long 地址参数不会缩窄 u64。"
+  }
+]

@@ -1,0 +1,59 @@
+commit b3f78e74986546a6da5d28c24e627d95d17f79ec
+Author:     Ryan Roberts <ryan.roberts@arm.com>
+AuthorDate: Fri Jun 2 10:29:46 2023 +0100
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Fri Jun 9 16:25:55 2023 -0700
+
+    mm: vmalloc must set pte via arch code
+    
+    Patch series "Fixes for pte encapsulation bypasses", v3.
+    
+    A series to improve the encapsulation of pte entries by disallowing
+    non-arch code from directly dereferencing pte_t pointers.
+    
+    
+    This patch (of 4):
+    
+    It is bad practice to directly set pte entries within a pte table.
+    Instead all modifications must go through arch-provided helpers such as
+    set_pte_at() to give the arch code visibility and allow it to check (and
+    potentially modify) the operation.
+    
+    Link: https://lkml.kernel.org/r/20230602092949.545577-1-ryan.roberts@arm.com
+    Link: https://lkml.kernel.org/r/20230602092949.545577-2-ryan.roberts@arm.com
+    Fixes: 3e9a9e256b1e ("mm: add a vmap_pfn function")
+    Signed-off-by: Ryan Roberts <ryan.roberts@arm.com>
+    Reviewed-by: Zi Yan <ziy@nvidia.com>
+    Acked-by: Lorenzo Stoakes <lstoakes@gmail.com>
+    Reviewed-by: Christoph Hellwig <hch@lst.de>
+    Reviewed-by: Uladzislau Rezki (Sony) <urezki@gmail.com>
+    Reviewed-by: Mike Rapoport (IBM) <rppt@kernel.org>
+    Cc: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+    Cc: Matthew Wilcox (Oracle) <willy@infradead.org>
+    Cc: SeongJae Park <sj@kernel.org>
+    Cc: Yu Zhao <yuzhao@google.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/mm/vmalloc.c b/mm/vmalloc.c
+index 7c32435219b1..9d64a4098c36 100644
+--- a/mm/vmalloc.c
++++ b/mm/vmalloc.c
+@@ -2944,10 +2944,16 @@ struct vmap_pfn_data {
+ static int vmap_pfn_apply(pte_t *pte, unsigned long addr, void *private)
+ {
+ 	struct vmap_pfn_data *data = private;
++	unsigned long pfn = data->pfns[data->idx];
++	pte_t ptent;
+ 
+-	if (WARN_ON_ONCE(pfn_valid(data->pfns[data->idx])))
++	if (WARN_ON_ONCE(pfn_valid(pfn)))
+ 		return -EINVAL;
+-	*pte = pte_mkspecial(pfn_pte(data->pfns[data->idx++], data->prot));
++
++	ptent = pte_mkspecial(pfn_pte(pfn, data->prot));
++	set_pte_at(&init_mm, addr, pte, ptent);
++
++	data->idx++;
+ 	return 0;
+ }
+ 

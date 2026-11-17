@@ -1,0 +1,380 @@
+[1] 0f90b88dbcd1:arch/x86/kernel/kvmclock.c pattern=^bool kvm_check_and_clear_guest_paused
+...
+144: bool kvm_check_and_clear_guest_paused(void)
+145: {
+146: 	struct pvclock_vsyscall_time_info *src = this_cpu_hvclock();
+147: 	bool ret = false;
+148: 
+149: 	if (!src)
+150: 		return ret;
+151: 
+152: 	if ((src->pvti.flags & PVCLOCK_GUEST_STOPPED) != 0) {
+153: 		src->pvti.flags &= ~PVCLOCK_GUEST_STOPPED;
+154: 		pvclock_touch_watchdogs();
+155: 		ret = true;
+156: 	}
+157: 	return ret;
+158: }
+159: 
+160: static int kvm_cs_enable(struct clocksource *cs)
+
+[1] 0f90b88dbcd1:include/asm-generic/kvm_para.h pattern=^static inline bool kvm_check_and_clear_guest_paused
+...
+12: static inline bool kvm_check_and_clear_guest_paused(void)
+13: {
+14: 	return false;
+15: }
+16: 
+17: static inline unsigned int kvm_arch_para_features(void)
+
+[3] d9807d60c145:arch/riscv/include/asm/cacheflush.h pattern=flush_cache_vmap
+...
+35: #define flush_icache_range(start, end) flush_icache_all()
+36: #define flush_icache_user_page(vma, pg, addr, len) \
+37: 	flush_icache_mm(vma->vm_mm, 0)
+38: 
+39: #ifdef CONFIG_64BIT
+40: #define flush_cache_vmap(start, end)		flush_tlb_kernel_range(start, end)
+41: #define flush_cache_vmap_early(start, end)	local_flush_tlb_kernel_range(start, end)
+42: #endif
+43: 
+44: #ifndef CONFIG_SMP
+45: 
+46: #define flush_icache_all() local_flush_icache_all()
+47: #define flush_icache_mm(mm, local) flush_icache_all()
+48: 
+49: #else /* CONFIG_SMP */
+50: 
+51: void flush_icache_all(void);
+52: void flush_icache_mm(struct mm_struct *mm, bool local);
+53: 
+
+[3] d9807d60c145:mm/sparse-vmemmap.c pattern=^struct page .*__populate_section_memmap
+...
+452: struct page * __meminit __populate_section_memmap(unsigned long pfn,
+453: 		unsigned long nr_pages, int nid, struct vmem_altmap *altmap,
+454: 		struct dev_pagemap *pgmap)
+455: {
+456: 	unsigned long start = (unsigned long) pfn_to_page(pfn);
+457: 	unsigned long end = start + nr_pages * sizeof(struct page);
+458: 	int r;
+459: 
+460: 	if (WARN_ON_ONCE(!IS_ALIGNED(pfn, PAGES_PER_SUBSECTION) ||
+461: 		!IS_ALIGNED(nr_pages, PAGES_PER_SUBSECTION)))
+462: 		return NULL;
+463: 
+464: 	if (vmemmap_can_optimize(altmap, pgmap))
+465: 		r = vmemmap_populate_compound_pages(pfn, start, end, nid, pgmap);
+466: 	else
+467: 		r = vmemmap_populate(start, end, nid, altmap);
+468: 
+469: 	if (r < 0)
+470: 		return NULL;
+471: 
+472: 	return pfn_to_page(pfn);
+473: }
+
+[4] d94c12bd97d5:arch/arm64/include/asm/word-at-a-time.h pattern=load_unaligned_zeropad
+...
+44:  * Load an unaligned word from kernel space.
+45:  *
+46:  * In the (very unlikely) case of the word being a page-crosser
+47:  * and the next page not being mapped, take the exception and
+48:  * return zeroes in the non-existing part.
+49:  */
+50: static inline unsigned long load_unaligned_zeropad(const void *addr)
+51: {
+52: 	unsigned long ret;
+53: 
+54: 	__mte_enable_tco_async();
+55: 
+56: 	/* Load word from unaligned pointer addr */
+57: 	asm(
+58: 	"1:	ldr	%0, %2\n"
+59: 	"2:\n"
+60: 	_ASM_EXTABLE_LOAD_UNALIGNED_ZEROPAD(1b, 2b, %0, %1)
+61: 	: "=&r" (ret)
+62: 	: "r" (addr), "Q" (*(unsigned long *)addr));
+63: 
+64: 	__mte_disable_tco_async();
+65: 
+66: 	return ret;
+67: }
+68: 
+69: #endif /* __ASM_WORD_AT_A_TIME_H */
+
+[5] 59f876fb9d68:arch/arm/include/asm/bitops.h pattern=__ffs
+...
+218: #if __LINUX_ARM_ARCH__ < 5
+219: 
+220: #include <asm-generic/bitops/__fls.h>
+221: #include <asm-generic/bitops/__ffs.h>
+222: #include <asm-generic/bitops/fls.h>
+223: #include <asm-generic/bitops/ffs.h>
+224: 
+225: #else
+226: 
+227: /*
+228:  * On ARMv5 and above, the gcc built-ins may rely on the clz instruction
+229:  * and produce optimal inlined code in all cases. On ARMv7 it is even
+230:  * better by also using the rbit instruction.
+231:  */
+232: #include <asm-generic/bitops/builtin-__fls.h>
+233: #include <asm-generic/bitops/builtin-__ffs.h>
+234: #include <asm-generic/bitops/builtin-fls.h>
+235: #include <asm-generic/bitops/builtin-ffs.h>
+236: 
+237: #endif
+238: 
+239: #include <asm-generic/bitops/ffz.h>
+240: 
+241: #include <asm-generic/bitops/fls64.h>
+242: 
+243: #include <asm-generic/bitops/sched.h>
+
+[9] 22883973244b:include/linux/uaccess.h pattern=^#ifndef untagged_addr
+...
+19:  * Passing down mm_struct allows to define untagging rules on per-process
+20:  * basis.
+21:  *
+22:  * It's defined as noop for architectures that don't support memory tagging.
+23:  */
+24: #ifndef untagged_addr
+25: #define untagged_addr(addr) (addr)
+26: #endif
+27: 
+28: #ifndef untagged_addr_remote
+29: #define untagged_addr_remote(mm, addr)	({		\
+30: 	mmap_assert_locked(mm);				\
+31: 	untagged_addr(addr);				\
+32: })
+33: #endif
+34: 
+35: /*
+36:  * Architectures should provide two primitives (raw_copy_{to,from}_user())
+37:  * and get rid of their private instances of copy_{to,from}_user() and
+
+[9] 22883973244b:arch/x86/include/asm/uaccess_64.h pattern=^static inline unsigned long __untagged_addr_remote
+...
+36: })
+37: 
+38: static inline unsigned long __untagged_addr_remote(struct mm_struct *mm,
+39: 						   unsigned long addr)
+40: {
+41: 	mmap_assert_locked(mm);
+42: 	return addr & (mm)->context.untag_mask;
+43: }
+44: 
+45: #define untagged_addr_remote(mm, addr)	({				\
+46: 	unsigned long __addr = (__force unsigned long)(addr);		\
+47: 	(__force __typeof__(addr))__untagged_addr_remote(mm, __addr);	\
+48: })
+49: 
+50: #endif
+51: 
+52: /*
+53:  * The virtual address space space is logically divided into a kernel
+
+[10] 56ae10cf628b:arch/powerpc/include/asm/nohash/32/pte-8xx.h pattern=^#define ptep_get ptep_get
+...
+212: 
+213: #ifdef CONFIG_PPC_16K_PAGES
+214: #define ptep_get ptep_get
+215: static inline pte_t ptep_get(pte_t *ptep)
+216: {
+217: 	pte_basic_t val = READ_ONCE(ptep->pte);
+218: 	pte_t pte = {val, val, val, val};
+219: 
+220: 	return pte;
+221: }
+222: #endif /* CONFIG_PPC_16K_PAGES */
+223: 
+224: #endif
+
+[13] 546e42c8c6d9:include/linux/pgtable.h pattern=^static inline pud_t pudp_huge_get_and_clear
+...
+649: 
+650: 	pmd_clear(pmdp);
+651: 	page_table_check_pmd_clear(mm, pmd);
+652: 
+653: 	return pmd;
+654: }
+655: #endif /* __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR */
+656: #ifndef __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR
+657: static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
+658: 					    unsigned long address,
+659: 					    pud_t *pudp)
+660: {
+661: 	pud_t pud = *pudp;
+662: 
+663: 	pud_clear(pudp);
+664: 	page_table_check_pud_clear(mm, pud);
+665: 
+666: 	return pud;
+667: }
+668: #endif /* __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR */
+669: #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+670: 
+671: #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+672: #ifndef __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR_FULL
+673: static inline pmd_t pmdp_huge_get_and_clear_full(struct vm_area_struct *vma,
+674: 					    unsigned long address, pmd_t *pmdp,
+675: 					    int full)
+676: {
+677: 	return pmdp_huge_get_and_clear(vma->vm_mm, address, pmdp);
+678: }
+679: #endif
+680: 
+681: #ifndef __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR_FULL
+682: static inline pud_t pudp_huge_get_and_clear_full(struct vm_area_struct *vma,
+683: 					    unsigned long address, pud_t *pudp,
+684: 					    int full)
+685: {
+686: 	return pudp_huge_get_and_clear(vma->vm_mm, address, pudp);
+687: }
+688: #endif
+689: #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+690: 
+691: #ifndef __HAVE_ARCH_PTEP_GET_AND_CLEAR_FULL
+692: static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
+693: 					    unsigned long address, pte_t *ptep,
+694: 					    int full)
+695: {
+696: 	return ptep_get_and_clear(mm, address, ptep);
+697: }
+698: #endif
+
+[14] edf2d546bfd6:arch/riscv/kernel/patch.c pattern=^static void patch_unmap|^static int __patch_insn_write
+...
+58: }
+59: 
+60: static void patch_unmap(int fixmap)
+61: {
+62: 	clear_fixmap(fixmap);
+63: }
+64: NOKPROBE_SYMBOL(patch_unmap);
+65: 
+66: static int __patch_insn_set(void *addr, u8 c, size_t len)
+67: {
+68: 	void *waddr = addr;
+69: 	bool across_pages = (((uintptr_t)addr & ~PAGE_MASK) + len) > PAGE_SIZE;
+70: 
+71: 	/*
+72: 	 * Only two pages can be mapped at a time for writing.
+73: 	 */
+74: 	if (len + offset_in_page(addr) > 2 * PAGE_SIZE)
+75: 		return -EINVAL;
+76: 	/*
+77: 	 * Before reaching here, it was expected to lock the text_mutex
+78: 	 * already, so we don't need to give another lock here and could
+79: 	 * ensure that it was safe between each cores.
+80: 	 */
+81: 	lockdep_assert_held(&text_mutex);
+82: 
+83: 	preempt_disable();
+84: 
+85: 	if (across_pages)
+86: 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+87: 
+88: 	waddr = patch_map(addr, FIX_TEXT_POKE0);
+89: 
+90: 	memset(waddr, c, len);
+91: 
+92: 	/*
+93: 	 * We could have just patched a function that is about to be
+94: 	 * called so make sure we don't execute partially patched
+95: 	 * instructions by flushing the icache as soon as possible.
+96: 	 */
+97: 	local_flush_icache_range((unsigned long)waddr,
+98: 				 (unsigned long)waddr + len);
+99: 
+100: 	patch_unmap(FIX_TEXT_POKE0);
+...
+109: NOKPROBE_SYMBOL(__patch_insn_set);
+110: 
+111: static int __patch_insn_write(void *addr, const void *insn, size_t len)
+112: {
+113: 	void *waddr = addr;
+114: 	bool across_pages = (((uintptr_t) addr & ~PAGE_MASK) + len) > PAGE_SIZE;
+115: 	int ret;
+116: 
+117: 	/*
+118: 	 * Only two pages can be mapped at a time for writing.
+119: 	 */
+120: 	if (len + offset_in_page(addr) > 2 * PAGE_SIZE)
+121: 		return -EINVAL;
+122: 
+123: 	/*
+124: 	 * Before reaching here, it was expected to lock the text_mutex
+125: 	 * already, so we don't need to give another lock here and could
+126: 	 * ensure that it was safe between each cores.
+127: 	 *
+128: 	 * We're currently using stop_machine() for ftrace & kprobes, and while
+129: 	 * that ensures text_mutex is held before installing the mappings it
+130: 	 * does not ensure text_mutex is held by the calling thread.  That's
+131: 	 * safe but triggers a lockdep failure, so just elide it for that
+132: 	 * specific case.
+133: 	 */
+134: 	if (!riscv_patch_in_stop_machine)
+135: 		lockdep_assert_held(&text_mutex);
+136: 
+137: 	preempt_disable();
+138: 
+139: 	if (across_pages)
+140: 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+141: 
+142: 	waddr = patch_map(addr, FIX_TEXT_POKE0);
+143: 
+144: 	ret = copy_to_kernel_nofault(waddr, insn, len);
+145: 
+146: 	/*
+147: 	 * We could have just patched a function that is about to be
+148: 	 * called so make sure we don't execute partially patched
+149: 	 * instructions by flushing the icache as soon as possible.
+150: 	 */
+151: 	local_flush_icache_range((unsigned long)waddr,
+...
+171: NOKPROBE_SYMBOL(__patch_insn_set);
+172: 
+173: static int __patch_insn_write(void *addr, const void *insn, size_t len)
+174: {
+175: 	return copy_to_kernel_nofault(addr, insn, len);
+176: }
+177: NOKPROBE_SYMBOL(__patch_insn_write);
+178: #endif /* CONFIG_MMU */
+179: 
+180: static int patch_insn_set(void *addr, u8 c, size_t len)
+181: {
+182: 	size_t patched = 0;
+183: 	size_t size;
+184: 	int ret = 0;
+185: 
+186: 	/*
+187: 	 * __patch_insn_set() can only work on 2 pages at a time so call it in a
+188: 	 * loop with len <= 2 * PAGE_SIZE.
+189: 	 */
+190: 	while (patched < len && !ret) {
+191: 		size = min_t(size_t, PAGE_SIZE * 2 - offset_in_page(addr + patched), len - patched);
+192: 		ret = __patch_insn_set(addr + patched, c, size);
+193: 
+194: 		patched += size;
+195: 	}
+196: 
+197: 	return ret;
+198: }
+199: NOKPROBE_SYMBOL(patch_insn_set);
+200: 
+201: int patch_text_set_nosync(void *addr, u8 c, size_t len)
+202: {
+203: 	u32 *tp = addr;
+204: 	int ret;
+205: 
+206: 	ret = patch_insn_set(tp, c, len);
+207: 
+208: 	return ret;
+209: }
+210: NOKPROBE_SYMBOL(patch_text_set_nosync);
+211: 
+212: int patch_insn_write(void *addr, const void *insn, size_t len)
+213: {
+

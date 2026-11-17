@@ -1,0 +1,37 @@
+########## 第10条  编号 A063  提交 d080a08b06b6  日期 2024-03-11
+
+【提交说明】
+riscv: Fix spurious errors from __get/put_kernel_nofault
+
+These macros did not initialize __kr_err, so they could fail even if
+the access did not fault.
+
+Fixes: d464118cdc41 ("riscv: implement __get_kernel_nofault and __put_user_nofault")
+
+【改动统计】
+ arch/riscv/include/asm/uaccess.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index ec0cab9fbddd..72ec1d9bd3f3 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -319,7 +319,7 @@ unsigned long __must_check clear_user(void __user *to, unsigned long n)
+ 
+ #define __get_kernel_nofault(dst, src, type, err_label)			\
+ do {									\
+-	long __kr_err;							\
++	long __kr_err = 0;						\
+ 									\
+ 	__get_user_nocheck(*((type *)(dst)), (type *)(src), __kr_err);	\
+ 	if (unlikely(__kr_err))						\
+@@ -328,7 +328,7 @@ do {									\
+ 
+ #define __put_kernel_nofault(dst, src, type, err_label)			\
+ do {									\
+-	long __kr_err;							\
++	long __kr_err = 0;						\
+ 									\
+ 	__put_user_nocheck(*((type *)(src)), (type *)(dst), __kr_err);	\
+ 	if (unlikely(__kr_err))						\

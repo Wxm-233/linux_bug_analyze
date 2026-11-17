@@ -1,0 +1,49 @@
+diff --git a/arch/loongarch/kvm/main.c b/arch/loongarch/kvm/main.c
+index 236523d2449d..03730ffa27da 100644
+--- a/arch/loongarch/kvm/main.c
++++ b/arch/loongarch/kvm/main.c
+@@ -7,6 +7,7 @@
+ #include <linux/module.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/kvm_host.h>
++#include <linux/nospec.h>
+ #include <asm/cacheflush.h>
+ #include <asm/cpufeature.h>
+ #include <asm/kvm_csr.h>
+@@ -22,7 +23,7 @@ static struct kvm_context __percpu *vmcs;
+ int get_gcsr_flag(int csr)
+ {
+ 	if (csr < CSR_MAX_NUMS)
+-		return gcsr_flag[csr];
++		return gcsr_flag[array_index_nospec(csr, CSR_MAX_NUMS)];
+ 
+ 	return INVALID_GCSR;
+ }
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index 8e028be3f0a9..c0da56d2363b 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <linux/kvm_host.h>
++#include <linux/nospec.h>
+ #include <asm/fpu.h>
+ #include <asm/lbt.h>
+ #include <asm/loongarch.h>
+@@ -510,6 +511,7 @@ static inline int kvm_set_cpuid(struct kvm_vcpu *vcpu, u64 val)
+ 
+ 	if (val >= KVM_MAX_PHYID)
+ 		return -EINVAL;
++	val = array_index_nospec(val, KVM_MAX_PHYID);
+ 
+ 	map = vcpu->kvm->arch.phyid_map;
+ 	cpuid = kvm_read_sw_gcsr(csr, LOONGARCH_CSR_CPUID);
+@@ -584,6 +586,7 @@ struct kvm_vcpu *kvm_get_vcpu_by_cpuid(struct kvm *kvm, int cpuid)
+ 	if (cpuid >= KVM_MAX_PHYID)
+ 		return NULL;
+ 
++	cpuid = array_index_nospec(cpuid, KVM_MAX_PHYID);
+ 	map = kvm->arch.phyid_map;
+ 	if (!map->phys_map[cpuid].enabled)
+ 		return NULL;

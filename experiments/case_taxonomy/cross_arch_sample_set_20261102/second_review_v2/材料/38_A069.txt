@@ -1,0 +1,63 @@
+########## 第38条  编号 A069  提交 a370c2419e46  日期 2024-03-26
+
+【提交说明】
+riscv: Disable preemption when using patch_map()
+
+patch_map() uses fixmap mappings to circumvent the non-writability of
+the kernel text mapping.
+
+The __set_fixmap() function only flushes the current cpu tlb, it does
+not emit an IPI so we must make sure that while we use a fixmap mapping,
+the current task is not migrated on another cpu which could miss the
+newly introduced fixmap mapping.
+
+So in order to avoid any task migration, disable the preemption.
+
+Fixes: cad539baa48f ("riscv: implement a memset like function for text")
+Fixes: 0ff7c3b33127 ("riscv: Use text_mutex instead of patch_lock")
+
+【改动统计】
+ arch/riscv/kernel/patch.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 37e87fdcf6a0..30e12b310cab 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -80,6 +80,8 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	 */
+ 	lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+ 
+@@ -92,6 +94,8 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	if (across_pages)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return 0;
+ }
+ NOKPROBE_SYMBOL(__patch_insn_set);
+@@ -122,6 +126,8 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	if (!riscv_patch_in_stop_machine)
+ 		lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+ 
+@@ -134,6 +140,8 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	if (across_pages)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return ret;
+ }
+ NOKPROBE_SYMBOL(__patch_insn_write);

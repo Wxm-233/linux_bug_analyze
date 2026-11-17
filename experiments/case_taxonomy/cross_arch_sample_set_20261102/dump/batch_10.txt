@@ -1,0 +1,1518 @@
+
+##### A250
+=== f51fed61eea0 A 2026-06-12 +2/-2
+riscv: drop __init from vec_check_unaligned_access_speed_all_cpus
+
+This function runs within a kthread and need not necessarily finish
+before system finishes boot and free_initmem() unmaps the .init.text
+section. This function makes calls to SBI for probing unaligned access
+speed, and if this is slow for some reason (say some debug prints were
+added to SBI), the kthread can still be running at this point and result
+in an instruction page fault when trying to fetch from the freed region.
+
+[   25.642087] Unable to handle kernel paging request at virtual address ffffffff80a04ef8
+[   25.646694] Current vec_check_unali pgtable: 4K pagesize, 48-bit VAs, pgdp=0x00004000316e9000
+[   25.653170] [ffffffff80a04ef8] pgd=000010004be7e401, p4d=000010004be7e401, pud=000010004be7e001, pmd=000010000c3000e3
+[   25.661244] Oops [#1]
+[   25.662997] Modules linked in:
+[   25.665357] CPU: 3 UID: 0 PID: 42 Comm: vec_check_unali Not tainted 7.0.0-tt-blackhole-asrinivasan-00007-g30ff73f18211 #570 PREEMPTLAZY
+[   25.674669] Hardware name: Tenstorrent Blackhole (DT)
+[   25.678545] epc : vec_check_unaligned_access_speed_all_cpus+0x18/0x2c
+[   25.683458]  ra : vec_check_unaligned_access_speed_all_cpus+0x18/0x2c
+[   25.688372] epc : ffffffff80a04ef8 ra : ffffffff80a04ef8 sp : ffff8f8000203e20
+[   25.693874]  gp : ffffffff814dc168 tp : ffffaf8001ad9900 t0 : 0000000000000000
+[   25.699401]  t1 : fffffffffffffff0 t2 : ffffaf8001ad9a10 s0 : ffff8f8000203e30
+[   25.704912]  s1 : ffffaf80018dc780 a0 : 0000000000000000 a1 : 0000000000000002
+[   25.710407]  a2 : 00000000000001f0 a3 : 0000000000000018 a4 : 0000000000000000
+[   25.715917]  a5 : 0000000000000000 a6 : ffffaf8001c03d98 a7 : ffffaf8001c03e30
+[   25.721419]  s2 : ffff8f8000023c98 s3 : ffffaf8001aa1240 s4 : ffffffff80a04ee0
+[   25.726937]  s5 : 0000000000000000 s6 : 0000000000000000 s7 : 0000000000000000
+[   25.732450]  s8 : 0000000000000000 s9 : 0000000000000000 s10: 0000000000000000
+[   25.737944]  s11: 0000000000000000 t3 : 0000000000000002 t4 : 0000000000000402
+[   25.743481]  t5 : 0000000000000040 t6 : 0000000000000004 ssp : 0000000000000000
+[   25.749024] status: 0000000200000120 badaddr: ffffffff80a04ef8 cause: 000000000000000c
+[   25.755060] [<ffffffff80a04ef8>] vec_check_unaligned_access_speed_all_cpus+0x18/0x2c
+[   25.760964] [<ffffffff80047a10>] kthread+0xd8/0xfc
+[   25.764660] [<ffffffff80010c48>] ret_from_fork_kernel+0x18/0x1c4
+[   25.769220] [<ffffffff80895fe6>] ret_from_fork_kernel_asm+0x16/0x18
+[   25.774018] Code: cccc cccc cccc cccc cccc cccc cccc cccc cccc cccc (cccc) cccc
+
+Drop __init from its signature so that this doesn't happen.
+
+Fixes: a00e022be531 ("riscv: Annotate unaligned access init functions")
+Assisted-by: Claude:claude-opus-4-6
+functions: 
+fixes: a00e022be531(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index bb57eb5d19df..5a5aa22124e7 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -290,5 +290,5 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ 
+ /* Measure unaligned access speed on all CPUs present at boot in parallel. */
+-static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++static int vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+ {
+ 	schedule_on_each_cpu(check_vector_unaligned_access);
+@@ -298,5 +298,5 @@ static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __alway
+ }
+ #else /* CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS */
+-static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++static int vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+ {
+ 	return 0;
+
+##### A251
+=== e4bf6eb4c7b6 A 2026-06-23 +9/-1
+arch/riscv: vdso: remove CFI landing pad from rt_sigreturn
+
+When CONFIG_RISCV_USER_CFI is enabled, the CFI version of the vDSO, has
+a CFI landing pad instruction at the start of __vdso_rt_sigreturn. This
+breaks libgcc's unwinding code which matches on the first two
+instructions. Other unwinders that rely on similar instruction matching
+may also be affected.
+
+Since __vdso_rt_sigreturn is reached as part of signal-return handling
+rather than via an indirect call/jump from userspace, it does not need a
+CFI landing pad. Remove it and restore the instruction sequence expected
+by existing unwinding code.
+
+This matches what was done on arm64 in commit 9a964285572b ("arm64:
+vdso: Don't prefix sigreturn trampoline with a BTI C instruction") for a
+similar issue.
+
+Fixes: 37f57bd3faea ("arch/riscv: compile vdso with landing pad and shadow stack note")
+Co-authored-by: Joel Stanley <joel@jms.id.au>
+[pjw@kernel.org: fixed comment style]
+functions: 
+fixes: 37f57bd3faea(riscv)
+diff --git a/arch/riscv/kernel/vdso/rt_sigreturn.S b/arch/riscv/kernel/vdso/rt_sigreturn.S
+index e82987dc3739..d6f96b1abe40 100644
+--- a/arch/riscv/kernel/vdso/rt_sigreturn.S
++++ b/arch/riscv/kernel/vdso/rt_sigreturn.S
+@@ -8,9 +8,17 @@
+ #include <asm/assembler.h>
+ 
++/*
++ * WARNING: Do NOT add a CFI landing pad at the start of this function.
++ * Unwinders such as libgcc identify the sigreturn trampoline by matching the
++ * instruction sequence. Adding a landing pad here would break unwinding from
++ * signal handlers.
++ *
++ * This trampoline is used only for signal return and not via an indirect
++ * call/jump from userspace, so adding CFI landing pad is unnecessary.
++ */
+ 	.text
+ SYM_FUNC_START(__vdso_rt_sigreturn)
+ 	.cfi_startproc
+ 	.cfi_signal_frame
+-	vdso_lpad
+ 	li a7, __NR_rt_sigreturn
+ 	ecall
+
+##### A252
+=== c4c7756a81b5 A 2026-06-24 +6/-6
+riscv: Fix 32-bit call_on_irq_stack() frame pointer ABI
+
+call_on_irq_stack() uses struct member offsets to set up its link in the
+frame record list. On riscv32, struct stackframe is the wrong size to
+maintain stack pointer alignment, so STACKFRAME_SIZE_ON_STACK includes
+padding. However, the ABI requires the frame record to be placed
+immediately below the address stored in s0, so the padding must come
+before the struct members.
+
+Fix the layout by making STACKFRAME_FP and STACKFRAME_RA the negative
+offsets from s0, instead of the positive offsets from sp.
+
+Fixes: 82982fdd5133 ("riscv: Deduplicate IRQ stack switching")
+[pjw@kernel.org: cleaned up the patch tags and added Matthew's Reviewed-by]
+functions: arch/riscv/kernel/asm-offsets.c:asm_offsets
+fixes: 82982fdd5133(riscv)
+diff --git a/arch/riscv/kernel/asm-offsets.c b/arch/riscv/kernel/asm-offsets.c
+index af827448a609..a75f0cfea1e9 100644
+--- a/arch/riscv/kernel/asm-offsets.c
++++ b/arch/riscv/kernel/asm-offsets.c
+@@ -502,6 +502,6 @@ void asm_offsets(void)
+ 
+ 	DEFINE(STACKFRAME_SIZE_ON_STACK, ALIGN(sizeof(struct stackframe), STACK_ALIGN));
+-	OFFSET(STACKFRAME_FP, stackframe, fp);
+-	OFFSET(STACKFRAME_RA, stackframe, ra);
++	DEFINE(STACKFRAME_FP, offsetof(struct stackframe, fp) - sizeof(struct stackframe));
++	DEFINE(STACKFRAME_RA, offsetof(struct stackframe, ra) - sizeof(struct stackframe));
+ #ifdef CONFIG_FUNCTION_TRACER
+ 	DEFINE(FTRACE_OPS_FUNC,		offsetof(struct ftrace_ops, func));
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index c6988983cdf7..08df724e13b9 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -387,6 +387,6 @@ SYM_FUNC_START(call_on_irq_stack)
+ 	/* Create a frame record to save ra and s0 (fp) */
+ 	addi	sp, sp, -STACKFRAME_SIZE_ON_STACK
+-	REG_S	ra, STACKFRAME_RA(sp)
+-	REG_S	s0, STACKFRAME_FP(sp)
++	REG_S	ra, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_RA)(sp)
++	REG_S	s0, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_FP)(sp)
+ 	addi	s0, sp, STACKFRAME_SIZE_ON_STACK
+ 
+@@ -406,6 +406,6 @@ SYM_FUNC_START(call_on_irq_stack)
+ 	/* Switch back to the thread stack and restore ra and s0 */
+ 	addi	sp, s0, -STACKFRAME_SIZE_ON_STACK
+-	REG_L	ra, STACKFRAME_RA(sp)
+-	REG_L	s0, STACKFRAME_FP(sp)
++	REG_L	ra, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_RA)(sp)
++	REG_L	s0, (STACKFRAME_SIZE_ON_STACK + STACKFRAME_FP)(sp)
+ 	addi	sp, sp, STACKFRAME_SIZE_ON_STACK
+ 
+
+##### A253
+=== 0cc15f2c7a55 A 2026-06-26 +2/-2
+KVM: riscv: PMU: Bound counter mask scan to BITS_PER_LONG
+
+The PMU SBI handler passes the guest argument registers directly to
+the PMU start/stop helpers:
+
+kvm_riscv_vcpu_pmu_ctr_start(vcpu, cp->a0, cp->a1, cp->a2, ...)
+kvm_riscv_vcpu_pmu_ctr_stop(vcpu, cp->a0, cp->a1, cp->a2, ...)
+
+which map to:
+
+unsigned long ctr_base
+unsigned long ctr_mask
+unsigned long flags
+
+Thus cp->a1 is a single unsigned long ctr_mask, not a bitmap array
+sized for RISCV_MAX_COUNTERS.
+
+On RV32, RISCV_MAX_COUNTERS is 64 while BITS_PER_LONG is 32.  Using
+for_each_set_bit() with RISCV_MAX_COUNTERS can therefore make
+find_next_bit() access bits beyond the storage of ctr_mask on RV32.
+
+Limit the scan to BITS_PER_LONG. The requested counter range is already
+validated by kvm_pmu_validate_counter_mask(), so this preserves RV64
+behavior and avoids an out-of-bounds bitmap read on RV32.
+
+Fixes: 0cb74b65d2e5 ("RISC-V: KVM: Implement perf support without sampling")
+functions: arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_start, arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_stop
+fixes: 0cb74b65d2e5(riscv)
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index bb46dcbfb24d..2025b664961c 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -587,5 +587,5 @@ int kvm_riscv_vcpu_pmu_ctr_start(struct kvm_vcpu *vcpu, unsigned long ctr_base,
+ 	}
+ 	/* Start the counters that have been configured and requested by the guest */
+-	for_each_set_bit(i, &ctr_mask, RISCV_MAX_COUNTERS) {
++	for_each_set_bit(i, &ctr_mask, BITS_PER_LONG) {
+ 		pmc_index = array_index_nospec(i + ctr_base,
+ 					       RISCV_KVM_MAX_COUNTERS);
+@@ -659,5 +659,5 @@ int kvm_riscv_vcpu_pmu_ctr_stop(struct kvm_vcpu *vcpu, unsigned long ctr_base,
+ 
+ 	/* Stop the counters that have been configured and requested by the guest */
+-	for_each_set_bit(i, &ctr_mask, RISCV_MAX_COUNTERS) {
++	for_each_set_bit(i, &ctr_mask, BITS_PER_LONG) {
+ 		pmc_index = array_index_nospec(i + ctr_base,
+ 					       RISCV_KVM_MAX_COUNTERS);
+
+##### A254
+=== bc7b086a4552 A 2026-06-30 +3/-0
+riscv: probes: save original sp in rethook trampoline
+
+Reading a word from the stack in a kretprobe crashes a risc-v kernel.
+
+$ cd /sys/kernel/tracing/
+$ echo 'r n_tty_write $stack0' > dynamic_events
+$ echo 1 > events/kprobes/enable
+Unable to handle kernel paging request at virtual address 0000000200000128
+...
+[<ffffffff80016d16>] regs_get_kernel_stack_nth+0x26/0x38
+[<ffffffff80177196>] process_fetch_insn+0x3ee/0x760
+[<ffffffff80177836>] kretprobe_trace_func+0x116/0x1f0
+[<ffffffff8017795a>] kretprobe_dispatcher+0x4a/0x58
+[<ffffffff8013572e>] kretprobe_rethook_handler+0x5e/0x90
+[<ffffffff80180838>] rethook_trampoline_handler+0x70/0x108
+[<ffffffff8001ba32>] arch_rethook_trampoline_callback+0x12/0x1c
+[<ffffffff8001ba84>] arch_rethook_trampoline+0x48/0x94
+[<ffffffff8067872a>] tty_write+0x1a/0x30
+
+In regs_get_kernel_stack_nth, regs->sp contains an arbitrary value.
+
+arch_rethook_trampoline saves the registers from the probed function in a
+struct pt_regs. sp is not saved. Instead, sp is decremented for
+arch_rethook_trampoline's local stack.
+
+Fix this crash and save the original sp along with the other registers.
+Use a0 as a temporary register, it is overwritten anyway.
+
+Fixes: c22b0bcb1dd02 ("riscv: Add kprobes supported")
+[pjw@kernel.org: added Fixes tag; cc'ed stable]
+functions: 
+fixes: c22b0bcb1dd0(riscv)
+diff --git a/arch/riscv/kernel/probes/rethook_trampoline.S b/arch/riscv/kernel/probes/rethook_trampoline.S
+index f2cd83d9b0f0..c3aa8d8cf5af 100644
+--- a/arch/riscv/kernel/probes/rethook_trampoline.S
++++ b/arch/riscv/kernel/probes/rethook_trampoline.S
+@@ -42,4 +42,7 @@
+ 	REG_S x30, PT_T5(sp)
+ 	REG_S x31, PT_T6(sp)
++	/* save original sp */
++	addi a0, sp, PT_SIZE_ON_STACK
++	REG_S a0, PT_SP(sp)
+ 	.endm
+ 
+
+##### A255
+=== ad6dcfa02376 A 2026-07-01 +3/-3
+riscv: vdso: Do not use LTO for the vDSO
+
+With LTO enabled the compiler assumes that the vDSO functions are not
+used and optimizes them away completely. Currently this happens to
+__vdso_clock_getres(), __vdso_clock_gettime(), __vdso_getrandom(),
+__vdso_gettimeofday() and __vdso_riscv_hwprobe().
+
+Disable LTO for the vDSO, as these functions are hand-optimized anyways.
+
+Fixes: 021d23428bdb ("RISC-V: build: Allow LTO to be selected")
+functions: 
+fixes: 021d23428bdb(riscv)
+diff --git a/arch/riscv/kernel/vdso/Makefile b/arch/riscv/kernel/vdso/Makefile
+index a842dc034571..43ee881f6c6f 100644
+--- a/arch/riscv/kernel/vdso/Makefile
++++ b/arch/riscv/kernel/vdso/Makefile
+@@ -70,7 +70,7 @@ endif
+ 
+ # Disable -pg to prevent insert call site
+-CFLAGS_REMOVE_vgettimeofday.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS)
+-CFLAGS_REMOVE_getrandom.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS)
+-CFLAGS_REMOVE_hwprobe.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS)
++CFLAGS_REMOVE_vgettimeofday.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS) $(CC_FLAGS_LTO)
++CFLAGS_REMOVE_getrandom.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS) $(CC_FLAGS_LTO)
++CFLAGS_REMOVE_hwprobe.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS) $(CC_FLAGS_LTO)
+ 
+ # Force dependency
+
+##### A256
+=== 298276da73ca A 2026-07-06 +6/-32
+RISC-V: KVM: Zicbo[m|z|p] block sizes should be always present in ONE_REG
+
+All config and core registers of the KVM RISC-V ONE_REG interface are
+expected to be always available to the KVM user-space and the KVM
+get-reg-list selftest assumes these registers to be as base registers.
+
+Currently, the Zicbo[m|z|p] block size config registers are only
+available when corresponding ISA extension is present on the host
+which breaks the above expectation. In fact, KVM get-reg-list selftest
+fails when any of the Zicbo[m|z|p] ISA extension is not present on
+host. To address this issue, drop the ISA extension checks from
+kvm_riscv_vcpu_get/set_reg_config() and copy_config_reg_indices()
+functions.
+
+Fixes: 031f9efafc08 ("KVM: riscv: Add KVM_GET_REG_LIST API support")
+Fixes: a044ef71043e ("RISC-V: KVM: use ENOENT in *_one_reg() when extension is unavailable")
+Fixes: 48e2febcda74 ("RISC-V: KVM: Provide UAPI for Zicbop block size")
+Fixes: cf05b059d59f ("RISC-V: KVM: Introduce common kvm_riscv_isa_check_host()")
+functions: arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_get_reg_config, arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_set_reg_config, arch/riscv/kvm/vcpu_onereg.c:copy_config_reg_indices
+fixes: 031f9efafc08(riscv), a044ef71043e(riscv), 48e2febcda74(riscv), cf05b059d59f(riscv)
+ arch/riscv/kvm/vcpu_onereg.c | 38 ++++++--------------------------------
+ 1 file changed, 6 insertions(+), 32 deletions(-)
+diff --git a/arch/riscv/kvm/vcpu_onereg.c b/arch/riscv/kvm/vcpu_onereg.c
+index bb920e8923c9..61988382570f 100644
+--- a/arch/riscv/kvm/vcpu_onereg.c
++++ b/arch/riscv/kvm/vcpu_onereg.c
+@@ -51,17 +51,11 @@ static int kvm_riscv_vcpu_get_reg_config(struct kvm_vcpu *vcpu,
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(zicbom_block_size):
+-		if (kvm_riscv_isa_check_host(ZICBOM))
+-			return -ENOENT;
+-		reg_val = riscv_cbom_block_size;
++		reg_val = (kvm_riscv_isa_check_host(ZICBOM)) ? 0 : riscv_cbom_block_size;
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(zicboz_block_size):
+-		if (kvm_riscv_isa_check_host(ZICBOZ))
+-			return -ENOENT;
+-		reg_val = riscv_cboz_block_size;
++		reg_val = (kvm_riscv_isa_check_host(ZICBOZ)) ? 0 : riscv_cboz_block_size;
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(zicbop_block_size):
+-		if (kvm_riscv_isa_check_host(ZICBOP))
+-			return -ENOENT;
+-		reg_val = riscv_cbop_block_size;
++		reg_val = (kvm_riscv_isa_check_host(ZICBOP)) ? 0 : riscv_cbop_block_size;
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(mvendorid):
+@@ -145,19 +139,13 @@ static int kvm_riscv_vcpu_set_reg_config(struct kvm_vcpu *vcpu,
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(zicbom_block_size):
+-		if (kvm_riscv_isa_check_host(ZICBOM))
+-			return -ENOENT;
+-		if (reg_val != riscv_cbom_block_size)
++		if (reg_val && reg_val != riscv_cbom_block_size)
+ 			return -EINVAL;
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(zicboz_block_size):
+-		if (kvm_riscv_isa_check_host(ZICBOZ))
+-			return -ENOENT;
+-		if (reg_val != riscv_cboz_block_size)
++		if (reg_val && reg_val != riscv_cboz_block_size)
+ 			return -EINVAL;
+ 		break;
+ 	case KVM_REG_RISCV_CONFIG_REG(zicbop_block_size):
+-		if (kvm_riscv_isa_check_host(ZICBOP))
+-			return -ENOENT;
+-		if (reg_val != riscv_cbop_block_size)
++		if (reg_val && reg_val != riscv_cbop_block_size)
+ 			return -EINVAL;
+ 		break;
+@@ -615,18 +603,4 @@ static int copy_config_reg_indices(const struct kvm_vcpu *vcpu,
+ 		u64 reg;
+ 
+-		/*
+-		 * Avoid reporting config reg if the corresponding extension
+-		 * was not available.
+-		 */
+-		if (i == KVM_REG_RISCV_CONFIG_REG(zicbom_block_size) &&
+-		    kvm_riscv_isa_check_host(ZICBOM))
+-			continue;
+-		else if (i == KVM_REG_RISCV_CONFIG_REG(zicboz_block_size) &&
+-			 kvm_riscv_isa_check_host(ZICBOZ))
+... (7 more diff lines)
+
+##### A257
+=== 3a2694bf6ac8 A 2026-07-06 +1/-1
+riscv: Gate FUNCTION_ALIGNMENT_4B on DYNAMIC_FTRACE
+
+The FUNCTION_ALIGNMENT_4B select forces the whole kernel to be built
+with -fmin-function-alignment=4. This alignment is only needed so the
+patchable-function-entry NOPs, which arch/riscv/Makefile emits under
+CONFIG_DYNAMIC_FTRACE, can be patched reliably on RISCV_ISA_C=y builds
+where compressed instructions otherwise allow 2-byte function
+alignment.
+
+The select is currently gated on HAVE_DYNAMIC_FTRACE, a capability bit
+that is selected whenever the toolchain supports dynamic ftrace, rather
+than on whether tracing is actually enabled. As a result every
+RISCV_ISA_C=y build gets 4-byte function alignment across the entire
+kernel even when function tracing is disabled, needlessly growing the
+kernel image and wasting instruction cache for a feature that is not
+in use.
+
+Gate the select on DYNAMIC_FTRACE instead, matching the condition under
+which arch/riscv/Makefile emits -fpatchable-function-entry, so the
+alignment is only applied when it is actually needed.
+
+Fixes: c41bf4326c7b ("riscv: ftrace: align patchable functions to 4 Byte boundary")
+functions: 
+fixes: c41bf4326c7b(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index c0a6992933e4..f7028caaeae0 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -158,5 +158,5 @@ config RISCV
+ 	select HAVE_DMA_CONTIGUOUS if MMU
+ 	select HAVE_DYNAMIC_FTRACE if MMU && (CLANG_SUPPORTS_DYNAMIC_FTRACE || GCC_SUPPORTS_DYNAMIC_FTRACE)
+-	select FUNCTION_ALIGNMENT_4B if HAVE_DYNAMIC_FTRACE && RISCV_ISA_C
++	select FUNCTION_ALIGNMENT_4B if DYNAMIC_FTRACE && RISCV_ISA_C
+ 	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS if HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS if (DYNAMIC_FTRACE_WITH_ARGS && !CFI)
+
+##### A258
+=== 52fb1756ea1d A 2026-07-08 +4/-3
+riscv, bpf: Fix kernel stack corruption in tailcall with CFI
+
+When CONFIG_CFI_CLANG is enabled, prog->bpf_func already skips the kcfi
+instruction during setup. Including it again in the tailcall jump offset
+causes it to jump over an extra 4 bytes, skipping the stack pointer
+adjustment, which will result in kernel stack corruption.
+
+Fixes: 30a59cc79754 ("riscv, bpf: Fix possible infinite tailcall when CONFIG_CFI_CLANG is enabled")
+functions: arch/riscv/net/bpf_jit_comp64.c:__build_epilogue, arch/riscv/net/bpf_jit_comp64.c:bpf_jit_build_prologue
+fixes: 30a59cc79754(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 2f06752fb036..cedf40927474 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -19,5 +19,4 @@
+ #define RV_FENTRY_NINSNS 2
+ #define RV_FENTRY_NBYTES (RV_FENTRY_NINSNS * 4)
+-#define RV_KCFI_NINSNS (IS_ENABLED(CONFIG_CFI) ? 1 : 0)
+ /* imm that allows emit_imm to emit max count insns */
+ #define RV_MAX_COUNT_IMM 0x7FFF7FF7FF7FF7FF
+@@ -273,6 +272,6 @@ static void __build_epilogue(bool is_tail_call, struct rv_jit_context *ctx)
+ 		emit_addiw(RV_REG_A0, RV_REG_A5, 0, ctx);
+ 	emit_jalr(RV_REG_ZERO, is_tail_call ? RV_REG_T3 : RV_REG_RA,
+-		  /* kcfi, fentry and TCC init insns will be skipped on tailcall */
+-		  is_tail_call ? (RV_KCFI_NINSNS + RV_FENTRY_NINSNS + 1) * 4 : 0,
++		  /* fentry and TCC init insns will be skipped on tailcall */
++		  is_tail_call ? (RV_FENTRY_NINSNS + 1) * 4 : 0,
+ 		  ctx);
+ }
+@@ -2034,4 +2033,6 @@ void bpf_jit_build_prologue(struct rv_jit_context *ctx, bool is_subprog)
+ 	emit_kcfi(is_subprog ? cfi_bpf_subprog_hash : cfi_bpf_hash, ctx);
+ 
++	/* bpf prog starts here as kcfi skipped during prog->bpf_func setup */
++
+ 	/* nops reserved for auipc+jalr pair */
+ 	for (i = 0; i < RV_FENTRY_NINSNS; i++)
+
+##### A259
+=== c05292790571 A 2026-07-09 +1/-1
+riscv: vdso: Only try to install vDSO when present
+
+vdso.so.dbg is only built with CONFIG_MMU.
+
+Fixes: f157d411a9eb ("riscv: add missing vdso_install target")
+Fixes: 3edf39916977 ("vDSO, kbuild: Provide vDSO debug variants at runtime")
+functions: 
+fixes: f157d411a9eb(riscv), 3edf39916977(common)
+diff --git a/arch/riscv/Makefile b/arch/riscv/Makefile
+index ce0cc737f870..1363e5bef35c 100644
+--- a/arch/riscv/Makefile
++++ b/arch/riscv/Makefile
+@@ -169,5 +169,5 @@ endif
+ endif
+ 
+-vdso-install-y			+= arch/riscv/kernel/vdso/vdso.so.dbg
++vdso-install-$(CONFIG_MMU)		+= arch/riscv/kernel/vdso/vdso.so.dbg
+ vdso-install-$(CONFIG_RISCV_USER_CFI)	+= arch/riscv/kernel/vdso_cfi/vdso-cfi.so.dbg
+ vdso-install-$(CONFIG_COMPAT)	+= arch/riscv/kernel/compat_vdso/compat_vdso.so.dbg
+
+##### A260
+=== d024a0a7879e A 2026-07-15 +87/-34
+RISC-V: KVM: Serialize virtual interrupt pending state updates
+
+KVM RISC-V tracks guest local interrupt state with two bitmaps:
+
+  - irqs_pending: interrupts that should be visible to the guest
+  - irqs_pending_mask: interrupts whose pending state changed
+
+The current code updates those bitmaps with independent atomic bitops
+and assumes a multiple-producer, single-consumer protocol. That model
+does not actually hold.
+
+kvm_riscv_vcpu_sync_interrupts() is not a pure consumer. When the guest
+changes guest-visible HVIP state, sync_interrupts() writes both
+irqs_pending and irqs_pending_mask to reflect the new guest state back
+into KVM state. As a result, irqs_pending and irqs_pending_mask form a
+single logical state transition, but they are not updated atomically as
+a pair.
+
+This allows a race where a newly injected interrupt is lost. For
+example:
+
+  CPU0                              CPU1
+  ----                              ----
+  kvm_riscv_vcpu_set_interrupt(VS_SOFT)
+    set_bit(VS_SOFT, irqs_pending)
+                                    kvm_riscv_vcpu_sync_interrupts()
+                                      sees guest-cleared HVIP.VSSIP
+                                      sets irqs_pending_mask
+                                      clear_bit(IRQ_VS_SOFT, irqs_pending)
+    set_bit(VS_SOFT, irqs_pending_mask)
+    kvm_vcpu_kick()
+
+After that interleaving, a later flush can update HVIP without VSSIP
+even though a new virtual interrupt was injected. In practice, the
+guest can remain blocked in WFI with work pending.
+
+The same pending/mask protocol is shared by VS soft interrupts, PMU
+overflow delivery, and AIA high interrupt synchronization, so the race
+is not limited to one interrupt source.
+
+Fix this by serializing all updates to irqs_pending and irqs_pending_mask
+functions: arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_flush_interrupts, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_sync_interrupts, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_has_interrupts, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_set_csr, arch/riscv/kvm/vcpu.c:kvm_riscv_reset_vcpu, arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_create, arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_flush_interrupts, arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_sync_interrupts, arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_set_interrupt, arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_unset_interrupt, arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_has_interrupts, arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_general_set_csr
+fixes: cce69aff689e(riscv)
+ arch/riscv/include/asm/kvm_host.h | 10 ++++-----
+ arch/riscv/kvm/aia.c              | 35 ++++++++++++++++++++++++------
+ arch/riscv/kvm/vcpu.c             | 68 +++++++++++++++++++++++++++++++++++++++++------------------
+ arch/riscv/kvm/vcpu_onereg.c      |  8 +++++--
+ 4 files changed, 87 insertions(+), 34 deletions(-)
+diff --git a/arch/riscv/include/asm/kvm_host.h b/arch/riscv/include/asm/kvm_host.h
+index 60017ceec9d2..e2d5808169e4 100644
+--- a/arch/riscv/include/asm/kvm_host.h
++++ b/arch/riscv/include/asm/kvm_host.h
+@@ -210,11 +210,11 @@ struct kvm_vcpu_arch {
+ 	 * VCPU interrupts
+ 	 *
+-	 * We have a lockless approach for tracking pending VCPU interrupts
+-	 * implemented using atomic bitops. The irqs_pending bitmap represent
+-	 * pending interrupts whereas irqs_pending_mask represent bits changed
+-	 * in irqs_pending. Our approach is modeled around multiple producer
+-	 * and single consumer problem where the consumer is the VCPU itself.
++	 * The irqs_pending bitmap represents pending interrupts whereas
++	 * irqs_pending_mask represents bits changed in irqs_pending. Updates
++	 * to these bitmaps are serialized so vcpu interrupt sync/flush cannot
++	 * drop a newly injected interrupt while syncing guest-visible HVIP.
+ 	 */
+ #define KVM_RISCV_VCPU_NR_IRQS	64
++	raw_spinlock_t irqs_pending_lock;
+ 	DECLARE_BITMAP(irqs_pending, KVM_RISCV_VCPU_NR_IRQS);
+ 	DECLARE_BITMAP(irqs_pending_mask, KVM_RISCV_VCPU_NR_IRQS);
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index bafb009c5ce5..9a653b4ad40a 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -54,10 +54,13 @@ void kvm_riscv_vcpu_aia_flush_interrupts(struct kvm_vcpu *vcpu)
+ 	unsigned long mask, val;
+ 
++	lockdep_assert_held(&vcpu->arch.irqs_pending_lock);
++
+ 	if (!kvm_riscv_aia_available())
+ 		return;
+ 
+-	if (READ_ONCE(vcpu->arch.irqs_pending_mask[1])) {
+-		mask = xchg_acquire(&vcpu->arch.irqs_pending_mask[1], 0);
+-		val = READ_ONCE(vcpu->arch.irqs_pending[1]) & mask;
++	mask = vcpu->arch.irqs_pending_mask[1];
++	if (mask) {
++		vcpu->arch.irqs_pending_mask[1] = 0;
++		val = vcpu->arch.irqs_pending[1] & mask;
+ 
+ 		csr->hviph &= ~mask;
+@@ -70,4 +73,6 @@ void kvm_riscv_vcpu_aia_sync_interrupts(struct kvm_vcpu *vcpu)
+ 	struct kvm_vcpu_aia_csr *csr = &vcpu->arch.aia_context.guest_csr;
+ 
++	lockdep_assert_held(&vcpu->arch.irqs_pending_lock);
++
+ 	if (kvm_riscv_aia_available())
+ 		csr->vsieh = ncsr_read(CSR_VSIEH);
+@@ -78,4 +83,8 @@ bool kvm_riscv_vcpu_aia_has_interrupts(struct kvm_vcpu *vcpu, u64 mask)
+ {
+ 	unsigned long seip;
++#ifdef CONFIG_32BIT
++	unsigned long flags;
++	bool pending;
++#endif
+ 
+ 	if (!kvm_riscv_aia_available())
+@@ -83,6 +92,11 @@ bool kvm_riscv_vcpu_aia_has_interrupts(struct kvm_vcpu *vcpu, u64 mask)
+ 
+... (211 more diff lines)
+
+##### A261
+=== 45ebe4540817 A 2026-07-16 +2/-1
+riscv/mm: use physical alignment for vmemmap_start_pfn
+
+RISC-V computes vmemmap_start_pfn by rounding phys_ram_base down to
+VMEMMAP_ADDR_ALIGN.  That alignment must therefore be expressed in the
+physical-address domain.
+
+Commit 476849b0fba4 ("riscv/mm: align vmemmap to maximal folio size")
+attempted to account for the maximal folio alignment by feeding
+MAX_FOLIO_VMEMMAP_ALIGN directly into VMEMMAP_ADDR_ALIGN.  However,
+MAX_FOLIO_VMEMMAP_ALIGN is measured in bytes of struct page storage,
+whereas VMEMMAP_ADDR_ALIGN is used to align a physical address.
+
+The mask-based compound_info encoding requires pfn_to_page(0) to be
+naturally aligned to MAX_FOLIO_VMEMMAP_ALIGN.  Commit 9f94db4c7eaa
+("mm/sparse: check memmap alignment for compound_info_has_mask()") added a
+check for that requirement and exposed the unit mismatch on systems such
+as QEMU virt, where the DRAM base is not aligned to MAX_FOLIO_NR_PAGES *
+PAGE_SIZE.
+
+Here is the log:
+[    0.000000][    C0] ------------[ cut here ]------------
+[    0.000000][    C0] WARNING: mm/sparse.c:365 at sparse_init+0x58a/0x6fe, CPU#0: swapper/0
+[    0.000000][    C0] Modules linked in:
+[    0.000000][    C0] CPU: 0 UID: 0 PID: 0 Comm: swapper Not tainted 7.2.0-rc3-g1d8304bdd65f #2 PREEMPT 
+[    0.000000][    C0] Hardware name: riscv-virtio,qemu (DT)
+[    0.000000][    C0] epc : sparse_init+0x58a/0x6fe
+[    0.000000][    C0]  ra : sparse_init+0x58a/0x6fe
+[    0.000000][    C0] epc : ffffffff86851c88 ra : ffffffff86851c88 sp : ffffffff88807a30
+[    0.000000][    C0]  gp : ffffffff8a3bf240 tp : ffffffff88842080 t0 : ff600000ffab6000
+[    0.000000][    C0]  t1 : 000000017fab6000 t2 : 65203a6573726363 s0 : ffffffff88807bc0
+[    0.000000][    C0]  s1 : 000000000e000000 a0 : 0000000000000007 a1 : 0000000000000000
+[    0.000000][    C0]  a2 : 0000000000000002 a3 : ffffffff86851c88 a4 : 0000000000000000
+[    0.000000][    C0]  a5 : ffffffff88843080 a6 : 0000000000000003 a7 : 0000000000000000
+[    0.000000][    C0]  s2 : ff60000000000000 s3 : 0040000000000000 s4 : 0004000000000000
+[    0.000000][    C0]  s5 : ffffffff8a4d92e0 s6 : ff600000ffab55e0 s7 : ffffffff88384d00
+[    0.000000][    C0]  s8 : 0000000000000003 s9 : ffffffff88384cc1 s10: ffffffff88384cc0
+[    0.000000][    C0]  s11: ffffffff8a4daae0 t3 : ffffffff915e8b20 t4 : ffffffff915e8b20
+[    0.000000][    C0]  t5 : ffffffff915e8b20 t6 : ffffffff915e8bc8 ssp : 0000000000000000
+[    0.000000][    C0] status: 0000000200000100 badaddr: ffffffff86851c88 cause: 0000000000000003
+[    0.000000][    C0] [<ffffffff86851c88>] sparse_init+0x58a/0x6fe
+[    0.000000][    C0] [<ffffffff8683d396>] mm_core_init_early+0x116/0x1e30
+functions: 
+fixes: 476849b0fba4(riscv)
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 3e450890be07..422efa11824b 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -64,5 +64,6 @@ EXPORT_SYMBOL(phys_ram_base);
+ #ifdef CONFIG_SPARSEMEM_VMEMMAP
+ #define VMEMMAP_ADDR_ALIGN	max(1ULL << SECTION_SIZE_BITS, \
+-				    MAX_FOLIO_VMEMMAP_ALIGN)
++				    PFN_PHYS(MAX_FOLIO_VMEMMAP_ALIGN / \
++					     sizeof(struct page)))
+ 
+ unsigned long vmemmap_start_pfn __ro_after_init;
+
+##### A262
+=== 4a94f45ef720 A 2026-07-18 +59/-12
+RISC-V: KVM: Guard HFENCE range loops against overflow
+
+The local HFENCE range helpers build the loop end with addr + size and
+then step through the range by the requested page order. If addr + size
+wraps, a small range near the top of the address space can be treated as
+empty and skip the intended fence. The final loop step can also wrap
+before the loop condition is evaluated again.
+
+Treat wrapped ranges conservatively as full-range HFENCE requests and stop
+each bounded loop before the next step can wrap past the computed end. This
+keeps the existing large-range fallback and only changes local GVMA/VVMA
+range construction.
+
+Fixes: 2415e46e3a9a ("RISC-V: KVM: Introduce range based local HFENCE functions")
+functions: arch/riscv/kvm/tlb.c:kvm_riscv_local_hfence_gvma_vmid_gpa, arch/riscv/kvm/tlb.c:kvm_riscv_local_hfence_gvma_gpa, arch/riscv/kvm/tlb.c:kvm_riscv_local_hfence_vvma_asid_gva, arch/riscv/kvm/tlb.c:kvm_riscv_local_hfence_vvma_gva
+fixes: 2415e46e3a9a(riscv)
+ arch/riscv/kvm/tlb.c | 71 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 59 insertions(+), 12 deletions(-)
+diff --git a/arch/riscv/kvm/tlb.c b/arch/riscv/kvm/tlb.c
+index fd445e9fa3f9..2ae34632cdcb 100644
+--- a/arch/riscv/kvm/tlb.c
++++ b/arch/riscv/kvm/tlb.c
+@@ -9,4 +9,5 @@
+ #include <linux/err.h>
+ #include <linux/module.h>
++#include <linux/overflow.h>
+ #include <linux/smp.h>
+ #include <linux/kvm_host.h>
+@@ -25,5 +26,10 @@ void kvm_riscv_local_hfence_gvma_vmid_gpa(unsigned long vmid,
+ 					  unsigned long order)
+ {
+-	gpa_t pos;
++	gpa_t end, pos, step = BIT(order);
++
++	if (check_add_overflow(gpa, gpsz, &end)) {
++		kvm_riscv_local_hfence_gvma_vmid_all(vmid);
++		return;
++	}
+ 
+ 	if (PTRS_PER_PTE < (gpsz >> order)) {
+@@ -34,12 +40,18 @@ void kvm_riscv_local_hfence_gvma_vmid_gpa(unsigned long vmid,
+ 	if (has_svinval()) {
+ 		asm volatile (SFENCE_W_INVAL() ::: "memory");
+-		for (pos = gpa; pos < (gpa + gpsz); pos += BIT(order))
++		for (pos = gpa; pos < end; pos += step) {
+ 			asm volatile (HINVAL_GVMA(%0, %1)
+ 			: : "r" (pos >> 2), "r" (vmid) : "memory");
++			if (end - pos <= step)
++				break;
++		}
+ 		asm volatile (SFENCE_INVAL_IR() ::: "memory");
+ 	} else {
+-		for (pos = gpa; pos < (gpa + gpsz); pos += BIT(order))
++		for (pos = gpa; pos < end; pos += step) {
+ 			asm volatile (HFENCE_GVMA(%0, %1)
+ 			: : "r" (pos >> 2), "r" (vmid) : "memory");
++			if (end - pos <= step)
++				break;
++		}
+ 	}
+ }
+@@ -53,5 +65,10 @@ void kvm_riscv_local_hfence_gvma_gpa(gpa_t gpa, gpa_t gpsz,
+ 				     unsigned long order)
+ {
+-	gpa_t pos;
++	gpa_t end, pos, step = BIT(order);
++
++	if (check_add_overflow(gpa, gpsz, &end)) {
++		kvm_riscv_local_hfence_gvma_all();
++		return;
++	}
+ 
+ 	if (PTRS_PER_PTE < (gpsz >> order)) {
+@@ -62,12 +79,18 @@ void kvm_riscv_local_hfence_gvma_gpa(gpa_t gpa, gpa_t gpsz,
+ 	if (has_svinval()) {
+ 		asm volatile (SFENCE_W_INVAL() ::: "memory");
+-		for (pos = gpa; pos < (gpa + gpsz); pos += BIT(order))
++		for (pos = gpa; pos < end; pos += step) {
+... (84 more diff lines)
+
+##### A263
+=== f06b670cfd1c A 2026-07-18 +30/-22
+RISC-V: KVM: Avoid one-word masks for SBI v0.1 all-harts
+
+KVM already treats a NULL hart-mask pointer in SBI v0.1 calls as all
+harts, matching OpenSBI's legacy handling. The current handler builds that
+target set as (1UL << online_vcpus) - 1 before iterating the mask.
+
+That expression shifts by the type width once the VM has BITS_PER_LONG
+online vCPUs, and a single word cannot represent larger VMs. A count-based
+mask also selects the wrong IDs when vCPU IDs are sparse.
+
+Handle SEND_IPI with a NULL hart-mask by iterating all online vCPUs
+directly. For remote fence calls, use the existing hbase == -1UL
+convention so the common fence request helper targets the whole VM
+without consulting hmask.
+
+Non-NULL guest hart masks keep the existing v0.1 behavior.
+
+Fixes: a046c2d8578c ("RISC-V: KVM: Reorganize SBI code by moving SBI v0.1 to its own file")
+functions: arch/riscv/kvm/vcpu_sbi_v01.c:kvm_sbi_ext_v01_handler
+fixes: a046c2d8578c(riscv)
+ arch/riscv/kvm/vcpu_sbi_v01.c | 52 ++++++++++++++++++++++++++++++----------------------
+ 1 file changed, 30 insertions(+), 22 deletions(-)
+diff --git a/arch/riscv/kvm/vcpu_sbi_v01.c b/arch/riscv/kvm/vcpu_sbi_v01.c
+index c9c323d4577a..de544ea3f28d 100644
+--- a/arch/riscv/kvm/vcpu_sbi_v01.c
++++ b/arch/riscv/kvm/vcpu_sbi_v01.c
+@@ -17,6 +17,7 @@ static int kvm_sbi_ext_v01_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 				   struct kvm_vcpu_sbi_return *retdata)
+ {
+-	ulong hmask;
+-	int i, ret = 0;
++	ulong hbase = 0, hmask;
++	unsigned long i;
++	int ret = 0;
+ 	u64 next_cycle;
+ 	struct kvm_vcpu *rvcpu;
+@@ -47,18 +48,23 @@ static int kvm_sbi_ext_v01_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 		break;
+ 	case SBI_EXT_0_1_SEND_IPI:
+-		if (cp->a0)
++		if (cp->a0) {
+ 			hmask = kvm_riscv_vcpu_unpriv_read(vcpu, false, cp->a0, utrap);
+-		else
+-			hmask = (1UL << atomic_read(&kvm->online_vcpus)) - 1;
+-		if (utrap->scause)
+-			break;
+-
+-		for_each_set_bit(i, &hmask, BITS_PER_LONG) {
+-			rvcpu = kvm_get_vcpu_by_id(vcpu->kvm, i);
+-			if (!rvcpu)
+-				continue;
+-			ret = kvm_riscv_vcpu_set_interrupt(rvcpu, IRQ_VS_SOFT);
+-			if (ret < 0)
++			if (utrap->scause)
+ 				break;
++
++			for_each_set_bit(i, &hmask, BITS_PER_LONG) {
++				rvcpu = kvm_get_vcpu_by_id(vcpu->kvm, i);
++				if (!rvcpu)
++					continue;
++				ret = kvm_riscv_vcpu_set_interrupt(rvcpu, IRQ_VS_SOFT);
++				if (ret < 0)
++					break;
++			}
++		} else {
++			kvm_for_each_vcpu(i, rvcpu, kvm) {
++				ret = kvm_riscv_vcpu_set_interrupt(rvcpu, IRQ_VS_SOFT);
++				if (ret < 0)
++					break;
++			}
+ 		}
+ 		break;
+@@ -71,27 +77,29 @@ static int kvm_sbi_ext_v01_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 	case SBI_EXT_0_1_REMOTE_SFENCE_VMA:
+ 	case SBI_EXT_0_1_REMOTE_SFENCE_VMA_ASID:
+-		if (cp->a0)
++		if (cp->a0) {
+ 			hmask = kvm_riscv_vcpu_unpriv_read(vcpu, false, cp->a0, utrap);
+-		else
+-			hmask = (1UL << atomic_read(&kvm->online_vcpus)) - 1;
++		} else {
++			hbase = -1UL;
+... (28 more diff lines)
+
+##### A264
+=== 5eb8921371c6 A 2026-07-20 +6/-1
+bpf, riscv: Fix extable handling for arena load_acquire
+
+emit_atomic_ld_st() returns 1 to have build_body() skip the zext after
+a sub-word load_acquire. The caller does "ret = ret ?:
+add_exception_handler(...)", which skips add_exception_handler() on any
+non-zero ret, so the extable entry is missing and a faulting
+PROBE_ATOMIC load_acquire oopses.
+
+REG_DONT_CLEAR_MARKER leaves rd stale on fault, and the verifier still
+thinks the load overwrote it, so a program can leak it through a map.
+
+Check ret >= 0 before calling add_exception_handler(), and pass rd for
+LOAD_ACQ so the fault zeroes rd like a PROBE_MEM load. Return ret
+unchanged for the zext skip.
+
+Fixes: fb7cefabae81 ("riscv, bpf: Add support arena atomics for RV64")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_emit_insn
+fixes: fb7cefabae81(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 823262ca47eb..ad089a9a4ea9 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1987,5 +1987,10 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 			ret = emit_atomic_rmw(rd, rs, insn, ctx);
+ 
+-		ret = ret ?: add_exception_handler(insn, REG_DONT_CLEAR_MARKER, ctx);
++		/* ret can be 1 (skip-zext); extable entry still needs to be added */
++		if (ret >= 0)
++			ret = add_exception_handler(insn,
++				insn->imm == BPF_LOAD_ACQ ? rd : REG_DONT_CLEAR_MARKER,
++				ctx) ?: ret;
++
+ 		if (ret)
+ 			return ret;
+
+##### A265
+=== 994dad686e75 A 2026-07-21 +7/-1
+riscv: hwprobe: Register unaligned probes before usermode
+
+The hwprobe vDSO data is populated by the first riscv_hwprobe syscall.
+Some values, such as MISALIGNED_VECTOR_PERF, may depend on the async
+vector unaligned access speed probe registered by
+check_unaligned_access_all_cpus().
+
+That initcall currently runs at late_initcall level. However,
+rootfs_initcall enables usermode helpers before late initcalls run, so an
+early helper can execute userspace and call riscv_hwprobe first.
+
+In that case complete_hwprobe_vdso_data() consumes the initial
+pending_boot_probes reference, populates the vDSO cache, and marks it
+ready before the later async probe is registered. The eventual probe
+result then cannot update the already-ready cache.
+
+Move check_unaligned_access_all_cpus() to fs_initcall_sync. This still
+runs after clocksource_done_booting(), so the ktime_get_mono_fast_ns()
+benchmark uses a stable clocksource, but it runs before rootfs_initcall
+enables usermode helpers.
+
+Any async hwprobe probe is therefore registered before userspace can
+trigger the one-time vDSO cache population.
+
+Fixes: 6455c6c11827 ("riscv: Clean up & optimize unaligned scalar access probe")
+functions: 
+fixes: 6455c6c11827(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 5a5aa22124e7..36201613d2ca 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -412,3 +412,9 @@ static int __init check_unaligned_access_all_cpus(void)
+ }
+ 
+-late_initcall(check_unaligned_access_all_cpus);
++/*
++ * Run after clocksource_done_booting() so measure_cycles() uses a stable
++ * clocksource, but before rootfs_initcall() enables usermode helpers. Those
++ * helpers can reach hwprobe and populate the vDSO cache, so async hwprobe
++ * probes must be registered first.
++ */
++fs_initcall_sync(check_unaligned_access_all_cpus);
+
+##### A266
+=== dfdf1374fdec A 2026-07-21 +15/-0
+KVM: RISC-V: Clear former VCPU cache on virtualization disable
+
+When a CPU is taken offline or enters deep idle states, hypervisor CSR
+state is lost. The kvm_former_vcpu fast-path optimization caches the
+last VCPU that ran on each CPU to avoid expensive CSR restoration when
+the same VCPU is re-scheduled on the same CPU. However, if this cache
+is not cleared when CSR state is lost, the next VCPU entry will
+incorrectly skip CSR restoration, leading to corrupt hypervisor state.
+
+Add kvm_riscv_clear_former_vcpu() to invalidate the per-CPU cache and
+call it from kvm_arch_disable_virtualization_cpu() to ensure proper CSR
+restoration after CPU offline or system suspend events.
+
+Fixes: 1323a5cfe52c ("KVM: riscv: Skip CSR restore if VCPU is reloaded on the same core")
+functions: arch/riscv/kvm/main.c:kvm_arch_disable_virtualization_cpu
+fixes: 1323a5cfe52c(riscv)
+diff --git a/arch/riscv/include/asm/kvm_host.h b/arch/riscv/include/asm/kvm_host.h
+index ba5e53e7962b..a30600579231 100644
+--- a/arch/riscv/include/asm/kvm_host.h
++++ b/arch/riscv/include/asm/kvm_host.h
+@@ -291,4 +291,6 @@ static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
+ static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
+ 
++void kvm_riscv_clear_former_vcpu(void);
++
+ int kvm_riscv_setup_default_irq_routing(struct kvm *kvm, u32 lines);
+ 
+diff --git a/arch/riscv/kvm/main.c b/arch/riscv/kvm/main.c
+index 0924c75100a2..350e4f097d6e 100644
+--- a/arch/riscv/kvm/main.c
++++ b/arch/riscv/kvm/main.c
+@@ -70,4 +70,6 @@ void kvm_arch_disable_virtualization_cpu(void)
+ 	csr_write(CSR_HIDELEG, 0);
+ 
++	kvm_riscv_clear_former_vcpu();
++
+ 	kvm_riscv_nacl_disable();
+ }
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index 56dc0af2f9db..1b4416b20665 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -27,4 +27,15 @@
+ static DEFINE_PER_CPU(struct kvm_vcpu *, kvm_former_vcpu);
+ 
++void kvm_riscv_clear_former_vcpu(void)
++{
++	/*
++	 * Clear the per-CPU former VCPU pointer because hypervisor CSR state
++	 * will be lost. This ensures that the next VCPU entry will properly
++	 * restore all CSRs instead of incorrectly skipping CSR restoration
++	 * via the fast-path optimization.
++	 */
++	__this_cpu_write(kvm_former_vcpu, NULL);
++}
++
+ const struct kvm_stats_desc kvm_vcpu_stats_desc[] = {
+ 	KVM_GENERIC_VCPU_STATS(),
+
+##### A267
+=== 739dfb8b4b76 A 2026-07-29 +7/-6
+RISC-V: KVM: Widen G-stage fault address to gpa_t
+
+fault_addr in gstage_page_fault() and the fault_addr parameter of
+kvm_riscv_vcpu_mmio_load/store() are unsigned long.  On RV32 with
+Sv32x4, guest physical addresses are 34 bits, so a 32-bit unsigned
+long truncates bits 32/33 at two points:
+
+  - reconstruction: fault_addr = (trap->htval << 2) | ... is evaluated
+    in 32-bit arithmetic, dropping bits 32/33 before widening;
+  - the MMIO handler call: even with the local widened, the handler's
+    unsigned long parameter narrows it back to 32 bits, aliasing
+    accesses above 4 GB into the low 4 GB.
+
+Widen fault_addr to gpa_t end to end: the local in gstage_page_fault(),
+the (gpa_t) cast before the <<2 shift, and the fault_addr parameters of
+kvm_riscv_vcpu_mmio_load/store().  The handlers' internal uses
+(run->mmio.phys_addr is __u64, kvm_io_bus_read/write() take gpa_t) are
+already 64-bit, so no further changes are needed.
+
+Also in preparation for sharing a common struct kvm_page_fault across
+architectures, where fault_addr is gpa_t.  No functional change on RV64.
+
+Fixes: 9d05c1fee837 ("RISC-V: KVM: Implement stage2 page table programming")
+Assisted-by: YuanSheng: deepseek-v4-pro
+functions: arch/riscv/kvm/vcpu_exit.c:gstage_page_fault
+fixes: 9d05c1fee837(riscv)
+diff --git a/arch/riscv/include/asm/kvm_vcpu_insn.h b/arch/riscv/include/asm/kvm_vcpu_insn.h
+index 350011c83581..a5c50dd4a884 100644
+--- a/arch/riscv/include/asm/kvm_vcpu_insn.h
++++ b/arch/riscv/include/asm/kvm_vcpu_insn.h
+@@ -39,8 +39,8 @@ int kvm_riscv_vcpu_virtual_insn(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 
+ int kvm_riscv_vcpu_mmio_load(struct kvm_vcpu *vcpu, struct kvm_run *run,
+-			     unsigned long fault_addr,
++			     gpa_t fault_addr,
+ 			     unsigned long htinst);
+ int kvm_riscv_vcpu_mmio_store(struct kvm_vcpu *vcpu, struct kvm_run *run,
+-			      unsigned long fault_addr,
++			      gpa_t fault_addr,
+ 			      unsigned long htinst);
+ int kvm_riscv_vcpu_mmio_return(struct kvm_vcpu *vcpu, struct kvm_run *run);
+diff --git a/arch/riscv/kvm/vcpu_exit.c b/arch/riscv/kvm/vcpu_exit.c
+index 73299770a98a..9985c3bd2557 100644
+--- a/arch/riscv/kvm/vcpu_exit.c
++++ b/arch/riscv/kvm/vcpu_exit.c
+@@ -18,10 +18,11 @@ static int gstage_page_fault(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 	struct kvm_gstage_mapping host_map;
+ 	struct kvm_memory_slot *memslot;
+-	unsigned long hva, fault_addr;
++	unsigned long hva;
++	gpa_t fault_addr;
+ 	bool writable;
+ 	gfn_t gfn;
+ 	int ret;
+ 
+-	fault_addr = (trap->htval << 2) | (trap->stval & 0x3);
++	fault_addr = ((gpa_t)trap->htval << 2) | (trap->stval & 0x3);
+ 	gfn = fault_addr >> PAGE_SHIFT;
+ 	memslot = gfn_to_memslot(vcpu->kvm, gfn);
+diff --git a/arch/riscv/kvm/vcpu_insn.c b/arch/riscv/kvm/vcpu_insn.c
+index f09f9251d1f0..6506411a3f78 100644
+--- a/arch/riscv/kvm/vcpu_insn.c
++++ b/arch/riscv/kvm/vcpu_insn.c
+@@ -372,5 +372,5 @@ int kvm_riscv_vcpu_virtual_insn(struct kvm_vcpu *vcpu, struct kvm_run *run,
+  */
+ int kvm_riscv_vcpu_mmio_load(struct kvm_vcpu *vcpu, struct kvm_run *run,
+-			     unsigned long fault_addr,
++			     gpa_t fault_addr,
+ 			     unsigned long htinst)
+ {
+@@ -495,5 +495,5 @@ int kvm_riscv_vcpu_mmio_load(struct kvm_vcpu *vcpu, struct kvm_run *run,
+  */
+ int kvm_riscv_vcpu_mmio_store(struct kvm_vcpu *vcpu, struct kvm_run *run,
+-			      unsigned long fault_addr,
++			      gpa_t fault_addr,
+ 			      unsigned long htinst)
+ {
+
+##### A268
+=== a0188cc13369 A 2026-07-29 +2/-2
+riscv: mm: Fix out-of-bounds page-table walk during memory hot-remove
+
+remove_pud_mapping() and remove_p4d_mapping() obtain a child table base
+with pud_offset(p4dp, 0) and p4d_offset(pgd, 0), then add the index for
+addr.
+
+RISC-V folds page-table levels at runtime. When a level is folded, its
+offset helper returns the parent entry itself, but the index can still be
+nonzero. Adding it walks past the parent table. Sv48 folds P4D, while Sv39
+folds both P4D and PUD, so memory hot-remove can descend into unrelated
+memory and pass an invalid page to __free_pages(). This can trigger:
+
+  kernel BUG at include/linux/mm.h:1810!
+  VM_BUG_ON_PAGE(page_ref_count(page) == 0)
+  arch_remove_memory+0x1e/0x5c
+  try_remove_memory+0x15e/0x200
+  remove_memory+0x24/0x3c
+
+Only add the index when the corresponding page-table level is enabled,
+matching p4d_offset() and pud_offset().
+
+Fixes: c75a74f4ba19 ("riscv: mm: Add memory hotplugging support")
+Assisted-by: Claude:claude-fable-5
+functions: arch/riscv/mm/init.c:remove_pud_mapping, arch/riscv/mm/init.c:remove_p4d_mapping
+fixes: c75a74f4ba19(riscv)
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 395ed9ab578e..b6d149e989c8 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -1626,5 +1626,5 @@ static void __meminit remove_pud_mapping(pud_t *pud_base, unsigned long addr, un
+ 	for (; addr < end; addr = next) {
+ 		next = pud_addr_end(addr, end);
+-		pudp = pud_base + pud_index(addr);
++		pudp = pgtable_l4_enabled ? pud_base + pud_index(addr) : pud_base;
+ 		pud = pudp_get(pudp);
+ 		if (!pud_present(pud))
+@@ -1657,5 +1657,5 @@ static void __meminit remove_p4d_mapping(p4d_t *p4d_base, unsigned long addr, un
+ 	for (; addr < end; addr = next) {
+ 		next = p4d_addr_end(addr, end);
+-		p4dp = p4d_base + p4d_index(addr);
++		p4dp = pgtable_l5_enabled ? p4d_base + p4d_index(addr) : p4d_base;
+ 		p4d = p4dp_get(p4dp);
+ 		if (!p4d_present(p4d))
+
+##### A269
+=== 735bc20c2418 A 2026-07-30 +9/-5
+RISC-V: KVM: Fix PMU event info array size overflow
+
+SBI PMU EVENT_GET_INFO stores guest-controlled num_events * sizeof(*einfo)
+in a 32-bit integer. On RV64, num_events = 0x10000001 makes 0x100000010
+truncate to 16. KVM then allocates one entry but loops over the original
+num_events, causing out-of-bounds reads and writes. A nested guest
+triggered:
+
+BUG: KASAN: slab-out-of-bounds in kvm_riscv_vcpu_pmu_event_info+0xa4/0x142
+Read of size 4 at addr ff600000074d46b0 by task init/1
+Call Trace:
+[<ffffffff8006471c>] kvm_riscv_vcpu_pmu_event_info+0xa4/0x142
+[<ffffffff800690c0>] kvm_sbi_ext_pmu_handler+0xca/0x268
+[<ffffffff8006779e>] kvm_riscv_vcpu_sbi_ecall+0xec/0x1e6
+[<ffffffff8006008c>] kvm_riscv_vcpu_exit+0x48c/0x540
+[<ffffffff8005ea0a>] kvm_arch_vcpu_ioctl_run+0x37e/0xc80
+Allocated by task 1:
+ __kmalloc_noprof+0x19e/0x4b0
+ kvm_riscv_vcpu_pmu_event_info+0x72/0x142
+ kvm_sbi_ext_pmu_handler+0xca/0x268
+ kvm_riscv_vcpu_sbi_ecall+0xec/0x1e6
+ kvm_riscv_vcpu_exit+0x48c/0x540
+ kvm_arch_vcpu_ioctl_run+0x37e/0xc80
+The buggy address is located 0 bytes to the right of
+ allocated 16-byte region [ff600000074d46a0, ff600000074d46b0)
+
+Store the shared-memory size in size_t and reject multiplication overflow.
+Allocate the guest-driven array with GFP_KERNEL_ACCOUNT so it is charged
+to kmemcg, and use __GFP_NOWARN to suppress allocation failure warnings.
+Use kvcalloc() to allow vmalloc fallback and an unsigned long loop index
+to match num_events.
+
+Fixes: e309fd113b9f ("RISC-V: KVM: Implement get event info function")
+functions: arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_event_info
+fixes: e309fd113b9f(riscv)
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index f241cfb6eb3a..752f1014d633 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -13,5 +13,7 @@
+ #include <linux/kvm_host.h>
+ #include <linux/nospec.h>
++#include <linux/overflow.h>
+ #include <linux/perf/riscv_pmu.h>
++#include <linux/slab.h>
+ #include <asm/csr.h>
+ #include <asm/kvm_isa.h>
+@@ -480,5 +482,5 @@ int kvm_riscv_vcpu_pmu_event_info(struct kvm_vcpu *vcpu, unsigned long saddr_low
+ {
+ 	struct riscv_pmu_event_info *einfo = NULL;
+-	int shmem_size = num_events * sizeof(*einfo);
++	size_t shmem_size;
+ 	gpa_t shmem;
+ 	u32 eidx, etype;
+@@ -486,5 +488,6 @@ int kvm_riscv_vcpu_pmu_event_info(struct kvm_vcpu *vcpu, unsigned long saddr_low
+ 	int ret;
+ 
+-	if (flags != 0 || (saddr_low & (SZ_16 - 1) || num_events == 0)) {
++	if (flags != 0 || (saddr_low & (SZ_16 - 1)) || num_events == 0 ||
++	    check_mul_overflow(num_events, sizeof(*einfo), &shmem_size)) {
+ 		ret = SBI_ERR_INVALID_PARAM;
+ 		goto out;
+@@ -501,5 +504,6 @@ int kvm_riscv_vcpu_pmu_event_info(struct kvm_vcpu *vcpu, unsigned long saddr_low
+ 	}
+ 
+-	einfo = kzalloc(shmem_size, GFP_KERNEL);
++	einfo = kvcalloc(num_events, sizeof(*einfo),
++			 GFP_KERNEL_ACCOUNT | __GFP_NOWARN);
+ 	if (!einfo) {
+ 		ret = SBI_ERR_FAILURE;
+@@ -513,5 +517,5 @@ int kvm_riscv_vcpu_pmu_event_info(struct kvm_vcpu *vcpu, unsigned long saddr_low
+ 	}
+ 
+-	for (int i = 0; i < num_events; i++) {
++	for (unsigned long i = 0; i < num_events; i++) {
+ 		eidx = einfo[i].event_idx;
+ 		etype = kvm_pmu_get_perf_event_type(eidx);
+@@ -526,5 +530,5 @@ int kvm_riscv_vcpu_pmu_event_info(struct kvm_vcpu *vcpu, unsigned long saddr_low
+ 
+ free_mem:
+-	kfree(einfo);
++	kvfree(einfo);
+ out:
+ 	retdata->err_val = ret;
+
+##### A270
+=== 0f289334af68 A 2026-08-02 +2/-0
+riscv/runtime-const: Disable linker relaxation for RUNTIME_MAGIC
+
+Commit ee10b1028129 ("riscv/runtime-const: Replace open-coded
+placeholder with RUNTIME_MAGIC") switched the lui + addi[w] placeholder
+from hand-encoded immediates to %hi()/%lo() of RUNTIME_MAGIC.
+
+GNU Assembler folds %hi()/%lo() of an absolute expression at assembly
+time. LLVM's integrated assembler since 21.1 defers it to the linker
+instead, which range checks it: on riscv64 R_RISCV_HI20 must fit a
+signed 20-bit field, and RUNTIME_MAGIC (0x89ABCDEF) is a positive 64-bit
+value rather than a sign-extended 32-bit one, so it does not:
+
+    ld.lld: error: relocation R_RISCV_HI20 out of range: 563901 is not in
+    [-524288, 524287]
+
+The sequence is patched at runtime and its instruction offsets are
+recorded via ".long 1b - .", so the linker must not touch it in the
+first place. Add ".option norelax", as is already done for
+ALTERNATIVE() and static keys; the integrated assembler then resolves
+%hi()/%lo() itself and emits no relocation, restoring the exact
+encoding the open-coded placeholder produced.
+
+Fixes: ee10b1028129 ("riscv/runtime-const: Replace open-coded placeholder with RUNTIME_MAGIC")
+functions: 
+fixes: ee10b1028129(riscv)
+diff --git a/arch/riscv/include/asm/runtime-const.h b/arch/riscv/include/asm/runtime-const.h
+index a472ebbf0971..ce2008bb5227 100644
+--- a/arch/riscv/include/asm/runtime-const.h
++++ b/arch/riscv/include/asm/runtime-const.h
+@@ -24,4 +24,5 @@
+ 	asm_inline(".option push\n\t"					\
+ 		".option norvc\n\t"					\
++		".option norelax\n\t"					\
+ 		"1:\t"							\
+ 		"lui	%[__ret], %%hi(" RUNTIME_MAGIC ")\n\t"		\
+@@ -48,4 +49,5 @@
+ 	".option push\n\t"					\
+ 	".option norvc\n\t"					\
++	".option norelax\n\t"					\
+ 	"1:\t"							\
+ 	"lui	%[__ret], %%hi(" RUNTIME_MAGIC ")\n\t"		\
+
+##### A271
+=== 2820d227ad4e A 2026-08-02 +4/-1
+riscv: ftrace: Fix ftrace_modify_call failure on kprobed functions
+
+We are frequently hitting the following splat during the riscv bpf
+selftests:
+
+00000000026dc75a: expected (7c3ff297) but got (00100073)
+------------[ ftrace bug ]------------
+ftrace failed to modify
+[<ffffffff03c44c1c>] bpf_kfunc_common_test+0x4/0x20 [bpf_testmod]
+ actual:   e7:82:c2:ce
+Updating ftrace call site to call a different ftrace function
+ftrace record flags: 80100002
+ (2)
+ expected tramp: ffffffff80043904
+------------[ cut here ]------------
+WARNING: kernel/trace/ftrace.c:2278 at ftrace_bug+0x46e/0x4b0, CPU#1: test_progs/98
+...
+[<ffffffff80008f4e>] ftrace_bug+0x46e/0x4b0
+[<ffffffff803d3e86>] ftrace_replace_code+0x16e/0x170
+[<ffffffff803d42b6>] ftrace_modify_all_code+0x12e/0x1b8
+[<ffffffff800430f4>] arch_ftrace_update_code+0x14/0x28
+[<ffffffff803e0324>] ftrace_startup+0x14c/0x2a0
+[<ffffffff803e133c>] ftrace_startup_subops+0x584/0x1050
+[<ffffffff804500e6>] register_ftrace_graph+0x4e6/0x1018
+[<ffffffff804cf9f6>] register_fprobe_ips+0xc66/0x12f8
+[<ffffffff8049abe8>] bpf_kprobe_multi_link_attach+0x5d8/0xe68
+[<ffffffff8050fcaa>] __sys_bpf+0x3d5a/0x47f0
+[<ffffffff805107ee>] __riscv_sys_bpf+0xae/0x168
+[<ffffffff80034d78>] syscall_handler+0x60/0x100
+[<ffffffff8228b4f4>] do_trap_ecall_u+0x174/0x208
+[<ffffffff822b69c4>] handle_exception+0x16c/0x178
+
+After debugging, it can be triggered by similar commands below:
+```
+echo do_nanosleep > set_ftrace_filter
+echo function > current_tracer
+echo 'p do_nanosleep' > kprobe_events
+echo 1 > events/kprobes/enable
+echo 'f do_nanosleep' > dynamic_events
+echo 1 > events/fprobes/enable
+```
+functions: arch/riscv/kernel/ftrace.c:__ftrace_modify_call
+fixes: b2137c3b6d7a(riscv)
+diff --git a/arch/riscv/kernel/ftrace.c b/arch/riscv/kernel/ftrace.c
+index b430edfb83f4..be8b68514417 100644
+--- a/arch/riscv/kernel/ftrace.c
++++ b/arch/riscv/kernel/ftrace.c
+@@ -13,4 +13,5 @@
+ #include <asm/cacheflush.h>
+ #include <asm/text-patching.h>
++#include <asm/insn.h>
+ 
+ #ifdef CONFIG_DYNAMIC_FTRACE
+@@ -64,5 +65,7 @@ static int __ftrace_modify_call(unsigned long source, unsigned long target, bool
+ 			return -EFAULT;
+ 
+-		if (replaced[0] != call[0]) {
++		/* Bypass the check if the auipc insn is a kprobe breakpoint */
++		if (replaced[0] != call[0] &&
++		    !(riscv_insn_is_ebreak(replaced[0]) || riscv_insn_is_c_ebreak(replaced[0]))) {
+ 			pr_err("%p: expected (%08x) but got (%08x)\n",
+ 			       (void *)source, call[0], replaced[0]);
+
+##### A272
+=== b5060a4aa33d A 2026-08-03 +120/-14
+RISC-V: KVM: fix vcpu vector context handling for kernel-mode vector
+
+Running vector workloads like perf + mcf on KVM can result in an
+unexpected termination due to a vtype corruption. This happens because
+the kernel-mode vector (KMV) misattributes the guest's vcpu context as
+the user's context and source from a wrong status.VS.
+
+The simplified call chain that results in this problem is shown as
+follow:
+
+__riscv_sys_ioctl()
+    kvm_arch_vcpu_ioctl_run()
+      kvm_riscv_vcpu_exit()
+        kvm_riscv_vcpu_sbi_ecall()
+          kvm_riscv_vcpu_pmu_ctr_stop()
+            kvm_vcpu_write_guest()
+              __copy_to_user()
+                enter_vector_usercopy()
+                  kernel_vector_begin()
+
+kernel_vector_begin() should use the sstatus.VS from guest's vcpu
+context instead of task_pt_reg(current). Also, it should not save
+guest's v-reg into the user's context memory.
+
+To resolve this, the vcpu context must be correctly saved when KMV is
+serving a guest. However, invoking KVM functions directly from generic
+RISC-V architecture code introduces a reverse dependency, breaking
+builds when KVM is configured as N or M.
+
+Address this by registering an RCU-protected callback for context
+flushing. KVM registers this callback at module initialization and
+unregisters it on exit. When KMV starts a kernel context, it can now
+safely flush the vector context via the callback.
+
+Fixes: ecd2ada8a5e0 ("riscv: Add support for kernel mode vector")
+functions: arch/riscv/kernel/kernel_mode_vector.c:riscv_v_flags_set, arch/riscv/kernel/kernel_mode_vector.c:riscv_v_start_kernel_context, arch/riscv/kernel/kernel_mode_vector.c:kernel_vector_begin, arch/riscv/kvm/main.c:kvm_riscv_teardown, arch/riscv/kvm/main.c:riscv_kvm_init, arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_load, arch/riscv/kvm/vcpu.c:kvm_arch_vcpu_put, arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_enter_exit, arch/riscv/kvm/vcpu_vector.c:kvm_riscv_vcpu_guest_vector_restore, arch/riscv/kvm/vcpu_vector.c:kvm_riscv_vcpu_host_vector_restore, arch/riscv/kvm/vcpu_vector.c:kvm_riscv_vcpu_free_vector_context
+fixes: ecd2ada8a5e0(riscv)
+ arch/riscv/include/asm/kvm_vcpu_vector.h | 24 +++++++++++++++++++++
+ arch/riscv/include/asm/processor.h       |  8 +++++++
+ arch/riscv/include/asm/vector.h          |  5 +++++
+ arch/riscv/kernel/kernel_mode_vector.c   | 59 +++++++++++++++++++++++++++++++++++++++++-----------
+ arch/riscv/kvm/main.c                    |  4 ++++
+ arch/riscv/kvm/vcpu.c                    | 12 +++++++++++
+ arch/riscv/kvm/vcpu_vector.c             | 22 ++++++++++++++++++--
+ 7 files changed, 120 insertions(+), 14 deletions(-)
+diff --git a/arch/riscv/include/asm/kvm_vcpu_vector.h b/arch/riscv/include/asm/kvm_vcpu_vector.h
+index 57a798a4cb0d..6371d5ea5392 100644
+--- a/arch/riscv/include/asm/kvm_vcpu_vector.h
++++ b/arch/riscv/include/asm/kvm_vcpu_vector.h
+@@ -36,4 +36,20 @@ void kvm_riscv_vcpu_host_vector_restore(struct kvm_cpu_context *cntx);
+ int kvm_riscv_vcpu_alloc_vector_context(struct kvm_vcpu *vcpu);
+ void kvm_riscv_vcpu_free_vector_context(struct kvm_vcpu *vcpu);
++void kvm_riscv_register_vctx_callback(void (*func)(void));
++void kvm_riscv_unregister_vctx_callback(void);
++void kvm_riscv_vcpu_flush_vector(void);
++
++static inline void kvm_riscv_v_init(void)
++{
++	if (has_vector())
++		kvm_riscv_register_vctx_callback(&kvm_riscv_vcpu_flush_vector);
++}
++
++static inline void kvm_riscv_v_exit(void)
++{
++	if (has_vector())
++		kvm_riscv_unregister_vctx_callback();
++}
++
+ #else
+ 
+@@ -70,4 +86,12 @@ static inline void kvm_riscv_vcpu_free_vector_context(struct kvm_vcpu *vcpu)
+ {
+ }
++
++static inline void kvm_riscv_v_init(void)
++{
++}
++
++static inline void kvm_riscv_v_exit(void)
++{
++}
+ #endif
+ 
+diff --git a/arch/riscv/include/asm/processor.h b/arch/riscv/include/asm/processor.h
+index 812517b2cec1..a6a0c3d5a913 100644
+--- a/arch/riscv/include/asm/processor.h
++++ b/arch/riscv/include/asm/processor.h
+@@ -68,4 +68,10 @@ struct pt_regs;
+  *    activation of this state disables the preemption. On a non-RT kernel, it
+  *    also disable bh.
++ *  - bit 1: tells kvm that the vcpu process has guest context saved in vcpu's
++ *    context memory and need to be restore upon returing back to the guest.
++ *  - bit 2: represents that the vector context has now loaded and belongs to
++ *    the guest kernel. Any non-scheduler context saving routing needs to save
++ *    the register file to vcpu's context memory. The bit is set upon returing
++ *    back to the guest and cleared after loading the host's vector context.
+  *  - bits 8: is used for tracking preemptible kernel-mode Vector, when
+  *    RISCV_ISA_V_PREEMPTIVE is enabled. Calling kernel_vector_begin() does not
+@@ -98,4 +104,6 @@ struct pt_regs;
+ #define RISCV_V_CTX_UNIT_DEPTH		0x00010000
+ #define RISCV_KERNEL_MODE_V		0x00000001
++#define RISCV_V_VCPU_NEED_RESTORE	0x00000002
++#define RISCV_V_VCPU_CTX		0x00000004
+ #define RISCV_PREEMPT_V			0x00000100
+ #define RISCV_PREEMPT_V_DIRTY		0x80000000
+... (210 more diff lines)
+
+##### A273
+=== 34c9cfcde29b A 2026-08-07 +2/-17
+riscv: unaligned: stop using kthread for check_vector_unaligned_access()
+
+A kthread is used to run check_vector_unaligned_access() to optimize boot
+time, allowing the kernel to continue booting without waiting for the
+unaligned vector speed probe to finish.
+
+However, this asynchronous approach introduces several complications.
+First, the kthread may not complete before a user reads vDSO data,
+resulting in incorrect values. This was previously addressed by
+commit 5d15d2ad36b0 ("riscv: hwprobe: Fix stale vDSO data for
+late-initialized keys at boot"), which added complex synchronization
+between the kthread and vDSO reads.
+
+Second, it was discovered that the kthread may not finish before
+vec_check_unaligned_access_speed_all_cpus() (marked with __init) is freed,
+triggering a page fault.
+
+These issues raise the question of whether the kthread is worth the added
+complexity. A past boot time regression report was actually unrelated to
+synchronous probing; it was caused by the probe running serially. Since
+switching to a parallel probe, no further complaints have been made.
+Furthermore, the unaligned scalar access speed probe takes the same amount
+of time, runs synchronously, and has caused no issues.
+
+Testing shows no noticeable boot time slowdown when running the vector
+probe synchronously (0.464474s with kthread vs. 0.457991s without).
+
+Remove the kthread usage and run the probe synchronously. This simplifies
+the boot flow and allows for the revert of commit 5d15d2ad36b0 ("riscv:
+hwprobe: Fix stale vDSO data for late-initialized keys at boot")
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+[pjw@kernel.org: updated to apply; adjusted Fixes: tag; fixed my own manual patch application error]
+functions: arch/riscv/kernel/unaligned_access_speed.c:vec_check_unaligned_access_speed_all_cpus, arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_all_cpus
+fixes: e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 36201613d2ca..67f1a0371659 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -7,5 +7,4 @@
+ #include <linux/cpumask.h>
+ #include <linux/jump_label.h>
+-#include <linux/kthread.h>
+ #include <linux/mm.h>
+ #include <linux/smp.h>
+@@ -289,16 +288,7 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ }
+ 
+-/* Measure unaligned access speed on all CPUs present at boot in parallel. */
+-static int vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+-{
+-	schedule_on_each_cpu(check_vector_unaligned_access);
+-	riscv_hwprobe_complete_async_probe();
+-
+-	return 0;
+-}
+ #else /* CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS */
+-static int vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++static void check_vector_unaligned_access(struct work_struct *work __always_unused)
+ {
+-	return 0;
+ }
+ #endif
+@@ -388,10 +378,5 @@ static int __init check_unaligned_access_all_cpus(void)
+ 	} else if (!check_vector_unaligned_access_emulated_all_cpus() &&
+ 		   IS_ENABLED(CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS)) {
+-		riscv_hwprobe_register_async_probe();
+-		if (IS_ERR(kthread_run(vec_check_unaligned_access_speed_all_cpus,
+-				       NULL, "vec_check_unaligned_access_speed_all_cpus"))) {
+-			pr_warn("Failed to create vec_unalign_check kthread\n");
+-			riscv_hwprobe_complete_async_probe();
+-		}
++		schedule_on_each_cpu(check_vector_unaligned_access);
+ 	}
+ 
+
+##### A274
+=== 7e4cb63d61a7 A 2026-08-07 +19/-0
+riscv: acpi: Handle LPI architectural context loss flags
+
+Commit 4785aa802853 ("cpuidle, ACPI: Evaluate LPI arch_flags for
+broadcast timer") replaced the generic nonzero check for LPI
+architectural context loss flags with arch_get_idle_state_flags().
+RISC-V does not implement the helper, so it falls back to the stub
+that returns 0. Consequently, CPUIDLE_FLAG_TIMER_STOP is not set when
+an LPI state loses the hart timer context, preventing cpuidle from
+using a broadcast timer for that state.
+
+Implement the RISC-V helper and map the hart timer context loss flag
+to CPUIDLE_FLAG_TIMER_STOP.
+
+Fixes: 4785aa802853 ("cpuidle, ACPI: Evaluate LPI arch_flags for broadcast timer")
+functions: 
+fixes: 4785aa802853(common)
+diff --git a/arch/riscv/include/asm/acpi.h b/arch/riscv/include/asm/acpi.h
+index d59bd06347cc..980aa11d7741 100644
+--- a/arch/riscv/include/asm/acpi.h
++++ b/arch/riscv/include/asm/acpi.h
+@@ -13,4 +13,6 @@
+ #define _ASM_ACPI_H
+ 
++#include <linux/cpuidle.h>
++
+ /* Basic configuration for ACPI */
+ #ifdef CONFIG_ACPI
+@@ -68,4 +70,21 @@ int acpi_get_riscv_isa(struct acpi_table_header *table,
+ void acpi_get_cbo_block_size(struct acpi_table_header *table, u32 *cbom_size,
+ 			     u32 *cboz_size, u32 *cbop_size);
++
++/*
++ * RISC-V Functional Fixed Hardware Specification Version v1.0.1,
++ * Chapter 3.1.2, Table 4: Arch. Context Lost Flags
++ */
++#define RISCV_LPI_HART_TIMER_CTXT_LOST		BIT(0)
++
++static inline unsigned int arch_get_idle_state_flags(u32 arch_flags)
++{
++	if (arch_flags & RISCV_LPI_HART_TIMER_CTXT_LOST)
++		return CPUIDLE_FLAG_TIMER_STOP;
++
++	return 0;
++}
++
++#define arch_get_idle_state_flags arch_get_idle_state_flags
++
+ #else
+ static inline void acpi_init_rintc_map(void) { }

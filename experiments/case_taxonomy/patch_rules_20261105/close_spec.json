@@ -1,0 +1,12 @@
+{
+ "log_date": "2026-11-05",
+ "section": "## 11月5日 后续：补丁场景的检查——P1、P2开发样例通过但全架构误报过多；模型审查补丁能发现K4，但推翻了正确的K1标记\n\n按上一轮的缺口补检查（patch_rules_20261105/，判据b59d5858…）。P1反向执行上下文（fixmap、本核TLB/icache刷新须在不可迁移上下文中，向上追3层）；P2变体接口完整性（RV64/RV32文件对中一方覆盖公共钩子、另一方没有，且有__weak默认或被共用文件/公共代码调用）；P3对照参照补丁（x86覆盖的钩子与新调用的公共接口）；L模型直接审查补丁（Claude-Sonnet-5.5，P第4步、P第8步、U第3步各3次，共9次）。开发样例：P1在P第2–5步、U三步、Ufix修复前都报告patch_map/patch_unmap，在P第6–8步和修复后不报告（基线也报告，K1早于迁移，上游Fixes同时指向0ff7c3b33127）；P2在P第4–6步报告bpf_arch_text_copy/invalidate，第7–8步不报告；P3没有发现K4，只有x86内部写法的噪声。终点版本全架构：P1 13条中不成立12、判断不了1（保护在更上层的调度器、页表锁、陷入入口；单CPU在线；包装函数），P2 14条全部不成立（RV32本不支持的功能靠__weak默认返回不支持），均记“误报过多”；改进方向：P1把陷入入口当关中断起点并识别单CPU分支，P2只保留“被两个变体共用的文件调用”。新疑点：RISC-V KVM的kvm_riscv_check_vcpu_requests在preempt_disable之前，fence.i只刷本核后vcpu可能迁移，未见vcpu换CPU时刷新指令缓存（arm64有），只记录未验证。L：K4 3/3、K3 3/3（提示附P2）、K1 0/6（模型以“fixmap全局、text_mutex串行”否定了正确的P1标记，缺“__set_fixmap只刷本核TLB”这一事实）；去重后P第4步8个问题中4个成立，P第8步10个中2个成立，U第3步1个不成立。新找到的模型迁移结果问题：bpf_arch_text_poke开头lockdep_assert_held(&text_mutex)又自行mutex_lock（6/6次指出，开lockdep即警告）；patch_text_set_nosync整块kzalloc（4/6）。不成立的主要是finalize前的icache刷新（patch_text_nosync之后另有全核刷新）、finalize失败泄漏（finalize自己释放）、bpf_jit_free写法与参照相同、释放前拷贝size（x86修复要求）。结论：按机制补检查方向可行但需收紧；模型审查补丁必要，但需复核第2版的依据要求和程序给出的架构事实。统计：模型调用9，构建0，新确认缺陷0，新疑点1。证据linux_bug_analyze/experiments/case_taxonomy/patch_rules_20261105/。",
+ "plan_replacements": [
+  [
+   "fix_strategy_test_20261105/已暂停，样本池留作历史回放。",
+   "fix_strategy_test_20261105/已暂停，样本池留作历史回放。补丁场景检查（patch_rules_20261105/）：P1反向执行上下文、P2变体接口完整性在开发样例上按预期报告K1、K3，但终点版本全架构误报过多（P1 12/13、P2 14/14不成立），待收紧后在历史回放样本上独立评估；P3对照参照补丁无效；模型审查补丁发现K4（3/3）和迁移结果中bpf_arch_text_poke的锁断言问题，但以错误理由推翻了正确的K1标记（0/6），需加入程序给出的架构事实和判“不成立”须有依据的要求。新疑点RISC-V KVM fence.i请求处理可迁移，只记录。"
+  ]
+ ],
+ "plan_row": "| 2026-11-05 | 补丁场景的检查 | P1、P2开发样例通过但全架构误报过多；P3无效；模型审查发现K4与text_poke锁断言，但推翻正确的K1标记；linux_bug_analyze/experiments/case_taxonomy/patch_rules_20261105/ | 收紧P1/P2；模型审查加事实与依据要求；历史回放样本 |",
+ "order_paragraph": ""
+}

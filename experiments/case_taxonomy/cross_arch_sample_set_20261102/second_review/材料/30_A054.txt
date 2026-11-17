@@ -1,0 +1,50 @@
+########## 第30条  编号 A054  提交 05ab803d1ad8  日期 2024-02-27
+
+【提交说明】
+riscv: Save/restore envcfg CSR during CPU suspend
+
+The value of the [ms]envcfg CSR is lost when entering a nonretentive
+idle state, so the CSR must be rewritten when resuming the CPU.
+
+Fixes: 43c16d51a19b ("RISC-V: Enable cbo.zero in usermode")
+
+【改动统计】
+ arch/riscv/include/asm/suspend.h | 1 +
+ arch/riscv/kernel/suspend.c      | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/suspend.h b/arch/riscv/include/asm/suspend.h
+index 02f87867389a..491296a335d0 100644
+--- a/arch/riscv/include/asm/suspend.h
++++ b/arch/riscv/include/asm/suspend.h
+@@ -14,6 +14,7 @@ struct suspend_context {
+ 	struct pt_regs regs;
+ 	/* Saved and restored by high-level functions */
+ 	unsigned long scratch;
++	unsigned long envcfg;
+ 	unsigned long tvec;
+ 	unsigned long ie;
+ #ifdef CONFIG_MMU
+diff --git a/arch/riscv/kernel/suspend.c b/arch/riscv/kernel/suspend.c
+index 239509367e42..299795341e8a 100644
+--- a/arch/riscv/kernel/suspend.c
++++ b/arch/riscv/kernel/suspend.c
+@@ -15,6 +15,8 @@
+ void suspend_save_csrs(struct suspend_context *context)
+ {
+ 	context->scratch = csr_read(CSR_SCRATCH);
++	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_XLINUXENVCFG))
++		context->envcfg = csr_read(CSR_ENVCFG);
+ 	context->tvec = csr_read(CSR_TVEC);
+ 	context->ie = csr_read(CSR_IE);
+ 
+@@ -36,6 +38,8 @@ void suspend_save_csrs(struct suspend_context *context)
+ void suspend_restore_csrs(struct suspend_context *context)
+ {
+ 	csr_write(CSR_SCRATCH, context->scratch);
++	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_XLINUXENVCFG))
++		csr_write(CSR_ENVCFG, context->envcfg);
+ 	csr_write(CSR_TVEC, context->tvec);
+ 	csr_write(CSR_IE, context->ie);
+ 

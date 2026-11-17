@@ -1,0 +1,26 @@
+commit 379eb01c21795edb4ca8d342503bd2183a19ec3a
+Subject: riscv: Ensure the value of FP registers in the core dump file is up to date
+
+
+diff --git a/arch/riscv/kernel/ptrace.c b/arch/riscv/kernel/ptrace.c
+index 1a85305720e8..9c0511119bad 100644
+--- a/arch/riscv/kernel/ptrace.c
++++ b/arch/riscv/kernel/ptrace.c
+@@ -10,6 +10,7 @@
+ #include <asm/ptrace.h>
+ #include <asm/syscall.h>
+ #include <asm/thread_info.h>
++#include <asm/switch_to.h>
+ #include <linux/audit.h>
+ #include <linux/ptrace.h>
+ #include <linux/elf.h>
+@@ -56,6 +57,9 @@ static int riscv_fpr_get(struct task_struct *target,
+ {
+ 	struct __riscv_d_ext_state *fstate = &target->thread.fstate;
+ 
++	if (target == current)
++		fstate_save(current, task_pt_regs(current));
++
+ 	membuf_write(&to, fstate, offsetof(struct __riscv_d_ext_state, fcsr));
+ 	membuf_store(&to, fstate->fcsr);
+ 	return membuf_zero(&to, 4);	// explicitly pad

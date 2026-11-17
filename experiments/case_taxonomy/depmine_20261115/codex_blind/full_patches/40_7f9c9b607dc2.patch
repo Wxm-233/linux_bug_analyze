@@ -1,0 +1,68 @@
+commit 7f9c9b607dc2641c77266efe788fab853d27dbd1
+Author:     Muchun Song <muchun.song@linux.dev>
+AuthorDate: Thu Apr 28 23:16:09 2022 -0700
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Thu Apr 28 23:16:09 2022 -0700
+
+    mm: rmap: fix cache flush on THP pages
+    
+    Patch series "Fix some bugs related to ramp and dax", v7.
+    
+    Patch 1-2 fix a cache flush bug, because subsequent patches depend on
+    those on those changes, there are placed in this series.  Patch 3-4 are
+    preparation for fixing a dax bug in patch 5.  Patch 6 is code cleanup
+    since the previous patch removes the usage of follow_invalidate_pte().
+    
+    
+    This patch (of 6):
+    
+    The flush_cache_page() only remove a PAGE_SIZE sized range from the cache.
+    However, it does not cover the full pages in a THP except a head page.
+    Replace it with flush_cache_range() to fix this issue.  At least, no
+    problems were found due to this.  Maybe because the architectures that
+    have virtual indexed caches is less.
+    
+    Link: https://lkml.kernel.org/r/20220403053957.10770-1-songmuchun@bytedance.com
+    Link: https://lkml.kernel.org/r/20220403053957.10770-2-songmuchun@bytedance.com
+    Fixes: f27176cfc363 ("mm: convert page_mkclean_one() to use page_vma_mapped_walk()")
+    Signed-off-by: Muchun Song <songmuchun@bytedance.com>
+    Reviewed-by: Yang Shi <shy828301@gmail.com>
+    Reviewed-by: Dan Williams <dan.j.williams@intel.com>
+    Reviewed-by: Christoph Hellwig <hch@lst.de>
+    Cc: Matthew Wilcox <willy@infradead.org>
+    Cc: Jan Kara <jack@suse.cz>
+    Cc: Al Viro <viro@zeniv.linux.org.uk>
+    Cc: Alistair Popple <apopple@nvidia.com>
+    Cc: Yang Shi <shy828301@gmail.com>
+    Cc: Ralph Campbell <rcampbell@nvidia.com>
+    Cc: Hugh Dickins <hughd@google.com>
+    Cc: Xiyu Yang <xiyuyang19@fudan.edu.cn>
+    Cc: "Kirill A. Shutemov" <kirill.shutemov@linux.intel.com>
+    Cc: Ross Zwisler <zwisler@kernel.org>
+    Cc: Xiongchun Duan <duanxiongchun@bytedance.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/mm/rmap.c b/mm/rmap.c
+index fedb82371efe..c194ec913c68 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -965,17 +965,18 @@ static bool page_mkclean_one(struct folio *folio, struct vm_area_struct *vma,
+ 		} else {
+ #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+ 			pmd_t *pmd = pvmw.pmd;
+ 			pmd_t entry;
+ 
+ 			if (!pmd_dirty(*pmd) && !pmd_write(*pmd))
+ 				continue;
+ 
+-			flush_cache_page(vma, address, folio_pfn(folio));
++			flush_cache_range(vma, address,
++					  address + HPAGE_PMD_SIZE);
+ 			entry = pmdp_invalidate(vma, address, pmd);
+ 			entry = pmd_wrprotect(entry);
+ 			entry = pmd_mkclean(entry);
+ 			set_pmd_at(vma->vm_mm, address, pmd, entry);
+ 			ret = 1;
+ #else
+ 			/* unexpected pmd-mapped folio? */
+ 			WARN_ON_ONCE(1);

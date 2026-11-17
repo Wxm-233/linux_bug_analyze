@@ -1,0 +1,187 @@
+{
+ "note": "First annotator's check (model Claude) of all issues of flags_end.json at df2908090cda. a = real and present; a2 = real but only on a specific configuration or rare path (criteria a′); b = not; c = cannot tell.",
+ "summary": {
+  "issues": 22,
+  "labels": {
+   "a2": 1,
+   "b": 11,
+   "c": 9,
+   "a": 1
+  },
+  "by_rule": {
+   "CTX": {
+    "a2": 1,
+    "b": 5,
+    "c": 8
+   },
+   "R7": {
+    "b": 5,
+    "a": 1
+   },
+   "R10": {
+    "c": 1,
+    "b": 1
+   }
+  },
+  "a_share": 0.091,
+  "new_suspects": [
+   "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_cfg_match"
+  ]
+ },
+ "rows": [
+  {
+   "k": 0,
+   "issue": "CTX|sleep|machine_shutdown|smp_shutdown_nonboot_cpus",
+   "label": "a2",
+   "known": "known",
+   "reason": "machine_shutdown calls smp_shutdown_nonboot_cpus with irqs off; confirmed in QEMU (riscv_kexec_shutdown_verify_20261102); kexec path only; arm64 and x86 do not disable irqs before it"
+  },
+  {
+   "k": 1,
+   "issue": "CTX|sleep|console_lock|might_sleep",
+   "label": "b",
+   "known": "",
+   "reason": "console_unblank does not take console_lock when oops_in_progress is set, and bust_spinlocks(1) sets it first"
+  },
+  {
+   "k": 2,
+   "issue": "CTX|sleep|mmu_split_huge_pages|cond_resched",
+   "label": "b",
+   "known": "",
+   "reason": "mmu_split_huge_pages drops mmu_lock (write_unlock) before cond_resched; the any-path closure missed the release inside the callee"
+  },
+  {
+   "k": 3,
+   "issue": "CTX|sleep|hugetlb_fault|mutex_lock",
+   "label": "b",
+   "known": "",
+   "reason": "handle_page_fault itself enables interrupts (line 319) before handle_mm_fault when the faulting context had them on"
+  },
+  {
+   "k": 4,
+   "issue": "CTX|rt|do_oops_enter_exit|spin_lock_irqsave",
+   "label": "c",
+   "known": "",
+   "reason": "oops_enter takes the spinlock_t pause_on_oops_lock only when pause_on_oops is set; same in the common oops path of every architecture, not RISC-V specific"
+  },
+  {
+   "k": 5,
+   "issue": "CTX|rt|mark_free_pages|spin_lock_irqsave",
+   "label": "c",
+   "known": "",
+   "reason": "zone spinlock_t in swsusp_save with irqs off is the common hibernation path of every architecture, not RISC-V specific"
+  },
+  {
+   "k": 6,
+   "issue": "CTX|sleep|flush_tlb_all|on_each_cpu",
+   "label": "b",
+   "known": "",
+   "reason": "flush_tlb_all takes the local path when fewer than two CPUs are online, as during create_image"
+  },
+  {
+   "k": 7,
+   "issue": "CTX|sleep|flush_icache_all|on_each_cpu",
+   "label": "b",
+   "known": "",
+   "reason": "flush_icache_all returns after the local flush when fewer than two CPUs are online"
+  },
+  {
+   "k": 8,
+   "issue": "CTX|noinstr|on_thread_stack|called from noinstr/__cpuidle",
+   "label": "c",
+   "known": "",
+   "reason": "static inline on_thread_stack called from noinstr stackleak code while x86 uses __always_inline; impact not established"
+  },
+  {
+   "k": 9,
+   "issue": "CTX|noinstr|cpu_relax|called from noinstr/__cpuidle",
+   "label": "c",
+   "known": "",
+   "reason": "static inline cpu_relax called from noinstr code while x86 uses __always_inline; impact not established"
+  },
+  {
+   "k": 10,
+   "issue": "CTX|noinstr|walk_stackframe|instrumentable callee",
+   "label": "c",
+   "known": "",
+   "reason": "noinstr arch_stack_walk calls instrumentable walk_stackframe; RISC-V has no objtool check"
+  },
+  {
+   "k": 11,
+   "issue": "CTX|noinstr|handle_page_fault|instrumentable callee",
+   "label": "c",
+   "known": "",
+   "reason": "noinstr do_page_fault calls handle_page_fault outside instrumentation_begin/end"
+  },
+  {
+   "k": 12,
+   "issue": "CTX|noinstr|irq_enter_rcu|instrumentable callee",
+   "label": "c",
+   "known": "",
+   "reason": "noinstr handle_riscv_irq calls irq_enter_rcu outside instrumentation_begin/end, which x86 wraps"
+  },
+  {
+   "k": 13,
+   "issue": "CTX|noinstr|irq_exit_rcu|instrumentable callee",
+   "label": "c",
+   "known": "",
+   "reason": "same as 12 for irq_exit_rcu"
+  },
+  {
+   "k": 14,
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:pmu_fw_ctr_read_hi",
+   "label": "b",
+   "known": "",
+   "reason": "fevent_code comes from pmc->event_idx, validated and stored at configuration time; the guest cannot supply an out-of-range value here"
+  },
+  {
+   "k": 15,
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:pmu_ctr_read",
+   "label": "b",
+   "known": "",
+   "reason": "same as 14"
+  },
+  {
+   "k": 16,
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_incr_fw",
+   "label": "b",
+   "known": "",
+   "reason": "every caller passes an SBI_PMU_FW_* constant; I5 did not exclude it because the checker counted the header prototype as a call site (checker defect)"
+  },
+  {
+   "k": 17,
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_start",
+   "label": "b",
+   "known": "",
+   "reason": "same as 14 (ctr_start)"
+  },
+  {
+   "k": 18,
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_stop",
+   "label": "b",
+   "known": "",
+   "reason": "same as 14 (ctr_stop)"
+  },
+  {
+   "k": 19,
+   "issue": "R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_cfg_match",
+   "label": "a",
+   "known": "new",
+   "reason": "event_code = get_event_code(eidx) with eidx = cp->a3 from the guest SBI call; after the bound check it indexes kvpmu->fw_event[event_code] (store) without array_index_nospec; the upstream Spectre-v1 fix 2dda6a9e09ee protected ctr_idx in the same function but not event_code; x86 and arm64 KVM sanitise guest-provided PMU indices"
+  },
+  {
+   "k": 20,
+   "issue": "R10|arch/riscv/kernel/cacheinfo.c:init_cache_level",
+   "label": "c",
+   "known": "",
+   "reason": "arm64 init_cache_level handles ACPI, RISC-V only the DT path; the common fetch_cache_info already sets the ACPI levels early, effect not checked"
+  },
+  {
+   "k": 21,
+   "issue": "R10|arch/riscv/mm/init.c:vmemmap_populate",
+   "label": "b",
+   "known": "",
+   "reason": "RISC-V uses vmemmap_populate_hugepages, which falls back to base pages itself"
+  }
+ ]
+}

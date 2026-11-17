@@ -1,0 +1,182 @@
+[
+  {
+    "k": 1,
+    "loc": "fs/ext4/dir.c:259",
+    "verdict": "可能",
+    "why": "32 位内核上，启用 largedir 的超过 4 GiB 目录若走线性扫描（未索引或索引出错后回退），且目录版本变化进入重定位分支，unsigned long 类型的 s_blocksize 使取反后的掩码只有 32 位。掩码零扩展后清掉 ctx->pos 的高 32 位，使读取位置跳回低偏移，造成重复或错位枚举；ext4_isize() 在 largedir 下确实读取目录大小的高 32 位。"
+  },
+  {
+    "k": 2,
+    "loc": "fs/hugetlbfs/inode.c:227",
+    "verdict": "不可能",
+    "why": "huge_page_mask(h) 是按巨页大小对齐的地址掩码，其反码恰为 huge_page_size(h)-1。这里计算巨页内偏移 offset，结果本来就只应保留页内的低位，文件位置的高位已由 index 单独表示。"
+  },
+  {
+    "k": 3,
+    "loc": "fs/hugetlbfs/inode.c:245",
+    "verdict": "不可能",
+    "why": "该分支计算文件最后一个巨页中有效数据的长度，即 ((isize-1) 对巨页大小取余)+1。~huge_page_mask(h) 只保留页内位正合此意，nr 的上界是巨页大小，不需要保存文件大小的高 32 位。"
+  },
+  {
+    "k": 4,
+    "loc": "fs/hugetlbfs/inode.c:613",
+    "verdict": "不可能",
+    "why": "BUG_ON 只检查截断位置是否按巨页大小对齐，检查的是 offset 的页内低位。高位为零不影响对齐判断，此表达式也没有把清掉高位后的值写回 offset。"
+  },
+  {
+    "k": 5,
+    "loc": "fs/hugetlbfs/inode.c:636",
+    "verdict": "不可能",
+    "why": "代码已用 start 右移得到的 idx 找到并锁住目标巨页，随后将 start 转为该巨页内的偏移。folio_zero_segment() 接收的就是页内范围，因此此处清除巨页编号及文件偏移高位是有意的。"
+  },
+  {
+    "k": 6,
+    "loc": "fs/hugetlbfs/inode.c:637",
+    "verdict": "不可能",
+    "why": "这里把 end 转为已锁定巨页内的结束偏移，~huge_page_mask(h) 正是页内掩码。若 end 落在页边界，后续还会把零转换为 huge_page_size(h)，所以清除文件位置高位符合清零范围的语义。"
+  },
+  {
+    "k": 7,
+    "loc": "fs/hugetlbfs/inode.c:850",
+    "verdict": "不可能",
+    "why": "该条件检查新文件大小能否被巨页大小整除，只需观察页内低位。即使 newsize 超过 4 GiB，其高位也不参与余数判断，且传给 hugetlb_vmtruncate() 的仍是原来的完整 newsize。"
+  },
+  {
+    "k": 8,
+    "loc": "mm/filemap.c:3183",
+    "verdict": "不可能",
+    "why": "offset_in_folio() 在 include/linux/mm.h:3175 已将输入转换为 unsigned long 并与 folio_size(folio)-1 相与，得到的是 folio 内偏移。该行只把这个有限的页内偏移按 bsz 向下对齐；推进完整文件位置 start 的第 3189 行则已使用 u64 掩码。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/memory-failure.c:1745",
+    "verdict": "不可能",
+    "why": "该掩码若在 32 位上处理高文件偏移，算术上确会丢失高位，但本版本两个调用来源仅为 dev_pagemap 故障处理和 CONFIG_FS_DAX 路径。它们依赖 ZONE_DEVICE，而 ZONE_DEVICE 经 MEMORY_HOTREMOVE、MEMORY_HOTPLUG 依赖 64BIT；32 位下 get_dev_pagemap() 恒返回 NULL，实际到不了此处。"
+  },
+  {
+    "k": 10,
+    "loc": "arch/arm/kernel/setup.c:988",
+    "verdict": "不可能",
+    "why": "total 是 max_low_pfn-min_low_pfn，表示低端直接映射内存的地址跨度，并非包含 HIGHMEM 的全部物理内存。ARM 的 find_limits() 使用 memblock 当前低端上限，而 adjust_lowmem_bounds() 又以 vmalloc_limit 限制该上限；这段跨度小于 4 GiB，所以转换为字节后仍可由 32 位 unsigned long 表示。"
+  },
+  {
+    "k": 11,
+    "loc": "arch/parisc/kernel/sys_parisc.c:217",
+    "verdict": "不可能",
+    "why": "这一定义位于第 213 行开始的 #ifdef CONFIG_64BIT 分支，只在 64 位 parisc 内核中编译。这里 (long)high 已经是 64 位，再左移 32 位不会产生所报的 32 位截断；32 位内核使用 #else 中的另一定义。"
+  },
+  {
+    "k": 12,
+    "loc": "arch/parisc/kernel/sys_parisc.c:223",
+    "verdict": "不可能",
+    "why": "此处 parisc_ftruncate64 与上一条一样受 #ifdef CONFIG_64BIT 保护，只在 long 为 64 位时编译。不能把 arm32、i386 等组合的 long 位宽套用到这段 parisc 的 64 位分支。"
+  },
+  {
+    "k": 13,
+    "loc": "arch/powerpc/mm/mem.c:139",
+    "verdict": "不可能",
+    "why": "add_pages() 位于 arch/powerpc/mm/mem.c:54 开始的 CONFIG_MEMORY_HOTPLUG 条件块中。当前源码的 mm/Kconfig:514-519 明确要求 MEMORY_HOTPLUG 依赖 64BIT，因此这段左移不会在 32 位 powerpc 内核中编译。"
+  },
+  {
+    "k": 14,
+    "loc": "arch/powerpc/mm/mem.c:140",
+    "verdict": "不可能",
+    "why": "nr_pages 的这次左移同样位于 CONFIG_MEMORY_HOTPLUG 条件块内。该配置在本版本依赖 64BIT，因此执行这里的 powerpc 内核使用 64 位 unsigned long，不存在所报的 32 位移位截断。"
+  },
+  {
+    "k": 15,
+    "loc": "arch/sparc/kernel/smp_64.c:405",
+    "verdict": "不可能",
+    "why": "smp_64.c 属于 sparc64 实现，arch/sparc/kernel/Makefile 按 BITS 选择 smp_$(BITS).o。32 位 sparc 编译 smp_32.c，因此此处 cpu 为 64 位 unsigned long，报告列出的其他 32 位架构也不会编译此文件。"
+  },
+  {
+    "k": 16,
+    "loc": "arch/x86/mm/init_64.c:986",
+    "verdict": "不可能",
+    "why": "arch/x86/mm/Makefile 按 BITS 选择 init_$(BITS).o，这段实现只属于 x86_64 内核。i386 使用 init_32.c，此处 start_pfn 的 unsigned long 实际为 64 位。"
+  },
+  {
+    "k": 17,
+    "loc": "fs/ext2/dir.c:292",
+    "verdict": "不可能",
+    "why": "include/linux/pagemap.h:1593-1596 的 dir_pages() 先将字节数强转 unsigned long 再右移，因此 32 位上的 npages 不超过 ULONG_MAX>>PAGE_SHIFT。该赋值只在 n<npages 的循环中执行，所以 n<<PAGE_SHIFT 必在 32 位范围内；更早的目录页数截断不能算成本行的移位溢出。"
+  },
+  {
+    "k": 18,
+    "loc": "fs/ext4/inode.c:2857",
+    "verdict": "可能",
+    "why": "32 位内核对超过 4 GiB 的文件做循环回写，且 mapping->writeback_index 指向高偏移时，pgoff_t 的左移先在 32 位内完成。以 4 KiB 页、5 GiB 回写位置为例，mpd->start_pos 会变成 1 GiB；后续据此搜索脏页，造成循环起点错误，低偏移持续变脏时可能推迟高偏移脏页的回写。"
+  },
+  {
+    "k": 19,
+    "loc": "fs/ext4/inode.c:2996",
+    "verdict": "可能",
+    "why": "循环回写进入 !cycled 且仍有写回额度的回扫分支时，32 位 writeback_index 左移后的高位先丢失，再做减一并扩展为 loff_t。若原循环位置是 5 GiB，回扫终点会从 5 GiB-1 变成 1 GiB-1，缩短应回扫的范围，使该轮可能漏掉此范围内重新变脏的页。"
+  },
+  {
+    "k": 20,
+    "loc": "fs/f2fs/file.c:3035",
+    "verdict": "可能",
+    "why": "F2FS 整理 ioctl 检查页对齐和 max_file_blocks()，并未把文件范围限制在 4 GiB 内，所以 32 位 pg_start 可以表示 5 GiB 对应的页号。把它左移回字节位置却只剩 1 GiB，导致整理前的 filemap_write_and_wait_range() 冲刷错误的低偏移区间，漏掉目标高偏移区间的写回和等待。"
+  },
+  {
+    "k": 21,
+    "loc": "fs/f2fs/file.c:3036",
+    "verdict": "可能",
+    "why": "32 位 pg_end 左移在减一及传入 loff_t 参数之前就会回绕，调用者允许终点超过 4 GiB。比如整理 [3 GiB,5 GiB) 时，终点变成 1 GiB-1，小于仍为 3 GiB 的起点，导致本应覆盖该整理范围的预写回及等待被遗漏。"
+  },
+  {
+    "k": 22,
+    "loc": "fs/fuse/dax.c:189",
+    "verdict": "不可能",
+    "why": "fs/fuse/Makefile 只在 CONFIG_FUSE_DAX 下编译 dax.o，而 FUSE_DAX 依赖 FS_DAX。FS_DAX 经 ZONE_DEVICE、MEMORY_HOTREMOVE、MEMORY_HOTPLUG 间接依赖 64BIT，因此该行不会在合法的 32 位配置中编译。"
+  },
+  {
+    "k": 23,
+    "loc": "fs/fuse/dax.c:402",
+    "verdict": "不可能",
+    "why": "fuse_fill_iomap() 所在的 dax.o 受 CONFIG_FUSE_DAX 控制。其配置依赖链 FUSE_DAX→FS_DAX→ZONE_DEVICE→MEMORY_HOTREMOVE→MEMORY_HOTPLUG→64BIT 排除了 32 位内核，这里的 itn.start 实际是 64 位 unsigned long。"
+  },
+  {
+    "k": 24,
+    "loc": "fs/fuse/dax.c:837",
+    "verdict": "不可能",
+    "why": "该文件只有启用 CONFIG_FUSE_DAX 才会编译，而此配置经 FS_DAX 和设备内存热插拔支持要求 64BIT。因而 dmap->itn.start 在实际编译条件下是 64 位，不会发生报告假设的 32 位左移回绕。"
+  },
+  {
+    "k": 25,
+    "loc": "fs/fuse/dax.c:931",
+    "verdict": "不可能",
+    "why": "inode_inline_reclaim_one_dmap() 仅随 CONFIG_FUSE_DAX 编译。该配置依赖 FS_DAX→ZONE_DEVICE→MEMORY_HOTREMOVE→MEMORY_HOTPLUG→64BIT，所以 start_idx 的 unsigned long 在可执行此代码的内核中为 64 位。"
+  },
+  {
+    "k": 26,
+    "loc": "fs/fuse/dax.c:1083",
+    "verdict": "不可能",
+    "why": "lookup_and_reclaim_dmap() 所在 dax.o 受 CONFIG_FUSE_DAX 保护，其依赖链最终要求 CONFIG_64BIT。虽然按孤立的 32 位表达式推算会溢出，但本版本没有能编译并执行该函数的合法 32 位配置。"
+  },
+  {
+    "k": 27,
+    "loc": "fs/gfs2/quota.c:752",
+    "verdict": "不可能",
+    "why": "所有调用的 loc 都来自 qd2offset()=(2*32 位 quota ID+类型位)*sizeof(struct gfs2_quota)，记录大小为 88 字节，因此记录末端不超过 704 GiB。挂载校验要求块大小至少 512 字节，所以 index 左移得到的配额文件块号小于 2^31，连同跨页写入的下一页也达不到 32 位溢出范围。"
+  },
+  {
+    "k": 28,
+    "loc": "fs/libfs.c:38",
+    "verdict": "说不清",
+    "why": "按 32 位算术，nrpages<< (PAGE_SHIFT-9) 确会在实际缓存量达到 2 TiB 时回绕；nrpages 是驻留页数，稀疏文件的巨大逻辑大小并不足以触发。ramfs 确实调用 simple_getattr()，但我未能证实受支持的 32 位配置能容纳至少 2 TiB 的这些缓存页及其元数据，也未建立覆盖所有 32 位配置的严格排除上界。故保留触发可达性疑问，不把算术溢出条件直接视为已可达的缺陷。"
+  },
+  {
+    "k": 29,
+    "loc": "fs/nilfs2/inode.c:1145",
+    "verdict": "可能",
+    "why": "32 位 HIGHMEM 系统若有总长至少 4 GiB 的连续延迟分配缓存块，nilfs_find_uncommitted_extent() 会跨批次累计其块数，未把这段长度限制在 32 位字节数内。delalloc_blklen 左移后再赋给 u64，使 4 KiB 块下的 1048576 个块得到 size=0，从而漏报该 FIEMAP 区间或把区间长度报短；触发需要足够缓存内存及允许这种脏页量的配置。"
+  },
+  {
+    "k": 30,
+    "loc": "fs/nilfs2/recovery.c:543",
+    "verdict": "可能",
+    "why": "rb->blkoff 的真实类型是 unsigned long，来自日志中的文件逻辑块号；32 位上 4 KiB 块对应 4 GiB 文件偏移的块号 1048576 本身完全可表示。该块号左移 12 位先回绕为零，再赋给 loff_t，使崩溃恢复把原本属于高文件偏移的数据写到文件开头，造成错误位置恢复和数据覆盖。"
+  }
+]

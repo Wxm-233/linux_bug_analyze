@@ -1,0 +1,14 @@
+[
+ {
+  "candidate": "move_ptes / pte_none（mm/mremap.c:267；X1 树为 :263；在 7 棵树中重复出现）",
+  "new_rule": "R1",
+  "verdict": "不合理",
+  "reason": "公共代码在 pte_none(old_pte) 为真时 continue，跳过的是给新位置写页表项（pte_clear、set_ptes），属于页表类效果，不是“给用户的内存清零或初始化”。它依赖的是各架构 pte_none 判断准确：如果某架构把有效表项判成空，搬家时这个映射就丢了，用户在新地址读到的是新分配的零页而不是原数据。这是“内容保持”性质，R1（清零）和 R2（旧翻译失效）都不是。映射到 R1 只是因为效果类别里同时有 mem，而规则顺序先看 R1。Z9 执行过 move_ptes，但它只检查 mremap 新扩出来的部分为零（propsuite2.c 第 219～229 行），不检查原内容是否保留，所以“测过没事”不能说明这条依赖成立。"
+ },
+ {
+  "candidate": "migrate_pages / memset（mm/migrate.c:2114，只在 effdep5 的 32 个候选里）",
+  "new_rule": "R1",
+  "verdict": "不合理",
+  "reason": "memset 清零的是函数局部的统计结构 stats（memset(&stats, 0, sizeof(stats))），不是交给用户的内存；被跳过的效果是 list_cut_before、list_splice_init 这类链表操作。名字对上只是因为共享资源 folios 含有“folios”这个词。"
+ }
+]

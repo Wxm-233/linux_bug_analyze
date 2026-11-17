@@ -1,0 +1,31 @@
+diff --git a/arch/mips/kvm/vz.c b/arch/mips/kvm/vz.c
+index ccab4d76b126..21c98f76b6f0 100644
+--- a/arch/mips/kvm/vz.c
++++ b/arch/mips/kvm/vz.c
+@@ -12,6 +12,7 @@
+ #include <linux/errno.h>
+ #include <linux/err.h>
+ #include <linux/module.h>
++#include <linux/nospec.h>
+ #include <linux/preempt.h>
+ #include <linux/vmalloc.h>
+ #include <asm/cacheflush.h>
+@@ -2076,7 +2077,7 @@ static int kvm_vz_get_one_reg(struct kvm_vcpu *vcpu,
+ 		idx = reg->id - KVM_REG_MIPS_CP0_MAAR(0);
+ 		if (idx >= ARRAY_SIZE(vcpu->arch.maar))
+ 			return -EINVAL;
+-		*v = vcpu->arch.maar[idx];
++		*v = vcpu->arch.maar[array_index_nospec(idx, ARRAY_SIZE(vcpu->arch.maar))];
+ 		break;
+ 	case KVM_REG_MIPS_CP0_MAARI:
+ 		if (!cpu_guest_has_maar || cpu_guest_has_dyn_maar)
+@@ -2353,7 +2354,8 @@ static int kvm_vz_set_one_reg(struct kvm_vcpu *vcpu,
+ 		idx = reg->id - KVM_REG_MIPS_CP0_MAAR(0);
+ 		if (idx >= ARRAY_SIZE(vcpu->arch.maar))
+ 			return -EINVAL;
+-		vcpu->arch.maar[idx] = mips_process_maar(dmtc_op, v);
++		vcpu->arch.maar[array_index_nospec(idx, ARRAY_SIZE(vcpu->arch.maar))] =
++			mips_process_maar(dmtc_op, v);
+ 		break;
+ 	case KVM_REG_MIPS_CP0_MAARI:
+ 		if (!cpu_guest_has_maar || cpu_guest_has_dyn_maar)

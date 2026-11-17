@@ -1,0 +1,1231 @@
+
+##### B575
+=== e861aaea2f47 B 2026-05-12 +2/-2
+iommupt: Fixup build warning by using BIT_ULL() for RISCVPT_NC/IO
+
+Fix build warning on 32-bit configurations by using BIT_ULL() for
+RISCVPT_NC and RISCVPT_IO.
+
+Fixes: 6c21eb174c6c ("iommupt: Encode IOMMU_MMIO/IOMMU_CACHE via RISC-V Svpbmt bits")
+functions: 
+fixes: 6c21eb174c6c(common)
+diff --git a/drivers/iommu/generic_pt/fmt/riscv.h b/drivers/iommu/generic_pt/fmt/riscv.h
+index 2648bb57953e..ae9a76514416 100644
+--- a/drivers/iommu/generic_pt/fmt/riscv.h
++++ b/drivers/iommu/generic_pt/fmt/riscv.h
+@@ -65,6 +65,6 @@ enum {
+ 	RISCVPT_PPN64_64K = GENMASK_ULL(53, 14),
+ 	RISCVPT_PBMT = GENMASK_ULL(62, 61),
+-	RISCVPT_NC = BIT(61),
+-	RISCVPT_IO = BIT(62),
++	RISCVPT_NC = BIT_ULL(61),
++	RISCVPT_IO = BIT_ULL(62),
+ 	RISCVPT_N = BIT_ULL(63),
+ 
+
+##### B576
+=== e4d3386b74fb B 2026-05-17 +3/-0
+ALSA: pcm: Don't setup bogus iov_iter for silencing
+
+At transition to the iov_iter for PCM data transfer, we blindly
+applied the iov_iter setup also for silencing (i.e. data = NULL), and
+it leads to a calculation of bogus iov_iter.  Fortunately this didn't
+cause troubles on most of architectures but it goes wrong on RISC-V
+now, causing a NULL dereference.
+
+Handle the NULL data case to treat the silencing in interleaved_copy()
+for addressing the bug above.  noninterleaved_copy() has already the
+NULL data handling, so it doesn't need changes.
+
+Fixes: cf393babb37a ("ALSA: pcm: Add copy ops with iov_iter")
+functions: sound/core/pcm_lib.c:interleaved_copy
+fixes: cf393babb37a(common)
+diff --git a/sound/core/pcm_lib.c b/sound/core/pcm_lib.c
+index 09c421cd9319..fe597f7d522d 100644
+--- a/sound/core/pcm_lib.c
++++ b/sound/core/pcm_lib.c
+@@ -2139,4 +2139,7 @@ static int interleaved_copy(struct snd_pcm_substream *substream,
+ 	frames = frames_to_bytes(runtime, frames);
+ 
++	if (!data)
++		return fill_silence(substream, 0, hwoff, NULL, frames);
++
+ 	return do_transfer(substream, 0, hwoff, data + off, frames, transfer,
+ 			   in_kernel);
+
+##### B577
+=== c37e0a4b79a6 B 2026-06-07 +2/-1
+ring-buffer: Fix event length with forced 8-byte alignment
+
+When RB_FORCE_8BYTE_ALIGNMENT is true, rb_calculate_event_length()
+reserves the space of event->array[0] for placing the data length and
+rb_update_event() stores the data length in event->array[0]
+accordingly. As a result the whole event length will add extra 4 bytes
+for sizeof(event.array[0]) unconditionally.
+
+But ring_buffer_event_length() only subtracts the
+sizeof(event->array[0]) for events larger than RB_MAX_SMALL_DATA +
+sizeof(event->array[0]). As a result, small events on architectures
+with RB_FORCE_8BYTE_ALIGNMENT=true report a data length that is 4
+bytes larger than expected.
+
+To fix it, add the RB_FORCE_8BYTE_ALIGNMENT as a condition to subtract
+the size of that length field whenever RB_FORCE_8BYTE_ALIGNMENT is
+true.
+
+This issue is observed in a riscv64 kernel with
+CONFIG_HAVE_64BIT_ALIGNED_ACCESS set to y, when we run ftrace selftest
+trace_marker_raw.tc, we get the weird log: for cases where the id is
+1..100, the number of data field is 8*N, but once id exceeds 100, the
+number of data field becomes 8*N+4:
+ # 1 buf: 58 00 00 00 80 5e d1 63 (number of data field is 8*1)
+ ...
+ # a buf: 58 ...                  (number of data field is 8*2)
+ ...
+ # 64 buf: 58 ...                 (number of data field is 8*13)
+ # 65 buf: 58 ...                 (number of data field is 8*13+4)
+
+After applying this change, the number of data field keeps being 8*N+4
+consistently.
+
+Fixes: 2271048d1b3b ("ring-buffer: Do 8 byte alignment for 64 bit that can not handle 4 byte align")
+functions: kernel/trace/ring_buffer.c:ring_buffer_event_length
+fixes: 2271048d1b3b(common)
+diff --git a/kernel/trace/ring_buffer.c b/kernel/trace/ring_buffer.c
+index 56a328e94395..d9af2bbaf9c0 100644
+--- a/kernel/trace/ring_buffer.c
++++ b/kernel/trace/ring_buffer.c
+@@ -271,5 +271,6 @@ unsigned ring_buffer_event_length(struct ring_buffer_event *event)
+ 		return length;
+ 	length -= RB_EVNT_HDR_SIZE;
+-	if (length > RB_MAX_SMALL_DATA + sizeof(event->array[0]))
++	if (length > RB_MAX_SMALL_DATA + sizeof(event->array[0]) ||
++	    RB_FORCE_8BYTE_ALIGNMENT)
+                 length -= sizeof(event->array[0]);
+ 	return length;
+
+##### B578
+=== 57ad674d032b B 2026-06-09 +8/-3
+scripts/sorttable: Handle RISC-V patchable ftrace entries
+
+RISC-V uses -fpatchable-function-entry=8,4 when the compressed ISA is
+enabled and -fpatchable-function-entry=4,2 otherwise. In both cases, the
+patchable NOP area starts 8 bytes before the function symbol address.
+The __mcount_loc entries therefore point at the patchable NOP area
+associated with a function, while nm reports the function symbol at the
+entry address used for the function range check.
+
+After RISC-V selected HAVE_BUILDTIME_MCOUNT_SORT, sorttable started
+applying that range check at build time. Without allowing entries just
+before the reported function address, the mcount sorter treats valid
+RISC-V ftrace callsites as invalid weak-function entries and writes
+them back as zero. The resulting kernel boots with no ftrace entries,
+breaking dynamic ftrace and users such as livepatch.
+
+The failure is silent during the final link because zeroing weak-function
+entries is an expected sorttable operation. At boot, those zero entries
+are skipped by ftrace_process_locs(), so the only obvious symptom is that
+the vmlinux ftrace table has lost valid callsites and ftrace users cannot
+attach to them.
+
+CONFIG_FTRACE_SORT_STARTUP_TEST also reports the table as sorted in this
+state: it only checks that the __mcount_loc entries are in ascending
+order, which a fully zeroed table trivially satisfies. The original
+commit relied on this check and did not see the regression.
+
+On an affected RISC-V QEMU boot with both CONFIG_FTRACE_SORT_STARTUP_TEST
+and CONFIG_FTRACE_STARTUP_TEST enabled, the sort check still passes
+while ftrace reports zero usable entries and the early selftests fail:
+
+  [    0.000000] ftrace section at ffffffff8101da98 sorted properly
+  [    0.000000] ftrace: allocating 0 entries in 128 pages
+  [    0.054999] Testing tracer function: .. no entries found ..FAILED!
+  [    0.172407] tracer: function failed selftest, disabling
+  [    0.178186] Failed to init function_graph tracer, init returned -19
+
+Handle RISC-V like arm64 for the function-range check and allow
+patchable entries up to 8 bytes before the function address.
+
+With this fix, a RISC-V QEMU smoke boot with ftrace startup tests shows
+functions: scripts/sorttable.c:do_file
+fixes: 0ca1724b56af(common)
+diff --git a/scripts/sorttable.c b/scripts/sorttable.c
+index e8ed11c680c6..d8dc2a1b7c31 100644
+--- a/scripts/sorttable.c
++++ b/scripts/sorttable.c
+@@ -892,15 +892,20 @@ static int do_file(char const *const fname, void *addr)
+ 
+ 	switch (elf_map_machine(ehdr)) {
+-	case EM_AARCH64:
+ #ifdef MCOUNT_SORT_ENABLED
++	case EM_AARCH64:
++		/* arm64 also needs RELA-based weak-function fixups. */
+ 		sort_reloc = true;
+ 		rela_type = 0x403;
+-		/* arm64 uses patchable function entry placing before function */
++		/* fallthrough */
++	case EM_RISCV:
++		/* arm64 and RISC-V place patchable entries before the function. */
+ 		before_func = 8;
++#else
++	case EM_AARCH64:
++	case EM_RISCV:
+ #endif
+ 		/* fallthrough */
+ 	case EM_386:
+ 	case EM_LOONGARCH:
+-	case EM_RISCV:
+ 	case EM_S390:
+ 	case EM_X86_64:
+
+##### B579
+=== 8d28a56cae9b B 2026-06-09 +1/-1
+perf riscv: fix register name strings
+
+On risc-v, pref probe generates an invalid syntax for a named register in
+a kprobe.
+
+$ perf probe --debug verbose --add "n_tty_write tty"
+...
+Writing event: p:probe/n_tty_write _text+8922528 tty=%"%a0":x64
+Failed to write event: Invalid argument
+
+The problem is the combination of
+
+   #define REG_DWARFNUM_NAME(reg, idx) [idx] = "%" #reg
+
+and entries such as
+
+   REG_DWARFNUM_NAME("%a0", 10)
+
+where #reg will escape the quotes of the first macro parameter.
+
+Update the macro definition to produce the correct syntax for a named
+register in a kprobe, i.e. the unquoted register name with only one
+leading %.
+
+Fixes: a90c4519186dfc08 ("perf riscv: Remove dwarf-regs.c and add dwarf-regs-table.h")
+functions: 
+fixes: a90c4519186d(common)
+diff --git a/tools/perf/arch/riscv/include/dwarf-regs-table.h b/tools/perf/arch/riscv/include/dwarf-regs-table.h
+index 009a4e3c51ab..8c42806d34f1 100644
+--- a/tools/perf/arch/riscv/include/dwarf-regs-table.h
++++ b/tools/perf/arch/riscv/include/dwarf-regs-table.h
+@@ -4,5 +4,5 @@
+ 
+ #undef REG_DWARFNUM_NAME
+-#define REG_DWARFNUM_NAME(reg, idx)	[idx] = "%" #reg
++#define REG_DWARFNUM_NAME(reg, idx)	[idx] = reg
+ 
+ static const char * const riscv_regstr_tbl[] = {
+
+##### B580
+=== 956ca5d72c76 B 2026-06-16 +3/-3
+ACPI: processor_idle: Mark LPI enter functions as __cpuidle
+
+When function tracing or Kprobes is enabled, entering an ACPI Low
+Power Idle (LPI) state triggers the following RCU splat:
+
+  RCU not on for: acpi_idle_lpi_enter+0x4/0xd8
+  WARNING: CPU: 8 PID: 0 at include/linux/trace_recursion.h:162 function_trace_call+0x1e8/0x228
+
+The acpi_idle_lpi_enter() function is invoked within the cpuidle
+path after RCU has already been disabled for the current local CPU.
+Consequently, ftrace's function_trace_call() expects RCU to be
+actively watching before recording trace data, emitting a warning
+if it is not.
+
+Fix this by annotating acpi_idle_lpi_enter(), the generic __weak
+stub, and the RISC-V implementation of acpi_processor_ffh_lpi_enter()
+with __cpuidle. This moves these functions into the '.cpuidle.text'
+section, implicitly disabling ftrace instrumentation (notrace) along
+this sensitive path and preventing trace-induced RCU warnings during
+idle entry.
+
+Fixes: a36a7fecfe60 ("ACPI / processor_idle: Add support for Low Power Idle(LPI) states")
+functions: 
+fixes: a36a7fecfe60(common)
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 390ab5f1d313..4482cf28f56a 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1144,5 +1144,5 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ }
+ 
+-int __weak acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
++int __weak __cpuidle acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+ {
+ 	return -ENODEV;
+@@ -1157,5 +1157,5 @@ int __weak acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+  * Return: 0 for success or negative value for error
+  */
+-static int acpi_idle_lpi_enter(struct cpuidle_device *dev,
++static int __cpuidle acpi_idle_lpi_enter(struct cpuidle_device *dev,
+ 			       struct cpuidle_driver *drv, int index)
+ {
+diff --git a/drivers/acpi/riscv/cpuidle.c b/drivers/acpi/riscv/cpuidle.c
+index 624f9bbdb58c..c76dbabff702 100644
+--- a/drivers/acpi/riscv/cpuidle.c
++++ b/drivers/acpi/riscv/cpuidle.c
+@@ -67,5 +67,5 @@ int acpi_processor_ffh_lpi_probe(unsigned int cpu)
+ }
+ 
+-int acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
++int __cpuidle acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+ {
+ 	u32 state = lpi->address;
+
+##### B581
+=== 1358126fbed1 B 2026-06-23 +8/-7
+irqchip/irq-riscv-imsic-early: Fix fwnode leak on state setup failure
+
+imsic_early_acpi_init() allocates a firmware node before setting up the
+IMSIC state. If imsic_setup_state() fails, the function returns without
+freeing the allocated fwnode.
+
+Free the fwnode and clear the global pointer on this error path, matching
+the cleanup already done when imsic_early_probe() fails.
+
+[ tglx: Use a common cleanup path instead of copying code around ]
+
+Fixes: fbe826b1c106 ("irqchip/riscv-imsic: Add ACPI support")
+functions: drivers/irqchip/irq-riscv-imsic-early.c:imsic_early_acpi_init
+fixes: fbe826b1c106(common)
+diff --git a/drivers/irqchip/irq-riscv-imsic-early.c b/drivers/irqchip/irq-riscv-imsic-early.c
+index a7a1852b548c..12efd241ce88 100644
+--- a/drivers/irqchip/irq-riscv-imsic-early.c
++++ b/drivers/irqchip/irq-riscv-imsic-early.c
+@@ -273,14 +273,11 @@ static int __init imsic_early_acpi_init(union acpi_subtable_headers *header,
+ 	if (rc) {
+ 		pr_err("%pfwP: failed to setup state (error %d)\n", imsic_acpi_fwnode, rc);
+-		return rc;
++		goto cleanup;
+ 	}
+ 
+ 	/* Do early setup of IMSIC state and IPIs */
+ 	rc = imsic_early_probe(imsic_acpi_fwnode);
+-	if (rc) {
+-		irq_domain_free_fwnode(imsic_acpi_fwnode);
+-		imsic_acpi_fwnode = NULL;
+-		return rc;
+-	}
++	if (rc)
++		goto cleanup;
+ 
+ 	rc = imsic_platform_acpi_probe(imsic_acpi_fwnode);
+@@ -301,6 +298,10 @@ static int __init imsic_early_acpi_init(union acpi_subtable_headers *header,
+ 	 */
+ 	return 0;
+-}
+ 
++cleanup:
++	irq_domain_free_fwnode(imsic_acpi_fwnode);
++	imsic_acpi_fwnode = NULL;
++	return rc;
++}
+ IRQCHIP_ACPI_DECLARE(riscv_imsic, ACPI_MADT_TYPE_IMSIC, NULL,
+ 		     1, imsic_early_acpi_init);
+
+##### B582
+=== b8f62414fa05 B 2026-06-25 +4/-3
+ACPI: RIMT: Only defer the IOMMU configuration in init stage
+
+The IOMMU configuration will be deferred if the IOMMU driver
+isn't probed by the time. Make this deferral only in the
+initialization stage with driver_deferred_probe_check_state().
+Otherwise the devices depends on IOMMU will be deferred forever
+in case the IOMMU device probe failed or it doesn't appear in
+the ACPI namespace.
+
+Fixes: 8f7729552582 ("ACPI: RISC-V: Add support for RIMT")
+[pjw@kernel.org: added Fixes line]
+functions: drivers/acpi/riscv/rimt.c:rimt_iommu_xlate
+fixes: 8f7729552582(riscv)
+diff --git a/drivers/acpi/riscv/rimt.c b/drivers/acpi/riscv/rimt.c
+index 906282b0e63c..e4538fa6c2c8 100644
+--- a/drivers/acpi/riscv/rimt.c
++++ b/drivers/acpi/riscv/rimt.c
+@@ -10,4 +10,5 @@
+ #include <linux/acpi.h>
+ #include <linux/acpi_rimt.h>
++#include <linux/device/driver.h>
+ #include <linux/iommu.h>
+ #include <linux/list.h>
+@@ -258,9 +259,9 @@ static int rimt_iommu_xlate(struct device *dev, struct acpi_rimt_node *node, u32
+ 
+ 	/*
+-	 * The IOMMU drivers may not be probed yet.
+-	 * Defer the IOMMU configuration
++	 * The IOMMU drivers may not be probed yet. Defer the IOMMU
++	 * configuration if it's still in initialization stage.
+ 	 */
+ 	if (!rimt_fwnode)
+-		return -EPROBE_DEFER;
++		return driver_deferred_probe_check_state(dev);
+ 
+ 	/*
+
+##### B583
+=== d21808328225 B 2026-06-25 +1/-1
+clocksource/drivers/timer-sun4i: Advertise a real minimum delta
+
+sun4i_clkevt_next_event() compensates for the timer stop/start
+synchronization delay by programming evt - TIMER_SYNC_TICKS into the
+hardware interval register. The clockevent device currently advertises
+TIMER_SYNC_TICKS as min_delta_ticks, so the clockevents core is allowed
+to call set_next_event() with evt == TIMER_SYNC_TICKS.
+
+That programs a zero-tick interval. With oneshot/highres/nohz timer
+operation this can leave the next event stuck, which was observed as a
+boot hang on Allwinner D1 after the clockevents core started reusing
+forced minimum-delta events.
+
+Advertise one extra tick instead, so the smallest event accepted by the
+core still programs at least one hardware tick after the synchronization
+compensation.
+
+Fixes: 12e1480bcb49 ("clocksource: sun4i: Report the minimum tick that we can program")
+Assisted-by: Codex:gpt-5.5
+functions: drivers/clocksource/timer-sun4i.c:sun4i_timer_init
+fixes: 12e1480bcb49(common)
+diff --git a/drivers/clocksource/timer-sun4i.c b/drivers/clocksource/timer-sun4i.c
+index 7bdcc60ad43c..c2d04ab7cf2d 100644
+--- a/drivers/clocksource/timer-sun4i.c
++++ b/drivers/clocksource/timer-sun4i.c
+@@ -209,5 +209,5 @@ static int __init sun4i_timer_init(struct device_node *node)
+ 
+ 	clockevents_config_and_register(&to.clkevt, timer_of_rate(&to),
+-					TIMER_SYNC_TICKS, 0xffffffff);
++					TIMER_SYNC_TICKS + 1, 0xffffffff);
+ 
+ 	/* Enable timer0 interrupt */
+
+##### B584
+=== 5a799714e8ca B 2026-06-30 +33/-15
+net/mlx5e: Fix publication race for priv->channel_stats[]
+
+mlx5e_channel_stats_alloc() publishes a new entry to
+priv->channel_stats[] and then increments priv->stats_nch as a
+publication token, but neither store carries any memory barrier:
+
+	priv->channel_stats[ix] = kvzalloc_node(...);
+	if (!priv->channel_stats[ix])
+		return -ENOMEM;
+	priv->stats_nch++;
+
+Concurrent readers compute the loop bound from priv->stats_nch and
+then dereference priv->channel_stats[i] using plain accesses, e.g.
+
+	for (i = 0; i < priv->stats_nch; i++) {
+		struct mlx5e_channel_stats *cs = priv->channel_stats[i];
+		... cs->rq.packets ...
+	}
+
+On weakly-ordered architectures (ARM, PowerPC, RISC-V) the writes to
+channel_stats[ix] and stats_nch may become visible to other CPUs out
+of program order. A reader can observe stats_nch == N while still
+seeing channel_stats[N-1] == NULL, leading to a NULL pointer
+dereference in the channel_stats loop.
+
+This has been observed in production on BlueField-3 DPUs (arm64),
+where ovs-vswitchd queries netdev statistics over netlink during NIC
+bringup, racing mlx5e_open_channel() -> mlx5e_channel_stats_alloc()
+on another CPU:
+
+  Unable to handle kernel NULL pointer dereference at virtual address 0x840
+  Hardware name: BlueField-3 DPU
+  pc : mlx5e_fold_sw_stats64+0x30/0x180 [mlx5_core]
+  Call trace:
+   mlx5e_fold_sw_stats64+0x30/0x180 [mlx5_core]
+   dev_get_stats+0x50/0xc0
+   ovs_vport_get_stats+0x38/0xac [openvswitch]
+   ovs_vport_cmd_fill_info+0x194/0x290 [openvswitch]
+   ovs_vport_cmd_get+0xbc/0x10c [openvswitch]
+   genl_family_rcv_msg_doit+0xd0/0x160
+   genl_rcv_msg+0xec/0x1f0
+functions: drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c:mlx5e_hv_vhca_fill_stats, drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c:mlx5e_hv_vhca_stats_buf_size, drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c:mlx5e_hv_vhca_stats_control, drivers/net/ethernet/mellanox/mlx5/core/en_main.c:mlx5e_channel_stats_alloc, drivers/net/ethernet/mellanox/mlx5/core/en_main.c:mlx5e_fold_sw_stats64, drivers/net/ethernet/mellanox/mlx5/core/en_main.c:mlx5e_get_queue_stats_rx, drivers/net/ethernet/mellanox/mlx5/core/en_main.c:mlx5e_get_queue_stats_tx, drivers/net/ethernet/mellanox/mlx5/core/en_main.c:mlx5e_get_base_stats, drivers/net/ethernet/mellanox/mlx5/core/en_stats.c:MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS, drivers/net/ethernet/mellanox/mlx5/core/en_stats.c:MLX5E_DECLARE_STATS_GRP_OP_NUM_STATS, drivers/net/ethernet/mellanox/mlx5/core/en_stats.c:MLX5E_DECLARE_STATS_GRP_OP_FILL_STRS, drivers/net/ethernet/mellanox/mlx5/core/en_stats.c:MLX5E_DECLARE_STATS_GRP_OP_FILL_STATS
+fixes: fa691d0c9c08(common)
+ drivers/net/ethernet/mellanox/mlx5/core/en.h               | 12 ++++++++++++
+ drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c | 10 ++++++----
+ drivers/net/ethernet/mellanox/mlx5/core/en_main.c          | 14 ++++++++------
+ drivers/net/ethernet/mellanox/mlx5/core/en_stats.c         |  9 +++++----
+ drivers/net/ethernet/mellanox/mlx5/core/ipoib/ipoib.c      |  3 ++-
+ 5 files changed, 33 insertions(+), 15 deletions(-)
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en.h b/drivers/net/ethernet/mellanox/mlx5/core/en.h
+index 2270e2e550dd..d507289096c2 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en.h
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en.h
+@@ -988,4 +988,16 @@ struct mlx5e_priv {
+ };
+ 
++static inline u16 mlx5e_stats_nch_read(const struct mlx5e_priv *priv)
++{
++	/* Pairs with smp_store_release in mlx5e_stats_nch_write(). */
++	return smp_load_acquire(&priv->stats_nch);
++}
++
++static inline void mlx5e_stats_nch_write(struct mlx5e_priv *priv, u16 n)
++{
++	/* Pairs with smp_load_acquire in mlx5e_stats_nch_read(). */
++	smp_store_release(&priv->stats_nch, n);
++}
++
+ struct mlx5e_dev {
+ 	struct net_device *netdev;
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c b/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
+index cdaf77650164..631f802105d5 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
+@@ -34,7 +34,8 @@ static void mlx5e_hv_vhca_fill_stats(struct mlx5e_priv *priv, void *data,
+ 				     int buf_len)
+ {
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int ch, i = 0;
+ 
+-	for (ch = 0; ch < priv->stats_nch; ch++) {
++	for (ch = 0; ch < nch; ch++) {
+ 		void *buf = data + i;
+ 
+@@ -51,6 +52,7 @@ static void mlx5e_hv_vhca_fill_stats(struct mlx5e_priv *priv, void *data,
+ static int mlx5e_hv_vhca_stats_buf_size(struct mlx5e_priv *priv)
+ {
+-	return (sizeof(struct mlx5e_hv_vhca_per_ring_stats) *
+-		priv->stats_nch);
++	u16 nch = mlx5e_stats_nch_read(priv);
++
++	return sizeof(struct mlx5e_hv_vhca_per_ring_stats) * nch;
+ }
+ 
+@@ -107,5 +109,5 @@ static void mlx5e_hv_vhca_stats_control(struct mlx5_hv_vhca_agent *agent,
+ 
+ 	block->version = MLX5_HV_VHCA_STATS_VERSION;
+-	block->rings   = priv->stats_nch;
++	block->rings   = mlx5e_stats_nch_read(priv);
+ 
+ 	if (!block->command) {
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+index 775f0c6e55c9..aa8610cedaa8 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+@@ -2774,5 +2774,5 @@ static int mlx5e_channel_stats_alloc(struct mlx5e_priv *priv, int ix, int cpu)
+ 	if (!priv->channel_stats[ix])
+ 		return -ENOMEM;
+-	priv->stats_nch++;
+... (102 more diff lines)
+
+##### B585
+=== eb525edd4890 B 2026-06-30 +1/-1
+clk: spacemit: k3: set hdma clock as critical
+
+HDMA clock is responsible for the internal TCM access path of X100 RISC-V
+core, so set the clock flag as critical to prevent it from being shut off,
+otherwise the Linux system will hang, for example in the case of a vector
+instruction access generates a page fault.
+
+Fixes: e371a77255b8 ("clk: spacemit: k3: add the clock tree")
+functions: 
+fixes: e371a77255b8(common)
+diff --git a/drivers/clk/spacemit/ccu-k3.c b/drivers/clk/spacemit/ccu-k3.c
+index 03de04144963..764426359540 100644
+--- a/drivers/clk/spacemit/ccu-k3.c
++++ b/drivers/clk/spacemit/ccu-k3.c
+@@ -1027,5 +1027,5 @@ CCU_MUX_DIV_GATE_DEFINE(isim_vclk_out3, isim_vclk_parents, APMU_SNR_ISIM_VCLK_CT
+ 
+ /* DCIU clocks start */
+-CCU_GATE_DEFINE(hdma_clk, CCU_PARENT_HW(axi_clk), DCIU_DMASYS_CLK_EN, BIT(0), 0);
++CCU_GATE_DEFINE(hdma_clk, CCU_PARENT_HW(axi_clk), DCIU_DMASYS_CLK_EN, BIT(0), CLK_IS_CRITICAL);
+ CCU_GATE_DEFINE(dma350_clk, CCU_PARENT_HW(axi_clk), DCIU_DMASYS_SDMA_CLK_EN, BIT(0), 0);
+ CCU_GATE_DEFINE(c2_tcm_pipe_clk, CCU_PARENT_HW(axi_clk), DCIU_C2_TCM_PIPE_CLK, BIT(0), 0);
+
+##### B586
+=== 5557c238eb0f B 2026-07-03 +1/-1
+gpu: nova-core: correct RISC-V HALTED field
+
+This uses the incorrect value, so update it.
+
+Fixes: bb58d1aee608 ("gpu: nova-core: falcon: Add support to check if RISC-V is active")
+functions: 
+fixes: bb58d1aee608(common)
+diff --git a/drivers/gpu/nova-core/regs.rs b/drivers/gpu/nova-core/regs.rs
+index 397124f245ee..49591c3dcfa7 100644
+--- a/drivers/gpu/nova-core/regs.rs
++++ b/drivers/gpu/nova-core/regs.rs
+@@ -557,5 +557,5 @@ pub(crate) fn mem_scrubbing_done(self) -> bool {
+     pub(crate) NV_PRISCV_RISCV_CPUCTL(u32) @ PFalcon2Base + 0x00000388 {
+         7:7     active_stat => bool;
+-        0:0     halted => bool;
++        4:4     halted => bool;
+     }
+ 
+
+##### B587
+=== 71d4e7233f23 B 2026-07-03 +36/-2
+gpu: nova-core: wait for RISC-V HALTED on FSP unload
+
+Currently the code waits for "not active" but this is not the same as
+halted as there are more than two states. Match openrm here and wait for
+halted instead.
+
+Fixes: c7fea1f70944 ("gpu: nova-core: add non-sec2 unload path")
+[acourbot: s/imply/guarantee.]
+functions: 
+fixes: c7fea1f70944(common)
+ drivers/gpu/nova-core/falcon.rs           | 11 +++++++++++
+ drivers/gpu/nova-core/falcon/hal.rs       |  5 +++++
+ drivers/gpu/nova-core/falcon/hal/ga102.rs |  7 +++++++
+ drivers/gpu/nova-core/falcon/hal/tu102.rs |  4 ++++
+ drivers/gpu/nova-core/gsp/hal/gh100.rs    | 11 +++++++++--
+ 5 files changed, 36 insertions(+), 2 deletions(-)
+diff --git a/drivers/gpu/nova-core/falcon.rs b/drivers/gpu/nova-core/falcon.rs
+index 78948cc8bff3..a91cbdd5d636 100644
+--- a/drivers/gpu/nova-core/falcon.rs
++++ b/drivers/gpu/nova-core/falcon.rs
+@@ -750,4 +750,6 @@ pub(crate) fn signature_reg_fuse_version(
+     /// Check if the RISC-V core is active.
+     ///
++    /// Note that this does not guarantee that the RISC-V core is halted if it returns `false`.
++    ///
+     /// Returns `true` if the RISC-V core is active, `false` otherwise.
+     pub(crate) fn is_riscv_active(&self) -> bool {
+@@ -755,4 +757,13 @@ pub(crate) fn is_riscv_active(&self) -> bool {
+     }
+ 
++    /// Checks whether the RISC-V core is halted.
++    ///
++    /// Note that this does not guarantee that the RISC-V core is active if it returns `false`.
++    ///
++    /// Returns [`ENOTSUPP`] if the status is not available.
++    pub(crate) fn is_riscv_halted(&self) -> Result<bool> {
++        self.hal.is_riscv_halted(self)
++    }
++
+     /// Load a firmware image into Falcon memory, using the preferred method for the current
+     /// chipset.
+diff --git a/drivers/gpu/nova-core/falcon/hal.rs b/drivers/gpu/nova-core/falcon/hal.rs
+index ee4a017f3a4c..7e532889a1f4 100644
+--- a/drivers/gpu/nova-core/falcon/hal.rs
++++ b/drivers/gpu/nova-core/falcon/hal.rs
+@@ -54,4 +54,9 @@ fn signature_reg_fuse_version(
+     fn is_riscv_active(&self, falcon: &Falcon<'_, E>) -> bool;
+ 
++    /// Checks whether the RISC-V core is halted.
++    ///
++    /// Returns [`ENOTSUPP`] if the chipset does not expose RISC-V halt status.
++    fn is_riscv_halted(&self, falcon: &Falcon<'_, E>) -> Result<bool>;
++
+     /// Wait for memory scrubbing to complete.
+     fn reset_wait_mem_scrubbing(&self, falcon: &Falcon<'_, E>) -> Result;
+diff --git a/drivers/gpu/nova-core/falcon/hal/ga102.rs b/drivers/gpu/nova-core/falcon/hal/ga102.rs
+index fe821ded5fa1..7600ee07ca2e 100644
+--- a/drivers/gpu/nova-core/falcon/hal/ga102.rs
++++ b/drivers/gpu/nova-core/falcon/hal/ga102.rs
+@@ -140,4 +140,11 @@ fn is_riscv_active(&self, falcon: &Falcon<'_, E>) -> bool {
+     }
+ 
++    fn is_riscv_halted(&self, falcon: &Falcon<'_, E>) -> Result<bool> {
++        Ok(falcon
++            .bar
++            .read(regs::NV_PRISCV_RISCV_CPUCTL::of::<E>())
++            .halted())
++    }
++
+     fn reset_wait_mem_scrubbing(&self, falcon: &Falcon<'_, E>) -> Result {
+         // TIMEOUT: memory scrubbing should complete in less than 20ms.
+diff --git a/drivers/gpu/nova-core/falcon/hal/tu102.rs b/drivers/gpu/nova-core/falcon/hal/tu102.rs
+index 34bf9f3f44c7..5291598fedf7 100644
+--- a/drivers/gpu/nova-core/falcon/hal/tu102.rs
++++ b/drivers/gpu/nova-core/falcon/hal/tu102.rs
+@@ -56,4 +56,8 @@ fn is_riscv_active(&self, falcon: &Falcon<'_, E>) -> bool {
+... (28 more diff lines)
+
+##### B588
+=== e01c7bd5b1ee B 2026-07-06 +7/-0
+perf build: Fix compiler errors with old capstone
+
+It seems RISCV was added in capstone version 5 (released Jul 2023).
+Unfortunately they are enum constants so cannot check with #ifdef but
+anyway we can define the symbols.  Let's do it using the version
+number to avoid build errors.  It'll fail at runtime though.
+
+  util/capstone.c: In function 'e_machine_to_capstone':
+  util/capstone.c:186:25: error: 'CS_ARCH_RISCV' undeclared (first use in this function);
+                                  did you mean 'CS_ARCH_SYSZ'?
+    186 |                 *arch = CS_ARCH_RISCV;
+        |                         ^~~~~~~~~~~~~
+        |                         CS_ARCH_SYSZ
+  util/capstone.c:186:25: note: each undeclared identifier is reported only once for each function it appears in
+
+  util/capstone.c:187:34: error: 'CS_MODE_RISCV64' undeclared (first use in this function);
+                                  did you mean 'CS_MODE_MIPS64'?
+    187 |                 *mode |= (is64 ? CS_MODE_RISCV64 : CS_MODE_RISCV32) | CS_MODE_RISCVC;
+        |                                  ^~~~~~~~~~~~~~~
+        |                                  CS_MODE_MIPS64
+
+Also note that capstone renamed CS_MODE_RISCVC to CS_MODE_RISCV_C which
+would cause a different build failure on latest versions.  It's reported
+in https://github.com/capstone-engine/capstone/issues/2977 so I think
+they will add compatibility layer to prevent the error.
+
+Fixes: 12c4737f55f2 ("perf capstone: Determine architecture from e_machine")
+functions: 
+fixes: 12c4737f55f2(common)
+diff --git a/tools/perf/util/capstone.c b/tools/perf/util/capstone.c
+index 9bba78ee0c5a..00e0141cae8d 100644
+--- a/tools/perf/util/capstone.c
++++ b/tools/perf/util/capstone.c
+@@ -25,4 +25,11 @@
+ #include "thread.h"
+ 
++#if CS_VERSION_MAJOR < 5
++#define CS_ARCH_RISCV    15
++#define CS_MODE_RISCV32  1
++#define CS_MODE_RISCV64  2
++#define CS_MODE_RISCVC   4
++#endif
++
+ #ifdef LIBCAPSTONE_DLOPEN
+ static void *perf_cs_dll_handle(void)
+
+##### B589
+=== a2ac823d8a22 B 2026-07-07 +5/-1
+selftests/rseq: Fix a building error for riscv arch
+
+RISC-V rseq selftests include asm/fence.h from tools/arch/riscv,
+but the rseq Makefile only adds tools/include in the CFLAGS, this
+results in the building failure both for native and cross build:
+
+    In file included from rseq.h:131,
+                     from rseq.c:37:
+    rseq-riscv.h:11:10: fatal error: asm/fence.h: No such file or directory
+
+To fix it, add the matching tools/arch/$(ARCH)/include path in the
+CFLAGS and derive ARCH from SUBARCH for standalone native builds where
+ARCH is not set.
+
+Fixes: c92786e179e0 ("KVM: riscv: selftests: Use the existing RISCV_FENCE macro in `rseq-riscv.h`")
+functions: 
+fixes: c92786e179e0(common)
+diff --git a/tools/testing/selftests/rseq/Makefile b/tools/testing/selftests/rseq/Makefile
+index 50d69e22ee7a..aba6317f6cb8 100644
+--- a/tools/testing/selftests/rseq/Makefile
++++ b/tools/testing/selftests/rseq/Makefile
+@@ -6,7 +6,11 @@ endif
+ 
+ top_srcdir = ../../../..
++include $(top_srcdir)/scripts/subarch.include
++ARCH ?= $(SUBARCH)
++LINUX_TOOL_ARCH_INCLUDE = $(top_srcdir)/tools/arch/$(ARCH)/include
+ 
+ CFLAGS += -O2 -Wall -g -I./ $(KHDR_INCLUDES) -L$(OUTPUT) -Wl,-rpath=./ \
+-	  $(CLANG_FLAGS) -I$(top_srcdir)/tools/include
++	  $(CLANG_FLAGS) -I$(top_srcdir)/tools/include \
++	  -I$(LINUX_TOOL_ARCH_INCLUDE)
+ LDLIBS += -lpthread -ldl
+ 
+
+##### B590
+=== f1c27922576e B 2026-07-08 +3/-1
+bpf: Reject programs with inlined helpers if JIT is not available
+
+When an architecture (such as LoongArch, ARM64, and RISC-V) implements
+bpf_jit_inlines_helper_call(), the verifier skips rewriting the helper
+call offset (insn->imm) in bpf_do_misc_fixups(). This is because the
+helper is expected to be inlined by the JIT compiler later. Therefore,
+insn->imm remains as the raw helper enum ID.
+
+However, if JIT is disabled at runtime (net.core.bpf_jit_enable=0) or
+if JIT compilation fails dynamically (e.g., due to OOM), the program
+falls back to the BPF interpreter.
+
+When the interpreter executes (__bpf_call_base + insn->imm) with the
+unpatched raw ID, it jumps into an invalid address space, triggering
+an instruction alignment fault or a kernel panic.
+
+Although these helpers have valid C implementations in the kernel, the
+omission of offset rewriting makes runtime interpreter fallback fatal.
+
+Fix this by setting 'prog->jit_required = 1' when helper call rewriting
+is skipped for JIT inlining. This ensures that such programs are safely
+rejected if JIT is not available, preventing the runtime kernel panic.
+
+Fixes: 2ddec2c80b44 ("riscv, bpf: inline bpf_get_smp_processor_id()")
+functions: kernel/bpf/fixups.c:bpf_do_misc_fixups
+fixes: 2ddec2c80b44(riscv)
+diff --git a/kernel/bpf/fixups.c b/kernel/bpf/fixups.c
+index 02246df2f6c3..d3be972714b2 100644
+--- a/kernel/bpf/fixups.c
++++ b/kernel/bpf/fixups.c
+@@ -1841,6 +1841,8 @@ int bpf_do_misc_fixups(struct bpf_verifier_env *env)
+ 
+ 		/* Skip inlining the helper call if the JIT does it. */
+-		if (bpf_jit_inlines_helper_call(insn->imm))
++		if (bpf_jit_inlines_helper_call(insn->imm)) {
++			prog->jit_required = 1;
+ 			goto next_insn;
++		}
+ 
+ 		if (insn->imm == BPF_FUNC_get_route_realm)
+
+##### B591
+=== 20435bda13f1 B 2026-07-09 +3/-1
+ACPI: RISC-V: Check acpi_get_handle() status in riscv_acpi_add_prt_dep()
+
+In riscv_acpi_add_prt_dep(), the acpi_get_handle() call can fail which
+would leave link_handle uninitialized.
+
+Fix it by checking the acpi_get_handle() return status and skip the entry
+if it fails.
+
+Fixes: 1b173cc4bfcd ("ACPI: RISC-V: Implement function to add implicit dependencies")
+functions: drivers/acpi/riscv/irq.c:riscv_acpi_add_prt_dep
+fixes: 1b173cc4bfcd(common)
+diff --git a/drivers/acpi/riscv/irq.c b/drivers/acpi/riscv/irq.c
+index cd83c3035cf6..75170151c614 100644
+--- a/drivers/acpi/riscv/irq.c
++++ b/drivers/acpi/riscv/irq.c
+@@ -340,5 +340,7 @@ static u32 riscv_acpi_add_prt_dep(acpi_handle handle)
+ 	while (entry && (entry->length > 0)) {
+ 		if (entry->source[0]) {
+-			acpi_get_handle(handle, entry->source, &link_handle);
++			status = acpi_get_handle(handle, entry->source, &link_handle);
++			if (ACPI_FAILURE(status))
++				continue;
+ 			dep_devices.count = 1;
+ 			dep_devices.handles = kzalloc_objs(*dep_devices.handles,
+
+##### B592
+=== 3a56321d0ace B 2026-07-09 +15/-4
+ACPI: RISC-V: Fix riscv_acpi_add_prt_dep() loop handling
+
+The loop in riscv_acpi_add_prt_dep() includes error conditions that are
+handled in a dubious - if not outright wrong - way, by continuining the
+loop (which skips and misses the entry pointer update to point to the next
+entry).
+
+Rewrite the loop as a for loop (that handles the continuation correctly)
+and wrap the condition and update statements using helper functions to make
+it cleaner.
+
+Fixes: 1b173cc4bfcd ("ACPI: RISC-V: Implement function to add implicit dependencies")
+functions: drivers/acpi/riscv/irq.c:riscv_acpi_add_prt_dep
+fixes: 1b173cc4bfcd(common)
+diff --git a/drivers/acpi/riscv/irq.c b/drivers/acpi/riscv/irq.c
+index 75170151c614..0cdec5dd575e 100644
+--- a/drivers/acpi/riscv/irq.c
++++ b/drivers/acpi/riscv/irq.c
+@@ -320,4 +320,18 @@ static int riscv_acpi_irq_get_dep(acpi_handle handle, unsigned int index, acpi_h
+ }
+ 
++static bool acpi_prt_entry_valid(void *prt_entry)
++{
++	struct acpi_pci_routing_table *entry = prt_entry;
++
++	return entry && entry->length > 0;
++}
++
++static void *acpi_prt_next_entry(void *prt_entry)
++{
++	struct acpi_pci_routing_table *entry = prt_entry;
++
++	return prt_entry + entry->length;
++}
++
+ static u32 riscv_acpi_add_prt_dep(acpi_handle handle)
+ {
+@@ -338,5 +352,5 @@ static u32 riscv_acpi_add_prt_dep(acpi_handle handle)
+ 
+ 	entry = buffer.pointer;
+-	while (entry && (entry->length > 0)) {
++	for (; acpi_prt_entry_valid(entry); entry = acpi_prt_next_entry(entry)) {
+ 		if (entry->source[0]) {
+ 			status = acpi_get_handle(handle, entry->source, &link_handle);
+@@ -366,7 +380,4 @@ static u32 riscv_acpi_add_prt_dep(acpi_handle handle)
+ 			count += acpi_scan_add_dep(handle, &dep_devices);
+ 		}
+-
+-		entry = (struct acpi_pci_routing_table *)
+-			((unsigned long)entry + entry->length);
+ 	}
+ 
+
+##### B593
+=== 64ae310bffa4 B 2026-07-09 +6/-4
+ACPI: RISC-V: Fix riscv_acpi_irq_get_dep() loop termination
+
+In riscv_acpi_add_irq_dep() the main loop condition would currently stop
+the loop if an interrupt descriptor contains an interrupt for which the
+respective GSI handle is NULL, which is not correct because subsequent
+interrupts in the interrupt descriptor might still have a GSI dependency
+that must not be skipped.
+
+Rework riscv_acpi_add_irq_dep() and the riscv_acpi_irq_get_dep() call chain
+to fix it - by not forcing the loop to stop in order to guarantee
+dependency detection for all the interrupt entries in the CRS descriptor.
+
+Fixes: 1b173cc4bfcd ("ACPI: RISC-V: Implement function to add implicit dependencies")
+functions: drivers/acpi/riscv/irq.c:riscv_acpi_irq_get_parent, drivers/acpi/riscv/irq.c:riscv_acpi_irq_get_dep, drivers/acpi/riscv/irq.c:riscv_acpi_add_irq_dep
+fixes: 1b173cc4bfcd(common)
+diff --git a/drivers/acpi/riscv/irq.c b/drivers/acpi/riscv/irq.c
+index 9b88d0993e88..cd83c3035cf6 100644
+--- a/drivers/acpi/riscv/irq.c
++++ b/drivers/acpi/riscv/irq.c
+@@ -300,4 +300,5 @@ static acpi_status riscv_acpi_irq_get_parent(struct acpi_resource *ares, void *c
+ 
+ 		ctx->handle = riscv_acpi_get_gsi_handle(eirq->interrupts[ctx->index]);
++		ctx->rc = 0;
+ 		return AE_CTRL_TERMINATE;
+ 	}
+@@ -315,8 +316,6 @@ static int riscv_acpi_irq_get_dep(acpi_handle handle, unsigned int index, acpi_h
+ 	acpi_walk_resources(handle, METHOD_NAME__CRS, riscv_acpi_irq_get_parent, &ctx);
+ 	*gsi_handle = ctx.handle;
+-	if (*gsi_handle)
+-		return 1;
+ 
+-	return 0;
++	return ctx.rc;
+ }
+ 
+@@ -382,6 +381,9 @@ static u32 riscv_acpi_add_irq_dep(acpi_handle handle)
+ 
+ 	for (i = 0;
+-	     riscv_acpi_irq_get_dep(handle, i, &gsi_handle);
++	     !riscv_acpi_irq_get_dep(handle, i, &gsi_handle);
+ 	     i++) {
++		if (!gsi_handle)
++			continue;
++
+ 		dep_devices.count = 1;
+ 		dep_devices.handles = kzalloc_objs(*dep_devices.handles, 1);
+
+##### B594
+=== 17e2030f3760 B 2026-07-14 +2/-0
+drm/imagination: acquire vm_ctx->lock before mapping memory to GPU VM
+
+The drm gpuvm code doesn't protect find operation against map operation,
+and the driver needs to ensure a map operation shouldn't happen when a
+find operation is in progress.
+
+In some cases a find operation will be in progress when doing map/unmap
+operations, and the find operation will do a NULL pointer dereference.
+
+An example of the stack trace of such NULL dereference is shown below:
+
+```
+Unable to handle kernel access to user memory without uaccess routines at
+virtual address 0000000000000010
+
+[<ffffffff01e989d4>] drm_gpuva_find+0x28/0x6c [drm_gpuvm]
+[<ffffffff01ed3a40>] pvr_vm_unmap+0x34/0x68 [powervr]
+[<ffffffff01ec69da>] pvr_ioctl_vm_unmap+0x2e/0x50 [powervr]
+[<ffffffff8080ce0a>] drm_ioctl_kernel+0x8e/0xdc
+[<ffffffff8080d016>] drm_ioctl+0x1be/0x3e0
+[<ffffffff802bec3e>] __riscv_sys_ioctl+0xba/0xc4
+[<ffffffff80d858b2>] do_trap_ecall_u+0x23e/0x3f4
+[<ffffffff80d92288>] handle_exception+0x168/0x174
+```
+
+As all occurences of drm_gpuva_find*() are already guarded by
+vm_ctx->lock, make pvr_vm_map() to acquire this lock to prevent
+disturbing any find operation. This fixes the NULL deference problem in
+drm_gpuva_find*().
+
+Fixes: ff5f643de0bf ("drm/imagination: Add GEM and VM related code")
+Fixes: 4bc736f890ce ("drm/imagination: vm: make use of GPUVM's drm_exec helper")
+functions: drivers/gpu/drm/imagination/pvr_vm.c:pvr_vm_map
+fixes: ff5f643de0bf(common), 4bc736f890ce(common)
+diff --git a/drivers/gpu/drm/imagination/pvr_vm.c b/drivers/gpu/drm/imagination/pvr_vm.c
+index 396d349fb6ce..ceb78694cd98 100644
+--- a/drivers/gpu/drm/imagination/pvr_vm.c
++++ b/drivers/gpu/drm/imagination/pvr_vm.c
+@@ -748,4 +748,5 @@ pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+ 	pvr_gem_object_get(pvr_obj);
+ 
++	mutex_lock(&vm_ctx->lock);
+ 	err = drm_gpuvm_exec_lock(&vm_exec);
+ 	if (err)
+@@ -757,4 +758,5 @@ pvr_vm_map(struct pvr_vm_context *vm_ctx, struct pvr_gem_object *pvr_obj,
+ 
+ err_cleanup:
++	mutex_unlock(&vm_ctx->lock);
+ 	pvr_vm_bind_op_fini(&bind_op);
+ 
+
+##### B595
+=== 16cc4f5c1c4b B 2026-07-21 +1/-1
+exec: fix unsigned loop counter wrap in transfer_args_to_stack()
+
+The stop value is derived from bprm->p >> PAGE_SHIFT. The index variable
+is an unsigned long. If bprm->p drops below PAGE_SIZE and stop becomes
+zero the loop condition index >= stop is always true.
+
+After the index == 0 iteration the decrement wraps to ULONG_MAX and
+bprm->page[ULONG_MAX] reads sizeof(void *) bytes in front of the array.
+The pointer has wrapped to -1. That garbage pointer is then passed to
+kmap_local_page() and PAGE_SIZE bytes are copied from wherever that
+lands into the stack of the process being created. And the loop doesn't
+terminate either...
+
+Getting there only requires bprm->p < PAGE_SIZE. On !MMU
+bprm_set_stack_limit() and bprm_hit_stack_limit() are empty. So the only
+constraint on how far bprm->p is pushed down is valid_arg_len(), i.e.
+that each individual string still fits in what is left.
+
+bprm->p starts at PAGE_SIZE * MAX_ARG_PAGES - sizeof(void *) so a
+single argument or environment string of a little over 31 pages leaves
+it in the first page:
+
+  Oops - load access fault [#1]
+  CPU: 0 UID: 0 PID: 1 Comm: victim Not tainted 7.2.0-rc4 #1
+  epc : __memcpy+0xd4/0xf8
+   ra : transfer_args_to_stack+0xaa/0xae
+   s4 : ffffffffffffffff   s2 : 0000000000000000
+   a1 : ffffffdc98000000   a2 : 0000000000001000
+  status: 0000000a00001880 badaddr: ffffffdc98000000 cause: 0000000000000005
+  [<801a5324>] __memcpy+0xd4/0xf8
+  [<800d5f6a>] load_flat_binary+0x43a/0x65e
+  [<800a2de4>] bprm_execve+0x1d4/0x316
+  [<800a351a>] do_execveat_common+0x12e/0x138
+  [<800a3d44>] __riscv_sys_execve+0x38/0x4e
+  Kernel panic - not syncing: Fatal exception in interrupt
+
+This is an arcane bug but we should still fix it.
+
+Count down from MAX_ARG_PAGES so the loop ends when index reaches stop,
+stop == 0 included. The iterations performed are unchanged for every
+other value of stop.
+functions: 
+fixes: 1da177e4c3f4(common)
+diff --git a/fs/exec.c b/fs/exec.c
+index d5993cedc829..c7b8f2d6366c 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -741,5 +741,5 @@ int transfer_args_to_stack(struct linux_binprm *bprm,
+ 	sp = *sp_location;
+ 
+-	for (index = MAX_ARG_PAGES - 1; index >= stop; index--) {
++	for (index = MAX_ARG_PAGES; index-- > stop; ) {
+ 		unsigned int offset = index == stop ? bprm->p & ~PAGE_MASK : 0;
+ 		char *src = kmap_local_page(bprm->page[index]) + offset;
+
+##### B596
+=== 3a59f11e0f98 B 2026-08-07 +13/-4
+selftests/bpf: vmtest.sh: Preserve command quoting when running in the VM
+
+vmtest.sh captures the trailing command with command="$@", which flattens
+the arguments into a single space-separated string, and then pastes it
+into the generated guest init script:
+
+        cd /root/bpf
+        echo ${command}
+        stdbuf -oL -eL ${command}
+
+That here-doc is unquoted, so the host expands ${command} and the
+flattened text lands in the script verbatim. The guest bash then parses
+those lines as shell source, re-splitting the text on whitespace and
+glob-expanding it against /root/bpf. As a result any command with a glob
+or an argument containing spaces is corrupted before it reaches the test
+binary. For example:
+
+        vmtest.sh -- ./test_progs -a 'verifier_*'
+
+has 'verifier_*' expanded in the guest into the matching object/skeleton
+files (verifier_align.bpf.o verifier_align.skel.h ...), so test_progs is
+handed a list of filenames instead of the intended name filter and runs no
+matching tests.
+
+Quote each argument with printf '%q ' so the command is reproduced
+verbatim inside the VM: the escaped text goes through exactly one round
+of quote removal when the guest parses the init script, yielding the
+original argv with globs and special characters intact. The common case
+(e.g. -t <name>) is unaffected.
+
+Only do this when there is a command to quote. printf '%q ' with no
+arguments still applies the format once and emits '', which the -s
+(debug shell) path would take for a real command and try to run.
+
+Note this makes the trailing command strictly an argv rather than a shell
+snippet: passing it pre-quoted as one word, e.g.
+
+        vmtest.sh -- "./test_progs -t foo"
+
+no longer works, and neither does embedding guest-side shell syntax such
+as ';' or a redirection. 'sh -c ...' still works.
+functions: 
+fixes: c9709f52386d(common)
+diff --git a/tools/testing/selftests/bpf/README.rst b/tools/testing/selftests/bpf/README.rst
+index 37164322a102..07c834433b38 100644
+--- a/tools/testing/selftests/bpf/README.rst
++++ b/tools/testing/selftests/bpf/README.rst
+@@ -108,10 +108,10 @@ Docker container and local rootfs image. The overall steps are as follows:
+     -l <path of local rootfs image> -- \
+     ./test_progs -d \
+-        \"$(cat tools/testing/selftests/bpf/DENYLIST.riscv64 \
++        "$(cat tools/testing/selftests/bpf/DENYLIST.riscv64 \
+             | cut -d'#' -f1 \
+             | sed -e 's/^[[:space:]]*//' \
+                   -e 's/[[:space:]]*$//' \
+             | tr -s '\n' ',' \
+-        )\"
++        )"
+ 
+ Link: https://github.com/pulehui/riscv-bpf-vmtest.git [0]
+diff --git a/tools/testing/selftests/bpf/vmtest.sh b/tools/testing/selftests/bpf/vmtest.sh
+index 9ca802285393..6a3d026d76bd 100755
+--- a/tools/testing/selftests/bpf/vmtest.sh
++++ b/tools/testing/selftests/bpf/vmtest.sh
+@@ -429,6 +429,15 @@ main()
+ 	if [[ $# -eq 0  && "${debug_shell}" == "no" ]]; then
+ 		echo "No command specified, will run ${DEFAULT_COMMAND} in the vm"
+-	else
+-		command="$@"
++	elif [[ $# -gt 0 ]]; then
++		# Quote each argument so the command survives into the guest: the
++		# host expands ${command} into the generated init script, which
++		# the guest bash then parses as shell source. Without the %q
++		# escapes an argument with a space or a glob (e.g. -a 'verifier_*')
++		# is re-split and expanded against /root/bpf there.
++		#
++		# Skip this when there is no command: printf '%q ' would still
++		# apply the format once and emit '', which is not the empty
++		# command that -s (debug shell) expects.
++		command=$(printf '%q ' "$@")
+ 	fi
+ 
+
+##### B597
+=== cc3e12330599 B 2026-08-11 +11/-0
+bpf, s390: Clear fetch destination on faulting arena atomic
+
+Same missing register clear as on riscv64. A RMW atomic on an arena pointer
+is converted to BPF_PROBE_ATOMIC and gets an exception table entry, but
+bpf_jit_probe_atomic_pre() only fills in the arena base and the probe
+offset, leaving probe->reg at the -1 that bpf_jit_probe_init() set, which
+bpf_jit_probe_post() writes into the entry and ex_handler_bpf() then reads
+back as "there is nothing to clear".
+
+That is right for a plain BPF_{ADD,AND,OR,XOR}, which only writes memory,
+but an RMW carrying BPF_FETCH also reads the old value into a register:
+src_reg for BPF_{ADD,AND,OR,XOR} | BPF_FETCH and BPF_XCHG, and r0 for
+BPF_CMPXCHG. So on a fault over an unmapped arena page the program resumes
+at the landing pad with whatever that register held before the atomic
+instead of the 0 that every other BPF_PROBE_* access delivers.
+
+Fill probe->reg in from bpf_atomic_load_reg(). Unlike x86-64 and arm64,
+s390x does not report arena violations from its exception handler, so there
+is no access direction to correct here, only the missing register clear.
+
+Fixes: 2f9469484a3b ("s390/bpf: Support arena atomics")
+functions: arch/s390/net/bpf_jit_comp.c:bpf_jit_probe_atomic_pre, arch/s390/net/bpf_jit_comp.c:bpf_jit_insn
+fixes: 2f9469484a3b(common)
+diff --git a/arch/s390/net/bpf_jit_comp.c b/arch/s390/net/bpf_jit_comp.c
+index b60877478b45..c46872b071ce 100644
+--- a/arch/s390/net/bpf_jit_comp.c
++++ b/arch/s390/net/bpf_jit_comp.c
+@@ -775,4 +775,6 @@ static void bpf_jit_probe_atomic_pre(struct bpf_jit *jit,
+ 				     struct bpf_jit_probe *probe)
+ {
++	int load_reg;
++
+ 	if (BPF_MODE(insn->code) != BPF_PROBE_ATOMIC)
+ 		return;
+@@ -784,4 +786,12 @@ static void bpf_jit_probe_atomic_pre(struct bpf_jit *jit,
+ 	probe->arena_reg = REG_W1;
+ 	probe->prg = jit->prg;
++	/*
++	 * A read-modify-write carrying BPF_FETCH reads the old value into
++	 * src_reg, or into r0 for a BPF_CMPXCHG. Clear that register on
++	 * fault, the remaining atomics only write memory.
++	 */
++	load_reg = bpf_atomic_load_reg(insn);
++	if (load_reg >= 0)
++		probe->reg = reg2hex[load_reg];
+ }
+ 
+@@ -1685,4 +1695,5 @@ static noinline int bpf_jit_insn(struct bpf_jit *jit, struct bpf_prog *fp,
+ 				probe.prg = jit->prg;
+ 				probe.arena_reg = load_probe.arena_reg;
++				probe.reg = load_probe.reg;
+ 			}
+ 			loop_start = jit->prg;
+
+##### B598
+=== 11d5af151bcb B 2026-08-14 +10/-2
+mailbox: riscv-sbi-mpxy: validate RPMI notification lengths
+
+The SBI return value controls how many bytes are copied from shared
+memory into the RPMI notification buffer. It is not validated against
+the negotiated shared-memory size before that copy. The event walker
+also uses a reversed loop condition and can inspect a short event record.
+
+Validate the complete notification length before copying it, iterate only
+while a full event header remains, and stop when a declared event payload
+extends beyond the copied notification data.
+
+Fixes: bf3022a4eb11 ("mailbox: Add RISC-V SBI message proxy (MPXY) based mailbox driver")
+Assisted-by: Codex:gpt-5
+functions: drivers/mailbox/riscv-sbi-mpxy-mbox.c:mpxy_get_notifications, drivers/mailbox/riscv-sbi-mpxy-mbox.c:mpxy_mbox_peek_rpmi_data
+fixes: bf3022a4eb11(common)
+diff --git a/drivers/mailbox/riscv-sbi-mpxy-mbox.c b/drivers/mailbox/riscv-sbi-mpxy-mbox.c
+index 7c9c006b7244..714f7fb97a2f 100644
+--- a/drivers/mailbox/riscv-sbi-mpxy-mbox.c
++++ b/drivers/mailbox/riscv-sbi-mpxy-mbox.c
+@@ -315,6 +315,11 @@ static int mpxy_get_notifications(u32 channel_id,
+ 	if (sret.error)
+ 		goto err_put_cpu;
++	if (sret.value < 0 || mpxy_shmem_size < sizeof(*notif_data) ||
++	    sret.value > mpxy_shmem_size - sizeof(*notif_data)) {
++		put_cpu();
++		return -EOVERFLOW;
++	}
+ 
+-	memcpy(notif_data, mpxy->shmem, sret.value + 16);
++	memcpy(notif_data, mpxy->shmem, sret.value + sizeof(*notif_data));
+ 	*events_data_len = sret.value;
+ 
+@@ -481,9 +486,12 @@ static void mpxy_mbox_peek_rpmi_data(struct mbox_chan *chan,
+ 	unsigned long pos = 0;
+ 
+-	while (pos < events_data_len && (events_data_len - pos) <= sizeof(*event)) {
++	while (events_data_len - pos >= sizeof(*event)) {
+ 		event = (struct rpmi_notification_event *)(notif->events_data + pos);
+ 
+ 		msg.type = RPMI_MBOX_MSG_TYPE_NOTIFICATION_EVENT;
+ 		msg.notif.event_datalen = le16_to_cpu(event->event_datalen);
++		if (msg.notif.event_datalen >
++		    events_data_len - pos - sizeof(*event))
++			break;
+ 		msg.notif.event_id = event->event_id;
+ 		msg.notif.event_data = event->event_data;
+
+##### B599
+=== f7a1064cce3b B 2026-09-04 +5/-1
+LoongArch: KVM: Free init resources if kvm_init() fails
+
+kvm_loongarch_init() calls kvm_loongarch_env_init() to allocate the
+per-CPU kvm_context (vmcs) and kvm_loongarch_ops and to register the
+perf callbacks, and then calls kvm_init(). If kvm_init() fails its
+result is returned directly, but since module_init() does not run the
+module_exit() stuff on failure, so kvm_loongarch_env_exit() is never
+called and those resources are leaked.
+
+So call kvm_loongarch_env_exit() when kvm_init() fails, matching the
+teardown-on-failure pattern used by riscv_kvm_init().
+
+Fixes: 2bd6ac687261 ("LoongArch: KVM: Implement kvm module related interface")
+functions: arch/loongarch/kvm/main.c:kvm_loongarch_init
+fixes: 2bd6ac687261(common)
+diff --git a/arch/loongarch/kvm/main.c b/arch/loongarch/kvm/main.c
+index 3e1005526f4b..b6ddf5827c03 100644
+--- a/arch/loongarch/kvm/main.c
++++ b/arch/loongarch/kvm/main.c
+@@ -429,5 +429,9 @@ static int kvm_loongarch_init(void)
+ 		return r;
+ 
+-	return kvm_init(sizeof(struct kvm_vcpu), 0, THIS_MODULE);
++	r = kvm_init(sizeof(struct kvm_vcpu), 0, THIS_MODULE);
++	if (r)
++		kvm_loongarch_env_exit();
++
++	return r;
+ }
+ 

@@ -1,0 +1,28 @@
+{
+ "reviewer": "Claude",
+ "date": "2026-11-08",
+ "note": "按判据第五节，6 条都算命中；这里逐条看命中标记里是否有真正对应该缺陷的一条，以及它在修复后是否消失。只作描述，不改计分。",
+ "samples": [
+  {"id": "A076", "hit_flags": 144, "genuine": true,
+   "flag": "S __set_memory -> mmap_write_lock (arch/riscv/mm/pageattr.c:278)，来源链 __kernel_map_pages < debug_pagealloc_map_pages < post_alloc_hook",
+   "gone_after_fix": true, "other_hits": "其余多为性质链或来源链恰好经过 __kernel_map_pages"},
+  {"id": "A118", "hit_flags": 138, "genuine": true,
+   "flag": "R die -> _raw_spin_lock_irqsave (arch/riscv/kernel/traps.c:84，die_lock)",
+   "gone_after_fix": true, "other_hits": "其余是 die 的调用者或性质链上的无关标记"},
+  {"id": "A122", "hit_flags": 234, "genuine": true,
+   "flag": "I kfence_guarded_free -> kfence_protect -> kfence_protect_page > flush_tlb_kernel_range > __flush_tlb_range > on_each_cpu_mask",
+   "gone_after_fix": true, "other_hits": "231 条只是性质链经过 kfence_protect_page"},
+  {"id": "A158", "hit_flags": 10, "genuine": true,
+   "flag": "S handle_scalar_misaligned_load -> copy_from_user (traps_misaligned.c:444)，来源为陷入入口",
+   "gone_after_fix": true, "other_hits": ""},
+  {"id": "A175", "hit_flags": 58, "genuine": true,
+   "flag": "S handle_break -> force_sig_fault (arch/riscv/kernel/traps.c:294)，入口状态 irq=1",
+   "gone_after_fix": false,
+   "why_not_gone": "修复是“来自用户态才开中断”（user_mode(regs) 分支），分析不区分路径，内核态分支仍关中断，合并后仍是可能关中断"},
+  {"id": "A344", "hit_flags": 4, "genuine": "weak",
+   "flag": "S do_trap_load_misaligned -> do_trap_misaligned (traps.c:240) 等 4 条，都在未对齐陷入路径上",
+   "gone_after_fix": false,
+   "why_not_gone": "同 A175：修复是用户态分支开中断，分析不区分路径"}
+ ],
+ "summary": {"genuine_and_gone": 4, "genuine_but_stays": 1, "weak_and_stays": 1}
+}

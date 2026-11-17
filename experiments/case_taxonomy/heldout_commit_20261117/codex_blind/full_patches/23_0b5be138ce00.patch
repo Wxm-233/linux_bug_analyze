@@ -1,0 +1,81 @@
+commit 0b5be138ce00f421bd7cc5a226061bd62c4ab850
+Author:     Lorenzo Stoakes <ljs@kernel.org>
+AuthorDate: Thu Aug 7 19:58:19 2025 +0100
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Mon Aug 11 23:00:59 2025 -0700
+
+    mm/mremap: avoid expensive folio lookup on mremap folio pte batch
+    
+    It was discovered in the attached report that commit f822a9a81a31 ("mm:
+    optimize mremap() by PTE batching") introduced a significant performance
+    regression on a number of metrics on x86-64, most notably
+    stress-ng.bigheap.realloc_calls_per_sec - indicating a 37.3% regression in
+    number of mremap() calls per second.
+    
+    I was able to reproduce this locally on an intel x86-64 raptor lake
+    system, noting an average of 143,857 realloc calls/sec (with a stddev of
+    4,531 or 3.1%) prior to this patch being applied, and 81,503 afterwards
+    (stddev of 2,131 or 2.6%) - a 43.3% regression.
+    
+    During testing I was able to determine that there was no meaningful
+    difference in efforts to optimise the folio_pte_batch() operation, nor
+    checking folio_test_large().
+    
+    This is within expectation, as a regression this large is likely to
+    indicate we are accessing memory that is not yet in a cache line (and
+    perhaps may even cause a main memory fetch).
+    
+    The expectation by those discussing this from the start was that
+    vm_normal_folio() (invoked by mremap_folio_pte_batch()) would likely be
+    the culprit due to having to retrieve memory from the vmemmap (which
+    mremap() page table moves does not otherwise do, meaning this is
+    inevitably cold memory).
+    
+    I was able to definitively determine that this theory is indeed correct
+    and the cause of the issue.
+    
+    The solution is to restore part of an approach previously discarded on
+    review, that is to invoke pte_batch_hint() which explicitly determines,
+    through reference to the PTE alone (thus no vmemmap lookup), what the PTE
+    batch size may be.
+    
+    On platforms other than arm64 this is currently hardcoded to return 1, so
+    this naturally resolves the issue for x86-64, and for arm64 introduces
+    little to no overhead as the pte cache line will be hot.
+    
+    With this patch applied, we move from 81,503 realloc calls/sec to 138,701
+    (stddev of 496.1 or 0.4%), which is a -3.6% regression, however accounting
+    for the variance in the original result, this is broadly restoring
+    performance to its prior state.
+    
+    Link: https://lkml.kernel.org/r/20250807185819.199865-1-lorenzo.stoakes@oracle.com
+    Fixes: f822a9a81a31 ("mm: optimize mremap() by PTE batching")
+    Signed-off-by: Lorenzo Stoakes <lorenzo.stoakes@oracle.com>
+    Reported-by: kernel test robot <oliver.sang@intel.com>
+    Closes: https://lore.kernel.org/oe-lkp/202508071609.4e743d7c-lkp@intel.com
+    Acked-by: David Hildenbrand <david@redhat.com>
+    Acked-by: Pedro Falcato <pfalcato@suse.de>
+    Reviewed-by: Barry Song <baohua@kernel.org>
+    Acked-by: Vlastimil Babka <vbabka@suse.cz>
+    Reviewed-by: Dev Jain <dev.jain@arm.com>
+    Cc: Ryan Roberts <ryan.roberts@arm.com>
+    Cc: Barry Song <baohua@kernel.org>
+    Cc: Jann Horn <jannh@google.com>
+    Cc: Liam Howlett <liam.howlett@oracle.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/mm/mremap.c b/mm/mremap.c
+index 677a4d744df9..9afa8cd524f5 100644
+--- a/mm/mremap.c
++++ b/mm/mremap.c
+@@ -179,6 +179,10 @@ static int mremap_folio_pte_batch(struct vm_area_struct *vma, unsigned long addr
+ 	if (max_nr == 1)
+ 		return 1;
+ 
++	/* Avoid expensive folio lookup if we stand no chance of benefit. */
++	if (pte_batch_hint(ptep, pte) == 1)
++		return 1;
++
+ 	folio = vm_normal_folio(vma, addr, pte);
+ 	if (!folio || !folio_test_large(folio))
+ 		return 1;

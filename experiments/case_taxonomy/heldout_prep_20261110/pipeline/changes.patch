@@ -1,0 +1,596 @@
+--- casemodel_dev_20261110/static/extract3.py
++++ pipeline/extract3.py
+@@ -1,7 +1,7 @@
+ """Per-function static facts, version 3 = static2 extract2.py + switch statements (casemodel criteria C2).
+ "switches": [{"line", "p": params in the condition (incl. through locals), "cases": [case constants]}]. Runs in WSL (libclang 18).
+ 
+-    python3 extract2.py <compile_commands.json> <source root> <out.json.gz> [--jobs N] [--only REGEX]
++    TARGET=<目标> python3 extract3.py <compile_commands.json> <source root> <out.json.gz> [--jobs N] [--only REGEX]
+ 
+ Same facts as ../../semhint_dev_20261109/static/extract.py, plus (criteria 三):
+   - guards / locals / calls record ALL referenced function, variable, enum-constant and macro names (round 1 kept
+@@ -10,7 +10,7 @@
+   - macro definitions of every macro used in a processed function, with their defining file;
+   - callback registrations [struct type | "", field, function name, file, line]   (I2)
+   - indirect calls through a member: calls entries ["field:<struct>:<field>", "-><field>", args]  (I2)
+-Unit classes: base = round-1 range; drivers = drivers/ units whose path contains riscv, sifive or -sbi (I3).
++Unit classes: base = common code + target kernel/mm; drivers = target-specific drivers (I3), from settings.
+ """
+ import ctypes
+ import gzip
+@@ -25,12 +25,12 @@
+ import clang.cindex as ci
+ from clang.cindex import CursorKind as K
+ 
+-BASE = ("kernel/", "mm/", "fs/", "net/", "ipc/", "lib/", "arch/riscv/kernel/", "arch/riscv/mm/")
+-DRV = re.compile(r"^drivers/.*(riscv|sifive|-sbi)")
++from settings import BASE, DRV, KERNEL_PREFIX, boundary_names
++
+ CMP_OPS = {"<", "<=", ">", ">=", "==", "!=", "&"}
+ ERRNO = re.compile(r"^E[A-Z0-9]+$")
+ IDENT = re.compile(r"^[A-Za-z_]\w*$")
+-_NAMES = json.loads(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "boundary_names.json")).read())
++_NAMES = boundary_names()
+ BMAC = set(_NAMES["macro"]) | {"NR_syscalls"}
+ 
+ _lib = None
+@@ -292,7 +292,7 @@
+                 out.append([tname, toks[i + 1], toks[j], f, cursor.location.line])
+ 
+ 
+-def function_facts(unit, fn, root, in_riscv_kernel):
++def function_facts(unit, fn, root, in_target_kernel):
+     f = Func(unit, fn)
+     f.build_locals()
+     rec = {"name": fn.spelling, "file": relpath(fn.location.file.name, root), "line": fn.location.line,
+@@ -352,7 +352,7 @@
+             cond, then = ch[0], ch[1]
+             cps, citems = f.closure(cond)
+             nr = "#NR_syscalls" in citems
+-            if in_riscv_kernel and nr:
++            if in_target_kernel and nr:
+                 rec["nr_ifs"].append({"line": x.location.line, "p": cps})
+             if not error_exit(then):
+                 continue
+@@ -403,7 +403,7 @@
+                 continue
+             _seen.add(usr)
+             fpath = relpath(c.location.file.name, root)
+-            funcs[usr] = function_facts(unit, c, root, fpath.startswith("arch/riscv/kernel/"))
++            funcs[usr] = function_facts(unit, c, root, fpath.startswith(KERNEL_PREFIX))
+     # global initializers (file-scope tables of operations)
+     gregs = []
+     for c in tu.cursor.get_children():
+@@ -421,12 +421,14 @@
+ 
+ 
+ def main():
+-    cc_path, root, out = sys.argv[1], sys.argv[2].rstrip("/"), sys.argv[3]
+-    jobs = int(sys.argv[sys.argv.index("--jobs") + 1]) if "--jobs" in sys.argv else 14
++    from cli import parse
++    args = parse('extract')
++    cc_path, root, out = args.compile_commands, args.root.rstrip('/'), args.out
++    jobs = args.jobs
+     cc = json.load(open(cc_path))
+     sel = [e for e in cc if e["file"].endswith(".c") and unit_class(relpath(e["file"], root))]
+-    if "--only" in sys.argv:
+-        pat = re.compile(sys.argv[sys.argv.index("--only") + 1])
++    if args.only is not None:
++        pat = re.compile(args.only)
+         sel = [e for e in sel if pat.search(e["file"])]
+     sel.sort(key=lambda e: e["file"])
+     units, funcs, macdefs, gregs, seen_in = [], {}, {}, [], {}
+--- casemodel_dev_20261110/static/hints4.py
++++ pipeline/hints4.py
+@@ -3,7 +3,7 @@
+ bits of & masks, on any guard or switch whose compared side maps to the parameter; no boundary item required.)
+ Hint sites with switchable improvements I1-I4 (criteria 二、四). Runs anywhere (needs facts + values).
+ 
+-    python3 hints2.py <facts.json.gz> <values.json> <config> <out.json> [--group G]
++    TARGET=<目标> python3 hints4.py <facts.json.gz> <values.json> <config> <out.json> [--group G]
+         config: comma list of I1,I2,I3,I4 (and/or "fix"), or "base"; anything but "base" uses the fixed operator
+ 
+ With every switch off the decisions are those of ../../semhint_dev_20261109/static/hints.py (criteria 三 基线复现).
+@@ -18,16 +18,15 @@
+ from pathlib import Path
+ 
+ HERE = Path(__file__).resolve().parent
+-NAMES = json.loads((HERE / "boundary_names.json").read_text())
++from settings import TARGET, ARCHS, ARCH_PREFIX, KERNEL_PREFIX, ARCH_MAC_FILE, DRV, boundary_names, require_values
++NAMES = boundary_names()
+ KIND = NAMES["kind"]
+ BMAC = set(NAMES["macro"])
+ BNON = set(NAMES["nonmacro"])
+ BALL = BMAC | BNON
+ MASK = 2**64 - 1
+-ARCHS = ("riscv", "arm64", "x86_64")
+ ADDR_NAMES = {"addr", "start", "brk", "uaddr", "uaddr2", "new_addr", "old_addr", "start_addr", "addr_hint"}
+-ARCH_MAC_FILE = re.compile(r"(^|/)(arch/riscv/|include/asm-generic/)")
+-DRV = re.compile(r"^drivers/.*(riscv|sifive|-sbi)")
++
+ 
+ 
+ def width_of(ptype):
+@@ -61,6 +60,7 @@
+ 
+ 
+ def run(d, vals, cfg):
++    require_values(vals)
+     I1, I2, I3, I4 = ("I1" in cfg), ("I2" in cfg), ("I3" in cfg), ("I4" in cfg)
+     OPFIX = bool(cfg)  # amendment 1: every configuration except "base" uses the libclang operator
+     DEPTH = 8 if I4 else 4
+@@ -69,7 +69,7 @@
+     md_all = d["macros"]
+ 
+     def in_arch(path):
+-        return path.startswith("arch/") or bool(DRV.search(path))
++        return path.startswith(ARCH_PREFIX) or bool(DRV.search(path))
+ 
+     # I1: tree-own boundary symbols
+     tree_mac, tree_fn = set(), set()
+@@ -82,7 +82,7 @@
+             if m.get("file") and ARCH_MAC_FILE.search(m["file"]) and n in used_outside:
+                 tree_mac.add(n)
+         for f in F.values():
+-            if (f["file"].startswith("arch/riscv/") or (I3 and DRV.search(f["file"]))) and f["name"] in used_outside:
++            if (f["file"].startswith(ARCH_PREFIX) or (I3 and DRV.search(f["file"]))) and f["name"] in used_outside:
+                 tree_fn.add(f["name"])
+     macdefs = {n: m for n, m in md_all.items() if n in BMAC or n == "NR_syscalls" or n in tree_mac}
+     univ = BALL | tree_mac | tree_fn
+@@ -376,7 +376,7 @@
+             sites[sc] = out
+             stats["sites"] += len(out)
+     nr_ifs = [{"fn": f["name"], "file": f["file"], "line": x["line"]} for f in F.values()
+-              if f["file"].startswith("arch/riscv/kernel/") for x in f["nr_ifs"]]
++              if f["file"].startswith(KERNEL_PREFIX) for x in f["nr_ifs"]]
+     raw = None
+     if nr_ifs:
+         raw = {"ifs": nr_ifs, "values": ["r:%d" % dd for dd in (-1, 0, 1)] + ["i:%x" % (MASK)],
+@@ -393,13 +393,16 @@
+ 
+ 
+ def main():
+-    facts, values, config, out = sys.argv[1:5]
++    from cli import parse
++    args = parse('hints')
++    facts, values, config, out = args.facts, args.values, args.config, args.out
+     cfg = set() if config == "base" else set(config.split(","))
+     d = json.load(gzip.open(facts, "rt"))
+     vals = json.loads(Path(values).read_text())
+     res = run(d, vals, cfg)
+-    if "--group" in sys.argv:
+-        res["group"] = sys.argv[sys.argv.index("--group") + 1]
++    if args.group is not None:
++        res["group"] = args.group
++    Path(out).parent.mkdir(parents=True, exist_ok=True)
+     Path(out).write_text(json.dumps(res))
+     print(config, json.dumps(res["stats"]))
+ 
+--- semhint_dev_20261109/static/macro_values.py
++++ pipeline/macro_values.py
+@@ -1,7 +1,7 @@
+ """Per-architecture compile-time values of object-like boundary macros and enum constants (criteria 4.5,
+ amendment 2 for NR_syscalls). Runs in WSL.
+ 
+-    python3 macro_values.py <group> <facts.json.gz> -> /root/work/semhint/values/<group>.json
++    TARGET=<目标> python3 macro_values.py <group> <facts.json.gz> --out <values.json>
+         {"<arch>": {"<name>": int | "nonconst" | "undefined"}, "builds": {...}}
+ 
+ For each name, a probe file includes a fixed set of headers and statically initialises an unsigned 64-bit object
+@@ -21,11 +21,9 @@
+ from pathlib import Path
+ 
+ HERE = Path(__file__).resolve().parent
+-NAMES = json.loads((HERE / "boundary_names.json").read_text())
+-B = "/root/work/difftest/build"
+-BUILDS = {g: {"riscv": f"{B}/{g}_pre", "arm64": f"{B}/{g}_ref_arm64", "x86_64": f"{B}/{g}_ref_x86_64"}
+-          for g in ("A101", "A310", "A171", "A181", "B467")}
+-BUILDS["CUR"] = {a: f"/root/work/boundary_build/{a}_defconfig" for a in ("riscv", "arm64", "x86_64")}
++from settings import boundary_names
++NAMES = boundary_names()
++from settings import TARGET, ARCHS, builds_for, temp_dir
+ HEADERS = ["linux/kernel.h", "linux/mm.h", "linux/mman.h", "linux/sched.h", "linux/uaccess.h", "linux/syscalls.h",
+            "linux/futex.h", "linux/perf_event.h", "linux/socket.h", "net/sock.h", "linux/fs.h", "linux/elf.h",
+            "linux/compat.h", "asm/unistd.h", "asm/processor.h", "asm/pgtable.h", "asm/page.h", "asm/elf.h"]
+@@ -62,7 +60,7 @@
+         else:
+             lines.append(f"{e} /* {n} */")
+     src = "\n".join(lines) + "\n"
+-    with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, dir="/tmp") as fh:
++    with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, dir=temp_dir()) as fh:
+         fh.write(src)
+         path = fh.name
+     try:
+@@ -127,7 +125,9 @@
+ 
+ 
+ def main():
+-    group, facts = sys.argv[1], sys.argv[2]
++    from cli import parse
++    args = parse('macro')
++    group, facts = args.group, args.facts
+     d = json.load(gzip.open(facts, "rt"))
+     kinds = NAMES["kind"]
+     names = set()
+@@ -140,16 +140,16 @@
+     kinds = dict(kinds, NR_syscalls="macro")
+     names = sorted(names)
+     chunks = [names[i:i + 60] for i in range(0, len(names), 60)]
+-    out = {"group": group, "builds": BUILDS[group], "names": len(names), "headers": HEADERS}
++    out = {"group": group, "builds": builds_for(group), "names": len(names), "headers": HEADERS}
+     defhdr = {}
+     for n, md in d["macros"].items():
+         f = md.get("file") or ""
+-        m = re.match(r"(?:include/|arch/riscv/include/)(.*\.h)$", f)
++        m = re.match(rf"(?:include/|arch/{TARGET}/include/)(.*\.h)$", f)
+         if m and not m.group(1).startswith(("generated/", "uapi/")):
+             defhdr[n] = m.group(1)
+     retried = {}
+     out["pass2_resolved"] = retried
+-    for arch, build in BUILDS[group].items():
++    for arch, build in builds_for(group).items():
+         with ThreadPoolExecutor(12) as ex:
+             parts = list(ex.map(lambda c: probe(build, c, kinds), chunks))
+         vals = {}
+@@ -158,7 +158,7 @@
+                 print(arch, "HEADER ERROR", err[-600:])
+                 sys.exit(3)
+             vals.update(p)
+-        # pass 2 (criteria 4.5 "固定的一组头文件" plus the name's own riscv header): undefined names again
++        # pass 2: fixed headers plus the name's own target-architecture header.
+         byhdr = {}
+         for n, v in vals.items():
+             if v == "undefined" and defhdr.get(n):
+@@ -179,8 +179,9 @@
+             k = v if isinstance(v, str) else "const"
+             st[k] = st.get(k, 0) + 1
+         print(group, arch, st, "NR_syscalls", vals.get("NR_syscalls"), "TASK_SIZE_MAX", vals.get("TASK_SIZE_MAX"))
+-    os.makedirs("/root/work/semhint/values", exist_ok=True)
+-    Path(f"/root/work/semhint/values/{group}.json").write_text(json.dumps(out, indent=0))
++    out_path = Path(args.out)
++    out_path.parent.mkdir(parents=True, exist_ok=True)
++    out_path.write_text(json.dumps(out, indent=0))
+ 
+ 
+ if __name__ == "__main__":
+--- static2_dev_20261109/static/macro_values2.py
++++ pipeline/macro_values2.py
+@@ -1,10 +1,9 @@
+ """Per-arch values for the I1 tree-own object-like macros (criteria 二 I1, same probe as round 1 4.5). Runs in WSL.
+ 
+-    python3 macro_values2.py <group> <facts2.json.gz> -> /root/work/static2/values/<group>.json
++    TARGET=<目标> python3 macro_values2.py <group> <facts2.json.gz> --base-values <values.json> --out <out.json>
+ 
+-Round-1 values (/root/work/semhint/values/<group>.json) are copied unchanged, so the baseline reproduces round 1;
+-only names not probed in round 1 are probed here (object-like macros defined under arch/riscv/ or
+-include/asm-generic/), with round 1's probe code (imported read-only from ../../semhint_dev_20261109/static).
++Explicit base values are copied unchanged; only new object-like macros defined under arch/<target>/ or
++include/asm-generic/ are probed here, using this directory's macro_values module.
+ """
+ import gzip
+ import json
+@@ -15,30 +14,32 @@
+ from pathlib import Path
+ 
+ HERE = Path(__file__).resolve().parent
+-sys.path.insert(0, str(HERE.parents[1] / "semhint_dev_20261109" / "static"))
+-import macro_values as mv  # noqa: E402
+-
+-ARCH_MAC_FILE = re.compile(r"(^|/)(arch/riscv/|include/asm-generic/)")
++import macro_values as mv
++from settings import TARGET, ARCH_MAC_FILE, builds_for, require_values
+ 
+ 
+ def main():
+-    group, facts = sys.argv[1], sys.argv[2]
++    from cli import parse
++    args = parse('macro2')
++    group, facts = args.group, args.facts
+     d = json.load(gzip.open(facts, "rt"))
+-    old = json.loads(Path(f"/root/work/semhint/values/{group}.json").read_text())
+-    known = set(old["riscv"])
++    old = json.loads(Path(args.base_values).read_text())
++    require_values(old)
++    known = set(old[TARGET])
+     new = sorted(n for n, m in d["macros"].items()
+                  if m.get("file") and ARCH_MAC_FILE.search(m["file"]) and not m["fl"] and n not in known)
+     kinds = {n: "macro" for n in new}
+     defhdr = {}
+     for n in new:
+         f = d["macros"][n]["file"] or ""
+-        m = re.match(r"(?:.*/)?(?:include/|arch/riscv/include/)(.*\.h)$", f)
++        m = re.match(rf"(?:.*/)?(?:include/|arch/{TARGET}/include/)(.*\.h)$", f)
+         if m and not m.group(1).startswith(("generated/", "uapi/")):
+             defhdr[n] = m.group(1)
+     out = dict(old)
++    out["builds"] = builds_for(group)
+     out["i1_probed"] = len(new)
+     chunks = [new[i:i + 60] for i in range(0, len(new), 60)]
+-    for arch, build in mv.BUILDS[group].items():
++    for arch, build in builds_for(group).items():
+         vals = dict(old[arch])
+         with ThreadPoolExecutor(12) as ex:
+             parts = list(ex.map(lambda c: mv.probe(build, c, kinds), chunks))
+@@ -70,8 +71,9 @@
+             k = v if isinstance(v, str) else "const"
+             st[k] = st.get(k, 0) + 1
+         print(group, arch, "new", len(new), st, "VA_USER_SV39", vals.get("VA_USER_SV39"))
+-    os.makedirs("/root/work/static2/values", exist_ok=True)
+-    Path(f"/root/work/static2/values/{group}.json").write_text(json.dumps(out, indent=0))
++    out_path = Path(args.out)
++    out_path.parent.mkdir(parents=True, exist_ok=True)
++    out_path.write_text(json.dumps(out, indent=0))
+ 
+ 
+ if __name__ == "__main__":
+--- casemodel_dev_20261110/static/layouts.py
++++ pipeline/layouts.py
+@@ -1,10 +1,10 @@
+ """Struct layouts per architecture for C1 (casemodel criteria C1). Runs in WSL (libclang 18).
+ 
+-    python3 layouts.py <group> <facts3.json.gz> -> /root/work/casemodel/layouts/<group>.json
++    TARGET=<目标> python3 layouts.py <group> <facts3.json.gz> --out <layouts.json>
+         {"types": [...], "<arch>": {"struct X": {"size": n, "fields": [{"name", "off", "size", "kind",
+                                                                          "pointee", "signed"}]}}}
+ 
+-Root types: pointee struct/union types of the riscv syscall entry parameters (__do_sys_*). Pointer fields to
++Root types: pointee struct/union types of the target syscall entry parameters (__do_sys_*). Pointer fields to
+ structs are followed 2 levels. Each architecture's layout comes from parsing one probe unit with that build's
+ mm/mmap.o flags (same builds as the constant probe, rankprune/static2 groups).
+ kind: ptr | scalar | array | record | bitfield.
+@@ -21,10 +21,7 @@
+ import clang.cindex as ci
+ from clang.cindex import CursorKind as K, TypeKind as TK
+ 
+-B = "/root/work/difftest/build"
+-BUILDS = {g: {"riscv": f"{B}/{g}_pre", "arm64": f"{B}/{g}_ref_arm64", "x86_64": f"{B}/{g}_ref_x86_64"}
+-          for g in ("A101", "A310", "A171", "A181", "B467")}
+-BUILDS["CUR"] = {a: f"/root/work/boundary_build/{a}_defconfig" for a in ("riscv", "arm64", "x86_64")}
++from settings import TARGET, ARCHS, builds_for, temp_dir
+ HEADERS = ["linux/syscalls.h", "linux/socket.h", "linux/perf_event.h", "linux/time.h", "linux/signal.h",
+            "linux/sched.h", "linux/aio_abi.h", "linux/fs.h", "linux/mount.h", "linux/mman.h", "linux/futex.h",
+            "linux/sem.h", "linux/msg.h", "linux/shm.h", "linux/uio.h", "linux/resource.h", "linux/utsname.h",
+@@ -92,15 +89,17 @@
+ 
+ 
+ def main():
+-    group, facts_path = sys.argv[1], sys.argv[2]
++    from cli import parse
++    args_cli = parse('layouts')
++    group, facts_path = args_cli.group, args_cli.facts
+     facts = json.load(gzip.open(facts_path, "rt"))
+     roots = root_types(facts)
+     res = {"group": group, "roots": roots}
+-    for arch, build in BUILDS[group].items():
++    for arch, build in builds_for(group).items():
+         os.chdir(build)
+         args = base_cmd(build)
+         src = "".join(f"#if __has_include(<{h}>)\n#include <{h}>\n#endif\n" for h in HEADERS)
+-        with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, dir="/tmp") as fh:
++        with tempfile.NamedTemporaryFile("w", suffix=".c", delete=False, dir=temp_dir()) as fh:
+             fh.write(src)
+             path = fh.name
+         tu = ci.Index.create().parse(path, args=args)
+@@ -130,8 +129,9 @@
+         res[f"{arch}_errors"] = errs[:5]
+         print(group, arch, "roots", len(roots), "found", sum(1 for t in roots if t in lay), "total", len(lay),
+               "errors", len(errs), flush=True)
+-    os.makedirs("/root/work/casemodel/layouts", exist_ok=True)
+-    Path(f"/root/work/casemodel/layouts/{group}.json").write_text(json.dumps(res, indent=0))
++    out_path = Path(args_cli.out)
++    out_path.parent.mkdir(parents=True, exist_ok=True)
++    out_path.write_text(json.dumps(res, indent=0))
+ 
+ 
+ if __name__ == "__main__":
+--- casemodel_dev_20261110/static/vocab.py
++++ pipeline/vocab.py
+@@ -1,19 +1,23 @@
+ """C2 value vocabulary per group (casemodel criteria C2). Runs in WSL.
+-    python3 vocab.py <group>  -> ../gen/vocab_<group>.json"""
++    TARGET=<目标> python3 vocab.py <group> --facts <facts.json.gz> --values <values.json> --out <vocab.json>"""
+ import gzip, json, sys
+ from pathlib import Path
+ HERE = Path(__file__).resolve().parent
+ sys.path.insert(0, str(HERE))
+ from hints4 import run  # noqa: E402
+-g = sys.argv[1]
++from cli import parse
++args = parse('vocab')
++g = args.group
+ tag = "CUR" if g == "CUR" else f"{g}_pre"
+-facts = json.load(gzip.open(f"/root/work/casemodel/facts/{tag}.json.gz", "rt"))
+-vals = json.loads(Path(f"/root/work/static2/values/{g}.json").read_text())
++facts = json.load(gzip.open(args.facts, "rt"))
++vals = json.loads(Path(args.values).read_text())
+ h = run(facts, vals, {"I1", "I2", "I3", "I4"})
+ v = h["vocab"]
+ st = {"syscalls": len(v), "params": sum(len(x) for x in v.values()),
+       "eq_values": sum(len(p["eq"]) for x in v.values() for p in x.values()),
+       "bits": sum(len(p["bits"]) for x in v.values() for p in x.values())}
+-(HERE.parent / "gen" / f"vocab_{g}.json").write_text(json.dumps({"group": g, "stats": st, "vocab": v}))
++out_path = Path(args.out)
++out_path.parent.mkdir(parents=True, exist_ok=True)
++out_path.write_text(json.dumps({"group": g, "stats": st, "vocab": v}))
+ print(g, "vocab", st, "futex", {k: (len(p["eq"]), len(p["bits"])) for k, p in v.get("futex", {}).items()},
+       "mmap", {k: (len(p["eq"]), len(p["bits"])) for k, p in v.get("mmap", {}).items()})
+--- rankprune_dev_20261110/static/rank.py
++++ pipeline/rank.py
+@@ -1,6 +1,6 @@
+ """Score, rank and prune hint sites (rankprune criteria 三、四、5.1). Runs in WSL.
+ 
+-    python3 rank.py <group>...    -> ../gen/hints_<group>.json (pruned, generator format), ../ranking_<group>.json
++    TARGET=<目标> python3 rank.py <group> --facts <facts.json.gz> --values <values.json> --out-dir <dir>
+     python3 rank.py --selftest
+ """
+ import gzip
+@@ -13,34 +13,54 @@
+ 
+ HERE = Path(__file__).resolve().parent
+ sys.path.insert(0, str(HERE))
+-from hints3 import run, trunc, is_addr  # noqa: E402
++from hints4 import run, trunc, is_addr  # noqa: E402
+ 
+ K, V, TOPSITES = 40, 6, 3
+-ARCHS = ("riscv", "arm64", "x86_64")
+-DRV = re.compile(r"(^|/)drivers/.*(riscv|sifive|-sbi)")
++from settings import TARGET, ARCHS, ARCH_PREFIX, RANK_DRV as DRV, require_values
+ FIXC = {"A101": "2116988d5372", "A310": "61119394631f", "A171": "890ba5be6335", "A181": "1046791390af",
+         "B467": "c625154993d0"}
+ FIXITEMS = {"A101": {"arch_get_mmap_end"}, "A171": {"TASK_SIZE_MAX"}, "A181": {"__put_user", "put_user"},
+             "B467": None, "A310": "raw_nr"}
+-GEN = HERE.parent / "gen"
+-VT = json.loads((HERE.parents[1] / "twostage_dev_20261109/version_tables.json").read_text())
+-sys.path.insert(0, str(GEN))
+-import generate as G  # noqa: E402
++# 排序所需的版本表、调用号表、排除表是只读静态输入；不导入生成器或执行器。
++def option(name, default=None):
++    if name in sys.argv:
++        return sys.argv[sys.argv.index(name) + 1]
++    return next((x[len(name)+1:] for x in sys.argv[1:] if x.startswith(name+'=')), default)
++
++GEN = HERE
++VT = json.loads(Path(option('--version-tables', HERE / 'version_tables.json')).read_text())
++BLACK_EXACT = set(json.loads((HERE / 'rank_policy.json').read_text())['black_exact'])
++if TARGET != 'riscv':
++    FIXC, FIXITEMS = {}, {}  # LoongArch 留出集不使用开发集修复点或修复日期。
+ 
+ 
+ def universe(group, entries):
+-    nrt = json.loads((GEN / "nr_tables.json").read_text())
+-    common = set.intersection(*[set(VT[k]) for k in G.KERNELS[group]])
+-    return {sc for sc in common if sc not in G.BLACK_EXACT and sc in entries and all(sc in nrt[a] for a in ARCHS)} \
++    nrt = json.loads(Path(option("--nr-tables", HERE / "nr_tables.json")).read_text())
++    if group == "CUR":
++        keys = ["cur_" + a for a in ARCHS]
++    elif TARGET == "riscv":
++        keys = [f"{group.lower()}_pre", f"{group.lower()}_fix", f"{group.lower()}_ref_arm64", f"{group.lower()}_ref_x86_64"]
++    else:
++        keymap = json.loads(Path(option('--kernel-keys')).read_text()) if option('--kernel-keys') else {}
++        if group not in keymap:
++            raise ValueError('LoongArch 历史组需要 --kernel-keys，不使用 RISC-V 开发集')
++        keys = keymap[group]
++    missing = [k for k in keys if k not in VT] + [a for a in ARCHS if a not in nrt]
++    if missing:
++        raise ValueError(f'目标架构缺少版本表/调用号表: {missing}；请提供 --version-tables 和 --nr-tables')
++    common = set.intersection(*[set(VT[k]) for k in keys])
++    return {sc for sc in common if sc not in BLACK_EXACT and sc in entries and all(sc in nrt[a] for a in ARCHS)} \
+         | {"raw_nr"}
+ 
+ 
+ def patch_names(group):
+-    d = json.load(gzip.open("/root/work/pgdev/patches_x86_arm64.json.gz", "rt"))
++    d = json.load(gzip.open(option("--patch-names", "/root/work/pgdev/patches_x86_arm64.json.gz"), "rt"))
+     cutoff = None
+-    if group != "CUR":
++    if TARGET == "riscv" and group != "CUR":
+         cutoff = int(subprocess.run(["git", "-C", "/root/repos/linux", "log", "-1", "--format=%at", FIXC[group]],
+                                     capture_output=True, text=True, check=True).stdout.strip())
++    if option("--patch-cutoff") is not None:
++        cutoff = int(option("--patch-cutoff"))
+     names = set()
+     for c in d["commits"]:
+         if cutoff is None or c["cdate"] < cutoff:
+@@ -49,7 +69,7 @@
+ 
+ 
+ def evidence(item, facts, vals, fn_files):
+-    """criteria 三: 3 proven divergent constant, 2 riscv-specific implementation, 1 other"""
++    """criteria 三: 3 proven divergent constant, 2 target-specific implementation, 1 other"""
+     md = facts["macros"].get(item)
+     vs = [vals[a].get(item) for a in ARCHS]
+     ints = [v for v in vs if isinstance(v, int)]
+@@ -58,13 +78,13 @@
+         return 3
+     if md is not None:
+         f = md.get("file") or ""
+-        if md["fl"] and ("arch/riscv/" in f or DRV.search(f)):
++        if md["fl"] and (ARCH_PREFIX in f or DRV.search(f)):
+             return 2
+-        if not md["fl"] and "arch/riscv/" in f and not isinstance(vals["riscv"].get(item), int):
++        if not md["fl"] and ARCH_PREFIX in f and not isinstance(vals[TARGET].get(item), int):
+             return 2
+         return 1
+     files = fn_files.get(item, [])
+-    if any(f.startswith("arch/riscv/") or DRV.search(f) for f in files):
++    if any(f.startswith(ARCH_PREFIX) or DRV.search(f) for f in files):
+         return 2
+     return 1
+ 
+@@ -129,8 +149,9 @@
+ 
+ def main_group(group):
+     tag = "CUR" if group == "CUR" else f"{group}_pre"
+-    facts = json.load(gzip.open(f"/root/work/static2/facts/{tag}.json.gz", "rt"))
+-    vals = json.loads(Path(f"/root/work/static2/values/{group}.json").read_text())
++    facts = json.load(gzip.open(option("--facts"), "rt"))
++    vals = json.loads(Path(option("--values")).read_text())
++    require_values(vals)
+     h = run(facts, vals, {"I1", "I2", "I3", "I4"})
+     pnames, cutoff = patch_names(group)
+     scored, ev_cache = score_sites(h, facts, vals, pnames)
+@@ -163,7 +184,7 @@
+               "raw_nr": h["raw_nr"] if "raw_nr" in top else None, "NR_syscalls": h["NR_syscalls"],
+               "T": sorted(sc for sc in top if sc == "raw_nr" or sites_out.get(sc)),
+               "stats": {"T_before": len([s for s in h["T"] if s in U]), "T_after": len(top), "K": K, "V": V}}
+-    (GEN / f"hints_{group}.json").write_text(json.dumps(pruned, indent=0))
++    (Path(option("--out-dir")) / f"hints_{group}.json").write_text(json.dumps(pruned, indent=0))
+     # criteria 5.1
+     ev = {"group": group, "cutoff": cutoff, "patch_names": len(pnames), "T_ranked": len(ranked),
+           "evidence_counts": {str(k): sum(1 for v in ev_cache.values() if v == k) for k in (1, 2, 3)},
+@@ -171,7 +192,7 @@
+                    scored[sc][0]["e"], scored[sc][0]["depth"], scored[sc][0].get("cb_hops"), scored[sc][0]["P"])
+                    if sc in scored else ("raw_nr",)] for i, sc in enumerate(ranked[:60])]}
+     fi = FIXITEMS.get(group)
+-    if group != "CUR":
++    if TARGET == "riscv" and group != "CUR":
+         if fi == "raw_nr":
+             fsc = ["raw_nr"] if "raw_nr" in sc_score else []
+             fixvals = {"raw_nr": True} if "raw_nr" in top else {}
+@@ -195,18 +216,18 @@
+         ev["fixpoint"] = {"syscalls": ranks, "best_rank": min(ranks.values()) if ranks else None,
+                           "in_topK": [sc for sc, r in ranks.items() if r <= K], "values_kept": fixvals,
+                           "evaluable": fi is not None}
+-    (HERE.parent / f"ranking_{group}.json").write_text(json.dumps(ev, indent=1))
++    (Path(option("--out-dir")) / f"ranking_{group}.json").write_text(json.dumps(ev, indent=1))
+     print(group, "T", len(ranked), "->", len(top), "fix", json.dumps(ev.get("fixpoint")), flush=True)
+ 
+ 
+ def selftest():
+-    facts = {"macros": {"A": {"fl": False, "file": "arch/riscv/include/asm/a.h"},
+-                        "B": {"fl": True, "file": "arch/riscv/include/asm/b.h"},
++    facts = {"macros": {"A": {"fl": False, "file": f"arch/{TARGET}/include/asm/a.h"},
++                        "B": {"fl": True, "file": f"arch/{TARGET}/include/asm/b.h"},
+                         "C": {"fl": True, "file": "include/linux/c.h"}},
+-             "functions": {"u1": {"name": "f_riscv", "file": "arch/riscv/kernel/x.c"},
++             "functions": {"u1": {"name": "f_riscv", "file": f"arch/{TARGET}/kernel/x.c"},
+                            "u2": {"name": "f_pub", "file": "kernel/y.c"}}}
+-    vals = {"riscv": {"A": 1}, "arm64": {"A": 2}, "x86_64": {"A": 2}}
+-    fn_files = {"f_riscv": ["arch/riscv/kernel/x.c"], "f_pub": ["kernel/y.c"]}
++    vals = {TARGET: {"A": 1}, "arm64": {"A": 2}, "x86_64": {"A": 2}}
++    fn_files = {"f_riscv": [f"arch/{TARGET}/kernel/x.c"], "f_pub": ["kernel/y.c"]}
+     got = [evidence(x, facts, vals, fn_files) for x in ("A", "B", "C", "f_riscv", "f_pub")]
+     assert got == [3, 2, 1, 2, 1], got
+     h = {"sites": {"s1": [{"fn": "g", "line": 1, "depth": 4, "cb_hops": 1, "items": ["A"], "objects": ["A"],
+@@ -221,8 +242,18 @@
+ 
+ 
+ if __name__ == "__main__":
+-    if sys.argv[1:] == ["--selftest"]:
++    import argparse
++    parser = argparse.ArgumentParser(description='TARGET 指定目标架构，冻结公式的静态提示排序')
++    parser.add_argument('group', nargs='?')
++    parser.add_argument('--selftest', action='store_true')
++    for flag in ('facts', 'values', 'out-dir', 'nr-tables', 'version-tables', 'kernel-keys', 'patch-names'):
++        parser.add_argument('--' + flag)
++    parser.add_argument('--patch-cutoff', type=int)
++    args = parser.parse_args()
++    if args.selftest:
+         selftest()
+     else:
+-        for g in sys.argv[1:]:
+-            main_group(g)
++        if not all((args.group, args.facts, args.values, args.out_dir)):
++            parser.error('需要 group、--facts、--values、--out-dir')
++        Path(args.out_dir).mkdir(parents=True, exist_ok=True)
++        main_group(args.group)

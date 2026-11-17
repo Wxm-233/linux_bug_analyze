@@ -1,0 +1,26 @@
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -855,6 +855,22 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *fm;
++			int idx;
++
++			fm = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!fm)
++				return -EINVAL;
++
++			for (idx = 0; idx < fm->nr_args; idx++) {
++				u8 reg = regmap[BPF_REG_1 + idx];
++
++				if (fm->arg_size[idx] == sizeof(int))
++					emit_insn(ctx, addiw, reg, reg, 0);
++			}
++		}
++
+ 		move_addr(ctx, t1, func_addr);
+ 		emit_insn(ctx, jirl, LOONGARCH_GPR_RA, t1, 0);
+ 		move_reg(ctx, regmap[BPF_REG_0], LOONGARCH_GPR_A0);

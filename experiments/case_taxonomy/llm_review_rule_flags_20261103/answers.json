@@ -1,0 +1,412 @@
+[
+ {
+  "dir": "Q_00",
+  "src": "ctx",
+  "rule": "CTX",
+  "name": "machine_shutdown",
+  "label": "a",
+  "basis": "qemu",
+  "verdict": "real",
+  "reason": "RISC-V的machine_shutdown先local_irq_disable()再调用smp_shutdown_nonboot_cpus()，后者会拿mutex(cpu_add_remove_lock)并走cpu_down等待完成量，可能睡眠，在关中断下不合法；arm64等架构并不在此前关中断，属RISC-V特有顺序问题"
+ },
+ {
+  "dir": "Q_01",
+  "src": "ctx",
+  "rule": "CTX",
+  "name": "die",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "第86行bust_spinlocks(1)只做++oops_in_progress，不调用console_unblank；第101行调用时oops_in_progress≥1，console_unblank走down_trylock分支，不会到达console_lock/might_sleep，且各架构写法一致。"
+ },
+ {
+  "dir": "Q_02",
+  "src": "ctx",
+  "rule": "CTX",
+  "name": "do_trap_insn_illegal",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "内核态非法指令分支在irqentry_nmi_enter后经do_trap_error调用die，die用普通spinlock_t的die_lock，PREEMPT_RT下会在NMI类硬原子上下文睡眠（x86/arm64用raw锁）；仅oops路径触发，用户态分支不进die。"
+ },
+ {
+  "dir": "Q_03",
+  "src": "ctx",
+  "rule": "CTX",
+  "name": "do_trap_load_misaligned",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "false_alarm",
+  "reason": "copy_from_user只在user_mode(regs)时调用，对应用户态分支，此时处于irqentry_enter_from_user_mode之后的普通进程上下文，可以睡眠；NMI分支（内核态）走memcpy，不会睡眠。"
+ },
+ {
+  "dir": "Q_04",
+  "src": "ctx",
+  "rule": "CTX",
+  "name": "__ftrace_modify_code",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "cond_resched受FTRACE_MODIFY_MAY_SLEEP_FL控制，而stop_machine路径下的command不带FTRACE_MAY_SLEEP，该标志只在可睡眠的默认更新路径设置，所以关中断回调中不会真的调用cond_resched。"
+ },
+ {
+  "dir": "Q_05",
+  "src": "ctx",
+  "rule": "CTX",
+  "name": "swsusp_arch_suspend",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "swsusp_arch_suspend 调用时 secondary CPU 已被下线，num_online_cpus()<2，flush_tlb_all 只走 local_flush_tlb_all，不会进入 on_each_cpu；且 on_each_cpu 本身也不睡眠。"
+ },
+ {
+  "dir": "Q_06",
+  "src": "mech",
+  "rule": "R1",
+  "name": "arch_ftrace_update_code",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "false_alarm",
+  "reason": "RISC-V在v6.6中没有int3类无停机修改机制，改写auipc+jalr需要stop_machine来同步，沿用默认的ftrace_run_stop_machine是有意且正确的，不是缺陷。"
+ },
+ {
+  "dir": "Q_07",
+  "src": "mech",
+  "rule": "R1",
+  "name": "memcpy_fromio",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V沿用asm-generic的memcpy_fromio是有意的合法默认行为，只是其他架构因各自硬件要求做了覆盖，并不构成RISC-V上的实际缺陷。"
+ },
+ {
+  "dir": "Q_08",
+  "src": "mech",
+  "rule": "R1",
+  "name": "ftrace_graph_func",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "默认ftrace_stub是为未实现DYNAMIC_FTRACE_WITH_ARGS的架构设计的合法fallback；v6.6的RISC-V通过传统ftrace_graph_caller路径处理function graph，不依赖ftrace_graph_func，不构成缺陷"
+ },
+ {
+  "dir": "Q_09",
+  "src": "mech",
+  "rule": "R1",
+  "name": "memcpy_toio",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V使用asm-generic默认的memcpy_toio（memcpy到__io_virt）是合法的正常用法，arm64/x86自定义是出于各自架构访问宽度/特性需求，并无RISC-V特有的可触发缺陷，也不涉及锁、中断或不可信下标。"
+ },
+ {
+  "dir": "Q_10",
+  "src": "mech",
+  "rule": "R1",
+  "name": "vmemmap_set_pmd",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "v6.6 的 RISC-V vmemmap_populate 只用基础页映射，不会走到 vmemmap_populate_hugepages/vmemmap_set_pmd，弱默认空实现是预期行为，并非缺陷。"
+ },
+ {
+  "dir": "Q_11",
+  "src": "mech",
+  "rule": "R1",
+  "name": "pcibios_assign_all_busses",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V沿用默认返回1（内核重新分配所有总线号）是合理的有意行为，无固件预枚举依赖，不构成缺陷，仅是与其他架构的实现差异"
+ },
+ {
+  "dir": "Q_12",
+  "src": "mech",
+  "rule": "R1",
+  "name": "ioremap_wc",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "asm-generic 将 ioremap_wc 回退为 ioremap 是设计内的合法默认行为，RISC-V 沿用只是缺少 WC 优化，不涉及正确性缺陷，且并非 RISC-V 特有。"
+ },
+ {
+  "dir": "Q_13",
+  "src": "mech",
+  "rule": "R1",
+  "name": "vmemmap_check_pmd",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "v6.6 中 RISC-V 的 vmemmap_populate 只调用 vmemmap_populate_basepages，不走调用 vmemmap_check_pmd 的 hugepage 路径，默认返回 0 也是正确行为，属有意不使用 PMD 大页映射。"
+ },
+ {
+  "dir": "Q_14",
+  "src": "mech",
+  "rule": "R1",
+  "name": "enter_lazy_tlb",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V 的 satp 在内核与用户间共用页表且 active_mm 引用保证 mm 不被释放，无需 arm64 的 TTBR0 处理或 x86 的 lazy 标记，空默认实现功能正确，仅是缺少可选优化。"
+ },
+ {
+  "dir": "Q_15",
+  "src": "mech",
+  "rule": "R7",
+  "name": "aplic_write_target",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "irq 来自客体可控的 APLIC MMIO 偏移，第98行边界检查后第100行直接索引 aplic->irqs[] 而无 array_index_nospec，符合 Spectre-v1 模式；但后续只是加锁和写入，没有明显的二次依赖访存，实际可利用性低，且与架构无关。"
+ },
+ {
+  "dir": "Q_16",
+  "src": "mech",
+  "rule": "R7",
+  "name": "kvm_riscv_vcpu_pmu_incr_fw",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "fid 只由内核内部调用点以固定常量（如 SBI_PMU_FW_IPI_SENT、MISALIGNED_LOAD 等）传入，并非客体或用户可控，边界检查仅为防御性，不存在可被推测利用的不可信下标。"
+ },
+ {
+  "dir": "Q_17",
+  "src": "mech",
+  "rule": "R7",
+  "name": "kvm_riscv_vcpu_pmu_ctr_cfg_match",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "false_alarm",
+  "reason": "ctr_idx 受位图 in_use 检查/pmu_get_pmc_index 约束，event_code 的访问仅是写常量 true，两处都没有后续依赖读取的泄漏 gadget，推测越界难以利用"
+ },
+ {
+  "dir": "Q_18",
+  "src": "mech",
+  "rule": "R7",
+  "name": "aplic_read_input",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "irq由客体MMIO访问偏移计算得出，194行做了上界检查后196行直接用其索引aplic->irqs，缺少array_index_nospec，存在Spectre-v1模式（利用难度较高，且并非RISC-V特有）"
+ },
+ {
+  "dir": "Q_19",
+  "src": "mech",
+  "rule": "R7",
+  "name": "aplic_read_target",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "irq 由客户机 MMIO 访问偏移推导，经上界检查后直接索引 aplic->irqs[irq] 并读取/加锁，未使用 array_index_nospec，符合 Spectre-v1 模式（与架构无关，利用难度较高、危害较低）"
+ },
+ {
+  "dir": "Q_20",
+  "src": "mech",
+  "rule": "R7",
+  "name": "kvm_riscv_vcpu_pmu_ctr_stop",
+  "label": "b",
+  "basis": "first_annotator_corrected",
+  "verdict": "real",
+  "reason": "fevent_code 来自客体设置的 pmc->event_idx，经 417 行上界检查后直接用作 fw_event[] 下标且无 array_index_nospec；形式上是 Spectre-v1 模式，但仅涉及布尔字段的读写，实际可利用性很低。"
+ },
+ {
+  "dir": "Q_21",
+  "src": "mech",
+  "rule": "R7",
+  "name": "aplic_write_enabled",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "irq 来自 guest 的 MMIO 写，经上界检查后直接索引 aplic->irqs[] 而未用 array_index_nospec，符合 Spectre-v1 模式（通用而非 RISC-V 特有，实际泄露 gadget 有限，严重度低）"
+ },
+ {
+  "dir": "Q_22",
+  "src": "mech",
+  "rule": "R7",
+  "name": "aplic_write_sourcecfg",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "irq 由客户机 MMIO 偏移决定，第62行边界检查后第64行直接索引 aplic->irqs 而无 array_index_nospec，符合 Spectre-v1 模式，只是后续 gadget 受限、利用难度较低。"
+ },
+ {
+  "dir": "Q_23",
+  "src": "mech",
+  "rule": "R7",
+  "name": "dbg_set_reg",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "regno 来自 KGDB 调试器协议，调试器本身已拥有任意内存读写的特权，不是不可信的客体/用户，且各架构写法相同，无实际 Spectre-v1 利用价值。"
+ },
+ {
+  "dir": "Q_24",
+  "src": "mech",
+  "rule": "R7",
+  "name": "riscv_vcpu_set_isa_ext_single",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "real",
+  "reason": "reg_num 来自用户态 KVM_SET_ONE_REG 的 reg->id，经边界检查后直接索引 kvm_isa_ext_arr 而无 array_index_nospec，符合 Spectre-v1 模式（可利用性较低，上游后来也加了加固）"
+ },
+ {
+  "dir": "Q_25",
+  "src": "mech",
+  "rule": "R7",
+  "name": "kvm_riscv_vcpu_pmu_ctr_start",
+  "label": "b",
+  "basis": "first_annotator_corrected",
+  "verdict": "false_alarm",
+  "reason": "fevent_code虽来自客户机且缺少array_index_nospec，但后续只是读取布尔值决定分支和写入，没有依赖该值的二次访存可构成Spectre-v1泄露gadget，实际不可利用"
+ },
+ {
+  "dir": "Q_26",
+  "src": "mech",
+  "rule": "R7",
+  "name": "aplic_read_enabled",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "unsure",
+  "reason": "irq来自客体MMIO且边界检查后直接索引irqs[]无array_index_nospec，模式成立；但仅推测读取一个enabled位并返回，缺少明显的二次依赖访问gadget，可利用性很低，属加固类问题"
+ },
+ {
+  "dir": "Q_27",
+  "src": "mech",
+  "rule": "R8",
+  "name": "kvm_age_gfn",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "real",
+  "reason": "kvm_age_gfn 由通用 MMU notifier 路径调用，范围大小可为任意值（如 memslot 求交后或 MGLRU/DAMON 触发），与 arm64 删除该 WARN_ON 的原因相同，RISC-V 上同样会误触发警告。"
+ },
+ {
+  "dir": "Q_28",
+  "src": "mech",
+  "rule": "R8",
+  "name": "bpf_jit_alloc_exec",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "arm64 的 b89ddf4cca43 是放宽 128MB 区域限制的特性改动而非缺陷修复；RISC-V 仍需把 JIT 内存限制在 BPF_JIT_REGION 内以满足 auipc/jalr 的可达范围，这行写法是有意保留的，没有锁、中断或不可信输入问题。"
+ },
+ {
+  "dir": "Q_29",
+  "src": "mech",
+  "rule": "R10",
+  "name": "__acpi_map_table",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "false_alarm",
+  "reason": "early_ioremap与early_memremap同走通用__early_ioremap，仅页属性不同，且返回类型为__iomem，RISC-V写法功能正确，只是与其他架构约定不一致，并无实际缺陷"
+ },
+ {
+  "dir": "Q_30",
+  "src": "mech",
+  "rule": "R10",
+  "name": "__acpi_unmap_table",
+  "label": "a",
+  "basis": "fixed_upstream",
+  "verdict": "false_alarm",
+  "reason": "early_memunmap 只是 early_iounmap 的包装，RISC-V 的 __acpi_map_table 使用 early_ioremap，与 early_iounmap 配对，功能等价且正确，只是函数命名不同。"
+ },
+ {
+  "dir": "Q_31",
+  "src": "mech",
+  "rule": "R10",
+  "name": "flush_thread",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "v6.6 的 RISC-V 不支持 HAVE_HW_BREAKPOINT，thread_struct 里没有 ptrace_bps，没有需要清理的硬件断点状态，不调用 flush_ptrace_hw_breakpoint 是正确的。"
+ },
+ {
+  "dir": "Q_32",
+  "src": "mech",
+  "rule": "R10",
+  "name": "pci_acpi_scan_root",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V 在 v6.6 中的 pci_acpi_scan_root 是返回 NULL 的桩函数（尚未支持 ACPI PCI 根桥），调用方会按失败处理，不存在遗漏调用导致的缺陷。"
+ },
+ {
+  "dir": "Q_33",
+  "src": "mech",
+  "rule": "R10",
+  "name": "raw_pci_read",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "unsure",
+  "reason": "RISC-V v6.6 的 raw_pci_read 是有意的桩实现，恒返回 PCIBIOS_DEVICE_NOT_FOUND，与 arm64/x86 不一致，属于功能未实现而非典型逻辑缺陷；ACPI 访问 PCI 配置空间时会失败，但没有锁/中断/下标类问题。"
+ },
+ {
+  "dir": "Q_34",
+  "src": "mech",
+  "rule": "R10",
+  "name": "raw_pci_write",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V 在 v6.6 中把 raw_pci_write 作为有意的桩实现，直接返回 PCIBIOS_DEVICE_NOT_FOUND；常规配置空间访问走 pci_ops，不经过此函数，属于功能未完善而非内存/锁/中断相关缺陷。"
+ },
+ {
+  "dir": "Q_35",
+  "src": "mech",
+  "rule": "R10",
+  "name": "vmemmap_populate",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "RISC-V v6.6 仅用 vmemmap_populate_basepages 是合法的通用实现，缺少大页/altmap 支持只是优化和功能差异，不会导致崩溃、泄漏或状态错误，也不涉及锁或中断问题。"
+ },
+ {
+  "dir": "Q_36",
+  "src": "end",
+  "rule": "CTX",
+  "name": "mmu_split_memory_region",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "cond_resched()前第137行已write_unlock(mmu_lock)，睡眠发生在不持锁状态，之后才重新加锁，与调用者的解锁配对，属于KVM通用的合法写法。"
+ },
+ {
+  "dir": "Q_37",
+  "src": "end",
+  "rule": "CTX",
+  "name": "do_page_fault",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "缺页处理在原子上下文(faulthandler_disabled/无mm)会提前返回；到达hugetlb_fault时处于可睡眠的进程上下文且中断状态已按父上下文恢复，mutex_lock合法，且所有架构一致。"
+ },
+ {
+  "dir": "Q_38",
+  "src": "end",
+  "rule": "CTX",
+  "name": "swsusp_arch_suspend",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "休眠快照/恢复时非引导CPU已下线，num_online_cpus()<2使flush_icache_all提前返回，不会走到on_each_cpu；且on_each_cpu是忙等而非睡眠。"
+ },
+ {
+  "dir": "Q_39",
+  "src": "end",
+  "rule": "R7",
+  "name": "pmu_fw_ctr_read_hi",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "fevent_code 来自 pmc->event_idx，该值在 SBI 计数器配置时已校验 event_code < SBI_PMU_FW_MAX 才存入，此处的检查只是防御性的，不是直接使用客体可控的未检查下标；cidx 也已使用 array_index_nospec，因此难以构成可利用的 Spectre-v1 gadget。"
+ },
+ {
+  "dir": "Q_40",
+  "src": "end",
+  "rule": "R7",
+  "name": "pmu_ctr_read",
+  "label": "b",
+  "basis": "first_annotator",
+  "verdict": "false_alarm",
+  "reason": "fevent_code来自写入时已校验的event_idx，读取处再次检查，且推测读出的值只被存入counter_val并返回，没有依赖该值的二次访存，可利用性极低（理论上的加固遗漏）"
+ }
+]

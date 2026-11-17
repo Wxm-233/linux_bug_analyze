@@ -1,0 +1,182 @@
+[
+  {
+    "k": 1,
+    "loc": "include/linux/pgtable.h:537",
+    "verdict": "不可能",
+    "why": "报告列出的 arm64、riscv、s390 都定义了 __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG，使用各自的 ptep_test_and_clear_young 实现。因而这些架构不会执行这里受 #ifndef 保护的通用 pte_mkold 调用，不能把编码表上的改位现象归到此处。"
+  },
+  {
+    "k": 2,
+    "loc": "include/linux/pgtable.h:553",
+    "verdict": "不可能",
+    "why": "报告列出的 arm64、s390 在需要 PMD young 操作的配置下均定义 __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG，覆盖此默认实现。无相关功能时通用函数也是 BUILD_BUG 分支，因此不存在在这些架构执行第 553 行并改坏项的路径。"
+  },
+  {
+    "k": 3,
+    "loc": "mm/swapfile.c:2491",
+    "verdict": "不可能",
+    "why": "unuse_pte_range 先用 softleaf_is_swap 筛出真实交换项，再调用 unuse_pte；后者取 PTL 后用 pte_same_as_swp 与该交换项重新核对，才读取 old_pte（2449～2456 行）。核对后的 old_pte 仍是该非空交换项，loongarch/arm 的 present 输入不会到达此次读取。"
+  },
+  {
+    "k": 4,
+    "loc": "include/linux/swapops.h:73",
+    "verdict": "不可能",
+    "why": "softleaf_from_pte 在调用 pte_swp_clear_flags 前已排除 present 和空项；另一个调用者 pte_same_as_swp 确实可能传入 present，但只清理按值传递的临时副本以比较真实交换项。loongarch/arm 清除 exclusive 位不会清除 present/protnone 判别位，所以误读为 1 也不会造成比较误命中或改写页表。"
+  },
+  {
+    "k": 5,
+    "loc": "include/linux/swapops.h:74",
+    "verdict": "不可能",
+    "why": "两个实际调用入口分别是已排除 present/none 的 softleaf_from_pte，以及仅做交换项匹配的 pte_same_as_swp。后者可能修改 present 的临时副本，但 loongarch/arm 的 present/protnone 判别位保留，结果不可能等于目标非 present 交换项，且该副本从不写回页表。"
+  },
+  {
+    "k": 6,
+    "loc": "include/linux/pgtable.h:1050",
+    "verdict": "不可能",
+    "why": "所列架构中 x86_64、arm64、riscv、powerpc、s390 都以 __HAVE_ARCH_PTEP_SET_WRPROTECT 覆盖此默认实现，剩下的 arm 普通页调用经 fork 的 present 分支进入 wrprotect_ptes。arm 的通用 huge_ptep_set_wrprotect 路径也在 copy_hugetlb_page_range 排除空项、迁移、hwpoison 和 marker 后才进入，因此此调用拿不到报告中的错误项。"
+  },
+  {
+    "k": 7,
+    "loc": "mm/mapping_dirty_helpers.c:43",
+    "verdict": "不可能",
+    "why": "当前树中这组 mapping_dirty_helpers 的实际调用者只有 vmwgfx，配置限于 x86/arm64，所遍历的原生 TTM 映射设置 VM_PFNMAP|VM_IO|VM_DONTEXPAND|VM_DONTDUMP，页表项为 present PFN 映射或空项。该类 VMA 不能注册 userfaultfd 或安装 guard，空项又过不了 pte_write 条件，因此不会把交换格式项或空项传到此次 pte_wrprotect。"
+  },
+  {
+    "k": 8,
+    "loc": "include/linux/pgtable.h:1222",
+    "verdict": "不可能",
+    "why": "报告列出的 x86_64、arm64、riscv、powerpc、s390 在支持 THP 的对应配置中都定义 __HAVE_ARCH_PMDP_SET_WRPROTECT，覆盖此通用函数。并且普通用户路径 copy_huge_pmd 在调用前已把 softleaf 分支分流并确认 pmd_trans_huge，不能用非 present 编码探测值说明此行可达。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/mapping_dirty_helpers.c:101",
+    "verdict": "不可能",
+    "why": "当前实际调用者 vmwgfx 只在 x86/arm64 使用这些回调，其原生 TTM 用户映射具有 VM_PFNMAP/VM_IO 等特殊 VMA 标志，不产生普通交换、迁移或 device-exclusive 项。userfaultfd 注册和 guard 安装也排除这类 VMA，剩余空项的 pte_dirty 为假；故尽管 pagewalk 本身会遍历空项，该调用仍只处理 present 项。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/migrate.c:395",
+    "verdict": "不可能",
+    "why": "remove_migration_pte 使用 PVMW_SYNC|PVMW_MIGRATION 遍历，page_vma_mapped_walk 的 check_pte 在此模式下只有 softleaf_is_migration 成立才返回成功。old_pte 在对应页表锁内读取，因此必为迁移项，present、空项和软件 marker 均被遍历器排除。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/migrate.c:420",
+    "verdict": "不可能",
+    "why": "此处读取的是与第 395 行相同的 old_pte，来源是 PVMW_MIGRATION 遍历器已验证的迁移项。中间构造新的 device-private PTE 不会改变 old_pte 的种类，源页表也仍受 PTL 保护，所以不会将 present/none 输入此交换格式读取接口。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/swapfile.c:2510",
+    "verdict": "不可能",
+    "why": "unuse_pte_range 仅为 softleaf_is_swap 的项调用 unuse_pte；unuse_pte 在 PTL 内再次匹配指定交换项后才于第 2456 行保存 old_pte。之后一直持锁，此处读取的旧值仍为非空真实交换项，与 x86_64/powerpc/s390 的 present 探测输入无关。"
+  },
+  {
+    "k": 13,
+    "loc": "include/linux/swapops.h:75",
+    "verdict": "不可能",
+    "why": "softleaf_from_pte 的入口有 present/none 排除；没有该守卫的 pte_same_as_swp 则只把清理结果与指定真实交换项比较。即使 x86_64/powerpc/s390 在 present 副本上把该位读为 soft-dirty，随后清位仍保留 present 判别，不能误判成目标交换项，也不修改实际 PTE。"
+  },
+  {
+    "k": 14,
+    "loc": "include/linux/swapops.h:76",
+    "verdict": "不可能",
+    "why": "可接收 present 的实际入口 pte_same_as_swp 仅清理临时副本以完成交换项相等比较，softleaf_from_pte 入口则已排除 present 和空项。x86_64/powerpc/s390 的 clear_soft_dirty 不清除 present/protnone 判别位，因此该副本即使改位也不能匹配真实交换项，且没有写回后果。"
+  },
+  {
+    "k": 15,
+    "loc": "mm/huge_memory.c:1868",
+    "verdict": "不可能",
+    "why": "copy_huge_pmd 只在 pmd_is_valid_softleaf 成立时进入此辅助函数，并持有源 PMD 锁。更直接地，此分支先检查迁移项种类，再于第 1865～1866 行重新构造 readable migration 项并赋给 pmd；本次修改的对象按构造就是迁移项。"
+  },
+  {
+    "k": 16,
+    "loc": "mm/huge_memory.c:1882",
+    "verdict": "不可能",
+    "why": "此调用位于 softleaf_is_device_private 且 softleaf_is_device_private_write 的分支内。第 1878～1879 行刚用 make_readable_device_private_entry 和 softleaf_to_pmd 构造了 pmd，因此此处只能修改非 present 的 device-private 项。"
+  },
+  {
+    "k": 17,
+    "loc": "mm/memory.c:956",
+    "verdict": "不可能",
+    "why": "两个实际入口分别是 copy_nonpresent_pte 的 device-exclusive 分支，以及 do_swap_page 的 softleaf_is_device_exclusive 分支。前者持 PTL 调用恢复函数，后者在重新加锁后用 pte_same 核对 orig_pte，故 restore_exclusive_pte 读取的 orig_pte 必为 device-exclusive 项，尚未被新建 present PTE 替换。"
+  },
+  {
+    "k": 18,
+    "loc": "mm/migrate.c:328",
+    "verdict": "不可能",
+    "why": "try_to_map_unused_to_zeropage 只有 remove_migration_pte 这一个调用者，传入的是 PVMW_MIGRATION 遍历后持锁读取的 old_pte。遍历器已经以 softleaf_is_migration 排除 present、空项及其他 marker，所以该参数属于交换格式定义域。"
+  },
+  {
+    "k": 19,
+    "loc": "mm/rmap.c:2133",
+    "verdict": "不可能",
+    "why": "实际调用链是 try_to_unmap_one → ttu_anon_folio → ttu_anon_swapbacked_folio → swp_pte_prepare，旧项来自非迁移模式的 page_vma_mapped_walk 并受 PTL 保护。该遍历器返回 present 或匹配 PFN 的 device-private/device-exclusive 项；present 已由第 2126 行分支处理，因而这里的 else 只能读取非空设备项，不包含 none、普通 marker 或其他错误输入。"
+  },
+  {
+    "k": 20,
+    "loc": "fs/proc/task_mmu.c:2510",
+    "verdict": "不可能",
+    "why": "make_uffd_wp_pte 的调用者 pagemap_scan_pmd_entry 在 pte_offset_map_lock 后读取同一 PTE 并调用本函数，全程持 PTL。第 2506 行已确认 ptent present，ptep_modify_prot_start 返回清除前的旧项而非空槽的新值，因此 old_pte 仍为 present；空项和其他非 present 项走后面的独立分支。"
+  },
+  {
+    "k": 21,
+    "loc": "mm/huge_memory.c:5051",
+    "verdict": "不可能",
+    "why": "set_pmd_migration_entry 的 rmap 调用者使用非迁移 PVMW 遍历，PMD 只能是 present THP 或 device-private；另一个调用者 migrate_vma_collect_huge_pmd 显式拒绝非 present 且非 device-private 的项。函数已将 present 输入分到第 5036 行分支，故这里从 pmdp_huge_get_and_clear 得到的旧值只能是非空 device-private 项。"
+  },
+  {
+    "k": 22,
+    "loc": "mm/huge_memory.c:5110",
+    "verdict": "不可能",
+    "why": "remove_migration_pmd 由 remove_migration_pte 的 PVMW_MIGRATION 遍历分支调用，遍历器在持 PMD 锁时确认 pmd_is_migration_entry 后才返回。此时 *pvmw->pmd 仍是迁移项，folio_mk_pmd 只构造局部变量 pmde，尚未覆盖源 PMD。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/huge_memory.c:5136",
+    "verdict": "不可能",
+    "why": "调用者的 PVMW_MIGRATION 模式已保证 *pvmw->pmd 是受锁保护的迁移项。前面改写的是局部 pmde，即使第 5134 行把 pmde 重编码为 device-private，源 *pvmw->pmd 也要到最后 set_pmd_at 才替换，因此此处读取仍在交换格式定义域内。"
+  },
+  {
+    "k": 24,
+    "loc": "mm/huge_memory.c:1870",
+    "verdict": "不可能",
+    "why": "本分支已检查 migration-write/read-exclusive 种类，并在第 1865～1866 行把 pmd 重建为 readable migration 项。随后 pmd_swp_mksoft_dirty 仅添加交换格式标志，不会把它变为 present 或 none，因此本次 pmd_swp_mkuffd 的输入必为迁移项。"
+  },
+  {
+    "k": 25,
+    "loc": "mm/huge_memory.c:1884",
+    "verdict": "不可能",
+    "why": "这里受 device-private 及其 write 种类判断支配，pmd 刚在第 1878～1879 行由 readable device-private entry 构造。可选的 soft-dirty 修改保持交换格式，所以传给 pmd_swp_mkuffd 的是非空 device-private 项，不能是报告中的 present/none。"
+  },
+  {
+    "k": 26,
+    "loc": "mm/userfaultfd.c:1454",
+    "verdict": "不可能",
+    "why": "调用者在第 1682～1694 行解析源项，等待迁移项，并拒绝所有非 softleaf_is_swap 的输入，因此仅真实交换项进入 move_swap_pte。函数取得双 PTL 后以 is_pte_pages_stable 重新核对原值，才用 ptep_get_and_clear 取旧项；之后添加 soft-dirty 不改变其交换项种类。"
+  },
+  {
+    "k": 27,
+    "loc": "mm/memory.c:4400",
+    "verdict": "不可能",
+    "why": "handle_pte_fault 先排除空项及非 present 项，再持 PTL 以 pte_same 复核后调用 do_wp_page。另一个入口 do_swap_page 则先构造并安装 present PTE 才在同一 PTL 内转入 do_wp_page，所以第 4400 行不可能读取到交换格式项或空项。"
+  },
+  {
+    "k": 28,
+    "loc": "include/linux/pgtable.h:1034",
+    "verdict": "说不清",
+    "why": "x86/riscv 覆盖此默认函数，其余架构的大多数调用点有 present 守卫或使用新建 present 项，但 DAX → vmf_insert_page_mkwrite → insert_page_into_pte_locked 的既有项分支只检查非空及 pte_pfn 相等（mm/memory.c:2489～2498），不能直接作为 present 保证。尚未证明 guard/uffd-wp 等软件标记能在实际 DAX 配置中通过该 PFN 检查，并在使用默认实现的标出架构上产生可观察后果；也未完整排除此路径，因此保留说不清。"
+  },
+  {
+    "k": 29,
+    "loc": "include/linux/pgtable.h:885",
+    "verdict": "不可能",
+    "why": "zap 和 rmap 的批量调用都在 present 分支，并只合并同一 folio 的连续 present 项，故累计脏位所修改的首项是 present。mremap 虽可传入非 present 项，但 nr_ptes 初值为 1，只有 present 输入才扩成批量（mm/mremap.c:269～291），非 present/marker 情况不会进入 while (--nr)，也不会执行本次 pte_mkdirty。"
+  },
+  {
+    "k": 30,
+    "loc": "include/linux/pgtable.h:1680",
+    "verdict": "不可能",
+    "why": "当前实际入口是 mprotect 的 change_present_ptes，由 change_pte_range 的 pte_present 分支在 PTL 内调用；空项、softleaf 和软件 marker 另行处理。批量范围只含同一 folio 的连续 present 项，ptep_modify_prot_start 返回的也是清除前旧项，因此合并脏位时首项仍属于 present 定义域。"
+  }
+]

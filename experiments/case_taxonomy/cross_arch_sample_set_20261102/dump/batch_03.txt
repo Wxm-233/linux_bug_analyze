@@ -1,0 +1,1301 @@
+
+##### A075
+=== 38a94c46660f A 2024-05-10 +21/-12
+riscv: smp: fail booting up smp if inconsistent vlen is detected
+
+Currently we only support Vector for SMP platforms, that is, all SMP
+cores have the same vlenb. If we happen to detect a mismatching vlen, it
+is better to just fail bootting it up to prevent further race/scheduling
+issues.
+
+Also, move .Lsecondary_park forward and chage `tail smp_callin` into a
+regular call in the early assembly. So a core would be parked right
+after a return from smp_callin. Note that a successful smp_callin
+does not return.
+
+Fixes: 7017858eb2d7 ("riscv: Introduce riscv_v_vsize to record size of Vector context")
+functions: arch/riscv/kernel/smpboot.c:smp_callin
+fixes: 7017858eb2d7(riscv)
+ arch/riscv/kernel/head.S    | 19 ++++++++++++-------
+ arch/riscv/kernel/smpboot.c | 14 +++++++++-----
+ 2 files changed, 21 insertions(+), 12 deletions(-)
+diff --git a/arch/riscv/kernel/head.S b/arch/riscv/kernel/head.S
+index 4236a69c35cb..a00f7523cb91 100644
+--- a/arch/riscv/kernel/head.S
++++ b/arch/riscv/kernel/head.S
+@@ -166,7 +166,18 @@ secondary_start_sbi:
+ 	call .Lsetup_trap_vector
+ 	scs_load_current
+-	tail smp_callin
++	call smp_callin
+ #endif /* CONFIG_SMP */
+ 
++.align 2
++.Lsecondary_park:
++	/*
++	 * Park this hart if we:
++	 *  - have too many harts on CONFIG_RISCV_BOOT_SPINWAIT
++	 *  - receive an early trap, before setup_trap_vector finished
++	 *  - fail in smp_callin(), as a successful one wouldn't return
++	 */
++	wfi
++	j .Lsecondary_park
++
+ .align 2
+ .Lsetup_trap_vector:
+@@ -182,10 +193,4 @@ secondary_start_sbi:
+ 	ret
+ 
+-.align 2
+-.Lsecondary_park:
+-	/* We lack SMP support or have too many harts, so park this hart */
+-	wfi
+-	j .Lsecondary_park
+-
+ SYM_CODE_END(_start)
+ 
+diff --git a/arch/riscv/kernel/smpboot.c b/arch/riscv/kernel/smpboot.c
+index 1319b29ce3b5..19baf0d574d3 100644
+--- a/arch/riscv/kernel/smpboot.c
++++ b/arch/riscv/kernel/smpboot.c
+@@ -215,4 +215,13 @@ asmlinkage __visible void smp_callin(void)
+ 	unsigned int curr_cpuid = smp_processor_id();
+ 
++	if (has_vector()) {
++		/*
++		 * Return as early as possible so the hart with a mismatching
++		 * vlen won't boot.
++		 */
++		if (riscv_v_setup_vsize())
++			return;
++	}
++
+ 	/* All kernel threads share the same mm context.  */
+ 	mmgrab(mm);
+@@ -227,9 +236,4 @@ asmlinkage __visible void smp_callin(void)
+ 	set_cpu_online(curr_cpuid, true);
+ 
+-	if (has_vector()) {
+-		if (riscv_v_setup_vsize())
+-			elf_hwcap &= ~COMPAT_HWCAP_ISA_V;
+-	}
+... (3 more diff lines)
+
+##### A076
+=== fb1cf0878328 A 2024-05-15 +22/-6
+riscv: rewrite __kernel_map_pages() to fix sleeping in invalid context
+
+__kernel_map_pages() is a debug function which clears the valid bit in page
+table entry for deallocated pages to detect illegal memory accesses to
+freed pages.
+
+This function set/clear the valid bit using __set_memory(). __set_memory()
+acquires init_mm's semaphore, and this operation may sleep. This is
+problematic, because  __kernel_map_pages() can be called in atomic context,
+and thus is illegal to sleep. An example warning that this causes:
+
+BUG: sleeping function called from invalid context at kernel/locking/rwsem.c:1578
+in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 2, name: kthreadd
+preempt_count: 2, expected: 0
+CPU: 0 PID: 2 Comm: kthreadd Not tainted 6.9.0-g1d4c6d784ef6 #37
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+[<ffffffff800060dc>] dump_backtrace+0x1c/0x24
+[<ffffffff8091ef6e>] show_stack+0x2c/0x38
+[<ffffffff8092baf8>] dump_stack_lvl+0x5a/0x72
+[<ffffffff8092bb24>] dump_stack+0x14/0x1c
+[<ffffffff8003b7ac>] __might_resched+0x104/0x10e
+[<ffffffff8003b7f4>] __might_sleep+0x3e/0x62
+[<ffffffff8093276a>] down_write+0x20/0x72
+[<ffffffff8000cf00>] __set_memory+0x82/0x2fa
+[<ffffffff8000d324>] __kernel_map_pages+0x5a/0xd4
+[<ffffffff80196cca>] __alloc_pages_bulk+0x3b2/0x43a
+[<ffffffff8018ee82>] __vmalloc_node_range+0x196/0x6ba
+[<ffffffff80011904>] copy_process+0x72c/0x17ec
+[<ffffffff80012ab4>] kernel_clone+0x60/0x2fe
+[<ffffffff80012f62>] kernel_thread+0x82/0xa0
+[<ffffffff8003552c>] kthreadd+0x14a/0x1be
+[<ffffffff809357de>] ret_from_fork+0xe/0x1c
+
+Rewrite this function with apply_to_existing_page_range(). It is fine to
+not have any locking, because __kernel_map_pages() works with pages being
+allocated/deallocated and those pages are not changed by anyone else in the
+meantime.
+
+Fixes: 5fde3db5eb02 ("riscv: add ARCH_SUPPORTS_DEBUG_PAGEALLOC support")
+functions: arch/riscv/mm/pageattr.c:__kernel_map_pages
+fixes: 5fde3db5eb02(riscv)
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index 410056a50aa9..271d01a5ba4d 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -388,4 +388,20 @@ int set_direct_map_default_noflush(struct page *page)
+ 
+ #ifdef CONFIG_DEBUG_PAGEALLOC
++static int debug_pagealloc_set_page(pte_t *pte, unsigned long addr, void *data)
++{
++	int enable = *(int *)data;
++
++	unsigned long val = pte_val(ptep_get(pte));
++
++	if (enable)
++		val |= _PAGE_PRESENT;
++	else
++		val &= ~_PAGE_PRESENT;
++
++	set_pte(pte, __pte(val));
++
++	return 0;
++}
++
+ void __kernel_map_pages(struct page *page, int numpages, int enable)
+ {
+@@ -393,10 +409,10 @@ void __kernel_map_pages(struct page *page, int numpages, int enable)
+ 		return;
+ 
+-	if (enable)
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(_PAGE_PRESENT), __pgprot(0));
+-	else
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(0), __pgprot(_PAGE_PRESENT));
++	unsigned long start = (unsigned long)page_address(page);
++	unsigned long size = PAGE_SIZE * numpages;
++
++	apply_to_existing_page_range(&init_mm, start, size, debug_pagealloc_set_page, &enable);
++
++	flush_tlb_kernel_range(start, start + size);
+ }
+ #endif
+
+##### A077
+=== a2a4d4a6a0bf A 2024-05-21 +14/-6
+riscv: stacktrace: fixed walk_stackframe()
+
+If the load access fault occures in a leaf function (with
+CONFIG_FRAME_POINTER=y), when wrong stack trace will be displayed:
+
+[<ffffffff804853c2>] regmap_mmio_read32le+0xe/0x1c
+---[ end trace 0000000000000000 ]---
+
+Registers dump:
+    ra     0xffffffff80485758 <regmap_mmio_read+36>
+    sp     0xffffffc80200b9a0
+    fp     0xffffffc80200b9b0
+    pc     0xffffffff804853ba <regmap_mmio_read32le+6>
+
+Stack dump:
+    0xffffffc80200b9a0:  0xffffffc80200b9e0  0xffffffc80200b9e0
+    0xffffffc80200b9b0:  0xffffffff8116d7e8  0x0000000000000100
+    0xffffffc80200b9c0:  0xffffffd8055b9400  0xffffffd8055b9400
+    0xffffffc80200b9d0:  0xffffffc80200b9f0  0xffffffff8047c526
+    0xffffffc80200b9e0:  0xffffffc80200ba30  0xffffffff8047fe9a
+
+The assembler dump of the function preambula:
+    add     sp,sp,-16
+    sd      s0,8(sp)
+    add     s0,sp,16
+
+In the fist stack frame, where ra is not stored on the stack we can
+observe:
+
+        0(sp)                  8(sp)
+        .---------------------------------------------.
+    sp->|       frame->fp      | frame->ra (saved fp) |
+        |---------------------------------------------|
+    fp->|         ....         |         ....         |
+        |---------------------------------------------|
+        |                      |                      |
+
+and in the code check is performed:
+	if (regs && (regs->epc == pc) && (frame->fp & 0x7))
+
+I see no reason to check frame->fp value at all, because it is can be
+functions: arch/riscv/kernel/stacktrace.c:walk_stackframe
+fixes: f766f77a74f5(riscv)
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index 64a9c093aef9..528ec7cc9a62 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -19,4 +19,14 @@
+ extern asmlinkage void ret_from_exception(void);
+ 
++static inline int fp_is_valid(unsigned long fp, unsigned long sp)
++{
++	unsigned long low, high;
++
++	low = sp + sizeof(struct stackframe);
++	high = ALIGN(sp, THREAD_SIZE);
++
++	return !(fp < low || fp > high || fp & 0x07);
++}
++
+ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			     bool (*fn)(void *, unsigned long), void *arg)
+@@ -42,5 +52,4 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 
+ 	for (;;) {
+-		unsigned long low, high;
+ 		struct stackframe *frame;
+ 
+@@ -48,13 +57,12 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			break;
+ 
+-		/* Validate frame pointer */
+-		low = sp + sizeof(struct stackframe);
+-		high = ALIGN(sp, THREAD_SIZE);
+-		if (unlikely(fp < low || fp > high || fp & 0x7))
++		if (unlikely(!fp_is_valid(fp, sp)))
+ 			break;
++
+ 		/* Unwind stack frame */
+ 		frame = (struct stackframe *)fp - 1;
+ 		sp = fp;
+-		if (regs && (regs->epc == pc) && (frame->fp & 0x7)) {
++		if (regs && (regs->epc == pc) && fp_is_valid(frame->ra, sp)) {
++			/* We hit function where ra is not saved on the stack */
+ 			fp = frame->ra;
+ 			pc = regs->ra;
+
+##### A078
+=== 6ca445d8af0e A 2024-05-23 +9/-0
+riscv: Fix early ftrace nop patching
+
+Commit c97bf629963e ("riscv: Fix text patching when IPI are used")
+converted ftrace_make_nop() to use patch_insn_write() which does not
+emit any icache flush relying entirely on __ftrace_modify_code() to do
+that.
+
+But we missed that ftrace_make_nop() was called very early directly when
+converting mcount calls into nops (actually on riscv it converts 2B nops
+emitted by the compiler into 4B nops).
+
+This caused crashes on multiple HW as reported by Conor and Björn since
+the booting core could have half-patched instructions in its icache
+which would trigger an illegal instruction trap: fix this by emitting a
+local flush icache when early patching nops.
+
+Fixes: c97bf629963e ("riscv: Fix text patching when IPI are used")
+functions: arch/riscv/kernel/ftrace.c:ftrace_init_nop
+fixes: c97bf629963e(riscv)
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+index dd8d07146116..ce79c558a4c8 100644
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -14,4 +14,10 @@ static inline void local_flush_icache_all(void)
+ }
+ 
++static inline void local_flush_icache_range(unsigned long start,
++					    unsigned long end)
++{
++	local_flush_icache_all();
++}
++
+ #define PG_dcache_clean PG_arch_1
+ 
+diff --git a/arch/riscv/kernel/ftrace.c b/arch/riscv/kernel/ftrace.c
+index 4d14eadcd765..87cbd86576b2 100644
+--- a/arch/riscv/kernel/ftrace.c
++++ b/arch/riscv/kernel/ftrace.c
+@@ -121,4 +121,7 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
+ 	mutex_unlock(&text_mutex);
+ 
++	if (!mod)
++		local_flush_icache_range(rec->ip, rec->ip + MCOUNT_INSN_SIZE);
++
+ 	return out;
+ }
+
+##### A079
+=== a638b0461b58 A 2024-05-23 +2/-3
+riscv: prevent pt_regs corruption for secondary idle threads
+
+Top of the kernel thread stack should be reserved for pt_regs. However
+this is not the case for the idle threads of the secondary boot harts.
+Their stacks overlap with their pt_regs, so both may get corrupted.
+
+Similar issue has been fixed for the primary hart, see c7cdd96eca28
+("riscv: prevent stack corruption by reserving task_pt_regs(p) early").
+However that fix was not propagated to the secondary harts. The problem
+has been noticed in some CPU hotplug tests with V enabled. The function
+smp_callin stored several registers on stack, corrupting top of pt_regs
+structure including status field. As a result, kernel attempted to save
+or restore inexistent V context.
+
+Fixes: 9a2451f18663 ("RISC-V: Avoid using per cpu array for ordered booting")
+Fixes: 2875fe056156 ("RISC-V: Add cpu_ops and modify default booting method")
+functions: arch/riscv/kernel/cpu_ops_sbi.c:sbi_cpu_start, arch/riscv/kernel/cpu_ops_spinwait.c:cpu_update_secondary_bootdata
+fixes: 9a2451f18663(riscv), 2875fe056156(riscv)
+diff --git a/arch/riscv/kernel/cpu_ops_sbi.c b/arch/riscv/kernel/cpu_ops_sbi.c
+index 1cc7df740edd..e6fbaaf54956 100644
+--- a/arch/riscv/kernel/cpu_ops_sbi.c
++++ b/arch/riscv/kernel/cpu_ops_sbi.c
+@@ -73,5 +73,5 @@ static int sbi_cpu_start(unsigned int cpuid, struct task_struct *tidle)
+ 	smp_mb();
+ 	bdata->task_ptr = tidle;
+-	bdata->stack_ptr = task_stack_page(tidle) + THREAD_SIZE;
++	bdata->stack_ptr = task_pt_regs(tidle);
+ 	/* Make sure boot data is updated */
+ 	smp_mb();
+diff --git a/arch/riscv/kernel/cpu_ops_spinwait.c b/arch/riscv/kernel/cpu_ops_spinwait.c
+index 613872b0a21a..24869eb88908 100644
+--- a/arch/riscv/kernel/cpu_ops_spinwait.c
++++ b/arch/riscv/kernel/cpu_ops_spinwait.c
+@@ -35,6 +35,5 @@ static void cpu_update_secondary_bootdata(unsigned int cpuid,
+ 	/* Make sure tidle is updated */
+ 	smp_mb();
+-	WRITE_ONCE(__cpu_spinwait_stack_pointer[hartid],
+-		   task_stack_page(tidle) + THREAD_SIZE);
++	WRITE_ONCE(__cpu_spinwait_stack_pointer[hartid], task_pt_regs(tidle));
+ 	WRITE_ONCE(__cpu_spinwait_task_pointer[hartid], tidle);
+ }
+
+##### A080
+=== 7bed51617401 A 2024-05-26 +1/-1
+riscv: enable HAVE_ARCH_HUGE_VMAP for XIP kernel
+
+HAVE_ARCH_HUGE_VMAP also works on XIP kernel, so remove its dependency on
+!XIP_KERNEL.
+
+This also fixes a boot problem for XIP kernel introduced by the commit in
+"Fixes:". This commit used huge page mapping for vmemmap, but huge page
+vmap was not enabled for XIP kernel.
+
+Fixes: ff172d4818ad ("riscv: Use hugepage mappings for vmemmap")
+functions: 
+fixes: ff172d4818ad(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index b94176e25be1..0525ee2d63c7 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -107,5 +107,5 @@ config RISCV
+ 	select HAVE_ARCH_AUDITSYSCALL
+ 	select HAVE_ARCH_HUGE_VMALLOC if HAVE_ARCH_HUGE_VMAP
+-	select HAVE_ARCH_HUGE_VMAP if MMU && 64BIT && !XIP_KERNEL
++	select HAVE_ARCH_HUGE_VMAP if MMU && 64BIT
+ 	select HAVE_ARCH_JUMP_LABEL if !XIP_KERNEL
+ 	select HAVE_ARCH_JUMP_LABEL_RELATIVE if !XIP_KERNEL
+
+##### A081
+=== 1d84afaf0252 A 2024-05-30 +12/-10
+riscv: Fix fully ordered LR/SC xchg[8|16]() implementations
+
+The fully ordered versions of xchg[8|16]() using LR/SC lack the
+necessary memory barriers to guarantee the order.
+
+Fix this by matching what is already implemented in the fully ordered
+versions of cmpxchg() using LR/SC.
+
+Fixes: a8ed2b7a2c13 ("riscv/cmpxchg: Implement xchg for variables of size 1 and 2")
+functions: 
+fixes: a8ed2b7a2c13(riscv)
+ arch/riscv/include/asm/cmpxchg.h | 22 ++++++++++++----------
+ 1 file changed, 12 insertions(+), 10 deletions(-)
+diff --git a/arch/riscv/include/asm/cmpxchg.h b/arch/riscv/include/asm/cmpxchg.h
+index ddb002ed89de..808b4c78462e 100644
+--- a/arch/riscv/include/asm/cmpxchg.h
++++ b/arch/riscv/include/asm/cmpxchg.h
+@@ -11,5 +11,5 @@
+ #include <asm/fence.h>
+ 
+-#define __arch_xchg_masked(prepend, append, r, p, n)			\
++#define __arch_xchg_masked(sc_sfx, prepend, append, r, p, n)		\
+ ({									\
+ 	u32 *__ptr32b = (u32 *)((ulong)(p) & ~0x3);			\
+@@ -26,5 +26,5 @@
+ 	       "	and  %1, %0, %z4\n"				\
+ 	       "	or   %1, %1, %z3\n"				\
+-	       "	sc.w %1, %1, %2\n"				\
++	       "	sc.w" sc_sfx " %1, %1, %2\n"			\
+ 	       "	bnez %1, 0b\n"					\
+ 	       append							\
+@@ -47,5 +47,6 @@
+ })
+ 
+-#define _arch_xchg(ptr, new, sfx, prepend, append)			\
++#define _arch_xchg(ptr, new, sc_sfx, swap_sfx, prepend,			\
++		   sc_append, swap_append)				\
+ ({									\
+ 	__typeof__(ptr) __ptr = (ptr);					\
+@@ -56,13 +57,13 @@
+ 	case 1:								\
+ 	case 2:								\
+-		__arch_xchg_masked(prepend, append,			\
++		__arch_xchg_masked(sc_sfx, prepend, sc_append,		\
+ 				   __ret, __ptr, __new);		\
+ 		break;							\
+ 	case 4:								\
+-		__arch_xchg(".w" sfx, prepend, append,			\
++		__arch_xchg(".w" swap_sfx, prepend, swap_append,	\
+ 			      __ret, __ptr, __new);			\
+ 		break;							\
+ 	case 8:								\
+-		__arch_xchg(".d" sfx, prepend, append,			\
++		__arch_xchg(".d" swap_sfx, prepend, swap_append,	\
+ 			      __ret, __ptr, __new);			\
+ 		break;							\
+@@ -74,14 +75,15 @@
+ 
+ #define arch_xchg_relaxed(ptr, x)					\
+-	_arch_xchg(ptr, x, "", "", "")
++	_arch_xchg(ptr, x, "", "", "", "", "")
+ 
+ #define arch_xchg_acquire(ptr, x)					\
+-	_arch_xchg(ptr, x, "", "", RISCV_ACQUIRE_BARRIER)
++	_arch_xchg(ptr, x, "", "", "",					\
++		   RISCV_ACQUIRE_BARRIER, RISCV_ACQUIRE_BARRIER)
+ 
+ #define arch_xchg_release(ptr, x)					\
+-	_arch_xchg(ptr, x, "", RISCV_RELEASE_BARRIER, "")
++	_arch_xchg(ptr, x, "", "", RISCV_RELEASE_BARRIER, "", "")
+ 
+ #define arch_xchg(ptr, x)						\
+-	_arch_xchg(ptr, x, ".aqrl", "", "")
+... (3 more diff lines)
+
+##### A082
+=== 04a2aef59cfe A 2024-06-06 +1/-1
+RISC-V: fix vector insn load/store width mask
+
+RVFDQ_FL_FS_WIDTH_MASK should be 3 bits [14-12], shifted down by 12 bits.
+Replace GENMASK(3, 0) with GENMASK(2, 0).
+
+Fixes: cd054837243b ("riscv: Allocate user's vector context in the first-use trap")
+functions: 
+fixes: cd054837243b(riscv)
+diff --git a/arch/riscv/include/asm/insn.h b/arch/riscv/include/asm/insn.h
+index 06e439eeef9a..09fde95a5e8f 100644
+--- a/arch/riscv/include/asm/insn.h
++++ b/arch/riscv/include/asm/insn.h
+@@ -146,5 +146,5 @@
+ /* parts of opcode for RVF, RVD and RVQ */
+ #define RVFDQ_FL_FS_WIDTH_OFF	12
+-#define RVFDQ_FL_FS_WIDTH_MASK	GENMASK(3, 0)
++#define RVFDQ_FL_FS_WIDTH_MASK	GENMASK(2, 0)
+ #define RVFDQ_FL_FS_WIDTH_W	2
+ #define RVFDQ_FL_FS_WIDTH_D	3
+
+##### A083
+=== 23b2188920a2 A 2024-06-13 +1/-1
+riscv: stacktrace: convert arch_stack_walk() to noinstr
+
+arch_stack_walk() is called intensively in function_graph when the
+kernel is compiled with CONFIG_TRACE_IRQFLAGS. As a result, the kernel
+logs a lot of arch_stack_walk and its sub-functions into the ftrace
+buffer. However, these functions should not appear on the trace log
+because they are part of the ftrace itself. This patch references what
+arm64 does for the smae function. So it further prevent the re-enter
+kprobe issue, which is also possible on riscv.
+
+Related-to: commit 0fbcd8abf337 ("arm64: Prohibit instrumentation on arch_stack_walk()")
+Fixes: 680341382da5 ("riscv: add CALLER_ADDRx support")
+functions: 
+fixes: 680341382da5(riscv)
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index 528ec7cc9a62..0d3f00eb0bae 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -157,5 +157,5 @@ unsigned long __get_wchan(struct task_struct *task)
+ }
+ 
+-noinline void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
++noinline noinstr void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
+ 		     struct task_struct *task, struct pt_regs *regs)
+ {
+
+##### A084
+=== ee3fab10cb15 A 2024-06-17 +6/-7
+riscv: cacheinfo: remove the useless input parameter (node) of ci_leaf_init()
+
+ci_leaf_init() is a declared static function. The implementation of the
+function body and the caller do not use the parameter (struct device_node
+*node) input parameter, so remove it.
+
+Fixes: 6a24915145c9 ("Revert "riscv: Set more data to cacheinfo"")
+functions: arch/riscv/kernel/cacheinfo.c:populate_cache_leaves
+fixes: 6a24915145c9(riscv)
+diff --git a/arch/riscv/kernel/cacheinfo.c b/arch/riscv/kernel/cacheinfo.c
+index 09e9b88110d1..30a6878287ad 100644
+--- a/arch/riscv/kernel/cacheinfo.c
++++ b/arch/riscv/kernel/cacheinfo.c
+@@ -65,5 +65,4 @@ uintptr_t get_cache_geometry(u32 level, enum cache_type type)
+ 
+ static void ci_leaf_init(struct cacheinfo *this_leaf,
+-			 struct device_node *node,
+ 			 enum cache_type type, unsigned int level)
+ {
+@@ -81,9 +80,9 @@ int populate_cache_leaves(unsigned int cpu)
+ 
+ 	if (of_property_read_bool(np, "cache-size"))
+-		ci_leaf_init(this_leaf++, np, CACHE_TYPE_UNIFIED, level);
++		ci_leaf_init(this_leaf++, CACHE_TYPE_UNIFIED, level);
+ 	if (of_property_read_bool(np, "i-cache-size"))
+-		ci_leaf_init(this_leaf++, np, CACHE_TYPE_INST, level);
++		ci_leaf_init(this_leaf++, CACHE_TYPE_INST, level);
+ 	if (of_property_read_bool(np, "d-cache-size"))
+-		ci_leaf_init(this_leaf++, np, CACHE_TYPE_DATA, level);
++		ci_leaf_init(this_leaf++, CACHE_TYPE_DATA, level);
+ 
+ 	prev = np;
+@@ -98,9 +97,9 @@ int populate_cache_leaves(unsigned int cpu)
+ 			break;
+ 		if (of_property_read_bool(np, "cache-size"))
+-			ci_leaf_init(this_leaf++, np, CACHE_TYPE_UNIFIED, level);
++			ci_leaf_init(this_leaf++, CACHE_TYPE_UNIFIED, level);
+ 		if (of_property_read_bool(np, "i-cache-size"))
+-			ci_leaf_init(this_leaf++, np, CACHE_TYPE_INST, level);
++			ci_leaf_init(this_leaf++, CACHE_TYPE_INST, level);
+ 		if (of_property_read_bool(np, "d-cache-size"))
+-			ci_leaf_init(this_leaf++, np, CACHE_TYPE_DATA, level);
++			ci_leaf_init(this_leaf++, CACHE_TYPE_DATA, level);
+ 		levels = level;
+ 	}
+
+##### A085
+=== 3b6564427aea A 2024-06-22 +11/-4
+riscv: Fix linear mapping checks for non-contiguous memory regions
+
+The RISC-V kernel already has checks to ensure that memory which would
+lie outside of the linear mapping is not used. However those checks
+use memory_limit, which is used to implement the mem= kernel command
+line option (to limit the total amount of memory, not its address
+range). When memory is made up of two or more non-contiguous memory
+banks this check is incorrect.
+
+Two changes are made here:
+ - add a call in setup_bootmem() to memblock_cap_memory_range() which
+   will cause any memory which falls outside the linear mapping to be
+   removed from the memory regions.
+ - remove the check in create_linear_mapping_page_table() which was
+   intended to remove memory which is outside the liner mapping based
+   on memory_limit, as it is no longer needed. Note a check for
+   mapping more memory than memory_limit (to implement mem=) is
+   unnecessary because of the existing call to
+   memblock_enforce_memory_limit().
+
+This issue was seen when booting on a SV39 platform with two memory
+banks:
+  0x00,80000000 1GiB
+  0x20,00000000 32GiB
+This memory range is 158GiB from top to bottom, but the linear mapping
+is limited to 128GiB, so the lower block of RAM will be mapped at
+PAGE_OFFSET, and the upper block straddles the top of the linear
+mapping.
+
+This causes the following Oops:
+[    0.000000] Linux version 6.10.0-rc2-gd3b8dd5b51dd-dirty (stuart.menefy@codasip.com) (riscv64-codasip-linux-gcc (GCC) 13.2.0, GNU ld (GNU Binutils) 2.41.0.20231213) #20 SMP Sat Jun 22 11:34:22 BST 2024
+[    0.000000] memblock_add: [0x0000000080000000-0x00000000bfffffff] early_init_dt_add_memory_arch+0x4a/0x52
+[    0.000000] memblock_add: [0x0000002000000000-0x00000027ffffffff] early_init_dt_add_memory_arch+0x4a/0x52
+...
+[    0.000000] memblock_alloc_try_nid: 23724 bytes align=0x8 nid=-1 from=0x0000000000000000 max_addr=0x0000000000000000 early_init_dt_alloc_memory_arch+0x1e/0x48
+[    0.000000] memblock_reserve: [0x00000027ffff5350-0x00000027ffffaffb] memblock_alloc_range_nid+0xb8/0x132
+[    0.000000] Unable to handle kernel paging request at virtual address fffffffe7fff5350
+[    0.000000] Oops [#1]
+[    0.000000] Modules linked in:
+[    0.000000] CPU: 0 PID: 0 Comm: swapper Not tainted 6.10.0-rc2-gd3b8dd5b51dd-dirty #20
+[    0.000000] Hardware name: codasip,a70x (DT)
+functions: arch/riscv/mm/init.c:setup_bootmem, arch/riscv/mm/init.c:create_linear_mapping_page_table
+fixes: c99127c45248(riscv)
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index bfa2dea95354..8b698d9609e7 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -235,6 +235,4 @@ static void __init setup_bootmem(void)
+ 	memblock_reserve(vmlinux_start, vmlinux_end - vmlinux_start);
+ 
+-	phys_ram_end = memblock_end_of_DRAM();
+-
+ 	/*
+ 	 * Make sure we align the start of the memory on a PMD boundary so that
+@@ -251,4 +249,14 @@ static void __init setup_bootmem(void)
+ 		kernel_map.va_pa_offset = PAGE_OFFSET - phys_ram_base;
+ 
++	/*
++	 * The size of the linear page mapping may restrict the amount of
++	 * usable RAM.
++	 */
++	if (IS_ENABLED(CONFIG_64BIT)) {
++		max_mapped_addr = __pa(PAGE_OFFSET) + KERN_VIRT_SIZE;
++		memblock_cap_memory_range(phys_ram_base,
++					  max_mapped_addr - phys_ram_base);
++	}
++
+ 	/*
+ 	 * Reserve physical address space that would be mapped to virtual
+@@ -267,4 +275,5 @@ static void __init setup_bootmem(void)
+ 	}
+ 
++	phys_ram_end = memblock_end_of_DRAM();
+ 	min_low_pfn = PFN_UP(phys_ram_base);
+ 	max_low_pfn = max_pfn = PFN_DOWN(phys_ram_end);
+@@ -1285,6 +1294,4 @@ static void __init create_linear_mapping_page_table(void)
+ 		    __pa(PAGE_OFFSET) < end)
+ 			start = __pa(PAGE_OFFSET);
+-		if (end >= __pa(PAGE_OFFSET) + memory_limit)
+-			end = __pa(PAGE_OFFSET) + memory_limit;
+ 
+ 		create_linear_mapping_range(start, end, 0, NULL);
+
+##### A086
+=== 9f1e16fb1fc9 A 2024-06-22 +13/-5
+riscv, bpf: Fix out-of-bounds issue when preparing trampoline image
+
+We get the size of the trampoline image during the dry run phase and
+allocate memory based on that size. The allocated image will then be
+populated with instructions during the real patch phase. But after
+commit 26ef208c209a ("bpf: Use arch_bpf_trampoline_size"), the `im`
+argument is inconsistent in the dry run and real patch phase. This may
+cause emit_imm in RV64 to generate a different number of instructions
+when generating the 'im' address, potentially causing out-of-bounds
+issues. Let's emit the maximum number of instructions for the "im"
+address during dry run to fix this problem.
+
+Fixes: 26ef208c209a ("bpf: Use arch_bpf_trampoline_size")
+functions: arch/riscv/net/bpf_jit_comp64.c:__arch_prepare_bpf_trampoline, arch/riscv/net/bpf_jit_comp64.c:arch_prepare_bpf_trampoline
+fixes: 26ef208c209a(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index d5cebb0b0afe..e6d690657f3e 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -17,4 +17,6 @@
+ 
+ #define RV_FENTRY_NINSNS 2
++/* imm that allows emit_imm to emit max count insns */
++#define RV_MAX_COUNT_IMM 0x7FFF7FF7FF7FF7FF
+ 
+ #define RV_REG_TCC RV_REG_A6
+@@ -917,5 +919,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
+-		emit_imm(RV_REG_A0, (const s64)im, ctx);
++		emit_imm(RV_REG_A0, ctx->insns ? (const s64)im : RV_MAX_COUNT_IMM, ctx);
+ 		ret = emit_call((const u64)__bpf_tramp_enter, true, ctx);
+ 		if (ret)
+@@ -978,5 +980,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
+ 		im->ip_epilogue = ctx->insns + ctx->ninsns;
+-		emit_imm(RV_REG_A0, (const s64)im, ctx);
++		emit_imm(RV_REG_A0, ctx->insns ? (const s64)im : RV_MAX_COUNT_IMM, ctx);
+ 		ret = emit_call((const u64)__bpf_tramp_exit, true, ctx);
+ 		if (ret)
+@@ -1047,4 +1049,5 @@ int arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *image,
+ 	int ret;
+ 	struct rv_jit_context ctx;
++	u32 size = image_end - image;
+ 
+ 	ctx.ninsns = 0;
+@@ -1060,9 +1063,14 @@ int arch_prepare_bpf_trampoline(struct bpf_tramp_image *im, void *image,
+ 	ret = __arch_prepare_bpf_trampoline(im, m, tlinks, func_addr, flags, &ctx);
+ 	if (ret < 0)
+-		return ret;
++		goto out;
+ 
+-	bpf_flush_icache(ctx.insns, ctx.insns + ctx.ninsns);
++	if (WARN_ON(size < ninsns_rvoff(ctx.ninsns))) {
++		ret = -E2BIG;
++		goto out;
++	}
+ 
+-	return ninsns_rvoff(ret);
++	bpf_flush_icache(image, image_end);
++out:
++	return ret < 0 ? ret : size;
+ }
+ 
+
+##### A087
+=== edf2d546bfd6 A 2024-06-24 +20/-13
+riscv: patch: Flush the icache right after patching to avoid illegal insns
+
+We cannot delay the icache flush after patching some functions as we may
+have patched a function that will get called before the icache flush.
+
+The only way to completely avoid such scenario is by flushing the icache
+as soon as we patch a function. This will probably be costly as we don't
+batch the icache maintenance anymore.
+
+Fixes: 6ca445d8af0e ("riscv: Fix early ftrace nop patching")
+functions: arch/riscv/kernel/ftrace.c:ftrace_init_nop, arch/riscv/kernel/ftrace.c:__ftrace_modify_code, arch/riscv/kernel/patch.c:__patch_insn_set, arch/riscv/kernel/patch.c:__patch_insn_write, arch/riscv/kernel/patch.c:patch_text_set_nosync, arch/riscv/kernel/patch.c:patch_text_nosync, arch/riscv/kernel/patch.c:patch_text_cb
+fixes: 6ca445d8af0e(riscv)
+ arch/riscv/kernel/ftrace.c |  7 ++-----
+ arch/riscv/kernel/patch.c  | 26 ++++++++++++++++++--------
+ 2 files changed, 20 insertions(+), 13 deletions(-)
+diff --git a/arch/riscv/kernel/ftrace.c b/arch/riscv/kernel/ftrace.c
+index 87cbd86576b2..4b95c574fd04 100644
+--- a/arch/riscv/kernel/ftrace.c
++++ b/arch/riscv/kernel/ftrace.c
+@@ -121,7 +121,4 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
+ 	mutex_unlock(&text_mutex);
+ 
+-	if (!mod)
+-		local_flush_icache_range(rec->ip, rec->ip + MCOUNT_INSN_SIZE);
+-
+ 	return out;
+ }
+@@ -157,7 +154,7 @@ static int __ftrace_modify_code(void *data)
+ 		while (atomic_read(&param->cpu_count) <= num_online_cpus())
+ 			cpu_relax();
+-	}
+ 
+-	local_flush_icache_all();
++		local_flush_icache_all();
++	}
+ 
+ 	return 0;
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 4007563fb607..ab03732d06c4 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -90,4 +90,12 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	memset(waddr, c, len);
+ 
++	/*
++	 * We could have just patched a function that is about to be
++	 * called so make sure we don't execute partially patched
++	 * instructions by flushing the icache as soon as possible.
++	 */
++	local_flush_icache_range((unsigned long)waddr,
++				 (unsigned long)waddr + len);
++
+ 	patch_unmap(FIX_TEXT_POKE0);
+ 
+@@ -136,4 +144,12 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	ret = copy_to_kernel_nofault(waddr, insn, len);
+ 
++	/*
++	 * We could have just patched a function that is about to be
++	 * called so make sure we don't execute partially patched
++	 * instructions by flushing the icache as soon as possible.
++	 */
++	local_flush_icache_range((unsigned long)waddr,
++				 (unsigned long)waddr + len);
++
+ 	patch_unmap(FIX_TEXT_POKE0);
+ 
+@@ -190,7 +206,4 @@ int patch_text_set_nosync(void *addr, u8 c, size_t len)
+ 	ret = patch_insn_set(tp, c, len);
+ 
+-	if (!ret)
+-		flush_icache_range((uintptr_t)tp, (uintptr_t)tp + len);
+-
+ 	return ret;
+ }
+... (18 more diff lines)
+
+##### A088
+=== 16d3b1af0944 A 2024-06-28 +41/-3
+perf: RISC-V: Check standard event availability
+
+The RISC-V SBI PMU specification defines several standard hardware and
+cache events. Currently, all of these events are exposed to userspace,
+even when not actually implemented. They appear in the `perf list`
+output, and commands like `perf stat` try to use them.
+
+This is more than just a cosmetic issue, because the PMU driver's .add
+function fails for these events, which causes pmu_groups_sched_in() to
+prematurely stop scheduling in other (possibly valid) hardware events.
+
+Add logic to check which events are supported by the hardware (i.e. can
+be mapped to some counter), so only usable events are reported to
+userspace. Since the kernel does not know the mapping between events and
+possible counters, this check must happen during boot, when no counters
+are in use. Make the check asynchronous to minimize impact on boot time.
+
+Fixes: e9991434596f ("RISC-V: Add perf platform driver based on SBI PMU extension")
+functions: arch/riscv/kvm/vcpu_pmu.c:kvm_pmu_create_perf_event, drivers/perf/riscv_pmu_sbi.c:pmu_sbi_event_map, drivers/perf/riscv_pmu_sbi.c:pmu_sbi_device_probe
+fixes: e9991434596f(common)
+ arch/riscv/kvm/vcpu_pmu.c    |  2 +-
+ drivers/perf/riscv_pmu_sbi.c | 42 ++++++++++++++++++++++++++++++++++++++++--
+ 2 files changed, 41 insertions(+), 3 deletions(-)
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 04db1f993c47..bcf41d6e0df0 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -328,5 +328,5 @@ static long kvm_pmu_create_perf_event(struct kvm_pmc *pmc, struct perf_event_att
+ 	event = perf_event_create_kernel_counter(attr, -1, current, kvm_riscv_pmu_overflow, pmc);
+ 	if (IS_ERR(event)) {
+-		pr_err("kvm pmu event creation failed for eidx %lx: %ld\n", eidx, PTR_ERR(event));
++		pr_debug("kvm pmu event creation failed for eidx %lx: %ld\n", eidx, PTR_ERR(event));
+ 		return PTR_ERR(event);
+ 	}
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 94bc369a3454..4e842dcedfba 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -21,4 +21,5 @@
+ #include <linux/sched/clock.h>
+ #include <linux/soc/andes/irq.h>
++#include <linux/workqueue.h>
+ 
+ #include <asm/errata_list.h>
+@@ -115,5 +116,5 @@ struct sbi_pmu_event_data {
+ };
+ 
+-static const struct sbi_pmu_event_data pmu_hw_event_map[] = {
++static struct sbi_pmu_event_data pmu_hw_event_map[] = {
+ 	[PERF_COUNT_HW_CPU_CYCLES]		= {.hw_gen_event = {
+ 							SBI_PMU_HW_CPU_CYCLES,
+@@ -149,5 +150,5 @@ static const struct sbi_pmu_event_data pmu_hw_event_map[] = {
+ 
+ #define C(x) PERF_COUNT_HW_CACHE_##x
+-static const struct sbi_pmu_event_data pmu_cache_event_map[PERF_COUNT_HW_CACHE_MAX]
++static struct sbi_pmu_event_data pmu_cache_event_map[PERF_COUNT_HW_CACHE_MAX]
+ [PERF_COUNT_HW_CACHE_OP_MAX]
+ [PERF_COUNT_HW_CACHE_RESULT_MAX] = {
+@@ -294,4 +295,32 @@ static const struct sbi_pmu_event_data pmu_cache_event_map[PERF_COUNT_HW_CACHE_M
+ };
+ 
++static void pmu_sbi_check_event(struct sbi_pmu_event_data *edata)
++{
++	struct sbiret ret;
++
++	ret = sbi_ecall(SBI_EXT_PMU, SBI_EXT_PMU_COUNTER_CFG_MATCH,
++			0, cmask, 0, edata->event_idx, 0, 0);
++	if (!ret.error) {
++		sbi_ecall(SBI_EXT_PMU, SBI_EXT_PMU_COUNTER_STOP,
++			  ret.value, 0x1, SBI_PMU_STOP_FLAG_RESET, 0, 0, 0);
++	} else if (ret.error == SBI_ERR_NOT_SUPPORTED) {
++		/* This event cannot be monitored by any counter */
++		edata->event_idx = -EINVAL;
++	}
++}
++
++static void pmu_sbi_check_std_events(struct work_struct *work)
++{
++	for (int i = 0; i < ARRAY_SIZE(pmu_hw_event_map); i++)
++		pmu_sbi_check_event(&pmu_hw_event_map[i]);
++
++	for (int i = 0; i < ARRAY_SIZE(pmu_cache_event_map); i++)
++		for (int j = 0; j < ARRAY_SIZE(pmu_cache_event_map[i]); j++)
+... (27 more diff lines)
+
+##### A089
+=== 5c178472af24 A 2024-07-06 +5/-0
+riscv: define ILLEGAL_POINTER_VALUE for 64bit
+
+This is used in poison.h for poison pointer offset. Based on current
+SV39, SV48 and SV57 vm layout, 0xdead000000000000 is a proper value
+that is not mappable, this can avoid potentially turning an oops to
+an expolit.
+
+Fixes: fbe934d69eb7 ("RISC-V: Build Infrastructure")
+functions: 
+fixes: fbe934d69eb7(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 4871220061c4..31d941792369 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -321,4 +321,9 @@ config FIX_EARLYCON_MEM
+ 	def_bool MMU
+ 
++config ILLEGAL_POINTER_VALUE
++	hex
++	default 0 if 32BIT
++	default 0xdead000000000000 if 64BIT
++
+ config PGTABLE_LEVELS
+ 	int
+
+##### A090
+=== cea9d27705d6 A 2024-07-11 +0/-4
+riscv: Remove unused _TIF_WORK_MASK
+
+Since commit f0bddf50586d ("riscv: entry: Convert to generic entry"),
+_TIF_WORK_MASK is no longer used, so remove it.
+
+Fixes: f0bddf50586d ("riscv: entry: Convert to generic entry")
+functions: 
+fixes: f0bddf50586d(riscv)
+diff --git a/arch/riscv/include/asm/thread_info.h b/arch/riscv/include/asm/thread_info.h
+index fca5c6be2b81..5b09dc874151 100644
+--- a/arch/riscv/include/asm/thread_info.h
++++ b/arch/riscv/include/asm/thread_info.h
+@@ -113,7 +113,3 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src);
+ #define _TIF_RISCV_V_DEFER_RESTORE	(1 << TIF_RISCV_V_DEFER_RESTORE)
+ 
+-#define _TIF_WORK_MASK \
+-	(_TIF_NOTIFY_RESUME | _TIF_SIGPENDING | _TIF_NEED_RESCHED | \
+-	 _TIF_NOTIFY_SIGNAL | _TIF_UPROBE)
+-
+ #endif /* _ASM_RISCV_THREAD_INFO_H */
+
+##### A091
+=== 3908ba2e0b24 A 2024-07-17 +2/-1
+RISC-V: Enable the IPI before workqueue_online_cpu()
+
+Sometimes the hotplug cpu stalls at the arch_cpu_idle() for a while after
+workqueue_online_cpu(). When cpu stalls at the idle loop, the reschedule
+IPI is pending. However the enable bit is not enabled yet so the cpu stalls
+at WFI until watchdog timeout. Therefore enable the IPI before the
+workqueue_online_cpu() to fix the issue.
+
+Fixes: 63c5484e7495 ("workqueue: Add multiple affinity scopes and interface to select them")
+functions: arch/riscv/kernel/sbi-ipi.c:sbi_ipi_init
+fixes: 63c5484e7495(common)
+diff --git a/arch/riscv/kernel/sbi-ipi.c b/arch/riscv/kernel/sbi-ipi.c
+index 1026e22955cc..0cc5559c08d8 100644
+--- a/arch/riscv/kernel/sbi-ipi.c
++++ b/arch/riscv/kernel/sbi-ipi.c
+@@ -72,5 +72,5 @@ void __init sbi_ipi_init(void)
+ 	 * via generic IPI-Mux
+ 	 */
+-	cpuhp_setup_state(CPUHP_AP_ONLINE_DYN,
++	cpuhp_setup_state(CPUHP_AP_IRQ_RISCV_SBI_IPI_STARTING,
+ 			  "irqchip/sbi-ipi:starting",
+ 			  sbi_ipi_starting_cpu, NULL);
+diff --git a/include/linux/cpuhotplug.h b/include/linux/cpuhotplug.h
+index 51ba681b915a..e30d93b807d5 100644
+--- a/include/linux/cpuhotplug.h
++++ b/include/linux/cpuhotplug.h
+@@ -149,4 +149,5 @@ enum cpuhp_state {
+ 	CPUHP_AP_IRQ_SIFIVE_PLIC_STARTING,
+ 	CPUHP_AP_IRQ_RISCV_IMSIC_STARTING,
++	CPUHP_AP_IRQ_RISCV_SBI_IPI_STARTING,
+ 	CPUHP_AP_ARM_MVEBU_COHERENCY,
+ 	CPUHP_AP_PERF_X86_AMD_UNCORE_STARTING,
+
+##### A092
+=== fb197c5d2fd2 A 2024-07-19 +2/-0
+riscv/purgatory: align riscv_kernel_entry
+
+When alignment handling is delegated to the kernel, everything must be
+word-aligned in purgatory, since the trap handler is then set to the
+kexec one. Without the alignment, hitting the exception would
+ultimately crash. On other occasions, the kernel's handler would take
+care of exceptions.
+This has been tested on a JH7110 SoC with oreboot and its SBI delegating
+unaligned access exceptions and the kernel configured to handle them.
+
+Fixes: 736e30af583fb ("RISC-V: Add purgatory")
+functions: 
+fixes: 736e30af583f(riscv)
+diff --git a/arch/riscv/purgatory/entry.S b/arch/riscv/purgatory/entry.S
+index 5bcf3af903da..0e6ca6d5ae4b 100644
+--- a/arch/riscv/purgatory/entry.S
++++ b/arch/riscv/purgatory/entry.S
+@@ -8,4 +8,5 @@
+  *
+  */
++#include <asm/asm.h>
+ #include <linux/linkage.h>
+ 
+@@ -35,4 +36,5 @@ SYM_CODE_END(purgatory_start)
+ .data
+ 
++.align LGREG
+ SYM_DATA(riscv_kernel_entry, .quad 0)
+ 
+
+##### A093
+=== 343416f0c11c A 2024-08-01 +6/-5
+syscalls: fix syscall macros for newfstat/newfstatat
+
+The __NR_newfstat and __NR_newfstatat macros accidentally got renamed
+in the conversion to the syscall.tbl format, dropping the 'new' portion
+of the name.
+
+In an unrelated change, the two syscalls are no longer architecture
+specific but are once more defined on all 64-bit architectures, so the
+'newstat' ABI keyword can be dropped from the table as a simplification.
+
+Fixes: Fixes: 4fe53bf2ba0a ("syscalls: add generic scripts/syscall.tbl")
+functions: 
+fixes: 
+diff --git a/arch/arm64/kernel/Makefile.syscalls b/arch/arm64/kernel/Makefile.syscalls
+index 3cfafd003b2d..0542a718871a 100644
+--- a/arch/arm64/kernel/Makefile.syscalls
++++ b/arch/arm64/kernel/Makefile.syscalls
+@@ -2,5 +2,5 @@
+ 
+ syscall_abis_32 +=
+-syscall_abis_64 += renameat newstat rlimit memfd_secret
++syscall_abis_64 += renameat rlimit memfd_secret
+ 
+ syscalltbl = arch/arm64/tools/syscall_%.tbl
+diff --git a/arch/loongarch/kernel/Makefile.syscalls b/arch/loongarch/kernel/Makefile.syscalls
+index 523bb411a3bc..ab7d9baa2915 100644
+--- a/arch/loongarch/kernel/Makefile.syscalls
++++ b/arch/loongarch/kernel/Makefile.syscalls
+@@ -1,3 +1,4 @@
+ # SPDX-License-Identifier: GPL-2.0
+ 
+-syscall_abis_64 += newstat
++# No special ABIs on loongarch so far
++syscall_abis_64 +=
+diff --git a/arch/riscv/kernel/Makefile.syscalls b/arch/riscv/kernel/Makefile.syscalls
+index 52087a023b3d..9668fd1faf60 100644
+--- a/arch/riscv/kernel/Makefile.syscalls
++++ b/arch/riscv/kernel/Makefile.syscalls
+@@ -2,3 +2,3 @@
+ 
+ syscall_abis_32 += riscv memfd_secret
+-syscall_abis_64 += riscv newstat rlimit memfd_secret
++syscall_abis_64 += riscv rlimit memfd_secret
+diff --git a/scripts/syscall.tbl b/scripts/syscall.tbl
+index 797e20ea99a2..4586a18dfe9b 100644
+--- a/scripts/syscall.tbl
++++ b/scripts/syscall.tbl
+@@ -99,7 +99,7 @@
+ 78	common	readlinkat			sys_readlinkat
+ 79	stat64	fstatat64			sys_fstatat64
+-79	newstat	fstatat				sys_newfstatat
++79	64	newfstatat			sys_newfstatat
+ 80	stat64	fstat64				sys_fstat64
+-80	newstat	fstat				sys_newfstat
++80	64	newfstat			sys_newfstat
+ 81	common	sync				sys_sync
+ 82	common	fsync				sys_fsync
+
+##### A094
+=== ee9a68394b4b A 2024-08-01 +4/-0
+riscv: Re-introduce global icache flush in patch_text_XXX()
+
+commit edf2d546bfd6 ("riscv: patch: Flush the icache right after
+patching to avoid illegal insns") mistakenly removed the global icache
+flush in patch_text_nosync() and patch_text_set_nosync() functions, so
+reintroduce them.
+
+Fixes: edf2d546bfd6 ("riscv: patch: Flush the icache right after patching to avoid illegal insns")
+functions: arch/riscv/kernel/patch.c:patch_text_set_nosync, arch/riscv/kernel/patch.c:patch_text_nosync
+fixes: edf2d546bfd6(riscv)
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 69e5796fc51f..34ef522f07a8 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -206,4 +206,6 @@ int patch_text_set_nosync(void *addr, u8 c, size_t len)
+ 
+ 	ret = patch_insn_set(addr, c, len);
++	if (!ret)
++		flush_icache_range((uintptr_t)addr, (uintptr_t)addr + len);
+ 
+ 	return ret;
+@@ -240,4 +242,6 @@ int patch_text_nosync(void *addr, const void *insns, size_t len)
+ 
+ 	ret = patch_insn_write(addr, insns, len);
++	if (!ret)
++		flush_icache_range((uintptr_t)addr, (uintptr_t)addr + len);
+ 
+ 	return ret;
+
+##### A095
+=== a445699879f9 A 2024-08-05 +1/-1
+RISC-V: ACPI: NUMA: initialize all values of acpi_early_node_map to NUMA_NO_NODE
+
+Currently, only acpi_early_node_map[0] was initialized to NUMA_NO_NODE.
+To ensure all the values were properly initialized, switch to initialize
+all of them to NUMA_NO_NODE.
+
+Fixes: eabd9db64ea8 ("ACPI: RISCV: Add NUMA support based on SRAT and SLIT")
+functions: 
+fixes: eabd9db64ea8(riscv)
+diff --git a/arch/riscv/kernel/acpi_numa.c b/arch/riscv/kernel/acpi_numa.c
+index 0231482d6946..ff95aeebee3e 100644
+--- a/arch/riscv/kernel/acpi_numa.c
++++ b/arch/riscv/kernel/acpi_numa.c
+@@ -29,5 +29,5 @@
+ #include <asm/numa.h>
+ 
+-static int acpi_early_node_map[NR_CPUS] __initdata = { NUMA_NO_NODE };
++static int acpi_early_node_map[NR_CPUS] __initdata = { [0 ... NR_CPUS - 1] = NUMA_NO_NODE };
+ 
+ int __init acpi_numa_get_nid(unsigned int cpu)
+
+##### A096
+=== c42e2f076769 A 2024-08-09 +16/-8
+RISC-V: hwprobe: Add MISALIGNED_PERF key
+
+RISCV_HWPROBE_KEY_CPUPERF_0 was mistakenly flagged as a bitmask in
+hwprobe_key_is_bitmask(), when in reality it was an enum value. This
+causes problems when used in conjunction with RISCV_HWPROBE_WHICH_CPUS,
+since SLOW, FAST, and EMULATED have values whose bits overlap with
+each other. If the caller asked for the set of CPUs that was SLOW or
+EMULATED, the returned set would also include CPUs that were FAST.
+
+Introduce a new hwprobe key, RISCV_HWPROBE_KEY_MISALIGNED_PERF, which
+returns the same values in response to a direct query (with no flags),
+but is properly handled as an enumerated value. As a result, SLOW,
+FAST, and EMULATED are all correctly treated as distinct values under
+the new key when queried with the WHICH_CPUS flag.
+
+Leave the old key in place to avoid disturbing applications which may
+have already come to rely on the key, with or without its broken
+behavior with respect to the WHICH_CPUS flag.
+
+Fixes: e178bf146e4b ("RISC-V: hwprobe: Introduce which-cpus flag")
+functions: arch/riscv/kernel/sys_hwprobe.c:hwprobe_one_pair
+fixes: e178bf146e4b(riscv)
+ Documentation/arch/riscv/hwprobe.rst  | 20 +++++++++++++-------
+ arch/riscv/include/asm/hwprobe.h      |  2 +-
+ arch/riscv/include/uapi/asm/hwprobe.h |  1 +
+ arch/riscv/kernel/sys_hwprobe.c       |  1 +
+ 4 files changed, 16 insertions(+), 8 deletions(-)
+diff --git a/Documentation/arch/riscv/hwprobe.rst b/Documentation/arch/riscv/hwprobe.rst
+index 3db60a0911df..a994eed75bde 100644
+--- a/Documentation/arch/riscv/hwprobe.rst
++++ b/Documentation/arch/riscv/hwprobe.rst
+@@ -240,6 +240,11 @@ The following keys are defined:
+        riscv/zawrs") of riscv-isa-manual.
+ 
+-* :c:macro:`RISCV_HWPROBE_KEY_CPUPERF_0`: A bitmask that contains performance
+-  information about the selected set of processors.
++* :c:macro:`RISCV_HWPROBE_KEY_CPUPERF_0`: Deprecated.  Returns similar values to
++     :c:macro:`RISCV_HWPROBE_KEY_MISALIGNED_SCALAR_PERF`, but the key was
++     mistakenly classified as a bitmask rather than a value.
++
++* :c:macro:`RISCV_HWPROBE_KEY_MISALIGNED_SCALAR_PERF`: An enum value describing
++  the performance of misaligned scalar native word accesses on the selected set
++  of processors.
+ 
+   * :c:macro:`RISCV_HWPROBE_MISALIGNED_UNKNOWN`: The performance of misaligned
+@@ -250,10 +255,11 @@ The following keys are defined:
+     always extremely slow.
+ 
+-  * :c:macro:`RISCV_HWPROBE_MISALIGNED_SLOW`: Misaligned accesses are slower
+-    than equivalent byte accesses.  Misaligned accesses may be supported
+-    directly in hardware, or trapped and emulated by software.
++  * :c:macro:`RISCV_HWPROBE_MISALIGNED_SLOW`: Misaligned native word
++    sized accesses are slower than the equivalent quantity of byte accesses.
++    Misaligned accesses may be supported directly in hardware, or trapped and
++    emulated by software.
+ 
+-  * :c:macro:`RISCV_HWPROBE_MISALIGNED_FAST`: Misaligned accesses are faster
+-    than equivalent byte accesses.
++  * :c:macro:`RISCV_HWPROBE_MISALIGNED_FAST`: Misaligned native word
++    sized accesses are faster than the equivalent quantity of byte accesses.
+ 
+   * :c:macro:`RISCV_HWPROBE_MISALIGNED_UNSUPPORTED`: Misaligned accesses are
+diff --git a/arch/riscv/include/asm/hwprobe.h b/arch/riscv/include/asm/hwprobe.h
+index ef01c182af2b..ffb9484531af 100644
+--- a/arch/riscv/include/asm/hwprobe.h
++++ b/arch/riscv/include/asm/hwprobe.h
+@@ -9,5 +9,5 @@
+ #include <uapi/asm/hwprobe.h>
+ 
+-#define RISCV_HWPROBE_MAX_KEY 8
++#define RISCV_HWPROBE_MAX_KEY 9
+ 
+ static inline bool riscv_hwprobe_key_is_valid(__s64 key)
+diff --git a/arch/riscv/include/uapi/asm/hwprobe.h b/arch/riscv/include/uapi/asm/hwprobe.h
+index b706c8e47b02..635753084275 100644
+--- a/arch/riscv/include/uapi/asm/hwprobe.h
++++ b/arch/riscv/include/uapi/asm/hwprobe.h
+@@ -83,4 +83,5 @@ struct riscv_hwprobe {
+ #define RISCV_HWPROBE_KEY_HIGHEST_VIRT_ADDRESS	7
+ #define RISCV_HWPROBE_KEY_TIME_CSR_FREQ	8
++#define RISCV_HWPROBE_KEY_MISALIGNED_SCALAR_PERF	9
+ /* Increase RISCV_HWPROBE_MAX_KEY when adding items. */
+ 
+diff --git a/arch/riscv/kernel/sys_hwprobe.c b/arch/riscv/kernel/sys_hwprobe.c
+index 8d1b5c35d2a7..2d0f4f6a32c3 100644
+--- a/arch/riscv/kernel/sys_hwprobe.c
++++ b/arch/riscv/kernel/sys_hwprobe.c
+... (6 more diff lines)
+
+##### A097
+=== b686ecdeacf6 A 2024-08-14 +2/-2
+riscv: misaligned: Restrict user access to kernel memory
+
+raw_copy_{to,from}_user() do not call access_ok(), so this code allowed
+userspace to access any virtual memory address.
+
+Fixes: 7c83232161f6 ("riscv: add support for misaligned trap handling in S-mode")
+Fixes: 441381506ba7 ("riscv: misaligned: remove CONFIG_RISCV_M_MODE specific code")
+functions: arch/riscv/kernel/traps_misaligned.c:handle_misaligned_load, arch/riscv/kernel/traps_misaligned.c:handle_misaligned_store
+fixes: 7c83232161f6(riscv), 441381506ba7(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 192cd5603e95..d4fd8af7aaf5 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -418,5 +418,5 @@ int handle_misaligned_load(struct pt_regs *regs)
+ 	val.data_u64 = 0;
+ 	if (user_mode(regs)) {
+-		if (raw_copy_from_user(&val, (u8 __user *)addr, len))
++		if (copy_from_user(&val, (u8 __user *)addr, len))
+ 			return -1;
+ 	} else {
+@@ -516,5 +516,5 @@ int handle_misaligned_store(struct pt_regs *regs)
+ 
+ 	if (user_mode(regs)) {
+-		if (raw_copy_to_user((u8 __user *)addr, &val, len))
++		if (copy_to_user((u8 __user *)addr, &val, len))
+ 			return -1;
+ 	} else {
+
+##### A098
+=== 5aa09297a3dc A 2024-08-16 +3/-3
+RISC-V: KVM: Fix to allow hpmcounter31 from the guest
+
+The csr_fun defines a count parameter which defines the total number
+CSRs emulated in KVM starting from the base. This value should be
+equal to total number of counters possible for trap/emulation (32).
+
+Fixes: a9ac6c37521f ("RISC-V: KVM: Implement trap & emulate for hpmcounters")
+functions: 
+fixes: a9ac6c37521f(riscv)
+diff --git a/arch/riscv/include/asm/kvm_vcpu_pmu.h b/arch/riscv/include/asm/kvm_vcpu_pmu.h
+index c309daa2d75a..1d85b6617508 100644
+--- a/arch/riscv/include/asm/kvm_vcpu_pmu.h
++++ b/arch/riscv/include/asm/kvm_vcpu_pmu.h
+@@ -66,9 +66,9 @@ struct kvm_pmu {
+ #if defined(CONFIG_32BIT)
+ #define KVM_RISCV_VCPU_HPMCOUNTER_CSR_FUNCS \
+-{.base = CSR_CYCLEH,	.count = 31,	.func = kvm_riscv_vcpu_pmu_read_hpm }, \
+-{.base = CSR_CYCLE,	.count = 31,	.func = kvm_riscv_vcpu_pmu_read_hpm },
++{.base = CSR_CYCLEH,	.count = 32,	.func = kvm_riscv_vcpu_pmu_read_hpm }, \
++{.base = CSR_CYCLE,	.count = 32,	.func = kvm_riscv_vcpu_pmu_read_hpm },
+ #else
+ #define KVM_RISCV_VCPU_HPMCOUNTER_CSR_FUNCS \
+-{.base = CSR_CYCLE,	.count = 31,	.func = kvm_riscv_vcpu_pmu_read_hpm },
++{.base = CSR_CYCLE,	.count = 32,	.func = kvm_riscv_vcpu_pmu_read_hpm },
+ #endif
+ 
+
+##### A099
+=== 7d1ffc8b087e A 2024-08-16 +14/-1
+RISC-V: KVM: Allow legacy PMU access from guest
+
+Currently, KVM traps & emulates PMU counter access only if SBI PMU
+is available as the guest can only configure/read PMU counters via
+SBI only. However, if SBI PMU is not enabled in the host, the
+guest will fallback to the legacy PMU which will try to access
+cycle/instret and result in an illegal instruction trap which
+is not desired.
+
+KVM can allow dummy emulation of cycle/instret only for the guest
+if SBI PMU is not enabled in the host. The dummy emulation will
+still return zero as we don't to expose the host counter values
+from a guest using legacy PMU.
+
+Fixes: a9ac6c37521f ("RISC-V: KVM: Implement trap & emulate for hpmcounters")
+functions: 
+fixes: a9ac6c37521f(riscv)
+diff --git a/arch/riscv/include/asm/kvm_vcpu_pmu.h b/arch/riscv/include/asm/kvm_vcpu_pmu.h
+index fa0f535bbbf0..c309daa2d75a 100644
+--- a/arch/riscv/include/asm/kvm_vcpu_pmu.h
++++ b/arch/riscv/include/asm/kvm_vcpu_pmu.h
+@@ -11,4 +11,5 @@
+ 
+ #include <linux/perf/riscv_pmu.h>
++#include <asm/kvm_vcpu_insn.h>
+ #include <asm/sbi.h>
+ 
+@@ -105,6 +106,18 @@ struct kvm_pmu {
+ };
+ 
++static inline int kvm_riscv_vcpu_pmu_read_legacy(struct kvm_vcpu *vcpu, unsigned int csr_num,
++						 unsigned long *val, unsigned long new_val,
++						 unsigned long wr_mask)
++{
++	if (csr_num == CSR_CYCLE || csr_num == CSR_INSTRET) {
++		*val = 0;
++		return KVM_INSN_CONTINUE_NEXT_SEPC;
++	} else {
++		return KVM_INSN_ILLEGAL_TRAP;
++	}
++}
++
+ #define KVM_RISCV_VCPU_HPMCOUNTER_CSR_FUNCS \
+-{.base = 0,	.count = 0,	.func = NULL },
++{.base = CSR_CYCLE,	.count = 3,	.func = kvm_riscv_vcpu_pmu_read_legacy },
+ 
+ static inline void kvm_riscv_vcpu_pmu_init(struct kvm_vcpu *vcpu) {}

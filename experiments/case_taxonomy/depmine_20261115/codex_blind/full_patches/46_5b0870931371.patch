@@ -1,0 +1,42 @@
+commit 5b08709313718e95ba06ef49aa82f964a605bd9c
+Author:     Marc Zyngier <maz@kernel.org>
+AuthorDate: Thu Mar 18 18:30:26 2021 +0000
+Commit:     Marc Zyngier <maz@kernel.org>
+CommitDate: Thu Mar 18 18:30:26 2021 +0000
+
+    KVM: arm64: Fix host's ZCR_EL2 restore on nVHE
+    
+    We re-enter the EL1 host with CPTR_EL2.TZ set in order to
+    be able to lazily restore ZCR_EL2 when required.
+    
+    However, the same CPTR_EL2 configuration also leads to trapping
+    when ZCR_EL2 is accessed from EL2. Duh!
+    
+    Clear CPTR_EL2.TZ *before* writing to ZCR_EL2.
+    
+    Fixes: beed09067b42 ("KVM: arm64: Trap host SVE accesses when the FPSIMD state is dirty")
+    Reported-by: Will Deacon <will@kernel.org>
+    Signed-off-by: Marc Zyngier <maz@kernel.org>
+
+diff --git a/arch/arm64/kvm/hyp/nvhe/hyp-main.c b/arch/arm64/kvm/hyp/nvhe/hyp-main.c
+index 8d04d69edd15..84a702dc4a92 100644
+--- a/arch/arm64/kvm/hyp/nvhe/hyp-main.c
++++ b/arch/arm64/kvm/hyp/nvhe/hyp-main.c
+@@ -173,15 +173,16 @@ void handle_trap(struct kvm_cpu_context *host_ctxt)
+ 	switch (ESR_ELx_EC(esr)) {
+ 	case ESR_ELx_EC_HVC64:
+ 		handle_host_hcall(host_ctxt);
+ 		break;
+ 	case ESR_ELx_EC_SMC64:
+ 		handle_host_smc(host_ctxt);
+ 		break;
+ 	case ESR_ELx_EC_SVE:
+-		sve_cond_update_zcr_vq(ZCR_ELx_LEN_MASK, SYS_ZCR_EL2);
+ 		sysreg_clear_set(cptr_el2, CPTR_EL2_TZ, 0);
++		isb();
++		sve_cond_update_zcr_vq(ZCR_ELx_LEN_MASK, SYS_ZCR_EL2);
+ 		break;
+ 	default:
+ 		hyp_panic();
+ 	}
+ }

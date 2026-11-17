@@ -22,7 +22,9 @@ from typing import Any, Mapping
 
 NOTES = ("当前代办.md", "当前研究方向与进展.md", "项目研究与文档写作交接说明.md")
 PLAN = "接口验证后续规划.md"
-NOTES_SUBDIRS = ("", "md files")  # notes and family plan live in the workspace root or in this subfolder; logs stay in 日志/
+# notes and family plan live in the workspace root or in one of these subfolders; logs stay in 日志/.
+# "资料/旧方向工作笔记" is where "md files" was moved on 2026-11-06; the new workflow (交接文档.md) does not use this tool.
+NOTES_SUBDIRS = ("", "md files", "资料/旧方向工作笔记")
 HISTORY_LINE = "以下为历史记录，以本节及用户最新指示为准。"
 ORDER_HEADING = "\n## 当前执行顺序\n"
 WSL_ROOT = "/root"

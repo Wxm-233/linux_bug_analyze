@@ -1,0 +1,102 @@
+commit e4a70f5fbd43f55b474028a2cee3d78e4b443dd7
+Author:     Frederic Weisbecker <frederic@kernel.org>
+AuthorDate: Wed May 20 00:09:25 2026 +0200
+Commit:     Thomas Gleixner <tglx@kernel.org>
+CommitDate: Tue Jun 2 21:34:03 2026 +0200
+
+    timers/migration: Fix hotplug migrator selection target on asymetric capacity machines
+    
+    When a top-level migrator is deactivated, either at CPU down hotplug time
+    or when a CPU is domain isolated, a new migrator is elected among the
+    available CPUs and woken up to take over the migration duty.
+    
+    However that election must happen at the scope of a given hierarchy and not
+    globally, which the introduction of per-capacity hierarchies failed to
+    handle.
+    
+    As a result a given hierarchy may end up without migrator to handle global
+    timers.
+    
+    Fix it by making sure that the new migrator belongs to the same hierarchy
+    as the outgoing CPU.
+    
+    Fixes: 098cbaad8e57 ("timers/migration: Split per-capacity hierarchies")
+    Signed-off-by: Frederic Weisbecker <frederic@kernel.org>
+    Signed-off-by: Thomas Gleixner <tglx@kernel.org>
+    Link: https://patch.msgid.link/20260519220926.63437-2-frederic@kernel.org
+
+diff --git a/kernel/time/timer_migration.c b/kernel/time/timer_migration.c
+index 25e3c563eb74..8032b0044f44 100644
+--- a/kernel/time/timer_migration.c
++++ b/kernel/time/timer_migration.c
+@@ -1464,6 +1464,18 @@ static long tmigr_trigger_active(void *unused)
+ 	return 0;
+ }
+ 
++static struct tmigr_hierarchy *__tmigr_get_hierarchy(unsigned int capacity)
++{
++	struct tmigr_hierarchy *iter;
++
++	list_for_each_entry(iter, &tmigr_hierarchy_list, node) {
++		if (iter->capacity == capacity)
++			return iter;
++	}
++
++	return NULL;
++}
++
+ static int tmigr_clear_cpu_available(unsigned int cpu)
+ {
+ 	struct tmigr_cpu *tmc = this_cpu_ptr(&tmigr_cpu);
+@@ -1488,8 +1500,21 @@ static int tmigr_clear_cpu_available(unsigned int cpu)
+ 	}
+ 
+ 	if (firstexp != KTIME_MAX) {
+-		migrator = cpumask_any(tmigr_available_cpumask);
+-		work_on_cpu(migrator, tmigr_trigger_active, NULL);
++		struct tmigr_hierarchy *hier = __tmigr_get_hierarchy(arch_scale_cpu_capacity(cpu));
++
++		if (WARN_ON_ONCE(!hier))
++			return -EINVAL;
++
++		migrator = cpumask_any_and(tmigr_available_cpumask, hier->cpumask);
++		if (migrator < nr_cpu_ids) {
++			work_on_cpu(migrator, tmigr_trigger_active, NULL);
++		} else {
++			/*
++			 * If deactivation returned an expiration, it belongs to an available
++			 * nohz CPU in the hierarchy.
++			 */
++			WARN_ONCE(1, "Expected available CPU in the hierarchy\n");
++		}
+ 	}
+ 
+ 	return 0;
+@@ -1915,12 +1940,9 @@ static int tmigr_setup_groups(struct tmigr_hierarchy *hier, unsigned int cpu,
+ 
+ static struct tmigr_hierarchy *tmigr_get_hierarchy(unsigned int capacity)
+ {
+-	struct tmigr_hierarchy *hier = NULL, *iter;
++	struct tmigr_hierarchy *hier;
+ 
+-	list_for_each_entry(iter, &tmigr_hierarchy_list, node) {
+-		if (iter->capacity == capacity)
+-			hier = iter;
+-	}
++	hier = __tmigr_get_hierarchy(capacity);
+ 
+ 	if (hier)
+ 		return hier;
+@@ -1978,9 +2000,9 @@ static long connect_old_root_work(void *arg)
+ 	struct tmigr_hierarchy *hier;
+ 	int cpu = smp_processor_id();
+ 
+-	hier = tmigr_get_hierarchy(arch_scale_cpu_capacity(cpu));
+-	if (IS_ERR(hier))
+-		return PTR_ERR(hier);
++	hier = __tmigr_get_hierarchy(arch_scale_cpu_capacity(cpu));
++	if (WARN_ON_ONCE(!hier))
++		return -EINVAL;
+ 
+ 	return tmigr_connect_old_root(hier, cpu, old_root, true);
+ }

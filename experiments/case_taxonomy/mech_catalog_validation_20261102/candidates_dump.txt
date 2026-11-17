@@ -1,0 +1,1675 @@
+#0 8cb22bec1426 2023-08-29 kernel/probes/simulate-insn.c:rv_insn_reg_set_val
+  riscv: kprobes: allow writing to x0
+  | Instructions can write to x0, so we should simulate these instructions
+  | normally.
+  | Currently, the kernel hangs if an instruction who writes to x0 is
+  | simulated.
+    -		return false;
+    +		return true;
+
+#1 e59e5e2754bf 2023-08-29 mm/ptdump.c:ptdump_init
+  riscv: correct pt_level name via pgtable_l5/4_enabled
+  | The pt_level uses CONFIG_PGTABLE_LEVELS to display page table names.
+  | But if page mode is downgraded from kernel cmdline or restricted by
+  | the hardware in 64BIT, it will give a wrong name.
+  | Like, using no4lvl for sv39, ptdump named the 1G-mapping as "PUD"
+  | that should be "PGD":
+  | 0xffffffd840000000-0xffffffd900000000    0x00000000c0000000         3G PUD     D A G . . W R V
+    +	pg_level[1].name = pgtable_l5_enabled ? "P4D" : "PGD";
+    +	pg_level[2].name = pgtable_l4_enabled ? "PUD" : "PGD";
+    +
+
+#2 767423658d53 2023-09-07 kernel/elf_kexec.c:elf_find_pbase
+  riscv: kexec: Align the kexeced kernel entry
+  | The current riscv boot protocol requires 2MB alignment for RV64
+  | and 4MB alignment for RV32.
+  | In KEXEC_FILE path, the elf_find_pbase() function should align
+  | the kexeced kernel entry according to the requirement, otherwise
+  | the kexeced kernel would silently BUG at the setup_vm().
+    -	kbuf.buf_align = PAGE_SIZE;
+    +
+    +	/*
+    +	 * Current riscv boot protocol requires 2MB alignment for
+    +	 * RV64 and 4MB alignment for RV32
+    +	 *
+    +	 */
+    +	kbuf.buf_align = PMD_SIZE;
+
+#3 c20d36cc2a20 2023-09-12 kernel/cpufeature.c:check_unaligned_access
+  riscv: don't probe unaligned access speed if already done
+  | If misaligned_access_speed percpu var isn't so called "HWPROBE
+  | MISALIGNED UNKNOWN", it means the probe has happened(this is possible
+  | for example, hotplug off then hotplug on one cpu), and the percpu var
+  | has been set, don't probe again in this case.
+    +	/* We are already set since the last check */
+    +	if (per_cpu(misaligned_access_speed, cpu) != RISCV_HWPROBE_MISALIGNED_UNKNOWN)
+    +		return;
+    +
+
+#4 c4676f8dc1e1 2023-10-27 kernel/cpu.c:riscv_of_parent_hartid
+  RISC-V: Don't fail in riscv_of_parent_hartid() for disabled HARTs
+  | The riscv_of_processor_hartid() used by riscv_of_parent_hartid() fails
+  | for HARTs disabled in the DT. This results in the following warning
+  | thrown by the RISC-V INTC driver for the E-core on SiFive boards:
+  | [    0.000000] riscv-intc: unable to find hart id for /cpus/cpu@0/interrupt-controller
+  | The riscv_of_parent_hartid() is only expected to read the hartid
+  | from the DT so we directly call of_get_cpu_hwid() instead of calling
+    -	int rc;
+    -
+    -			rc = riscv_of_processor_hartid(node, hartid);
+    -			if (!rc)
+    -				return 0;
+    +			*hartid = (unsigned long)of_get_cpu_hwid(node, 0);
+    +			if (*hartid == ~0UL) {
+    +				pr_warn("Found CPU without hart ID\n");
+    +				return -ENODEV;
+    +			}
+    +			return 0;
+
+#5 adb1f95d388a 2023-10-29 kernel/pi/cmdline_early.c:get_early_cmdline
+  riscv: Fix an off-by-one in get_early_cmdline()
+  | The ending NULL is not taken into account by strncat(), so switch to
+  | strlcat() to correctly compute the size of the available memory when
+  | appending CONFIG_CMDLINE to 'early_cmdline'.
+    -		strncat(early_cmdline, CONFIG_CMDLINE,
+    -			COMMAND_LINE_SIZE - fdt_cmdline_size);
+    +		strlcat(early_cmdline, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+
+#6 22e0eb04837a 2023-11-03 kernel/traps_misaligned.c:handle_misaligned_store
+  riscv: fix misaligned access handling of C.SWSP and C.SDSP
+  | This is a backport of a fix that was done in OpenSBI: ec0559eb315b
+  | ("lib: sbi_misaligned_ldst: Fix handling of C.SWSP and C.SDSP").
+  | Unlike C.LWSP/C.LDSP, these encodings can be used with the zero
+  | register, so checking that the rs2 field is non-zero is unnecessary.
+  | Additionally, the previous check was incorrect since it was checking
+  | the immediate field of the instruction instead of the rs2 field.
+    -	} else if ((insn & INSN_MASK_C_SDSP) == INSN_MATCH_C_SDSP &&
+    -		   ((insn >> SH_RD) & 0x1f)) {
+    +	} else if ((insn & INSN_MASK_C_SDSP) == INSN_MATCH_C_SDSP) {
+    -	} else if ((insn & INSN_MASK_C_SWSP) == INSN_MATCH_C_SWSP &&
+    -		   ((insn >> SH_RD) & 0x1f)) {
+    +	} else if ((insn & INSN_MASK_C_SWSP) == INSN_MATCH_C_SWSP) {
+
+#7 869436dae72a 2023-11-23 kernel/signal.c:save_v_state
+  riscv; fix __user annotation in save_v_state()
+  | The save_v_state() is technically sending a __user pointer through
+  | __put_user() and thus is generating a sparse warning so force the
+  | value to be "void *" to fix:
+  | arch/riscv/kernel/signal.c:94:16: warning: incorrect type in initializer (different address spaces)
+  | arch/riscv/kernel/signal.c:94:16: expected void *__val
+  | arch/riscv/kernel/signal.c:94:16: got void [noderef] __user *[assigned] datap
+    -	err |= __put_user(datap, &state->v_state.datap);
+    +	err |= __put_user((__force void *)datap, &state->v_state.datap);
+
+#8 c29fc621e1a4 2023-12-12 mm/pageattr.c:__set_memory
+  riscv: Fix wrong usage of lm_alias() when splitting a huge linear mapping
+  | lm_alias() can only be used on kernel mappings since it explicitly uses
+  | __pa_symbol(), so simply fix this by checking where the address belongs
+  | to before.
+    -		lm_start = (unsigned long)lm_alias(start);
+    -		lm_end = (unsigned long)lm_alias(end);
+    +		if (is_kernel_mapping(start)) {
+    +			lm_start = (unsigned long)lm_alias(start);
+    +			lm_end = (unsigned long)lm_alias(end);
+    +		} else {
+    +			lm_start = start;
+    +			lm_end = end;
+    +		}
+
+#9 749b94b08005 2023-12-13 kernel/module.c:module_alloc
+  riscv: Fix module_alloc() that did not reset the linear mapping permissions
+  | After unloading a module, we must reset the linear mapping permissions,
+  | see the example below:
+  | Before unloading a module:
+  | 0xffffaf809d65d000-0xffffaf809d6dc000    0x000000011d65d000       508K PTE .   ..     ..   D A G . . W R V
+  | 0xffffaf809d6dc000-0xffffaf809d6dd000    0x000000011d6dc000         4K PTE .   ..     ..   D A G . . . R V
+  | 0xffffaf809d6dd000-0xffffaf809d6e1000    0x000000011d6dd000        16K PTE .   ..     ..   D A G . . W R V
+    -				    PAGE_KERNEL, 0, NUMA_NO_NODE,
+    +				    PAGE_KERNEL, VM_FLUSH_RESET_PERMS,
+    +				    NUMA_NO_NODE,
+
+#10 4c460eb36951 2023-12-24 kvm/vcpu_onereg.c:kvm_riscv_vcpu_set_reg_csr
+  RISC-V: KVM: Fix indentation in kvm_riscv_vcpu_set_reg_csr()
+  | The indentation of "break" in kvm_riscv_vcpu_set_reg_csr() is
+  | inconsistent hence let us fix it.
+    -break;
+    +		break;
+
+#11 a35551c7244d 2024-01-04 kernel/module.c:initialize_relocation_hashtable
+  riscv: Fix relocation_hashtable size
+  | A second dereference is needed to get the accurate size of the
+  | relocation_hashtable.
+    -					      sizeof(*relocation_hashtable),
+    +					      sizeof(**relocation_hashtable),
+
+#12 78996eee79eb 2024-01-04 kernel/module.c:add_relocation_to_accumulate
+  riscv: Fix module loading free order
+  | Reverse order of kfree calls to resolve use-after-free error.
+    -				kfree(rel_head);
+    +				kfree(rel_head);
+
+#13 4525462dd0db 2024-01-18 lib/csum.c:do_csum_with_alignment
+  riscv: lib: Check if output in asm goto supported
+  | The output field of an asm goto statement is not supported by all
+  | compilers. If it is not supported, fallback to the non-optimized code.
+    +#ifdef CC_HAS_ASM_GOTO_TIED_OUTPUT
+    +#endif /* CC_HAS_ASM_GOTO_TIED_OUTPUT */
+
+#14 f072b272aa27 2024-01-31 kvm/vcpu_sbi_sta.c:kvm_riscv_vcpu_record_steal_time
+  RISC-V: KVM: Use correct restricted types
+  | __le32 and __le64 types should be used with le32_to_cpu() and
+  | le64_to_cpu() and __user is needed for pointers referencing
+  | guest memory, as sparse helpfully points out.
+    -	u32 *sequence_ptr, sequence;
+    -	u64 *steal_ptr, steal;
+    +	__le32 __user *sequence_ptr;
+    +	__le64 __user *steal_ptr;
+    +	__le32 sequence_le;
+    +	__le64 steal_le;
+    +	u32 sequence;
+    +	u64 steal;
+    -	sequence_ptr = (u32 *)(hva + offset_in_page(shmem) +
+    +	sequence_ptr = (__le32 __user *)(hva + offset_in_page(shmem) +
+    -	steal_ptr = (u64 *)(hva + offset_in_page(shmem) +
+    +	steal_ptr = (__le64 __user *)(hva + offset_in_page(shmem) +
+    -	if (WARN_ON(get_user(sequence, sequence_ptr)))
+    +	if (WARN_ON(get_user(sequence_le, sequence_ptr)))
+    -	sequence = le32_to_cpu(sequence);
+    +	sequence = le32_to_cpu(sequence_le);
+    -	if (!WARN_ON(get_user(steal, steal_ptr))) {
+    -		steal = le64_to_cpu(steal);
+    +	if (!WARN_ON(get_user(steal_le, steal_ptr))) {
+    +		steal = le64_to_cpu(steal_le);
+
+#15 3752219b6007 2024-01-31 kernel/paravirt.c:pv_time_steal_clock
+  RISC-V: paravirt: Use correct restricted types
+  | __le32 and __le64 types should be used with le32_to_cpu() and
+  | le64_to_cpu(), as sparse helpfully points out.
+    -	u32 sequence;
+    -	u64 steal;
+    +	__le32 sequence;
+    +	__le64 steal;
+
+#16 313130c62cf1 2024-03-08 kernel/traps_misaligned.c:unaligned_emulation_finish
+  riscv: Only check online cpus for emulated accesses
+  | The unaligned access checker only sets valid values for online cpus.
+  | Check for these values on online cpus rather than on present cpus.
+    -	for_each_present_cpu(cpu) {
+    +	for_each_online_cpu(cpu) {
+
+#17 dd33e5dc7247 2024-03-19 kernel/traps.c:do_trap
+  riscv: use KERN_INFO in do_trap
+  | Print the instruction dump with info instead of emergency level.  The
+  | unhandled signal message is only for informational purpose.
+    -		dump_instr(KERN_EMERG, regs);
+    +		dump_instr(KERN_INFO, regs);
+
+#18 8e936e98718f 2024-03-21 kvm/aia_aplic.c:aplic_read_input
+  RISC-V: KVM: Fix APLIC in_clrip[x] read emulation
+  | The reads to APLIC in_clrip[x] registers returns rectified input values
+  | of the interrupt sources.
+  | A rectified input value of an interrupt source is defined by the section
+  | "4.5.2 Source configurations (sourcecfg[1]–sourcecfg[1023])" of the
+  | RISC-V AIA specification as:
+  |     rectified input value = (incoming wire value) XOR (source is inverted)
+    -	bool ret;
+    -	unsigned long flags;
+    +	u32 sourcecfg, sm, raw_input, irq_inverted;
+    +	unsigned long flags;
+    +	bool ret = false;
+    -	ret = (irqd->state & APLIC_IRQ_STATE_INPUT) ? true : false;
+    +
+    +	sourcecfg = irqd->sourcecfg;
+    +	if (sourcecfg & APLIC_SOURCECFG_D)
+    +		goto skip;
+    +
+    +	sm = sourcecfg & APLIC_SOURCECFG_SM_MASK;
+    +	if (sm == APLIC_SOURCECFG_SM_INACTIVE)
+    +		goto skip;
+    +
+    +	raw_input = (irqd->state & APLIC_IRQ_STATE_INPUT) ? 1 : 0;
+    +	irq_inverted = (sm == APLIC_SOURCECFG_SM_LEVEL_LOW ||
+    +			sm == APLIC_SOURCECFG_SM_EDGE_FALL) ? 1 : 0;
+    +	ret = !!(raw_input ^ irq_inverted);
+    +
+    +skip:
+
+#19 d8dd9f113e16 2024-03-21 kvm/aia_aplic.c:aplic_write_pending
+  RISC-V: KVM: Fix APLIC setipnum_le/be write emulation
+  | The writes to setipnum_le/be register for APLIC in MSI-mode have special
+  | consideration for level-triggered interrupts as-per the section "4.9.2
+  | Special consideration for level-sensitive interrupt sources" of the RISC-V
+  | AIA specification.
+  | Particularly, the below text from the RISC-V AIA specification defines
+  | the behaviour of writes to setipnum_le/be register for level-triggered
+    -	if (!pending &&
+    -	    ((sm == APLIC_SOURCECFG_SM_LEVEL_HIGH) ||
+    -	     (sm == APLIC_SOURCECFG_SM_LEVEL_LOW)))
+    +	if (sm == APLIC_SOURCECFG_SM_INACTIVE)
+    +	if (sm == APLIC_SOURCECFG_SM_LEVEL_HIGH ||
+    +	    sm == APLIC_SOURCECFG_SM_LEVEL_LOW) {
+    +		if (!pending)
+    +			goto skip_write_pending;
+    +		if ((irqd->state & APLIC_IRQ_STATE_INPUT) &&
+    +		    sm == APLIC_SOURCECFG_SM_LEVEL_LOW)
+    +			goto skip_write_pending;
+    +		if (!(irqd->state & APLIC_IRQ_STATE_INPUT) &&
+    +		    sm == APLIC_SOURCECFG_SM_LEVEL_HIGH)
+    +			goto skip_write_pending;
+    +	}
+    +
+
+#20 c27fa53b858b 2024-04-03 kernel/signal.c:__restore_v_state
+  riscv: Fix vector state restore in rt_sigreturn()
+  | The RISC-V Vector specification states in "Appendix D: Calling
+  | Convention for Vector State" [1] that "Executing a system call causes
+  | all caller-saved vector registers (v0-v31, vl, vtype) and vstart to
+  | become unspecified.". In the RISC-V kernel this is called "discarding
+  | the vstate".
+  | Returning from a signal handler via the rt_sigreturn() syscall, vector
+    +	/*
+    +	 * Mark the vstate as clean prior performing the actual copy,
+    +	 * to avoid getting the vstate incorrectly clobbered by the
+    +	 *  discarded vector state.
+    +	 */
+    +	riscv_v_vstate_set_restore(current, regs);
+    +
+    -	err = copy_from_user(current->thread.vstate.datap, datap, riscv_v_vsize);
+    -	if (unlikely(err))
+    -		return err;
+    -
+    -	riscv_v_vstate_set_restore(current, regs);
+    -
+    -	return err;
+    +	return copy_from_user(current->thread.vstate.datap, datap, riscv_v_vsize);
+
+#21 2d707b4e37f9 2024-04-15 kvm/aia_device.c:aia_imsic_hart_index
+  RISC-V: KVM: No need to use mask when hart-index-bit is 0
+  | When the maximum hart number within groups is 1, hart-index-bit is set to
+  | 0. Consequently, there is no need to restore the hart ID from IMSIC
+  | addresses and hart-index-bit settings. Currently, QEMU and kvmtool do not
+  | pass correct hart-index-bit values when the maximum hart number is a
+  | power of 2, thereby avoiding this issue. Corresponding patches for QEMU
+  | and kvmtool will also be dispatched.
+    -	u32 hart, group = 0;
+    +	u32 hart = 0, group = 0;
+    -	hart = (addr >> (aia->nr_guest_bits + IMSIC_MMIO_PAGE_SHIFT)) &
+    -		GENMASK_ULL(aia->nr_hart_bits - 1, 0);
+    +	if (aia->nr_hart_bits)
+    +		hart = (addr >> (aia->nr_guest_bits + IMSIC_MMIO_PAGE_SHIFT)) &
+    +		       GENMASK_ULL(aia->nr_hart_bits - 1, 0);
+
+#22 10541b374aa0 2024-04-16 net/bpf_jit_comp64.c:invoke_bpf_prog
+  riscv, bpf: Fix incorrect runtime stats
+  | When __bpf_prog_enter() returns zero, the s1 register is not set to zero,
+  | resulting in incorrect runtime stats. Fix it by setting s1 immediately upon
+  | the return of __bpf_prog_enter().
+    +	/* store prog start time */
+    +	emit_mv(RV_REG_S1, RV_REG_A0, ctx);
+    +
+    -	/* store prog start time */
+    -	emit_mv(RV_REG_S1, RV_REG_A0, ctx);
+    -
+
+#23 98ce906bd0a6 2024-04-20 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_stop
+  RISC-V: KVM: No need to update the counter value during reset
+  | The virtual counter value is updated during pmu_ctr_read. There is no need
+  | to update it in reset case. Otherwise, it will be counted twice which is
+  | incorrect.
+    -	u64 enabled, running;
+    -			if (flags & SBI_PMU_STOP_FLAG_RESET) {
+    -				/* Relase the counter if this is a reset request */
+    -				pmc->counter_val += perf_event_read_value(pmc->perf_event,
+    -									  &enabled, &running);
+    +			if (flags & SBI_PMU_STOP_FLAG_RESET)
+    +				/* Release the counter if this is a reset request */
+    -			}
+
+#24 994af1825a2a 2024-04-25 mm/init.c:setup_bootmem
+  riscv: fix overlap of allocated page and PTR_ERR
+  | On riscv32, it is possible for the last page in virtual address space
+  | (0xfffff000) to be allocated. This page overlaps with PTR_ERR, so that
+  | shouldn't happen.
+  | There is already some code to ensure memblock won't allocate the last page.
+  | However, buddy allocator is left unchecked.
+  | Fix this by reserving physical memory that would be mapped at virtual
+    -	 * memblock allocator is not aware of the fact that last 4K bytes of
+    -	 * the addressable memory can not be mapped because of IS_ERR_VALUE
+    -	 * macro. Make sure that last 4k bytes are not usable by memblock
+    -	 * if end of dram is equal to maximum addressable memory.  For 64-bit
+    -	 * kernel, this problem can't happen here as the end of the virtual
+    -	 * address space is occupied by the kernel mapping then this check must
+    -	 * be done as soon as the kernel mapping base address is determined.
+    +	 * Reserve physical address space that would be mapped to virtual
+    +	 * addresses greater than (void *)(-PAGE_SIZE) because:
+    +	 *  - This memory would overlap with ERR_PTR
+    +	 *  - This memory belongs to high memory, which is not supported
+    +	 *
+    +	 * This is not applicable to 64-bit kernel, because virtual addresses
+    +	 * after (void *)(-PAGE_SIZE) are not linearly mapped: they are
+    +	 * occupied by kernel mapping. Also it is unrealistic for high memory
+    +	 * to exist on 64-bit platforms.
+    -		max_mapped_addr = __pa(~(ulong)0);
+    -		if (max_mapped_addr == (phys_ram_end - 1))
+    -			memblock_set_current_limit(max_mapped_addr - 4096);
+    +		max_mapped_addr = __va_to_pa_nodebug(-PAGE_SIZE);
+    +		memblock_reserve(max_mapped_addr, (phys_addr_t)-max_mapped_addr);
+
+#25 e67e98ee8952 2024-05-02 kernel/cpufeature.c:riscv_fill_hwcap_from_ext_list
+  riscv: cpufeature: Fix extension subset checking
+  | This loop is supposed to check if ext->subset_ext_ids[j] is valid, rather
+  | than if ext->subset_ext_ids[i] is valid, before setting the extension
+  | id ext->subset_ext_ids[j] in isainfo->isa.
+    -					if (riscv_isa_extension_check(ext->subset_ext_ids[i]))
+    +					if (riscv_isa_extension_check(ext->subset_ext_ids[j]))
+
+#26 20a759df3bba 2024-05-05 net/bpf_jit_comp64.c:emit_atomic
+  riscv, bpf: make some atomic operations fully ordered
+  | The BPF atomic operations with the BPF_FETCH modifier along with
+  | BPF_XCHG and BPF_CMPXCHG are fully ordered but the RISC-V JIT implements
+  | all atomic operations except BPF_CMPXCHG with relaxed ordering.
+  | Section 8.1 of the "The RISC-V Instruction Set Manual Volume I:
+  | Unprivileged ISA" [1], titled, "Specifying Ordering of Atomic
+  | Instructions" says:
+    -		emit(is64 ? rv_amoadd_d(rs, rs, rd, 0, 0) :
+    -		     rv_amoadd_w(rs, rs, rd, 0, 0), ctx);
+    +		emit(is64 ? rv_amoadd_d(rs, rs, rd, 1, 1) :
+    +		     rv_amoadd_w(rs, rs, rd, 1, 1), ctx);
+    -		emit(is64 ? rv_amoand_d(rs, rs, rd, 0, 0) :
+    -		     rv_amoand_w(rs, rs, rd, 0, 0), ctx);
+    +		emit(is64 ? rv_amoand_d(rs, rs, rd, 1, 1) :
+    +		     rv_amoand_w(rs, rs, rd, 1, 1), ctx);
+    -		emit(is64 ? rv_amoor_d(rs, rs, rd, 0, 0) :
+    -		     rv_amoor_w(rs, rs, rd, 0, 0), ctx);
+    +		emit(is64 ? rv_amoor_d(rs, rs, rd, 1, 1) :
+    +		     rv_amoor_w(rs, rs, rd, 1, 1), ctx);
+    -		emit(is64 ? rv_amoxor_d(rs, rs, rd, 0, 0) :
+    -		     rv_amoxor_w(rs, rs, rd, 0, 0), ctx);
+    +		emit(is64 ? rv_amoxor_d(rs, rs, rd, 1, 1) :
+    +		     rv_amoxor_w(rs, rs, rd, 1, 1), ctx);
+    -		emit(is64 ? rv_amoswap_d(rs, rs, rd, 0, 0) :
+    -		     rv_amoswap_w(rs, rs, rd, 0, 0), ctx);
+    +		emit(is64 ? rv_amoswap_d(rs, rs, rd, 1, 1) :
+    +		     rv_amoswap_w(rs, rs, rd, 1, 1), ctx);
+
+#27 c67ddf59ac44 2024-05-15 mm/init.c:best_map_size
+  riscv: force PAGE_SIZE linear mapping if debug_pagealloc is enabled
+  | debug_pagealloc is a debug feature which clears the valid bit in page table
+  | entry for freed pages to detect illegal accesses to freed memory.
+  | For this feature to work, virtual mapping must have PAGE_SIZE resolution.
+  | (No, we cannot map with huge pages and split them only when needed; because
+  | pages can be allocated/freed in atomic context and page splitting cannot be
+  | done in atomic context)
+    +	if (debug_pagealloc_enabled())
+    +		return PAGE_SIZE;
+    +
+
+#28 c66f3b40b17d 2024-05-23 kvm/vcpu_onereg.c:kvm_riscv_vcpu_set_reg_isa_ext
+  RISC-V: KVM: Fix incorrect reg_subtype labels in kvm_riscv_vcpu_set_reg_isa_ext function
+  | In the function kvm_riscv_vcpu_set_reg_isa_ext, the original code
+  | used incorrect reg_subtype labels KVM_REG_RISCV_SBI_MULTI_EN/DIS.
+  | These have been corrected to KVM_REG_RISCV_ISA_MULTI_EN/DIS respectively.
+  | Although they are numerically equivalent, the actual processing
+  | will not result in errors, but it may lead to ambiguous code semantics.
+    -	case KVM_REG_RISCV_SBI_MULTI_EN:
+    +	case KVM_REG_RISCV_ISA_MULTI_EN:
+    -	case KVM_REG_RISCV_SBI_MULTI_DIS:
+    +	case KVM_REG_RISCV_ISA_MULTI_DIS:
+
+#29 e2c79b4c5c4d 2024-05-30 mm/fault.c:handle_page_fault
+  Revert "riscv: mm: accelerate pagefault when badaccess"
+  | I accidentally picked up an earlier version of this patch, which had
+  | already landed via mm.  The patch  I picked up contains a bug, which I
+  | kept as I thought it was a fix.  So let's just revert it.
+  | This reverts commit 4c6c0020427a4547845a83f7e4d6085e16c3e24f.
+    -		tsk->thread.bad_cause = SEGV_ACCERR;
+    -		bad_area_nosemaphore(regs, code, addr);
+    +		tsk->thread.bad_cause = cause;
+    +		bad_area_nosemaphore(regs, SEGV_ACCERR, addr);
+
+#30 c562ba719df5 2024-06-26 kernel/machine_kexec.c:machine_kexec_mask_interrupts
+  riscv: kexec: Avoid deadlock in kexec crash path
+  | If the kexec crash code is called in the interrupt context, the
+  | machine_kexec_mask_interrupts() function will trigger a deadlock while
+  | trying to acquire the irqdesc spinlock and then deactivate irqchip in
+  | irq_set_irqchip_state() function.
+  | Unlike arm64, riscv only requires irq_eoi handler to complete EOI and
+  | keeping irq_set_irqchip_state() will only leave this possible deadlock
+    -		int ret;
+    -		/*
+    -		 * First try to remove the active state. If this
+    -		 * fails, try to EOI the interrupt.
+    -		 */
+    -		ret = irq_set_irqchip_state(i, IRQCHIP_STATE_ACTIVE, false);
+    -
+    -		if (ret && irqd_irq_inprogress(&desc->irq_data) &&
+    -		    chip->irq_eoi)
+    +		if (chip->irq_eoi && irqd_irq_inprogress(&desc->irq_data))
+
+#31 61119394631f 2024-06-27 kernel/traps.c:do_trap_ecall_u
+  riscv: entry: always initialize regs->a0 to -ENOSYS
+  | Otherwise when the tracer changes syscall number to -1, the kernel fails
+  | to initialize a0 with -ENOSYS and subsequently fails to return the error
+  | code of the failed syscall to userspace. For example, it will break
+  | strace syscall tampering.
+    +		regs->a0 = -ENOSYS;
+    -		else if (syscall != -1)
+    -			regs->a0 = -ENOSYS;
+    +
+
+#32 22ab08955ea1 2024-07-08 kernel/perf_callchain.c:perf_callchain_user
+  riscv: Fix fp alignment bug in perf_callchain_user()
+  | The standard RISC-V calling convention said:
+  | 	"The stack grows downward and the stack pointer is always
+  | 	kept 16-byte aligned".
+  | So perf_callchain_user() should check whether 16-byte aligned for fp.
+    -	while (fp && !(fp & 0x3) && entry->nr < entry->max_stack)
+    +	while (fp && !(fp & 0x7) && entry->nr < entry->max_stack)
+
+#33 b75a22e7d4f2 2024-07-18 kernel/cpufeature.c:riscv_resolve_isa
+  riscv: cpufeature: Do not drop Linux-internal extensions
+  | The Linux-internal Xlinuxenvcfg ISA extension is omitted from the
+  | riscv_isa_ext array because it has no DT binding and should not appear
+  | in /proc/cpuinfo. The logic added in commit 625034abd52a ("riscv: add
+  | ISA extensions validation callback") assumes all extensions are included
+  | in riscv_isa_ext, and so riscv_resolve_isa() wrongly drops Xlinuxenvcfg
+  | from the final ISA string. Instead, accept such Linux-internal ISA
+    -			if (!ext)
+    -				continue;
+    -			if (ext->validate) {
+    +			if (ext && ext->validate) {
+    -					clear_bit(ext->id, source_isa);
+    +					clear_bit(bit, source_isa);
+    -			set_bit(ext->id, resolved_isa);
+    +			set_bit(bit, resolved_isa);
+    -			clear_bit(ext->id, source_isa);
+    +			clear_bit(bit, source_isa);
+    -			if (ext->id < RISCV_ISA_EXT_BASE)
+    -				*this_hwcap |= isa2hwcap[ext->id];
+    +			if (bit < RISCV_ISA_EXT_BASE)
+    +				*this_hwcap |= isa2hwcap[bit];
+
+#34 0c710050c47d 2024-07-31 mm/fault.c:mm_fault_error
+  riscv/mm: Add handling for VM_FAULT_SIGSEGV in mm_fault_error()
+  | Handle VM_FAULT_SIGSEGV in the page fault path so that we correctly
+  | kill the process and we don't BUG() the kernel.
+    +	if (!user_mode(regs)) {
+    +		no_context(regs, addr);
+    +		return;
+    +	}
+    +
+    -		if (!user_mode(regs)) {
+    -			no_context(regs, addr);
+    -			return;
+    -		}
+    -		if (!user_mode(regs)) {
+    -			no_context(regs, addr);
+    -			return;
+    -		}
+    +	} else if (fault & VM_FAULT_SIGSEGV) {
+    +		do_trap(regs, SIGSEGV, SEGV_MAPERR, addr);
+    +		return;
+    +
+
+#35 6b7b282e6bae 2024-08-07 kvm/vcpu_sbi.c:kvm_riscv_vcpu_sbi_forward
+  RISC-V: KVM: Fix sbiret init before forwarding to userspace
+  | When forwarding SBI calls to userspace ensure sbiret.error is
+  | initialized to SBI_ERR_NOT_SUPPORTED first, in case userspace
+  | neglects to set it to anything. If userspace neglects it then we
+  | can't be sure it did anything else either, so we just report it
+  | didn't do or try anything. Just init sbiret.value to zero, which is
+  | the preferred value to return when nothing special is specified.
+    -	run->riscv_sbi.ret[0] = cp->a0;
+    -	run->riscv_sbi.ret[1] = cp->a1;
+    +	run->riscv_sbi.ret[0] = SBI_ERR_NOT_SUPPORTED;
+    +	run->riscv_sbi.ret[1] = 0;
+
+#36 e01d48c699bb 2024-08-14 kernel/vendor_extensions.c:__riscv_isa_vendor_extension_available
+  riscv: Fix out-of-bounds when accessing Andes per hart vendor extension array
+  | The out-of-bounds access is reported by UBSAN:
+  | [    0.000000] UBSAN: array-index-out-of-bounds in ../arch/riscv/kernel/vendor_extensions.c:41:66
+  | [    0.000000] index -1 is out of range for type 'riscv_isavendorinfo [32]'
+  | [    0.000000] CPU: 0 UID: 0 PID: 0 Comm: swapper Not tainted 6.11.0-rc2ubuntu-defconfig #2
+  | [    0.000000] Hardware name: riscv-virtio,qemu (DT)
+  | [    0.000000] Call Trace:
+    -		cpu_bmap = &riscv_isa_vendor_ext_list_andes.per_hart_isa_bitmap[cpu];
+    +		cpu_bmap = riscv_isa_vendor_ext_list_andes.per_hart_isa_bitmap;
+
+#37 47d40d93292d 2024-08-15 kvm/vcpu_pmu.c:kvm_pmu_clear_snapshot_area
+  RISC-V: KVM: Don't zero-out PMU snapshot area before freeing data
+  | With the latest Linux-6.11-rc3, the below NULL pointer crash is observed
+  | when SBI PMU snapshot is enabled for the guest and the guest is forcefully
+  | powered-off.
+  |   Unable to handle kernel NULL pointer dereference at virtual address 0000000000000508
+  |   Oops [#1]
+  |   Modules linked in: kvm
+    -	int snapshot_area_size = sizeof(struct riscv_pmu_snapshot_data);
+    -	if (kvpmu->sdata) {
+    -		if (kvpmu->snapshot_addr != INVALID_GPA) {
+    -			memset(kvpmu->sdata, 0, snapshot_area_size);
+    -			kvm_vcpu_write_guest(vcpu, kvpmu->snapshot_addr,
+    -					     kvpmu->sdata, snapshot_area_size);
+    -		} else {
+    -			pr_warn("snapshot address invalid\n");
+    -		}
+    -		kfree(kvpmu->sdata);
+    -		kvpmu->sdata = NULL;
+    -	}
+    +	kfree(kvpmu->sdata);
+    +	kvpmu->sdata = NULL;
+
+#38 5f771088a2b5 2024-08-27 mm/init.c:setup_bootmem
+  riscv: Do not restrict memory size because of linear mapping on nommu
+  | It makes no sense to restrict physical memory size because of linear
+  | mapping size constraints when there is no linear mapping, so only do
+  | that when mmu is enabled.
+    -	if (IS_ENABLED(CONFIG_64BIT)) {
+    +	if (IS_ENABLED(CONFIG_64BIT) && IS_ENABLED(CONFIG_MMU)) {
+
+#39 37233169a6ea 2024-09-13 kernel/cacheinfo.c:populate_cache_leaves
+  riscv: Prevent a bad reference count on CPU nodes
+  | When populating cache leaves we previously fetched the CPU device node
+  | at the very beginning. But when ACPI is enabled we go through a
+  | specific branch which returns early and does not call 'of_node_put' for
+  | the node that was acquired.
+  | Since we are not using a CPU device node for the ACPI code anyways, we
+  | can simply move the initialization of it just passed the ACPI block, and
+    -	struct device_node *np = of_cpu_device_node_get(cpu);
+    -	struct device_node *prev = NULL;
+    +	struct device_node *np, *prev;
+    +	np = of_cpu_device_node_get(cpu);
+    +	if (!np)
+    +		return -ENOENT;
+    +
+
+#40 e0872ab72630 2024-10-17 kernel/cpu-hotplug.c:arch_cpuhp_cleanup_dead_cpu
+  riscv: Use '%u' to format the output of 'cpu'
+  | 'cpu' is an unsigned integer, so its conversion specifier should
+  | be %u, not %d.
+    -		pr_warn("CPU%d may not have stopped: %d\n", cpu, ret);
+    +		pr_warn("CPU%u may not have stopped: %d\n", cpu, ret);
+
+#41 9c528b5f7927 2024-10-17 kernel/unaligned_access_speed.c:riscv_online_cpu
+  RISC-V: Scalar unaligned access emulated on hotplug CPUs
+  | The check_unaligned_access_emulated() function should have been called
+  | during CPU hotplug to ensure that if all CPUs had emulated unaligned
+  | accesses, the new CPU also does.
+  | This patch adds the call to check_unaligned_access_emulated() in
+  | the hotplug path.
+    +	check_unaligned_access_emulated(NULL);
+
+#42 e59db0623f69 2024-10-17 net/bpf_jit_comp64.c:emit_atomic
+  riscv, bpf: Make BPF_CMPXCHG fully ordered
+  | According to the prototype formal BPF memory consistency model
+  | discussed e.g. in [1] and following the ordering properties of
+  | the C/in-kernel macro atomic_cmpxchg(), a BPF atomic operation
+  | with the BPF_CMPXCHG modifier is fully ordered.  However, the
+  | current RISC-V JIT lowerings fail to meet such memory ordering
+  | property.  This is illustrated by the following litmus test:
+    -		emit(is64 ? rv_sc_d(RV_REG_T3, rs, rd, 0, 0) :
+    -		     rv_sc_w(RV_REG_T3, rs, rd, 0, 0), ctx);
+    +		emit(is64 ? rv_sc_d(RV_REG_T3, rs, rd, 0, 1) :
+    +		     rv_sc_w(RV_REG_T3, rs, rd, 0, 1), ctx);
+
+#43 60821fb4dd73 2024-10-29 kvm/aia_aplic.c:aplic_write_pending
+  RISC-V: KVM: Fix APLIC in_clrip and clripnum write emulation
+  | In the section "4.7 Precise effects on interrupt-pending bits"
+  | of the RISC-V AIA specification defines that:
+  | "If the source mode is Level1 or Level0 and the interrupt domain
+  | is configured in MSI delivery mode (domaincfg.DM = 1):
+  | The pending bit is cleared whenever the rectified input value is
+  | low, when the interrupt is forwarded by MSI, or by a relevant
+    -			goto skip_write_pending;
+    +			goto noskip_write_pending;
+    +noskip_write_pending:
+
+#44 fb8179ce2996 2024-11-04 kernel/cacheinfo.c:populate_cache_leaves
+  riscv: cacheinfo: Use of_property_present() for non-boolean properties
+  | The use of of_property_read_bool() for non-boolean properties is
+  | deprecated in favor of of_property_present() when testing for property
+  | presence.
+    -	if (of_property_read_bool(np, "cache-size"))
+    +	if (of_property_present(np, "cache-size"))
+    -	if (of_property_read_bool(np, "i-cache-size"))
+    +	if (of_property_present(np, "i-cache-size"))
+    -	if (of_property_read_bool(np, "d-cache-size"))
+    +	if (of_property_present(np, "d-cache-size"))
+    -		if (of_property_read_bool(np, "cache-size"))
+    +		if (of_property_present(np, "cache-size"))
+    -		if (of_property_read_bool(np, "i-cache-size"))
+    +		if (of_property_present(np, "i-cache-size"))
+    -		if (of_property_read_bool(np, "d-cache-size"))
+    +		if (of_property_present(np, "d-cache-size"))
+
+#45 332fa4a802b1 2024-11-04 kvm/vcpu_sbi.c:kvm_riscv_vcpu_sbi_init
+  riscv: kvm: Fix out-of-bounds array access
+  | In kvm_riscv_vcpu_sbi_init() the entry->ext_idx can contain an
+  | out-of-bound index. This is used as a special marker for the base
+  | extensions, that cannot be disabled. However, when traversing the
+  | extensions, that special marker is not checked prior indexing the
+  | array.
+  | Add an out-of-bounds check to the function.
+    -	int i;
+    +	int idx, i;
+    +		idx = entry->ext_idx;
+    +
+    +		if (idx < 0 || idx >= ARRAY_SIZE(scontext->ext_status))
+    +			continue;
+    -			scontext->ext_status[entry->ext_idx] =
+    -				KVM_RISCV_SBI_EXT_STATUS_UNAVAILABLE;
+    +			scontext->ext_status[idx] = KVM_RISCV_SBI_EXT_STATUS_UNAVAILABLE;
+    -		scontext->ext_status[entry->ext_idx] = ext->default_disabled ?
+    +		scontext->ext_status[idx] = ext->default_disabled ?
+
+#46 13134cc94914 2024-11-19 kernel/probes/kprobes.c:arch_prepare_ss_slot
+  riscv: kprobes: Fix incorrect address calculation
+  | p->ainsn.api.insn is a pointer to u32, therefore arithmetic operations are
+  | multiplied by four. This is clearly undesirable for this case.
+  | Cast it to (void *) first before any calculation.
+  | Below is a sample before/after. The dumped memory is two kprobe slots, the
+  | first slot has
+  |   - c.addiw a0, 0x1c (0x7125)
+    -	patch_text_nosync(p->ainsn.api.insn + len, &insn, GET_INSN_LENGTH(insn));
+    +	patch_text_nosync((void *)p->ainsn.api.insn + len, &insn, GET_INSN_LENGTH(insn));
+
+#47 ea6398a5af81 2024-11-27 kvm/aia.c:kvm_riscv_aia_enable
+  RISC-V: KVM: Fix csr_write -> csr_set for HVIEN PMU overflow bit
+  | This doesn't cause a problem currently as HVIEN isn't used elsewhere
+  | yet. Found by inspection.
+    -		csr_write(CSR_HVIEN, BIT(IRQ_PMU_OVF));
+    +		csr_set(CSR_HVIEN, BIT(IRQ_PMU_OVF));
+
+#48 b3134b8c1a1c 2024-11-30 kernel/jump_label.c:arch_jump_label_transform_queue
+  riscv: Fixup boot failure when CONFIG_DEBUG_RT_MUTEXES=y
+  | When CONFIG_DEBUG_RT_MUTEXES=y, mutex_lock->rt_mutex_try_acquire
+  | would change from rt_mutex_cmpxchg_acquire to
+  | rt_mutex_slowtrylock():
+  | 	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+  | 	ret = __rt_mutex_slowtrylock(lock);
+  | 	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+    -	mutex_lock(&text_mutex);
+    -	patch_insn_write(addr, &insn, sizeof(insn));
+    -	mutex_unlock(&text_mutex);
+    +	if (early_boot_irqs_disabled) {
+    +		riscv_patch_in_stop_machine = 1;
+    +		patch_insn_write(addr, &insn, sizeof(insn));
+    +		riscv_patch_in_stop_machine = 0;
+    +	} else {
+    +		mutex_lock(&text_mutex);
+    +		patch_insn_write(addr, &insn, sizeof(insn));
+    +		mutex_unlock(&text_mutex);
+    +	}
+
+#49 c796e1872012 2024-12-09 kernel/setup.c:parse_dtb
+  riscv: Fix wrong usage of __pa() on a fixmap address
+  | riscv uses fixmap addresses to map the dtb so we can't use __pa() which
+  | is reserved for linear mapping addresses.
+    -	if (early_init_dt_scan(dtb_early_va, __pa(dtb_early_va))) {
+    +	if (early_init_dt_scan(dtb_early_va, dtb_early_pa)) {
+
+#50 564fc8eb6f78 2024-12-20 kernel/setup.c:setup_arch
+  riscv: signal: fix signal_minsigstksz
+  | The init_rt_signal_env() funciton is called before the alternative patch
+  | is applied, so using the alternative-related API to check the availability
+  | of an extension within this function doesn't have the intended effect.
+  | This patch reorders the init_rt_signal_env() and apply_boot_alternatives()
+  | to get the correct signal_minsigstksz.
+    -	init_rt_signal_env();
+    +	init_rt_signal_env();
+
+#51 aa49bc2ca852 2024-12-20 kernel/signal.c:get_rt_frame_size
+  riscv: signal: fix signal frame size
+  | The signal context of certain RISC-V extensions will be appended after
+  | struct __riscv_extra_ext_header, which already includes an empty context
+  | header. Therefore, there is no need to preserve a separate hdr for the
+  | END of signal context.
+    -	/*
+    -	 * Preserved a __riscv_ctx_hdr for END signal context header if an
+    -	 * extension uses __riscv_extra_ext_header
+    -	 */
+    -	if (total_context_size)
+    -		total_context_size += sizeof(struct __riscv_ctx_hdr);
+
+#52 c6ec1e1b078d 2025-02-10 kernel/cpufeature.c:riscv_resolve_isa
+  riscv: cpufeature: use bitmap_equal() instead of memcmp()
+  | Comparison of bitmaps should be done using bitmap_equal(), not memcmp(),
+  | use the former one to compare isa bitmaps.
+    -	} while (loop && memcmp(prev_resolved_isa, resolved_isa, sizeof(prev_resolved_isa)));
+    +	} while (loop && !bitmap_equal(prev_resolved_isa, resolved_isa, RISCV_ISA_EXT_MAX));
+
+#53 b90148485299 2025-02-17 kvm/vcpu_sbi_replace.c:kvm_sbi_ext_time_handler
+  riscv: KVM: Fix SBI TIME error generation
+  | When an invalid function ID of an SBI extension is used we should
+  | return not-supported, not invalid-param.
+    -		retdata->err_val = SBI_ERR_INVALID_PARAM;
+    +		retdata->err_val = SBI_ERR_NOT_SUPPORTED;
+
+#54 0611f78f83c9 2025-02-17 kvm/vcpu_sbi_replace.c:kvm_sbi_ext_ipi_handler
+  riscv: KVM: Fix SBI IPI error generation
+  | When an invalid function ID of an SBI extension is used we should
+  | return not-supported, not invalid-param. Also, when we see that at
+  | least one hartid constructed from the base and mask parameters is
+  | invalid, then we should return invalid-param. Finally, rather than
+  | relying on overflowing a left shift to result in zero and then using
+  | that zero in a condition which [correctly] skips sending an IPI (but
+    +	unsigned long hart_bit = 0, sentmask = 0;
+    -		retdata->err_val = SBI_ERR_INVALID_PARAM;
+    +		retdata->err_val = SBI_ERR_NOT_SUPPORTED;
+    -			if (!(hmask & (1UL << (tmp->vcpu_id - hbase))))
+    +			hart_bit = tmp->vcpu_id - hbase;
+    +			if (hart_bit >= __riscv_xlen)
+    +				goto done;
+    +			if (!(hmask & (1UL << hart_bit)))
+    +		sentmask |= 1UL << hart_bit;
+    +done:
+    +	if (hbase != -1UL && (hmask ^ sentmask))
+    +		retdata->err_val = SBI_ERR_INVALID_PARAM;
+    +
+
+#55 c7db342e3b47 2025-02-17 kvm/vcpu_sbi_hsm.c:kvm_sbi_hsm_vcpu_get_status
+  riscv: KVM: Fix hart suspend status check
+  | "Not stopped" means started or suspended so we need to check for
+  | a single state in order to have a chance to check for each state.
+  | Also, we need to use target_vcpu when checking for the suspend
+  | state.
+    -	if (!kvm_riscv_vcpu_stopped(target_vcpu))
+    -		return SBI_HSM_STATE_STARTED;
+    -	else if (vcpu->stat.generic.blocking)
+    +	if (kvm_riscv_vcpu_stopped(target_vcpu))
+    +		return SBI_HSM_STATE_STOPPED;
+    +	else if (target_vcpu->stat.generic.blocking)
+    -		return SBI_HSM_STATE_STOPPED;
+    +		return SBI_HSM_STATE_STARTED;
+
+#56 33981b1c4e49 2025-02-28 kernel/unaligned_access_speed.c:check_vector_unaligned_access
+  riscv: Fix missing __free_pages() in check_vector_unaligned_access()
+  | The locally allocated pages are never freed up, so add the corresponding
+  | __free_pages().
+    -		return;
+    +		goto free;
+    +
+    +free:
+    +	__free_pages(page, MISALIGNED_BUFFER_ORDER);
+
+#57 bbb622488749 2025-03-03 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_cfg_match
+  RISC-V: KVM: Disable the kernel perf counter during configure
+  | The perf event should be marked disabled during the creation as
+  | it is not ready to be scheduled until there is SBI PMU start call
+  | or config matching is called with auto start. Otherwise, event add/start
+  | gets called during perf_event_create_kernel_counter function.
+  | It will be enabled and scheduled to run via perf_event_enable during
+  | either the above mentioned scenario.
+    +		.disabled = true,
+
+#58 5af72a818612 2025-03-04 kernel/unaligned_access_speed.c:riscv_online_cpu_vec
+  riscv: Fix riscv_online_cpu_vec
+  | We shouldn't probe when we already know vector is unsupported and
+  | we should probe when we see we don't yet know whether it's supported.
+  | Furthermore, we should ensure we've set the access type to
+  | unsupported when we don't have vector at all.
+    -	if (!has_vector())
+    +	if (!has_vector()) {
+    +		per_cpu(vector_misaligned_access, cpu) = RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED;
+    +	}
+    -	if (per_cpu(vector_misaligned_access, cpu) != RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED)
+    +	if (per_cpu(vector_misaligned_access, cpu) != RISCV_HWPROBE_MISALIGNED_VECTOR_UNKNOWN)
+
+#59 e5bf9a4b68fa 2025-03-12 mm/cacheflush.c:set_icache_stale_mask
+  riscv: switch set_icache_stale_mask() to using non-atomic assign_cpu()
+  | The atomic cpumask_assign_cpu() follows non-atomic cpumask_setall(),
+  | which makes the whole operation non-atomic. Fix this by relaxing to
+  | non-atomic __assign_cpu().
+    -	cpumask_assign_cpu(cpu, mask, stale_cpu);
+    +	__assign_cpu(cpu, mask, stale_cpu);
+
+#60 2d117e67f318 2025-03-17 kvm/main.c:riscv_kvm_exit
+  RISC-V: KVM: Teardown riscv specific bits after kvm_exit
+  | During a module removal, kvm_exit invokes arch specific disable
+  | call which disables AIA. However, we invoke aia_exit before kvm_exit
+  | resulting in the following warning. KVM kernel module can't be inserted
+  | afterwards due to inconsistent state of IRQ.
+  | [25469.031389] percpu IRQ 31 still enabled on CPU0!
+  | [25469.031732] WARNING: CPU: 3 PID: 943 at kernel/irq/manage.c:2476 __free_percpu_irq+0xa2/0x150
+    -	kvm_riscv_teardown();
+    -
+    +
+    +	kvm_riscv_teardown();
+
+#61 28093cfef5dd 2025-03-26 kernel/elf_kexec.c:arch_kexec_apply_relocations_add
+  riscv/kexec_file: Handle R_RISCV_64 in purgatory relocator
+  | Commit 58ff537109ac ("riscv: Omit optimized string routines when
+  | using KASAN") introduced calls to EXPORT_SYMBOL() in assembly string
+  | routines, which result in R_RISCV_64 relocations against
+  | .export_symbol section. As these rountines are reused by RISC-V
+  | purgatory and our relocator doesn't recognize these relocations, this
+  | fails kexec-file-load with dmesg like
+    +		case R_RISCV_64:
+    +			*(u64 *)loc = val;
+    +			break;
+
+#62 87ec7d5249bb 2025-04-03 kvm/vcpu.c:kvm_riscv_reset_vcpu
+  KVM: RISC-V: reset smstateen CSRs
+  | Not resetting smstateen is a potential security hole, because VU might
+  | be able to access state that VS does not properly context-switch.
+    +	memset(&vcpu->arch.smstateen_csr, 0, sizeof(vcpu->arch.smstateen_csr));
+    +
+
+#63 1ee1313f4722 2025-04-09 kernel/module-sections.c:count_max_entries
+  riscv: module: Allocate PLT entries for R_RISCV_PLT32
+  | apply_r_riscv_plt32_rela() may need to emit a PLT entry for the
+  | referenced symbol, so there must be space allocated in the PLT.
+    -	unsigned int type, i;
+    -
+    -	for (i = 0; i < num; i++) {
+    -		type = ELF_RISCV_R_TYPE(relas[i].r_info);
+    -		if (type == R_RISCV_CALL_PLT) {
+    +	for (int i = 0; i < num; i++) {
+    +		switch (ELF_R_TYPE(relas[i].r_info)) {
+    +		case R_RISCV_CALL_PLT:
+    +		case R_RISCV_PLT32:
+    -		} else if (type == R_RISCV_GOT_HI20) {
+    +			break;
+    +		case R_RISCV_GOT_HI20:
+    +			break;
+
+#64 0b4cce68efb9 2025-04-09 kernel/module.c:apply_relocate_add
+  riscv: module: Fix out-of-bounds relocation access
+  | The current code allows rel[j] to access one element past the end of the
+  | relocation section. Simplify to num_relocations which is equivalent to
+  | the existing size expression.
+    -				if (j > sechdrs[relsec].sh_size / sizeof(*rel))
+    +				if (j == num_relocations)
+
+#65 453805f0a28f 2025-04-22 kernel/traps.c:do_trap_misaligned
+  riscv: misaligned: enable IRQs while handling misaligned accesses
+  | We can safely reenable IRQs if coming from userspace. This allows to
+  | access user memory that could potentially trigger a page fault.
+    -	if (user_mode(regs))
+    +	if (user_mode(regs)) {
+    -	else
+    +		local_irq_enable();
+    +	} else {
+    +	}
+    -	if (user_mode(regs))
+    +	if (user_mode(regs)) {
+    +		local_irq_disable();
+    -	else
+    +	} else {
+    +	}
+
+#66 ae08d55807c0 2025-05-04 kernel/process.c:set_tagged_addr_ctrl
+  riscv: Fix kernel crash due to PR_SET_TAGGED_ADDR_CTRL
+  | When userspace does PR_SET_TAGGED_ADDR_CTRL, but Supm extension is not
+  | available, the kernel crashes:
+  | Oops - illegal instruction [#1]
+  |     [snip]
+  | epc : set_tagged_addr_ctrl+0x112/0x15a
+  |  ra : set_tagged_addr_ctrl+0x74/0x15a
+    +	if (!riscv_has_extension_unlikely(RISCV_ISA_EXT_SUPM))
+    +		return -EINVAL;
+    +
+
+#67 7f1c3de1370b 2025-05-07 kernel/process.c:get_tagged_addr_ctrl
+  riscv: Disallow PR_GET_TAGGED_ADDR_CTRL without Supm
+  | When the prctl() interface for pointer masking was added, it did not
+  | check that the pointer masking ISA extension was supported, only the
+  | individual submodes. Userspace could still attempt to disable pointer
+  | masking and query the pointer masking state. commit 81de1afb2dd1
+  | ("riscv: Fix kernel crash due to PR_SET_TAGGED_ADDR_CTRL") disallowed
+  | the former, as the senvcfg write could crash on older systems.
+    +	if (!riscv_has_extension_unlikely(RISCV_ISA_EXT_SUPM))
+    +		return -EINVAL;
+    +
+
+#68 7917be170928 2025-05-23 kvm/vcpu_sbi.c:kvm_riscv_vcpu_sbi_system_reset
+  RISC-V: KVM: lock the correct mp_state during reset
+  | Currently, the kvm_riscv_vcpu_sbi_system_reset() function locks
+  | vcpu->arch.mp_state_lock when updating tmp->arch.mp_state.mp_state
+  | which is incorrect hence fix it.
+    -		spin_lock(&vcpu->arch.mp_state_lock);
+    +		spin_lock(&tmp->arch.mp_state_lock);
+    -		spin_unlock(&vcpu->arch.mp_state_lock);
+    +		spin_unlock(&tmp->arch.mp_state_lock);
+
+#69 2e7be1629966 2025-06-05 kvm/vcpu_sbi_replace.c:kvm_sbi_ext_rfence_handler
+  RISC-V: KVM: Don't treat SBI HFENCE calls as NOPs
+  | The SBI specification clearly states that SBI HFENCE calls should
+  | return SBI_ERR_NOT_SUPPORTED when one of the target hart doesn’t
+  | support hypervisor extension (aka nested virtualization in-case
+  | of KVM RISC-V).
+    -		 * SBI HFENCE calls should be treated as NOPs
+    +		 * SBI HFENCE calls should return not supported
+    +		 * hence fallthrough.
+    -		break;
+
+#70 6aba0cb5bba6 2025-06-05 kvm/vcpu_sbi_replace.c:kvm_sbi_ext_rfence_handler
+  RISC-V: KVM: Fix the size parameter check in SBI SFENCE calls
+  | As-per the SBI specification, an SBI remote fence operation applies
+  | to the entire address space if either:
+  | 1) start_addr and size are both 0
+  | 2) size is equal to 2^XLEN-1
+  | >From the above, only #1 is checked by SBI SFENCE calls so fix the
+  | size parameter check in SBI SFENCE calls to cover #2 as well.
+    -		if (cp->a2 == 0 && cp->a3 == 0)
+    +		if ((cp->a2 == 0 && cp->a3 == 0) || cp->a3 == -1UL)
+    -		if (cp->a2 == 0 && cp->a3 == 0)
+    +		if ((cp->a2 == 0 && cp->a3 == 0) || cp->a3 == -1UL)
+
+#71 57f576e860d3 2025-07-07 kvm/vcpu_timer.c:kvm_riscv_vcpu_timer_save
+  RISC-V: KVM: Disable vstimecmp before exiting to user-space
+  | If VS-timer expires when no VCPU running on a host CPU then WFI
+  | executed by such host CPU will be effective NOP resulting in no
+  | power savings. This is as-per RISC-V Privileged specificaiton
+  | which says: "WFI is also required to resume execution for locally
+  | enabled interrupts pending at any privilege level, regardless of
+  | the global interrupt enable at each privilege level."
+    +	 *
+    +	 * If VS-timer expires when no VCPU running on a host CPU then
+    +	 * WFI executed by such host CPU will be effective NOP resulting
+    +	 * in no power savings. This is because as-per RISC-V Privileged
+    +	 * specificaiton: "WFI is also required to resume execution for
+    +	 * locally enabled interrupts pending at any privilege level,
+    +	 * regardless of the global interrupt enable at each privilege
+    +	 * level."
+    +	 *
+    +	 * To address the above issue, vstimecmp CSR must be set to -1UL
+    +	 * over here when VCPU is scheduled-out or exits to user space.
+    +	csr_write(CSR_VSTIMECMP, -1UL);
+    +#if defined(CONFIG_32BIT)
+    +	csr_write(CSR_VSTIMECMPH, -1UL);
+    +#endif
+    +
+
+#72 b3510183ab7d 2025-07-10 kernel/traps_misaligned.c:handle_scalar_misaligned_load
+  riscv: traps_misaligned: properly sign extend value in misaligned load handler
+  | Add missing cast to signed long.
+    -		SET_RD(insn, regs, val.data_ulong << shift >> shift);
+    +		SET_RD(insn, regs, (long)(val.data_ulong << shift) >> shift);
+
+#73 799766208f09 2025-08-05 kvm/vcpu_vector.c:kvm_riscv_vcpu_set_reg_vector
+  RISC-V: KVM: fix stack overrun when loading vlenb
+  | The userspace load can put up to 2048 bits into an xlen bit stack
+  | buffer.  We want only xlen bits, so check the size beforehand.
+    +		if (reg_size != sizeof(reg_val))
+    +			return -EINVAL;
+
+#74 9bca8be646e0 2025-08-07 kvm/mmu.c:kvm_riscv_mmu_ioremap
+  RISC-V: KVM: Fix pte settings within kvm_riscv_gstage_ioremap()
+  | Currently, kvm_riscv_gstage_ioremap() is used to map IMSIC gpa to the
+  | spa of IMSIC guest interrupt file.
+  | The PAGE_KERNEL_IO property includes global setting whereas it does not
+  | include user mode settings, so when accessing the IMSIC address in the
+  | virtual machine, a guest page fault will occur, this is not expected.
+  | According to the RISC-V Privileged Architecture Spec, for G-stage address
+    +	pgprot_t prot;
+    +	prot = pgprot_noncached(PAGE_WRITE);
+    -		map.pte = pfn_pte(pfn, PAGE_KERNEL_IO);
+    +		map.pte = pfn_pte(pfn, prot);
+    +		map.pte = pte_mkdirty(map.pte);
+
+#75 d2721bb165b3 2025-10-14 kernel/cpu.c:riscv_early_of_processor_hartid
+  RISC-V: Don't print details of CPUs disabled in DT
+  | Early boot stages may disable CPU DT nodes for unavailable
+  | CPUs based on SKU, pinstraps, eFuse, etc. Currently, the
+  | riscv_early_of_processor_hartid() prints details of a CPU
+  | if it is disabled in DT which has no value and gives a
+  | false impression to the users that there some issue with
+  | the CPU.
+    -	if (!of_device_is_available(node)) {
+    -		pr_info("CPU with hartid=%lu is not available\n", *hart);
+    +	if (!of_device_is_available(node))
+    -	}
+
+#76 873f10cf8e4d 2025-10-16 kvm/aia_imsic.c:kvm_riscv_vcpu_aia_imsic_has_interrupt
+  RISC-V: KVM: Read HGEIP CSR on the correct cpu
+  | When executing kvm_riscv_vcpu_aia_has_interrupts, the vCPU may have
+  | migrated and the IMSIC VS-file have not been updated yet, currently
+  | the HGEIP CSR should be read from the imsic->vsfile_cpu ( the pCPU
+  | before migration ) via on_each_cpu_mask, but this will trigger an
+  | IPI call and repeated IPI within a period of time is expensive in
+  | a many-core systems.
+    -	if (imsic->vsfile_cpu > -1)
+    -		ret = !!(csr_read(CSR_HGEIP) & BIT(imsic->vsfile_hgei));
+    +	if (imsic->vsfile_cpu > -1) {
+    +		/*
+    +		 * This function is typically called from kvm_vcpu_block() via
+    +		 * kvm_arch_vcpu_runnable() upon WFI trap. The kvm_vcpu_block()
+    +		 * can be preempted and the blocking VCPU might resume on a
+    +		 * different CPU. This means it is possible that current CPU
+    +		 * does not match the imsic->vsfile_cpu hence this function
+    +		 * must check imsic->vsfile_cpu before accessing HGEIP CSR.
+    +		 */
+    +		if (imsic->vsfile_cpu != vcpu->cpu)
+    +			ret = true;
+    +		else
+    +			ret = !!(csr_read(CSR_HGEIP) & BIT(imsic->vsfile_hgei));
+    +	}
+
+#77 b7776a802f2f 2025-10-18 kernel/sys_hwprobe.c:hwprobe_arch_id
+  riscv: hwprobe: avoid uninitialized variable use in hwprobe_arch_id()
+  | Resolve this smatch warning:
+  |   arch/riscv/kernel/sys_hwprobe.c:50 hwprobe_arch_id() error: uninitialized symbol 'cpu_id'.
+  | This could happen if hwprobe_arch_id() was called with a key ID of
+  | something other than MVENDORID, MIMPID, and MARCHID.  This does not
+  | happen in the current codebase.  The only caller of hwprobe_arch_id()
+  | is a function that only passes one of those three key IDs.
+    +	if (pair->key != RISCV_HWPROBE_KEY_MVENDORID &&
+    +	    pair->key != RISCV_HWPROBE_KEY_MIMPID &&
+    +	    pair->key != RISCV_HWPROBE_KEY_MARCHID)
+    +		goto out;
+    +
+    +out:
+
+#78 2dc99ea27276 2025-10-18 kernel/cpufeature.c:has_thead_homogeneous_vlenb
+  riscv: cpufeature: avoid uninitialized variable in has_thead_homogeneous_vlenb()
+  | In has_thead_homogeneous_vlenb(), smatch detected that the vlenb variable
+  | could be used while uninitialized.  It appears that this could happen if
+  | no CPUs described in DT have the "thead,vlenb" property.
+  | Fix by initializing vlenb to 0, which will keep thead_vlenb_of set to 0
+  | (as it was statically initialized).  This in turn will cause
+  | riscv_v_setup_vsize() to fall back to CSR probing - the desired result if
+    -	u32 vlenb;
+    +	u32 vlenb = 0;
+    -	/* Ignore thead,vlenb property if xtheavector is not enabled in the kernel */
+    +	/* Ignore thead,vlenb property if xtheadvector is not enabled in the kernel */
+
+#79 8c5fa3764fac 2025-10-21 kvm/mmu.c:kvm_arch_prepare_memory_region
+  RISC-V: KVM: Remove automatic I/O mapping for VM_PFNMAP
+  | As of commit aac6db75a9fc ("vfio/pci: Use unmap_mapping_range()"),
+  | vm_pgoff may no longer guaranteed to hold the PFN for VM_PFNMAP
+  | regions. Using vma->vm_pgoff to derive the HPA here may therefore
+  | produce incorrect mappings.
+  | Instead, I/O mappings for such regions can be established on-demand
+  | during g-stage page faults, making the upfront ioremap in this path
+    -	gpa_t base_gpa;
+    -	base_gpa = new->base_gfn << PAGE_SHIFT;
+    -	 * any holes between them, so iterate over all of them to find
+    -	 * out if we can map any of them right now.
+    +	 * any holes between them, so iterate over all of them.
+    -		hva_t vm_start, vm_end;
+    +		hva_t vm_end;
+    -		vm_start = max(hva, vma->vm_start);
+    -			gpa_t gpa = base_gpa + (vm_start - hva);
+    -			phys_addr_t pa;
+    -
+    -			pa = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
+    -			pa += vm_start - vma->vm_start;
+    -
+    -
+    -			ret = kvm_riscv_mmu_ioremap(kvm, gpa, pa, vm_end - vm_start,
+    -						    writable, false);
+    -			if (ret)
+    -				break;
+    -	if (change == KVM_MR_FLAGS_ONLY)
+    -		goto out;
+    -
+    -	if (ret)
+    -		kvm_riscv_mmu_iounmap(kvm, base_gpa, size);
+    -
+
+#80 c42458fcf54b 2025-10-27 kernel/module-sections.c:module_frob_arch_sections
+  riscv: Fix memory leak in module_frob_arch_sections()
+  | The current code directly overwrites the scratch pointer with the
+  | return value of kvrealloc(). If kvrealloc() fails and returns NULL,
+  | the original buffer becomes unreachable, causing a memory leak.
+  | Fix this by using a temporary variable to store kvrealloc()'s return
+  | value and only update the scratch pointer on success.
+  | Found via static anlaysis and this is similar to commit 42378a9ca553
+    +	Elf_Rela *new_scratch;
+    -			scratch = kvrealloc(scratch, scratch_size, GFP_KERNEL);
+    -			if (!scratch)
+    +			new_scratch = kvrealloc(scratch, scratch_size, GFP_KERNEL);
+    +			if (!new_scratch) {
+    +				kvfree(scratch);
+    +			}
+    +			scratch = new_scratch;
+
+#81 7b090e7b910c 2025-11-14 kernel/sbi.c:sbi_init
+  riscv: sbi: Prefer SRST shutdown over legacy
+  | Currently, the sbi_init() always attempts to register the legacy shutdown
+  | function as the sys-off handler which is fine when RISCV_SBI_V01 is not
+  | enabled. However, if RISCV_SBI_V01 is enabled in the kernel and the SBI
+  | v0.1 is not supported by the underlying SBI implementation then the
+  | legacy shutdown fails. Fix this by not registering the legacy shutdown
+  | when SRST shutdown is available.
+    +	bool srst_power_off = false;
+    -	sbi_set_power_off();
+    +			srst_power_off = true;
+    +
+    +	if (!srst_power_off)
+    +		sbi_set_power_off();
+
+#82 1c0180cd4283 2025-12-29 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_event_info
+  RISC-V: KVM: Remove unnecessary 'ret' assignment
+  | If execution reaches "ret = 0" assignment in
+  | kvm_riscv_vcpu_pmu_event_info() then it means
+  | kvm_vcpu_write_guest() returned 0 hence ret is
+  | already zero and does not need to be assigned 0.
+    -	if (ret) {
+    +	if (ret)
+    -		goto free_mem;
+    -	}
+    -	ret = 0;
+
+#83 344c5281f438 2026-01-04 kernel/suspend.c:suspend_restore_csrs
+  riscv: suspend: Fix stimecmp update hazard on RV32
+  | On RV32, updating the 64-bit stimecmp (or vstimecmp) CSR requires two
+  | separate 32-bit writes. A race condition exists if the timer triggers
+  | during these two writes.
+  | The RISC-V Privileged Specification (e.g., Section 3.2.1 for mtimecmp)
+  | recommends a specific 3-step sequence to avoid spurious interrupts
+  | when updating 64-bit comparison registers on 32-bit systems:
+    -		csr_write(CSR_STIMECMP, context->stimecmp);
+    +		csr_write(CSR_STIMECMP, ULONG_MAX);
+    +		csr_write(CSR_STIMECMP, context->stimecmp);
+
+#84 11366ead4f14 2026-01-25 kvm/aia_imsic.c:kvm_riscv_aia_imsic_has_attr
+  RISC-V: KVM: Fix null pointer dereference in kvm_riscv_aia_imsic_has_attr()
+  | Add a null pointer check for imsic_state before dereferencing it in
+  | kvm_riscv_aia_imsic_has_attr(). While the function checks that the
+  | vcpu exists, it doesn't verify that the vcpu's imsic_state has been
+  | initialized, leading to a null pointer dereference when accessed.
+  | This issue was discovered during fuzzing of RISC-V KVM code. The
+  | crash occurs when userspace calls KVM_HAS_DEVICE_ATTR ioctl on an
+    -	isel = KVM_DEV_RISCV_AIA_IMSIC_GET_ISEL(type);
+    +	if (!imsic)
+    +		return -ENODEV;
+    +
+    +	isel = KVM_DEV_RISCV_AIA_IMSIC_GET_ISEL(type);
+
+#85 003b9dae53ae 2026-01-27 kvm/aia_imsic.c:kvm_riscv_vcpu_aia_imsic_update
+  RISC-V: KVM: Skip IMSIC update if vCPU IMSIC state is not initialized
+  | kvm_riscv_vcpu_aia_imsic_update() assumes that the vCPU IMSIC state has
+  | already been initialized and unconditionally accesses imsic->vsfile_lock.
+  | However, in fuzzed ioctl sequences, the AIA device may be initialized at
+  | the VM level while the per-vCPU IMSIC state is still NULL.
+  | This leads to invalid access when entering the vCPU run loop before
+  | IMSIC initialization has completed.
+    +	/* IMSIC vCPU state may not be initialized yet */
+    +	if (!imsic)
+    +		return 1;
+    +
+
+#86 aeb1d17d1af5 2026-01-27 kvm/aia_imsic.c:kvm_riscv_aia_imsic_rw_attr
+  RISC-V: KVM: Fix null pointer dereference in kvm_riscv_aia_imsic_rw_attr()
+  | Add a null pointer check for imsic_state before dereferencing it in
+  | kvm_riscv_aia_imsic_rw_attr(). While the function checks that the
+  | vcpu exists, it doesn't verify that the vcpu's imsic_state has been
+  | initialized, leading to a null pointer dereference when accessed.
+  | The crash manifests as:
+  |   Unable to handle kernel paging request at virtual address
+    -	isel = KVM_DEV_RISCV_AIA_IMSIC_GET_ISEL(type);
+    +	if (!imsic)
+    +		return -ENODEV;
+    +	isel = KVM_DEV_RISCV_AIA_IMSIC_GET_ISEL(type);
+
+#87 dec9ed994434 2026-02-02 kvm/mmu.c:kvm_unmap_gfn_range
+  RISC-V: KVM: Fix use-after-free in kvm_riscv_gstage_get_leaf()
+  | While fuzzing KVM on RISC-V, a use-after-free was observed in
+  | kvm_riscv_gstage_get_leaf(),  where ptep_get() dereferences a
+  | freed gstage page table page during gfn unmap.
+  | The crash manifests as:
+  |   use-after-free in ptep_get include/linux/pgtable.h:340 [inline]
+  |   use-after-free in kvm_riscv_gstage_get_leaf arch/riscv/kvm/gstage.c:89
+    +	bool mmu_locked;
+    +	mmu_locked = spin_trylock(&kvm->mmu_lock);
+    +	if (mmu_locked)
+    +		spin_unlock(&kvm->mmu_lock);
+
+#88 b342166cbcf9 2026-02-26 kvm/mmu.c:kvm_riscv_mmu_map
+  RISC-V: KVM: Skip THP support check during dirty logging
+  | When dirty logging is enabled, guest stage mappings are forced to
+  | PAGE_SIZE granularity. Changing the mapping page size at this point
+  | is incorrect.
+    -	if (vma_pagesize == PAGE_SIZE)
+    +	if (!logging && (vma_pagesize == PAGE_SIZE))
+
+#89 c28eb189e481 2026-02-26 kvm/aia_imsic.c:kvm_riscv_vcpu_aia_imsic_rmw
+  RISC-V: KVM: Fix null pointer dereference in kvm_riscv_vcpu_aia_rmw_topei()
+  | kvm_riscv_vcpu_aia_rmw_topei() assumes that the per-vCPU IMSIC state has
+  | been initialized once AIA is reported as available and initialized at
+  | the VM level. This assumption does not always hold.
+  | Under fuzzed ioctl sequences, a guest may access the IMSIC TOPEI CSR
+  | before the vCPU IMSIC state is set up. In this case,
+  | vcpu->arch.aia_context.imsic_state is still NULL, and the TOPEI RMW path
+    +	/* If IMSIC vCPU state not initialized then forward to user space */
+    +	if (!imsic)
+    +		return KVM_INSN_EXIT_TO_USER_SPACE;
+    +
+
+#90 5c1bb0787111 2026-02-27 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_info
+  RISC-V: KVM: fix off-by-one array access in SBI PMU
+  | The indexed array only has RISCV_KVM_MAX_COUNTERS elements.
+  | The out-of-bound access could have been performed by a guest,
+  | but it could only access another guest accessible data.
+    -	if (cidx > RISCV_KVM_MAX_COUNTERS || cidx == 1) {
+    +	if (cidx >= RISCV_KVM_MAX_COUNTERS || cidx == 1) {
+
+#91 721ead775712 2026-03-02 kvm/aia_device.c:aia_has_attr
+  RISC-V: KVM: Fix use-after-free in kvm_riscv_aia_aplic_has_attr()
+  | Fuzzer reports a KASAN use-after-free bug triggered by a race
+  | between KVM_HAS_DEVICE_ATTR and KVM_SET_DEVICE_ATTR ioctls on
+  | the AIA device. The root cause is that aia_has_attr() invokes
+  | kvm_riscv_aia_aplic_has_attr() without holding dev->kvm->lock, while
+  | a concurrent aia_set_attr() may call aia_init() under that lock. When
+  | aia_init() fails after kvm_riscv_aia_aplic_init() has succeeded, it
+    -	int nr_vcpus;
+    +	int nr_vcpus, r = -ENXIO;
+    -		return kvm_riscv_aia_aplic_has_attr(dev->kvm, attr->attr);
+    +		mutex_lock(&dev->kvm->lock);
+    +		r = kvm_riscv_aia_aplic_has_attr(dev->kvm, attr->attr);
+    +		mutex_unlock(&dev->kvm->lock);
+    +		break;
+    -	return -ENXIO;
+    +	return r;
+
+#92 fa9681ed5c6a 2026-03-03 kvm/vcpu_sbi_sta.c:kvm_sbi_ext_sta_set_reg
+  RISC-V: KVM: Validate SBI STA shmem alignment in kvm_sbi_ext_sta_set_reg()
+  | The RISC-V SBI Steal-Time Accounting (STA) extension requires the shared
+  | memory physical address to be 64-byte aligned, or set to all-ones to
+  | explicitly disable steal-time accounting.
+  | KVM exposes the SBI STA shared memory configuration to userspace via
+  | KVM_SET_ONE_REG. However, the current implementation of
+  | kvm_sbi_ext_sta_set_reg() does not validate the alignment of the configured
+    +	gpa_t new_shmem = INVALID_GPA;
+    -			vcpu->arch.sta.shmem = value;
+    -			vcpu->arch.sta.shmem |= hi << 32;
+    +			new_shmem = value;
+    +			new_shmem |= hi << 32;
+    -			vcpu->arch.sta.shmem = value;
+    +			new_shmem = value;
+    -			vcpu->arch.sta.shmem = ((gpa_t)value << 32);
+    -			vcpu->arch.sta.shmem |= lo;
+    +			new_shmem = ((gpa_t)value << 32);
+    +			new_shmem |= lo;
+    +	if (new_shmem != INVALID_GPA && !IS_ALIGNED(new_shmem, 64))
+    +		return -EINVAL;
+    +
+    +	vcpu->arch.sta.shmem = new_shmem;
+    +
+
+#93 7120a9d9e023 2026-03-04 kvm/aia_device.c:aia_has_attr
+  RISC-V: KVM: Fix potential UAF in kvm_riscv_aia_imsic_has_attr()
+  | The KVM_DEV_RISCV_AIA_GRP_APLIC branch of aia_has_attr() was identified
+  | to have a race condition with concurrent KVM_SET_DEVICE_ATTR ioctls,
+  | leading to a use-after-free bug.
+  | Upon analyzing the code, it was discovered that the
+  | KVM_DEV_RISCV_AIA_GRP_IMSIC branch of aia_has_attr() suffers from the same
+  | lack of synchronization. It invokes kvm_riscv_aia_imsic_has_attr() without
+    -		return kvm_riscv_aia_imsic_has_attr(dev->kvm, attr->attr);
+    +		mutex_lock(&dev->kvm->lock);
+    +		r = kvm_riscv_aia_imsic_has_attr(dev->kvm, attr->attr);
+    +		mutex_unlock(&dev->kvm->lock);
+    +		break;
+
+#94 aa35bcf2e762 2026-03-12 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_snapshot_set_shmem
+  RISC-V: KVM: fix PMU snapshot_set_shmem on 32-bit hosts
+  | When saddr_high != 0 on RV32, the goto out was unconditional, causing
+  | valid 64-bit addresses to be rejected. Only goto out when the address
+  | is invalid (64-bit host with saddr_high != 0).
+    -		if (IS_ENABLED(CONFIG_32BIT))
+    +		if (IS_ENABLED(CONFIG_32BIT)) {
+    -		else
+    +		} else {
+    -		goto out;
+    +			goto out;
+    +		}
+
+#95 b7c958d7c1eb 2026-03-16 kvm/vcpu_vector.c:kvm_riscv_vcpu_alloc_vector_context
+  riscv: kvm: fix vector context allocation leak
+  | When the second kzalloc (host_context.vector.datap) fails in
+  | kvm_riscv_vcpu_alloc_vector_context, the first allocation
+  | (guest_context.vector.datap) is leaked. Free it before returning.
+    -	if (!vcpu->arch.host_context.vector.datap)
+    +	if (!vcpu->arch.host_context.vector.datap) {
+    +		kfree(vcpu->arch.guest_context.vector.datap);
+    +		vcpu->arch.guest_context.vector.datap = NULL;
+    +	}
+
+#96 310e2096b082 2026-03-18 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_snapshot_set_shmem
+  RISC-V: KVM: Fix double-free of sdata in kvm_pmu_clear_snapshot_area()
+  | In kvm_riscv_vcpu_pmu_snapshot_set_shmem(), when kvm_vcpu_write_guest()
+  | fails, kvpmu->sdata is freed but not set to NULL. This leaves a dangling
+  | pointer that will be freed again when kvm_pmu_clear_snapshot_area() is
+  | called during vcpu teardown, triggering a KASAN double-free report.
+  | First free occurs in kvm_riscv_vcpu_pmu_snapshot_set_shmem():
+  |  kvm_riscv_vcpu_pmu_snapshot_set_shmem arch/riscv/kvm/vcpu_pmu.c:443
+    +		kvpmu->sdata = NULL;
+
+#97 1762ac42eed6 2026-03-19 kvm/vcpu_pmu.c:kvm_pmu_validate_counter_mask
+  RISC-V: KVM: Fix integer overflow in kvm_pmu_validate_counter_mask()
+  | When a guest initiates an SBI_EXT_PMU_COUNTER_CFG_MATCH call with
+  | ctr_base=0xfffffffffffffffe, ctr_mask=0xeb5f and flags=0x1
+  | (SBI_PMU_CFG_FLAG_SKIP_MATCH), kvm_riscv_vcpu_pmu_ctr_cfg_match()
+  | first invokes kvm_pmu_validate_counter_mask() to verify whether
+  | ctr_base and ctr_mask are valid, by evaluating:
+  |  !ctr_mask || (ctr_base + __fls(ctr_mask) >= kvm_pmu_num_counters(kvpmu))
+    -	/* Make sure the we have a valid counter mask requested from the caller */
+    -	if (!ctr_mask || (ctr_base + __fls(ctr_mask) >= kvm_pmu_num_counters(kvpmu)))
+    +	unsigned long num_ctrs = kvm_pmu_num_counters(kvpmu);
+    +
+    +	/* Make sure we have a valid counter mask requested from the caller */
+    +	if (!ctr_mask || ctr_base >= num_ctrs || (ctr_base + __fls(ctr_mask) >= num_ctrs))
+
+#98 3033b2b1e394 2026-03-23 kernel/process.c:set_tagged_addr_ctrl
+  riscv: Reset pmm when PR_TAGGED_ADDR_ENABLE is not set
+  | In set_tagged_addr_ctrl(), when PR_TAGGED_ADDR_ENABLE is not set, pmlen
+  | is correctly set to 0, but it forgets to reset pmm. This results in the
+  | CPU pmm state not corresponding to the software pmlen state.
+  | Fix this by resetting pmm along with pmlen.
+    -	if (!(arg & PR_TAGGED_ADDR_ENABLE))
+    +	if (!(arg & PR_TAGGED_ADDR_ENABLE)) {
+    +		pmm = ENVCFG_PMM_PMLEN_0;
+    +	}
+
+#99 6b60a128c2f4 2026-03-23 kernel/patch.c:patch_map
+  riscv: patch: Avoid early phys_to_page()
+  | Similarly to commit 8d09e2d569f6 ("arm64: patching: avoid early
+  | page_to_phys()"), avoid using phys_to_page() for the kernel address case
+  | in patch_map().
+  | Since this is called from apply_boot_alternatives() in setup_arch(), and
+  | commit 4267739cabb8 ("arch, mm: consolidate initialization of SPARSE
+  | memory model") has moved sparse_init() to after setup_arch(),
+    -	struct page *page;
+    +	phys_addr_t phys;
+    -	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr))
+    -		page = phys_to_page(__pa_symbol(addr));
+    -	else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
+    -		page = vmalloc_to_page(addr);
+    -	else
+    -		return addr;
+    +	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr)) {
+    +		phys = __pa_symbol(addr);
+    +	} else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX)) {
+    +		struct page *page = vmalloc_to_page(addr);
+    -	BUG_ON(!page);
+    +		BUG_ON(!page);
+    +		phys = page_to_phys(page) + offset_in_page(addr);
+    +	} else {
+    +		return addr;
+    +	}
+    -	return (void *)set_fixmap_offset(fixmap, page_to_phys(page) +
+    -					 offset_in_page(addr));
+    +	return (void *)set_fixmap_offset(fixmap, phys);
+
+#100 a216e24fc947 2026-03-30 kvm/gstage.c:kvm_riscv_gstage_wp_range
+  RISC-V: KVM: Fix lost write protection on huge pages during dirty logging
+  | When enabling dirty log in small chunks (e.g., QEMU default chunk
+  | size of 256K), the chunk size is always smaller than the page size
+  | of huge pages (1G or 2M) used in the gstage page tables. This caused
+  | the write protection to be incorrectly skipped for huge PTEs because
+  | the condition `(end - addr) >= page_size` was not satisfied.
+  | Remove the size check in `kvm_riscv_gstage_wp_range()` to ensure huge
+    -		if (!(addr & (page_size - 1)) && ((end - addr) >= page_size))
+    -			kvm_riscv_gstage_op_pte(gstage, addr, ptep,
+    -						ptep_level, GSTAGE_OP_WP);
+    -
+    +		addr = ALIGN_DOWN(addr, page_size);
+    +		kvm_riscv_gstage_op_pte(gstage, addr, ptep,
+    +					ptep_level, GSTAGE_OP_WP);
+
+#101 ddbf9c76c402 2026-04-03 kvm/tlb.c:make_xfence_request
+  RISC-V: KVM: Fix shift-out-of-bounds in make_xfence_request()
+  | The make_xfence_request() function uses a shift operation to check if a
+  | vCPU is in the hart mask:
+  |   if (!(hmask & (1UL << (vcpu->vcpu_id - hbase))))
+  | However, when the difference between vcpu_id and hbase
+  | is >= BITS_PER_LONG, the shift operation causes undefined behavior.
+  | This was detected by UBSAN:
+    -			if (vcpu->vcpu_id < hbase)
+    +			if (vcpu->vcpu_id < hbase ||
+    +				vcpu->vcpu_id >= hbase + BITS_PER_LONG)
+
+#102 4d2b03699460 2026-04-09 errata/mips/errata.c:mips_errata_patch_func
+  riscv: errata: Fix bitwise vs logical AND in MIPS errata patching
+  | The condition checking whether a specific errata needs patching uses
+  | logical AND (&&) instead of bitwise AND (&). Since logical AND only
+  | checks that both operands are non-zero, this causes all errata patches
+  | to be applied whenever any single errata is detected, rather than only
+  | applying the matching one.
+  | The SiFive errata implementation correctly uses bitwise AND for the same
+    -		if (cpu_req_errata && tmp) {
+    +		if (cpu_req_errata & tmp) {
+
+#103 d3e0634787a2 2026-05-04 kernel/alternative.c:apply_boot_alternatives
+  riscv: alternative: Also patch the CFI vDSO
+  | The dedicated vDSO for CFI-enabled userspace can also contain
+  | alternative entries.
+  | Patch those, too.
+    +
+    +	if (IS_ENABLED(CONFIG_RISCV_USER_CFI))
+    +		apply_vdso_alternatives(vdso_cfi_start);
+
+#104 0e9d0e7a7c78 2026-05-14 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_event_info
+  riscv: kvm: return SBI_ERR_FAILURE for pmu_event_info() when OOM
+  | kvm_riscv_vcpu_pmu_event_info() returned -ENOMEM from the
+  | SBI extension handler, which caused kvm_riscv_vcpu_sbi_ecall()
+  | to abort KVM_RUN and surface the error to userspace instead of
+  | completing the ECALL with a negative SBI error in a0.
+  | Use SBI_ERR_FAILURE and the normal retdata path, matching other PMU
+  | handlers and kvm_sbi_ext_pmu_handler comment.
+    -	if (!einfo)
+    -		return -ENOMEM;
+    +	if (!einfo) {
+    +		ret = SBI_ERR_FAILURE;
+    +		goto out;
+    +	}
+
+#105 0835ee26938e 2026-05-14 kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_snapshot_set_shmem
+  riscv: kvm: return SBI_ERR_FAILURE for pmu_snapshot_set_shmem() when OOM
+  | kvm_riscv_vcpu_pmu_snapshot_set_shmem() returned -ENOMEM from the
+  | SBI extension handler, which caused kvm_riscv_vcpu_sbi_ecall() to
+  | abort KVM_RUN and surface the error to userspace instead of
+  | ompleting the ECALL with a negative SBI error in a0.
+  | Use SBI_ERR_FAILURE and the normal retdata path, matching other PMU
+  | handlers and kvm_sbi_ext_pmu_handler comment.
+    -	if (!kvpmu->sdata)
+    -		return -ENOMEM;
+    +	if (!kvpmu->sdata) {
+    +		sbiret = SBI_ERR_FAILURE;
+    +		goto out;
+    +	}
+
+#106 fdb69d401967 2026-05-17 kvm/vcpu_sbi_v01.c:kvm_sbi_ext_v01_handler
+  RISC-V: KVM: Fix NULL pointer dereference in SBI v0.1 SEND_IPI handler
+  | The SBI v0.1 SEND_IPI handler iterates over the hart mask and calls
+  | kvm_get_vcpu_by_id() to find the target vcpu for each set bit. When a
+  | guest provides a hart mask containing bits for non-existent vcpu_ids,
+  | kvm_get_vcpu_by_id() returns NULL, which is then unconditionally
+  | dereferenced by kvm_riscv_vcpu_set_interrupt(), causing a kernel crash.
+  | Fix this by adding a NULL check before dereferencing the return value.
+    +			if (!rvcpu)
+    +				continue;
+
+#107 5eb6d68fe24d 2026-05-25 kvm/vcpu.c:kvm_arch_vcpu_ioctl_set_guest_debug
+  RISC-V: KVM: Fix ebreak self test failure
+  | The ebreak self test enables/disables guest debugging as a part of the
+  | test. However the KVM_SET_GUEST_DEBUG ioctl doesn't actually do it.
+  | Fixing it by calling kvm_riscv_vcpu_config_guest_debug.
+    +	kvm_riscv_vcpu_config_guest_debug(vcpu);
+
+#108 6d4c17ed5620 2026-05-26 kvm/vcpu_timer.c:kvm_riscv_vcpu_set_reg_timer
+  RISC-V: KVM: Fix timer state restore
+  | The KVM_REG_RISCV_TIMER_REG(state) one-reg write passes the value
+  | written by userspace to kvm_riscv_vcpu_timer_next_event() when
+  | re-enabling the timer.
+  | That value is the timer state, KVM_RISCV_TIMER_STATE_ON, not the
+  | timer compare value. During migration or state restore, userspace
+  | restores the compare register separately, which stores the target
+    -			ret = kvm_riscv_vcpu_timer_next_event(vcpu, reg_val);
+    +			ret = kvm_riscv_vcpu_timer_next_event(vcpu, t->next_cycles);
+
+#109 63224b02748d 2026-06-01 kvm/vcpu_sbi_fwft.c:kvm_sbi_ext_fwft_set_reg
+  KVM: RISC-V: SBI FWFT: Mark vCPU CSRs dirty after setting feature value
+  | Mark the vCPU CSRs as dirty after successfully setting an FWFT feature
+  | value. FWFT features may modify CSRs (e.g., pointer masking modifies
+  | henvcfg.PMM), and failing to mark them dirty can lead to the guest
+  | observing stale CSR state after vCPU scheduling or migration.
+    +		vcpu->arch.csr_dirty = true;
+
+#110 bf4a195f063b 2026-06-06 kernel/cacheinfo.c:populate_cache_leaves
+  riscv: cacheinfo: Fix node reference leak in populate_cache_leaves
+  | Currently, the while loop drops the reference to prev in each iteration.
+  | If the loop terminates early due to a break, the final of_node_put(np)
+  | correctly drops the reference to the current node.
+  | However, if the loop terminates naturally because np == NULL, calling
+  | of_node_put(np) is a no-op. This leaves the last valid node stored in
+  | prev without its reference dropped, resulting in a node reference leak.
+    -	of_node_put(np);
+    +	of_node_put(prev);
+
+#111 b8aa7571e943 2026-06-24 kvm/vcpu_sbi_fwft.c:kvm_sbi_fwft_set
+  KVM: riscv: SBI FWFT: Apply LOCK flag only on successful set
+  | kvm_sbi_fwft_set() applies the caller's flags to conf->flags before
+  | invoking the set() callback. If the callback returns an error, the LOCK
+  | bit persists and the feature becomes permanently locked without its value
+  | ever being changed.
+  | Move the flags assignment after the callback so LOCK takes effect only
+  | on success.
+    -	conf->flags = flags;
+    +	ret = conf->feature->set(vcpu, conf, false, value);
+    +	if (ret == SBI_SUCCESS)
+    +		conf->flags = flags;
+    -	return conf->feature->set(vcpu, conf, false, value);
+    +	return ret;
+
+#112 5fc6e7d45373 2026-06-29 kernel/machine_kexec_file.c:prepare_elf_headers
+  riscv: kexec_file: Fix crashk_low_res not exclude bug
+  | As done in commit 944a45abfabc ("arm64: kdump: Reimplement crashkernel=X")
+  | and commit 4831be702b95 ("arm64/kexec: Fix missing extra range for
+  | crashkres_low.") for arm64, while implementing crashkernel=X,[high,low],
+  | riscv should have excluded the "crashk_low_res" reserved ranges from
+  | the crash kernel memory to prevent them from being exported through
+  | /proc/vmcore, and the exclusion would need an extra crash_mem range.
+    -	nr_ranges = 1; /* For exclusion of crashkernel region */
+    +	nr_ranges = 2; /* For exclusion of crashkernel region */
+    -	if (!ret)
+    -		ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
+    +	if (ret)
+    +		goto out;
+    +
+    +	if (crashk_low_res.end) {
+    +		ret = crash_exclude_mem_range(cmem, crashk_low_res.start, crashk_low_res.end);
+    +		if (ret)
+    +			goto out;
+    +	}
+    +
+    +	ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
+
+#113 81bbcff0c053 2026-07-06 kernel/machine_kexec.c:machine_kexec_prepare
+  riscv: Prevent NULL pointer dereference in machine_kexec_prepare()
+  | A NULL pointer dereference issue is noticed in riscv's
+  | machine_kexec_prepare(), where image->segment[i].buf might be NULL and
+  | copied unchecked.
+  | The NULL buf comes from ima_add_kexec_buffer(), where kbuf is added by
+  | kexec_add_buffer(), but kbuf.buffer is NULL, then it is copied without
+  | a check in machine_kexec_prepare():
+    +		if (!image->segment[i].buf)
+    +			continue;
+    +
+
+#114 369e4635d048 2026-07-08 net/bpf_jit_core.c:bpf_jit_free
+  riscv, bpf: Fix memory leak in bpf_jit_free
+  | When bpf_int_jit_compile() is called for subprograms, it returns early
+  | during the first pass (!prog->is_func || extra_pass is false), keeping
+  | ctx->offset alive for the subsequent extra pass.
+  | If JIT compilation fails for a later subprogram, the BPF core aborts
+  | and calls bpf_jit_free() to clean up the first subprogram. However,
+  | bpf_jit_free() fails to free jit_data->ctx.offset, which causes a
+    +			kfree(jit_data->ctx.offset);
+
+#115 5caae1deee89 2026-07-13 kernel/sys_hwprobe.c:hwprobe_get_cpus
+  riscv: hwprobe: Avoid uninitialized read in hwprobe_get_cpus()
+  | When cpusetsize < cpumask_size(), hwprobe_get_cpus() did not fully
+  | initialize its copy of the cpu mask, which could cause non-deterministic
+  | results from the riscv_hwprobe syscall on a system with more than 8 CPUs
+  | when the supplied cpu mask is empty.  Address this by fully initializing
+  | the cpu mask.
+    +	cpumask_clear(&cpus);
+
+#116 e971f19e4c82 2026-07-16 kvm/nacl.c:__kvm_riscv_nacl_hfence
+  KVM: riscv: Fix infinite loop in NACL hfence entry allocation
+  | try_count is initialized to 5 but never decremented in the retry path,
+  | making the `if (try_count)` check always true. If all NACL shared memory
+  | hfence entries remain in the pending state after sync, the function loops
+  | forever, causing a soft lockup. Decrement try_count on each retry so the
+  | fallback warning and return become reachable.
+    -		if (try_count) {
+    +		if (try_count--) {
+
+#117 0e3d7d8c6c8c 2026-07-18 kvm/aia_device.c:aia_init
+  RISC-V: KVM: Reject overlapping AIA IMSIC address fields
+  | KVM lets userspace configure the IMSIC guest, HART, group-width, and
+  | group-shift fields independently. The individual bounds allow a layout
+  | such as guest_bits=7, hart_bits=6, group_bits=1, and group_shift=24.
+  | That layout places the group index bit at bit 24 while the lower
+  | guest+HART field also extends through bit 24. The IMSIC address helpers
+  | later consume these values as one address layout: aia_imsic_ppn() masks
+    +	/* Group index bits must not overlap guest and HART index bits. */
+    +	if (aia->nr_group_bits &&
+    +	    aia->nr_group_shift < (IMSIC_MMIO_PAGE_SHIFT +
+    +	    			   aia->nr_guest_bits + aia->nr_hart_bits))
+    +		return -EINVAL;
+    +
+
+#118 e8f3e9ba146a 2026-07-18 kvm/mmu.c:kvm_arch_prepare_memory_region
+  RISC-V: KVM: Allow memslots ending at the GPA limit
+  | KVM memslots describe half-open ranges [base_gfn, base_gfn + npages). A
+  | slot ending exactly at the guest physical-address limit has its final page
+  | below that limit and is valid.
+  | The current greater-than-or-equal comparison rejects a valid boundary case.
+  | Use a strict greater-than comparison, matching equivalent KVM architecture
+  | checks.
+    -	if ((new->base_gfn + new->npages) >=
+    +	if ((new->base_gfn + new->npages) >
+
+#119 e0ba6bf6579d 2026-07-28 kvm/aia_imsic.c:imsic_mrif_atomic_rmw
+  RISC-V: KVM: Use try_cmpxchg for IMSIC MRIF RMW
+  | Currently the RMW for IMSIC MRIF is implemented with word LRSC loop.
+  | This will only cover the lower 32bit on a 64bit system. Instead of
+  | guard the implementation with CONFIG_64BIT here, use try_cmpxchg()
+  | wrapper which has already take care this to fix this issue.
+  | It can also use AMO instructions on supported system.
+    -	__asm__ __volatile__ (
+    -		"0:	lr.w.aq   %1, %0\n"
+    -		"	and       %2, %1, %3\n"
+    -		"	or        %2, %2, %4\n"
+    -		"	sc.w.rl   %2, %2, %0\n"
+    -		"	bnez      %2, 0b"
+    -		: "+A" (*ptr), "+r" (old_val), "+r" (tmp)
+    -		: "r" (~wr_mask), "r" (new_val & wr_mask)
+    -		: "memory");
+    +	new_val &= wr_mask;
+    +	old_val = READ_ONCE(*ptr);
+    +	do {
+    +		tmp = (old_val & ~wr_mask) | new_val;
+    +	} while (!try_cmpxchg(ptr, &old_val, tmp));
+
+#120 c1bc73280fb2 2026-07-31 kvm/tlb.c:make_xfence_request
+  RISC-V: KVM: Separate req and fallback_req masks in make_xfence_request
+  | When handling hfence requests in make_xfence_request(), the current code
+  | uses a single 'actual_req' variable and a single vcpu_mask. If any VCPU
+  | fails to enqueue the hfence data (because its queue is full), the request
+  | falls back to 'fallback_req' for all VCPUs, even if other VCPUs still
+  | have available queue space.
+  | This can cause unnecessary fallback for healthy VCPUs, and more seriously,
+    -	unsigned int actual_req = req;
+    -	DECLARE_BITMAP(vcpu_mask, KVM_MAX_VCPUS);
+    +	DECLARE_BITMAP(req_vcpu_mask, KVM_MAX_VCPUS);
+    +	DECLARE_BITMAP(fallback_req_vcpu_mask, KVM_MAX_VCPUS);
+    -	bitmap_zero(vcpu_mask, KVM_MAX_VCPUS);
+    +	bitmap_zero(req_vcpu_mask, KVM_MAX_VCPUS);
+    +	bitmap_zero(fallback_req_vcpu_mask, KVM_MAX_VCPUS);
+    -		bitmap_set(vcpu_mask, i, 1);
+    -
+    -		if (!data || !data->type)
+    +		if (!data || !data->type) {
+    +			bitmap_set(req_vcpu_mask, i, 1);
+    +		}
+    -			actual_req = fallback_req;
+    +			bitmap_set(fallback_req_vcpu_mask, i, 1);
+    +		else
+    +			bitmap_set(req_vcpu_mask, i, 1);
+    -	kvm_make_vcpus_request_mask(kvm, actual_req, vcpu_mask);
+    +	kvm_make_vcpus_request_mask(kvm, req, req_vcpu_mask);
+    +	kvm_make_vcpus_request_mask(kvm, fallback_req, fallback_req_vcpu_mask);

@@ -1,0 +1,269 @@
+##### B580 956ca5d72c76 ACPI: processor_idle: Mark LPI enter functions as __cpuidle
+样本集标签：M5 K3 S2 掩盖0；对应物：drivers/acpi/processor_idle.c:acpi_idle_lpi_enter（未标__cpuidle）；理由：RCU关闭后的LPI进入函数可被跟踪；arm64、RISC-V的ACPI LPI同受影响
+--- 说明 ---
+ACPI: processor_idle: Mark LPI enter functions as __cpuidle
+When function tracing or Kprobes is enabled, entering an ACPI Low
+Power Idle (LPI) state triggers the following RCU splat:
+  RCU not on for: acpi_idle_lpi_enter+0x4/0xd8
+  WARNING: CPU: 8 PID: 0 at include/linux/trace_recursion.h:162 function_trace_call+0x1e8/0x228
+The acpi_idle_lpi_enter() function is invoked within the cpuidle
+path after RCU has already been disabled for the current local CPU.
+Consequently, ftrace's function_trace_call() expects RCU to be
+actively watching before recording trace data, emitting a warning
+if it is not.
+Fix this by annotating acpi_idle_lpi_enter(), the generic __weak
+stub, and the RISC-V implementation of acpi_processor_ffh_lpi_enter()
+with __cpuidle. This moves these functions into the '.cpuidle.text'
+section, implicitly disabling ftrace instrumentation (notrace) along
+--- 改动 ---
+diff --git a/drivers/acpi/processor_idle.c b/drivers/acpi/processor_idle.c
+index 390ab5f1d313..4482cf28f56a 100644
+--- a/drivers/acpi/processor_idle.c
++++ b/drivers/acpi/processor_idle.c
+@@ -1143,7 +1143,7 @@ static int acpi_processor_get_lpi_info(struct acpi_processor *pr)
+ 	return 0;
+ }
+ 
+-int __weak acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
++int __weak __cpuidle acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+ {
+ 	return -ENODEV;
+ }
+@@ -1156,7 +1156,7 @@ int __weak acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+  *
+  * Return: 0 for success or negative value for error
+  */
+-static int acpi_idle_lpi_enter(struct cpuidle_device *dev,
++static int __cpuidle acpi_idle_lpi_enter(struct cpuidle_device *dev,
+ 			       struct cpuidle_driver *drv, int index)
+ {
+ 	struct acpi_processor *pr;
+diff --git a/drivers/acpi/riscv/cpuidle.c b/drivers/acpi/riscv/cpuidle.c
+index 624f9bbdb58c..c76dbabff702 100644
+--- a/drivers/acpi/riscv/cpuidle.c
++++ b/drivers/acpi/riscv/cpuidle.c
+@@ -66,7 +66,7 @@ int acpi_processor_ffh_lpi_probe(unsigned int cpu)
+ 	return acpi_cpu_init_idle(cpu);
+ }
+ 
+-int acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
++int __cpuidle acpi_processor_ffh_lpi_enter(struct acpi_lpi_state *lpi)
+ {
+ 	u32 state = lpi->address;
+ 
+
+##### B584 5a799714e8ca net/mlx5e: Fix publication race for priv->channel_stats[]
+样本集标签：M4 K3 S2 掩盖3；对应物：drivers/net/ethernet/mellanox/mlx5（发布指针无屏障）；理由：发布新条目与计数之间无屏障；x86强序遮住，弱序的RISC-V、arm64才出错
+--- 说明 ---
+net/mlx5e: Fix publication race for priv->channel_stats[]
+mlx5e_channel_stats_alloc() publishes a new entry to
+priv->channel_stats[] and then increments priv->stats_nch as a
+publication token, but neither store carries any memory barrier:
+	priv->channel_stats[ix] = kvzalloc_node(...);
+	if (!priv->channel_stats[ix])
+		return -ENOMEM;
+	priv->stats_nch++;
+Concurrent readers compute the loop bound from priv->stats_nch and
+then dereference priv->channel_stats[i] using plain accesses, e.g.
+	for (i = 0; i < priv->stats_nch; i++) {
+		struct mlx5e_channel_stats *cs = priv->channel_stats[i];
+		... cs->rq.packets ...
+	}
+--- 改动 ---
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en.h b/drivers/net/ethernet/mellanox/mlx5/core/en.h
+index 2270e2e550dd..d507289096c2 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en.h
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en.h
+@@ -987,6 +987,18 @@ struct mlx5e_priv {
+ 	struct ethtool_fec_hist_range *fec_ranges;
+ };
+ 
++static inline u16 mlx5e_stats_nch_read(const struct mlx5e_priv *priv)
++{
++	/* Pairs with smp_store_release in mlx5e_stats_nch_write(). */
++	return smp_load_acquire(&priv->stats_nch);
++}
++
++static inline void mlx5e_stats_nch_write(struct mlx5e_priv *priv, u16 n)
++{
++	/* Pairs with smp_load_acquire in mlx5e_stats_nch_read(). */
++	smp_store_release(&priv->stats_nch, n);
++}
++
+ struct mlx5e_dev {
+ 	struct net_device *netdev;
+ 	struct devlink_port dl_port;
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c b/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
+index cdaf77650164..631f802105d5 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
+@@ -33,9 +33,10 @@ mlx5e_hv_vhca_fill_ring_stats(struct mlx5e_priv *priv, int ch,
+ static void mlx5e_hv_vhca_fill_stats(struct mlx5e_priv *priv, void *data,
+ 				     int buf_len)
+ {
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int ch, i = 0;
+ 
+-	for (ch = 0; ch < priv->stats_nch; ch++) {
++	for (ch = 0; ch < nch; ch++) {
+ 		void *buf = data + i;
+ 
+ 		if (WARN_ON_ONCE(buf +
+@@ -50,8 +51,9 @@ static void mlx5e_hv_vhca_fill_stats(struct mlx5e_priv *priv, void *data,
+ 
+ static int mlx5e_hv_vhca_stats_buf_size(struct mlx5e_priv *priv)
+ {
+-	return (sizeof(struct mlx5e_hv_vhca_per_ring_stats) *
+-		priv->stats_nch);
++	u16 nch = mlx5e_stats_nch_read(priv);
++
++	return sizeof(struct mlx5e_hv_vhca_per_ring_stats) * nch;
+ }
+ 
+ static int mlx5e_hv_vhca_stats_buf_max_size(struct mlx5e_priv *priv)
+@@ -106,7 +108,7 @@ static void mlx5e_hv_vhca_stats_control(struct mlx5_hv_vhca_agent *agent,
+ 	sagent = &priv->stats_agent;
+ 
+ 	block->version = MLX5_HV_VHCA_STATS_VERSION;
+-	block->rings   = priv->stats_nch;
++	block->rings   = mlx5e_stats_nch_read(priv);
+ 
+ 	if (!block->command) {
+ 		cancel_delayed_work_sync(&priv->stats_agent.work);
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+index 775f0c6e55c9..aa8610cedaa8 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+@@ -2773,7 +2773,7 @@ static int mlx5e_channel_stats_alloc(struct mlx5e_priv *priv, int ix, int cpu)
+ 						GFP_KERNEL, cpu_to_node(cpu));
+ 	if (!priv->channel_stats[ix])
+ 		return -ENOMEM;
+-	priv->stats_nch++;
++	mlx5e_stats_nch_write(priv, priv->stats_nch + 1);
+ 
+ 	return 0;
+ }
+@@ -4040,9 +4040,10 @@ static int mlx5e_setup_tc(struct net_device *dev, enum tc_setup_type type,
+ 
+ void mlx5e_fold_sw_stats64(struct mlx5e_priv *priv, struct rtnl_link_stats64 *s)
+ {
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int i;
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats = priv->channel_stats[i];
+ 		struct mlx5e_rq_stats *xskrq_stats = &channel_stats->xskrq;
+ 		struct mlx5e_rq_stats *rq_stats = &channel_stats->rq;
+@@ -5488,7 +5489,7 @@ static void mlx5e_get_queue_stats_rx(struct net_device *dev, int i,
+ 	struct mlx5e_rq_stats *xskrq_stats;
+ 	struct mlx5e_rq_stats *rq_stats;
+ 
+-	if (mlx5e_is_uplink_rep(priv) || !priv->stats_nch)
++	if (mlx5e_is_uplink_rep(priv) || !mlx5e_stats_nch_read(priv))
+ 		return;
+ 
+ 	channel_stats = priv->channel_stats[i];
+@@ -5512,7 +5513,7 @@ static void mlx5e_get_queue_stats_tx(struct net_device *dev, int i,
+ 	struct mlx5e_priv *priv = netdev_priv(dev);
+ 	struct mlx5e_sq_stats *sq_stats;
+ 
+-	if (!priv->stats_nch)
++	if (!mlx5e_stats_nch_read(priv))
+ 		return;
+ 
+ 	/* no special case needed for ptp htb etc since txq2sq_stats is kept up
+@@ -5538,6 +5539,7 @@ static void mlx5e_get_base_stats(struct net_device *dev,
+ 				 struct netdev_queue_stats_tx *tx)
+ {
+ 	struct mlx5e_priv *priv = netdev_priv(dev);
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	struct mlx5e_ptp *ptp_channel;
+ 	int i, tc;
+ 
+@@ -5549,7 +5551,7 @@ static void mlx5e_get_base_stats(struct net_device *dev,
+ 		rx->hw_gro_wire_packets = 0;
+ 		rx->hw_gro_wire_bytes = 0;
+ 
+-		for (i = priv->channels.params.num_channels; i < priv->stats_nch; i++) {
++		for (i = priv->channels.params.num_channels; i < nch; i++) {
+ 			struct netdev_queue_stats_rx rx_i = {0};
+ 
+ 			mlx5e_get_queue_stats_rx(dev, i, &rx_i);
+@@ -5585,7 +5587,7 @@ static void mlx5e_get_base_stats(struct net_device *dev,
+ 	tx->stop = 0;
+ 	tx->wake = 0;
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats = priv->channel_stats[i];
+ 
+ 		/* handle two cases:
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c b/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c
+index 7f33261ba655..de38b60806c2 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c
+@@ -515,6 +515,7 @@ static void mlx5e_stats_update_stats_rq_page_pool(struct mlx5e_channel *c)
+ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(sw)
+ {
+ 	struct mlx5e_sw_stats *s = &priv->stats.sw;
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int i;
+ 
+ 	memset(s, 0, sizeof(*s));
+@@ -522,7 +523,7 @@ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(sw)
+ 	for (i = 0; i < priv->channels.num; i++) /* for active channels only */
+ 		mlx5e_stats_update_stats_rq_page_pool(priv->channels.c[i]);
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats =
+ 			priv->channel_stats[i];
+ 
+@@ -2614,7 +2615,7 @@ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(ptp) { return; }
+ 
+ static MLX5E_DECLARE_STATS_GRP_OP_NUM_STATS(channels)
+ {
+-	int max_nch = priv->stats_nch;
++	int max_nch = mlx5e_stats_nch_read(priv);
+ 
+ 	return (NUM_RQ_STATS * max_nch) +
+ 	       (NUM_CH_STATS * max_nch) +
+@@ -2627,8 +2628,8 @@ static MLX5E_DECLARE_STATS_GRP_OP_NUM_STATS(channels)
+（改动共196行，只列前160行）
+
+##### B590 f1c27922576e bpf: Reject programs with inlined helpers if JIT is not available
+样本集标签：M9 K3 S2 掩盖2；对应物：kernel/bpf/verifier.c:bpf_do_misc_fixups（依赖JIT内联helper）；理由：实现bpf_jit_inlines_helper_call的架构在关闭JIT时helper调用号未改写
+--- 说明 ---
+bpf: Reject programs with inlined helpers if JIT is not available
+When an architecture (such as LoongArch, ARM64, and RISC-V) implements
+bpf_jit_inlines_helper_call(), the verifier skips rewriting the helper
+call offset (insn->imm) in bpf_do_misc_fixups(). This is because the
+helper is expected to be inlined by the JIT compiler later. Therefore,
+insn->imm remains as the raw helper enum ID.
+However, if JIT is disabled at runtime (net.core.bpf_jit_enable=0) or
+if JIT compilation fails dynamically (e.g., due to OOM), the program
+falls back to the BPF interpreter.
+When the interpreter executes (__bpf_call_base + insn->imm) with the
+unpatched raw ID, it jumps into an invalid address space, triggering
+an instruction alignment fault or a kernel panic.
+Although these helpers have valid C implementations in the kernel, the
+omission of offset rewriting makes runtime interpreter fallback fatal.
+--- 改动 ---
+diff --git a/kernel/bpf/fixups.c b/kernel/bpf/fixups.c
+index 02246df2f6c3..d3be972714b2 100644
+--- a/kernel/bpf/fixups.c
++++ b/kernel/bpf/fixups.c
+@@ -1840,8 +1840,10 @@ int bpf_do_misc_fixups(struct bpf_verifier_env *env)
+ 		}
+ 
+ 		/* Skip inlining the helper call if the JIT does it. */
+-		if (bpf_jit_inlines_helper_call(insn->imm))
++		if (bpf_jit_inlines_helper_call(insn->imm)) {
++			prog->jit_required = 1;
+ 			goto next_insn;
++		}
+ 
+ 		if (insn->imm == BPF_FUNC_get_route_realm)
+ 			prog->dst_needed = 1;
+

@@ -1,0 +1,140 @@
+[
+  {
+    "k": 1,
+    "loc": "mm/rmap.c:1980",
+    "verdict": "不可能",
+    "why": "唯一调用者 try_to_unmap_one 在 mm/rmap.c:2321 的 pte_present(pteval) 分支中才调用 folio_unmap_pte_batch，且一直持有页表锁。这里的 flags 也只有 FPB_RESPECT_WRITE | FPB_RESPECT_SOFT_DIRTY，不启用内部读取 pte_write/pte_young/pte_dirty 所需的 MERGE 标志。"
+  },
+  {
+    "k": 2,
+    "loc": "mm/util.c:1570",
+    "verdict": "不可能",
+    "why": "folio_pte_batch 固定传 flags=0，而所报告的 pte_write、pte_young、pte_dirty 分别位于 FPB_MERGE_WRITE 和 FPB_MERGE_YOUNG_DIRTY 条件内（mm/internal.h:444-448），这条提升链不会执行这些读操作。首项副本被错误传入时的 pte_pfn 问题另见第 15 条，不能据此把本条对 *ptep 的读链判为可达。"
+  },
+  {
+    "k": 3,
+    "loc": "mm/mremap.c:291",
+    "verdict": "不可能",
+    "why": "move_ptes 对非 present 项保留 nr_ptes=1，通用 get_and_clear_full_ptes 的受限操作都在 while (--nr) 中，因而不会执行。arm64 的覆盖实现同样先取清首项、仅在剩余项循环中合并 dirty/young，且 contpte_try_unfold 要求 pte_valid_cont；RISC-V 和 s390 的单项取清也不会进入所报的合并链。"
+  },
+  {
+    "k": 4,
+    "loc": "mm/vmscan.c:4279",
+    "verdict": "可能",
+    "why": "Nouveau 经 make_device_exclusive 把普通匿名页的 PTE 换成 device-exclusive 交换格式项并释放 folio 锁后，回收可经 folio_referenced_one → page_vma_mapped_walk → lru_gen_look_around 到这里；check_pte 明确允许这种项。arm64 实际经 test_and_clear_young_ptes → __ptep_test_and_clear_young，而非通用实现，后者直接以 cmpxchg 写回 pte_mkold 的结果。PTE_AF 位 10 与交换类型字段位 6-10 重叠，device-exclusive 类型 30 会被改成 14，破坏项类型并使后续缺页按错误的普通交换项处理。"
+  },
+  {
+    "k": 5,
+    "loc": "mm/rmap.c:986",
+    "verdict": "可能",
+    "why": "make_device_exclusive 产生的是仍关联普通 LRU 匿名 folio 的非 present 项，page_vma_mapped_walk 的 check_pte 允许它返回；禁用 MGLRU 时 folio_referenced_one 直接走本分支，小 folio 的 nr=1。arm64 实际走 clear_flush_young_ptes → __ptep_clear_flush_young → __ptep_test_and_clear_young（CONTPTE 未启用时前两层由通用批量包装和架构单项实现连接），其中 pte_mkold 无 present 守卫。它清掉交换类型中的位 10，将 device-exclusive 类型 30 改成 14，后续缺页会错误解释该项。"
+  },
+  {
+    "k": 6,
+    "loc": "mm/vmscan.c:3679",
+    "verdict": "不可能",
+    "why": "同一循环已在 mm/vmscan.c:3673 用 pmd_present(pmd[i]) 排除了非 present 项，且持有保护该 PMD 的锁；pmd+i 正是该数组项的地址。这里处理非叶 PMD 是有意的，should_clear_pmd_young 还限制为架构支持的非叶 young 操作，不存在所报的定义域外项。"
+  },
+  {
+    "k": 7,
+    "loc": "mm/vmscan.c:3691",
+    "verdict": "不可能",
+    "why": "调用受 mm/vmscan.c:3673 的 pmd_present(pmd[i]) 检查支配，后面还必须是 pmd_trans_huge 且成功取得目标 folio。整个检查至清 young 过程持有同一 PMD 锁，非 present 项不能在中间替换进去。"
+  },
+  {
+    "k": 8,
+    "loc": "mm/memory.c:4767",
+    "verdict": "不可能",
+    "why": "can_swapin_thp 先要求首项等于 pte_move_swp_offset(vmf->orig_pte, -idx)，而其上游 do_swap_page 已通过 softleaf_is_swap 排除了特殊项，调用时也持有 PTE 锁。swap_pte_batch 的第 2 个参数实际按值接收这份已确认的交换项；扫描到的后续项先与 expected_pte 比较，不相等就退出，不会把任意 present/空项交给 pte_next_swp_offset。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/memory.c:5070",
+    "verdict": "不可能",
+    "why": "do_swap_page 在 mm/memory.c:4901-4954 已把非普通交换类型分流，5042 又在 PTE 锁内复核原项。本处短路条件要求 folio_pte 等于由 orig_pte 移动交换偏移得到的项，才会调用 swap_pte_batch；辅助函数对后续项也先做完整相等比较，定义域得到保证。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/rmap.c:989",
+    "verdict": "不可能",
+    "why": "当前 folio_referenced 的实际调用来自 LRU 回收，device-private 的 ZONE_DEVICE folio 不在 LRU 上；普通 folio 的 device-exclusive 项只在 PTE 层建立，make_device_exclusive 会先拆 PMD 映射。这里的 walk 未设置 PVMW_MIGRATION，PMD 迁移项会被 page_vma_mapped_walk 拒绝，因此在本调用路径上返回 pvmw.pmd 且 pvmw.pte 为空时得到的是 present 巨大页 PMD。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/gup.c:696",
+    "verdict": "不可能",
+    "why": "唯一调用链是 follow_pmd_mask → follow_huge_pmd → can_follow_write_pmd。follow_pmd_mask 在加 PMD 锁后重新读取，并在 mm/gup.c:922-928 排除非 present 和非叶项，之后不释放锁就传入 pmdval，故不会对交换格式或空 PMD 调用 pmd_soft_dirty。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/huge_memory.c:2232",
+    "verdict": "不可能",
+    "why": "change_huge_pmd 在 2714-2717 把有效软件叶项交给 change_non_present_huge_pmd 后退出；thp_migration_supported 在本版本等价于 CONFIG_ARCH_HAS_PMD_SOFTLEAVES。另两个调用者 do_huge_pmd_numa_page、do_huge_pmd_uffd_rwp 来自已检查 present 的巨大页缺页路径，并在锁内复核 orig_pmd，所以传入的都是修改保护属性后的 present 项。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/swapfile.c:2411",
+    "verdict": "不可能",
+    "why": "unuse_pte 重新取锁时确实可能读到已换入的 present 项，但 pte_swp_clear_flags 只修改按值副本，结果仅用于和指定的交换项做 pte_same 比较，不写回页表。arm 的清 exclusive 只清位 7，loongarch 只清位 13/23；这些操作不会消掉 present/protnone 判别位，因此 present 项仍不可能等于目标交换项，错误读标志不改变比较结论。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/madvise.c:358",
+    "verdict": "不可能",
+    "why": "两个调用点分别在 mm/madvise.c:497 和 726，均在持有 PTE 锁时先读取 ptent，并由 482/698 的 pte_present 检查排除非 present 项，随后又排除 ZONE_DEVICE folio。传入 ptentp 的是这份 present 首项副本，辅助函数对后续项的匹配也保留 present 判别位，不能混入交换格式项。"
+  },
+  {
+    "k": 15,
+    "loc": "mm/util.c:1570",
+    "verdict": "可能",
+    "why": "大匿名 folio 的某个 PTE 可经 make_device_exclusive 转为 device-exclusive 项，folio_referenced_one:969-974 却只检查 folio_test_large，仍将该非 present 副本经 folio_pte_batch 传给 folio_pte_batch_flags 的 pte_pfn。x86_64 实际 pte_pfn 按 present 地址字段解码，4K 页时把交换偏移中保存的 PFN P 读成 P>>3，例如 0x200000 被读成 0x40000。至少在 CONFIG_DEBUG_VM、CONFIG_SPARSEMEM_VMEMMAP 且错 PFN 落入未映射内存洞的配置下，mm/internal.h:422 随即执行 page_folio(pfn_to_page(错PFN)) 并读取不存在的 struct page，造成内核页故障；此判定明确依赖该调试配置条件。"
+  },
+  {
+    "k": 16,
+    "loc": "mm/mprotect.c:51",
+    "verdict": "不可能",
+    "why": "mprotect 内部调用由 change_pte_range:357 的 present 分支进入，传入项来自该首项的 pte_modify；非 present 项另交 change_softleaf_pte 处理。对外的 can_change_pte_writable 在恢复 device-exclusive 项时接收新 mk_pte 的值，在 NUMA/RWP 路径接收已确认并锁内复核的 present 项，不能因本函数局部没有检查而认为交换项可达。"
+  },
+  {
+    "k": 17,
+    "loc": "mm/memory.c:4389",
+    "verdict": "不可能",
+    "why": "handle_pte_fault 在 6560 把非 present 项交给 do_swap_page，并在持锁后用 pte_same 复核原项才进入 do_wp_page。另一个入口是 do_swap_page:5256，但它此前已在 5224 用 set_ptes 安装了 present 页项，且仍持有 PTE 锁，所以这里读取 vmf->pte 也不会拿到原交换项。"
+  },
+  {
+    "k": 18,
+    "loc": "mm/gup.c:698",
+    "verdict": "不可能",
+    "why": "follow_pmd_mask 在 mm/gup.c:920-928 加锁并重新确认 pmd_present 和 pmd_leaf，然后经 follow_huge_pmd 调用本函数。锁保持到返回，传给 userfaultfd_huge_pmd_wp 的 pmdval 已保证为 present，x86_64 的 pmd_uffd 不会在此把交换偏移位误读成 uffd。"
+  },
+  {
+    "k": 19,
+    "loc": "mm/huge_memory.c:2236",
+    "verdict": "不可能",
+    "why": "三个调用来源分别是 change_huge_pmd 及 NUMA、RWP 巨大页缺页恢复。前者先分流全部有效的非 present 软件叶项，后两者从 __handle_mm_fault 的 present PMD 分支进入并在锁内复核原项，故本处 userfaultfd_huge_pmd_wp 的输入不是交换项或空项。"
+  },
+  {
+    "k": 20,
+    "loc": "mm/mprotect.c:55",
+    "verdict": "不可能",
+    "why": "maybe_change_pte_writable 的 mprotect 内部入口都来自 change_pte_range 的 present 分支；交换格式项由 change_softleaf_pte 单独处理。其余入口经 can_change_pte_writable 传入新建的 present 项，或由已验证的 NUMA/RWP present 项恢复而来，页表锁或按值副本保证这一性质不会在调用前失效。"
+  },
+  {
+    "k": 21,
+    "loc": "mm/memory.c:2498",
+    "verdict": "不可能",
+    "why": "普通 vm_insert_page 和批量插入固定 mkwrite=false，已有非空项会在 2490-2491 提前返回；当前会用 mkwrite=true 更新旧项的路径是 DAX 写缺页及相应的 mixed/PFN 插入约定，不对可交换匿名映射这样调用。此类特殊映射没有匿名交换、迁移或 device-exclusive 项，UFFD/guard 也拒绝 VM_SPECIAL，已有目标页映射即为 present（含 PROT_NONE），故这里的 maybe_mkwrite 不会修改交换格式项。"
+  },
+  {
+    "k": 22,
+    "loc": "mm/mprotect.c:134",
+    "verdict": "不可能",
+    "why": "prot_commit_flush_ptes 的所有调用均来自 change_present_ptes 及其批量提交辅助函数，最外层 change_pte_range:357 已在页表锁内检查 present。ptent 由 present 的 oldpte 经 pte_modify、uffd 标志和 PFN 推进得到，PROT_NONE 仍属于 present，非 present 的处理函数不会调用这条提交链。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/huge_memory.c:1224",
+    "verdict": "不可能",
+    "why": "逐一追踪当前调用点：map_anon_folio_pmd_nopf、do_set_pmd 及 insert_pmd 新建分支传入 folio_mk_pmd/pfn_pmd 构造的页映射，do_huge_pmd_wp_page 则在锁内复核已确认 present 的 orig_pmd。insert_pmd 更新已有项的分支服务 DAX 或 PFNMAP/MIXEDMAP 驱动映射，不产生普通交换、迁移或 device-private PMD，且还要求目标 PFN 相同，因此未找到能将非 present 项带入 maybe_pmd_mkwrite 的当前调用路径。"
+  }
+]

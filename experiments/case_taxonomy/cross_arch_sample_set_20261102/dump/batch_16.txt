@@ -1,0 +1,1170 @@
+
+##### A400
+=== c1bc73280fb2 A DEV 2026-07-31 +12/-8
+RISC-V: KVM: Separate req and fallback_req masks in make_xfence_request
+
+When handling hfence requests in make_xfence_request(), the current code
+uses a single 'actual_req' variable and a single vcpu_mask. If any VCPU
+fails to enqueue the hfence data (because its queue is full), the request
+falls back to 'fallback_req' for all VCPUs, even if other VCPUs still
+have available queue space.
+
+This can cause unnecessary fallback for healthy VCPUs, and more seriously,
+those healthy VCPUs will not process their already-enqueued hfence
+requests because no 'req' is set for them. As a result, their queues will
+quickly become full as well, degrading performance for SMP guests.
+
+Fix this by maintaining two separate bitmaps: one for VCPUs that
+successfully enqueued the hfence data (req_vcpu_mask) and another for
+those that failed (fallback_req_vcpu_mask). Then send the appropriate
+requests to each group. This ensures that fallback is only applied to
+VCPUs that actually need it, preserving the efficiency of the normal
+path for others.
+
+Fixes: 13acfec2dbcc ("RISC-V: KVM: Add remote HFENCE functions based on VCPU requests")
+functions: arch/riscv/kvm/tlb.c:make_xfence_request
+fixes: 13acfec2dbcc(riscv)
+diff --git a/arch/riscv/kvm/tlb.c b/arch/riscv/kvm/tlb.c
+index 993b25ea94d6..c54522decaa6 100644
+--- a/arch/riscv/kvm/tlb.c
++++ b/arch/riscv/kvm/tlb.c
+@@ -333,8 +333,9 @@ static void make_xfence_request(struct kvm *kvm,
+ 	unsigned long i;
+ 	struct kvm_vcpu *vcpu;
+-	unsigned int actual_req = req;
+-	DECLARE_BITMAP(vcpu_mask, KVM_MAX_VCPUS);
++	DECLARE_BITMAP(req_vcpu_mask, KVM_MAX_VCPUS);
++	DECLARE_BITMAP(fallback_req_vcpu_mask, KVM_MAX_VCPUS);
+ 
+-	bitmap_zero(vcpu_mask, KVM_MAX_VCPUS);
++	bitmap_zero(req_vcpu_mask, KVM_MAX_VCPUS);
++	bitmap_zero(fallback_req_vcpu_mask, KVM_MAX_VCPUS);
+ 	kvm_for_each_vcpu(i, vcpu, kvm) {
+ 		if (hbase != -1UL) {
+@@ -346,8 +347,8 @@ static void make_xfence_request(struct kvm *kvm,
+ 		}
+ 
+-		bitmap_set(vcpu_mask, i, 1);
+-
+-		if (!data || !data->type)
++		if (!data || !data->type) {
++			bitmap_set(req_vcpu_mask, i, 1);
+ 			continue;
++		}
+ 
+ 		/*
+@@ -357,8 +358,11 @@ static void make_xfence_request(struct kvm *kvm,
+ 		 */
+ 		if (!vcpu_hfence_enqueue(vcpu, data))
+-			actual_req = fallback_req;
++			bitmap_set(fallback_req_vcpu_mask, i, 1);
++		else
++			bitmap_set(req_vcpu_mask, i, 1);
+ 	}
+ 
+-	kvm_make_vcpus_request_mask(kvm, actual_req, vcpu_mask);
++	kvm_make_vcpus_request_mask(kvm, req, req_vcpu_mask);
++	kvm_make_vcpus_request_mask(kvm, fallback_req, fallback_req_vcpu_mask);
+ }
+ 
+
+##### B401
+=== 0f2692ee4324 B 2023-10-04 +3/-0
+selftests/bpf: Define SYS_PREFIX for riscv
+
+SYS_PREFIX was missing for a RISC-V, which made a couple of kprobe
+tests fail.
+
+Add missing SYS_PREFIX for RISC-V.
+
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+functions: 
+fixes: 08d0ce30e0e4(riscv)
+diff --git a/tools/testing/selftests/bpf/progs/bpf_misc.h b/tools/testing/selftests/bpf/progs/bpf_misc.h
+index 38a57a2e70db..799fff4995d8 100644
+--- a/tools/testing/selftests/bpf/progs/bpf_misc.h
++++ b/tools/testing/selftests/bpf/progs/bpf_misc.h
+@@ -100,4 +100,7 @@
+ #define SYSCALL_WRAPPER 1
+ #define SYS_PREFIX "__arm64_"
++#elif defined(__TARGET_ARCH_riscv)
++#define SYSCALL_WRAPPER 1
++#define SYS_PREFIX "__riscv_"
+ #else
+ #define SYSCALL_WRAPPER 0
+
+##### B402
+=== 8a412c5c1cd6 B 2023-10-04 +0/-2
+libbpf: Fix syscall access arguments on riscv
+
+Since commit 08d0ce30e0e4 ("riscv: Implement syscall wrappers"), riscv
+selects ARCH_HAS_SYSCALL_WRAPPER so let's use the generic implementation
+of PT_REGS_SYSCALL_REGS().
+
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+functions: 
+fixes: 08d0ce30e0e4(riscv)
+diff --git a/tools/lib/bpf/bpf_tracing.h b/tools/lib/bpf/bpf_tracing.h
+index 3803479dbe10..1c13f8e88833 100644
+--- a/tools/lib/bpf/bpf_tracing.h
++++ b/tools/lib/bpf/bpf_tracing.h
+@@ -363,6 +363,4 @@ struct pt_regs___arm64 {
+ #define __PT_PARM8_REG a7
+ 
+-/* riscv does not select ARCH_HAS_SYSCALL_WRAPPER. */
+-#define PT_REGS_SYSCALL_REGS(ctx) ctx
+ #define __PT_PARM1_SYSCALL_REG __PT_PARM1_REG
+ #define __PT_PARM2_SYSCALL_REG __PT_PARM2_REG
+
+##### B403
+=== b55b775f0316 B 2023-10-04 +2/-0
+selftests/bpf: Define SYS_NANOSLEEP_KPROBE_NAME for riscv
+
+Add missing sys_nanosleep name for RISC-V, which is used by some tests
+(e.g. attach_probe).
+
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+functions: 
+fixes: 08d0ce30e0e4(riscv)
+diff --git a/tools/testing/selftests/bpf/test_progs.h b/tools/testing/selftests/bpf/test_progs.h
+index 77bd492c6024..2f9f6f250f17 100644
+--- a/tools/testing/selftests/bpf/test_progs.h
++++ b/tools/testing/selftests/bpf/test_progs.h
+@@ -418,4 +418,6 @@ int get_bpf_max_tramp_links(void);
+ #elif defined(__aarch64__)
+ #define SYS_NANOSLEEP_KPROBE_NAME "__arm64_sys_nanosleep"
++#elif defined(__riscv)
++#define SYS_NANOSLEEP_KPROBE_NAME "__riscv_sys_nanosleep"
+ #else
+ #define SYS_NANOSLEEP_KPROBE_NAME "sys_nanosleep"
+
+##### B404
+=== 61e3d993c8bd B 2023-10-26 +2/-4
+drivers: perf: Do not broadcast to other cpus when starting a counter
+
+This command:
+
+$ perf record -e cycles:k -e instructions:k -c 10000 -m 64M dd if=/dev/zero of=/dev/null count=1000
+
+gives rise to this kernel warning:
+
+[  444.364395] WARNING: CPU: 0 PID: 104 at kernel/smp.c:775 smp_call_function_many_cond+0x42c/0x436
+[  444.364515] Modules linked in:
+[  444.364657] CPU: 0 PID: 104 Comm: perf-exec Not tainted 6.6.0-rc6-00051-g391df82e8ec3-dirty #73
+[  444.364771] Hardware name: riscv-virtio,qemu (DT)
+[  444.364868] epc : smp_call_function_many_cond+0x42c/0x436
+[  444.364917]  ra : on_each_cpu_cond_mask+0x20/0x32
+[  444.364948] epc : ffffffff8009f9e0 ra : ffffffff8009fa5a sp : ff20000000003800
+[  444.364966]  gp : ffffffff81500aa0 tp : ff60000002b83000 t0 : ff200000000038c0
+[  444.364982]  t1 : ffffffff815021f0 t2 : 000000000000001f s0 : ff200000000038b0
+[  444.364998]  s1 : ff60000002c54d98 a0 : ff60000002a73940 a1 : 0000000000000000
+[  444.365013]  a2 : 0000000000000000 a3 : 0000000000000003 a4 : 0000000000000100
+[  444.365029]  a5 : 0000000000010100 a6 : 0000000000f00000 a7 : 0000000000000000
+[  444.365044]  s2 : 0000000000000000 s3 : ffffffffffffffff s4 : ff60000002c54d98
+[  444.365060]  s5 : ffffffff81539610 s6 : ffffffff80c20c48 s7 : 0000000000000000
+[  444.365075]  s8 : 0000000000000000 s9 : 0000000000000001 s10: 0000000000000001
+[  444.365090]  s11: ffffffff80099394 t3 : 0000000000000003 t4 : 00000000eac0c6e6
+[  444.365104]  t5 : 0000000400000000 t6 : ff60000002e010d0
+[  444.365120] status: 0000000200000100 badaddr: 0000000000000000 cause: 0000000000000003
+[  444.365226] [<ffffffff8009f9e0>] smp_call_function_many_cond+0x42c/0x436
+[  444.365295] [<ffffffff8009fa5a>] on_each_cpu_cond_mask+0x20/0x32
+[  444.365311] [<ffffffff806e90dc>] pmu_sbi_ctr_start+0x7a/0xaa
+[  444.365327] [<ffffffff806e880c>] riscv_pmu_start+0x48/0x66
+[  444.365339] [<ffffffff8012111a>] perf_adjust_freq_unthr_context+0x196/0x1ac
+[  444.365356] [<ffffffff801237aa>] perf_event_task_tick+0x78/0x8c
+[  444.365368] [<ffffffff8003faf4>] scheduler_tick+0xe6/0x25e
+[  444.365383] [<ffffffff8008a042>] update_process_times+0x80/0x96
+[  444.365398] [<ffffffff800991ec>] tick_sched_handle+0x26/0x52
+[  444.365410] [<ffffffff800993e4>] tick_sched_timer+0x50/0x98
+[  444.365422] [<ffffffff8008a6aa>] __hrtimer_run_queues+0x126/0x18a
+[  444.365433] [<ffffffff8008b350>] hrtimer_interrupt+0xce/0x1da
+[  444.365444] [<ffffffff806cdc60>] riscv_timer_interrupt+0x30/0x3a
+[  444.365457] [<ffffffff8006afa6>] handle_percpu_devid_irq+0x80/0x114
+[  444.365470] [<ffffffff80065b82>] generic_handle_domain_irq+0x1c/0x2a
+functions: drivers/perf/riscv_pmu_sbi.c:pmu_sbi_ctr_start, drivers/perf/riscv_pmu_sbi.c:pmu_sbi_ctr_stop
+fixes: 3fec323339a4(common)
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 96c7f670c8f0..fcb0c70ca222 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -544,6 +544,5 @@ static void pmu_sbi_ctr_start(struct perf_event *event, u64 ival)
+ 	if ((hwc->flags & PERF_EVENT_FLAG_USER_ACCESS) &&
+ 	    (hwc->flags & PERF_EVENT_FLAG_USER_READ_CNT))
+-		on_each_cpu_mask(mm_cpumask(event->owner->mm),
+-				 pmu_sbi_set_scounteren, (void *)event, 1);
++		pmu_sbi_set_scounteren((void *)event);
+ }
+ 
+@@ -555,6 +554,5 @@ static void pmu_sbi_ctr_stop(struct perf_event *event, unsigned long flag)
+ 	if ((hwc->flags & PERF_EVENT_FLAG_USER_ACCESS) &&
+ 	    (hwc->flags & PERF_EVENT_FLAG_USER_READ_CNT))
+-		on_each_cpu_mask(mm_cpumask(event->owner->mm),
+-				 pmu_sbi_reset_scounteren, (void *)event, 1);
++		pmu_sbi_reset_scounteren((void *)event);
+ 
+ 	ret = sbi_ecall(SBI_EXT_PMU, SBI_EXT_PMU_COUNTER_STOP, hwc->idx, 1, flag, 0, 0, 0);
+
+##### B405
+=== 37de5a80e932 B 2023-11-06 +9/-3
+cifs: Fix encryption of cleared, but unset rq_iter data buffers
+
+Each smb_rqst struct contains two things: an array of kvecs (rq_iov) that
+contains the protocol data for an RPC op and an iterator (rq_iter) that
+contains the data payload of an RPC op.  When an smb_rqst is allocated
+rq_iter is it always cleared, but we don't set it up unless we're going to
+use it.
+
+The functions that determines the size of the ciphertext buffer that will
+be needed to encrypt a request, cifs_get_num_sgs(), assumes that rq_iter is
+always initialised - and employs user_backed_iter() to check that the
+iterator isn't user-backed.  This used to incidentally work, because
+->user_backed was set to false because the iterator has never been
+initialised, but with commit f1b4cb650b9a0eeba206d8f069fcdc532bfbcd74[1]
+which changes user_backed_iter() to determine this based on the iterator
+type insted, a warning is now emitted:
+
+        WARNING: CPU: 7 PID: 4584 at fs/smb/client/cifsglob.h:2165 smb2_get_aead_req+0x3fc/0x420 [cifs]
+        ...
+        RIP: 0010:smb2_get_aead_req+0x3fc/0x420 [cifs]
+        ...
+         crypt_message+0x33e/0x550 [cifs]
+         smb3_init_transform_rq+0x27d/0x3f0 [cifs]
+         smb_send_rqst+0xc7/0x160 [cifs]
+         compound_send_recv+0x3ca/0x9f0 [cifs]
+         cifs_send_recv+0x25/0x30 [cifs]
+         SMB2_tcon+0x38a/0x820 [cifs]
+         cifs_get_smb_ses+0x69c/0xee0 [cifs]
+         cifs_mount_get_session+0x76/0x1d0 [cifs]
+         dfs_mount_share+0x74/0x9d0 [cifs]
+         cifs_mount+0x6e/0x2e0 [cifs]
+         cifs_smb3_do_mount+0x143/0x300 [cifs]
+         smb3_get_tree+0x15e/0x290 [cifs]
+         vfs_get_tree+0x2d/0xe0
+         do_new_mount+0x124/0x340
+         __se_sys_mount+0x143/0x1a0
+
+The problem is that rq_iter was never set, so the type is 0 (ie. ITER_UBUF)
+which causes user_backed_iter() to return true.  The code doesn't
+malfunction because it checks the size of the iterator - which is 0.
+
+functions: 
+fixes: d08089f649a0(common)
+diff --git a/fs/smb/client/cifsglob.h b/fs/smb/client/cifsglob.h
+index 02082621d8e0..e55f49e278a2 100644
+--- a/fs/smb/client/cifsglob.h
++++ b/fs/smb/client/cifsglob.h
+@@ -2144,4 +2144,5 @@ static inline int cifs_get_num_sgs(const struct smb_rqst *rqst,
+ 	unsigned int nents = 0;
+ 	unsigned long addr;
++	size_t data_size;
+ 	int i, j;
+ 
+@@ -2159,9 +2160,12 @@ static inline int cifs_get_num_sgs(const struct smb_rqst *rqst,
+ 	 */
+ 	for (i = 0; i < num_rqst; i++) {
++		data_size = iov_iter_count(&rqst[i].rq_iter);
++
+ 		/* We really don't want a mixture of pinned and unpinned pages
+ 		 * in the sglist.  It's hard to keep track of which is what.
+ 		 * Instead, we convert to a BVEC-type iterator higher up.
+ 		 */
+-		if (WARN_ON_ONCE(user_backed_iter(&rqst[i].rq_iter)))
++		if (data_size &&
++		    WARN_ON_ONCE(user_backed_iter(&rqst[i].rq_iter)))
+ 			return -EIO;
+ 
+@@ -2169,5 +2173,6 @@ static inline int cifs_get_num_sgs(const struct smb_rqst *rqst,
+ 		 * up in the sglist.
+ 		 */
+-		if (WARN_ON_ONCE(iov_iter_extract_will_pin(&rqst[i].rq_iter)))
++		if (data_size &&
++		    WARN_ON_ONCE(iov_iter_extract_will_pin(&rqst[i].rq_iter)))
+ 			return -EIO;
+ 
+@@ -2185,5 +2190,6 @@ static inline int cifs_get_num_sgs(const struct smb_rqst *rqst,
+ 			skip = 0;
+ 		}
+-		nents += iov_iter_npages(&rqst[i].rq_iter, INT_MAX);
++		if (data_size)
++			nents += iov_iter_npages(&rqst[i].rq_iter, INT_MAX);
+ 	}
+ 	nents += DIV_ROUND_UP(offset_in_page(sig) + SMB2_SIGNATURE_SIZE, PAGE_SIZE);
+
+##### B406
+=== 57686a72da08 B 2023-11-09 +1/-0
+tools: Disable __packed attribute compiler warning due to -Werror=attributes
+
+Noticed on several perf tools cross build test containers:
+
+  [perfbuilder@five ~]$ grep FAIL ~/dm.log/summary
+    19    10.18 debian:experimental-x-mips    : FAIL gcc version 12.3.0 (Debian 12.3.0-6)
+    20    11.21 debian:experimental-x-mips64  : FAIL gcc version 12.3.0 (Debian 12.3.0-6)
+    21    11.30 debian:experimental-x-mipsel  : FAIL gcc version 12.3.0 (Debian 12.3.0-6)
+    37    12.07 ubuntu:18.04-x-arm            : FAIL gcc version 7.5.0 (Ubuntu/Linaro 7.5.0-3ubuntu1~18.04)
+    42    11.91 ubuntu:18.04-x-riscv64        : FAIL gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)
+    44    13.17 ubuntu:18.04-x-sh4            : FAIL gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)
+    45    12.09 ubuntu:18.04-x-sparc64        : FAIL gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)
+  [perfbuilder@five ~]$
+
+  In file included from util/intel-pt-decoder/intel-pt-pkt-decoder.c:10:
+  /tmp/perf-6.6.0-rc1/tools/include/asm-generic/unaligned.h: In function 'get_unaligned_le16':
+  /tmp/perf-6.6.0-rc1/tools/include/asm-generic/unaligned.h:13:29: error: packed attribute causes inefficient alignment for 'x' [-Werror=attributes]
+     13 |         const struct { type x; } __packed *__pptr = (typeof(__pptr))(ptr);      \
+        |                             ^
+  /tmp/perf-6.6.0-rc1/tools/include/asm-generic/unaligned.h:27:28: note: in expansion of macro '__get_unaligned_t'
+     27 |         return le16_to_cpu(__get_unaligned_t(__le16, p));
+        |                            ^~~~~~~~~~~~~~~~~
+
+This comes from the kernel, where the -Wattributes and -Wpacked isn't
+used, -Wpacked is already disabled, do it for the attributes as well.
+
+Fixes: a91c987254651443 ("perf tools: Add get_unaligned_leNN()")
+functions: 
+fixes: a91c98725465(common)
+diff --git a/tools/include/asm-generic/unaligned.h b/tools/include/asm-generic/unaligned.h
+index 156743d399ae..2fd551915c20 100644
+--- a/tools/include/asm-generic/unaligned.h
++++ b/tools/include/asm-generic/unaligned.h
+@@ -9,4 +9,5 @@
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wpacked"
++#pragma GCC diagnostic ignored "-Wattributes"
+ 
+ #define __get_unaligned_t(type, ptr) ({						\
+
+##### B407
+=== a399ee6773d6 B 2023-11-09 +1/-0
+tools: Disable __packed attribute compiler warning due to -Werror=attributes
+
+Noticed on several perf tools cross build test containers:
+
+  [perfbuilder@five ~]$ grep FAIL ~/dm.log/summary
+    19    10.18 debian:experimental-x-mips    : FAIL gcc version 12.3.0 (Debian 12.3.0-6)
+    20    11.21 debian:experimental-x-mips64  : FAIL gcc version 12.3.0 (Debian 12.3.0-6)
+    21    11.30 debian:experimental-x-mipsel  : FAIL gcc version 12.3.0 (Debian 12.3.0-6)
+    37    12.07 ubuntu:18.04-x-arm            : FAIL gcc version 7.5.0 (Ubuntu/Linaro 7.5.0-3ubuntu1~18.04)
+    42    11.91 ubuntu:18.04-x-riscv64        : FAIL gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)
+    44    13.17 ubuntu:18.04-x-sh4            : FAIL gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)
+    45    12.09 ubuntu:18.04-x-sparc64        : FAIL gcc version 7.5.0 (Ubuntu 7.5.0-3ubuntu1~18.04)
+  [perfbuilder@five ~]$
+
+  In file included from util/intel-pt-decoder/intel-pt-pkt-decoder.c:10:
+  /tmp/perf-6.6.0-rc1/tools/include/asm-generic/unaligned.h: In function 'get_unaligned_le16':
+  /tmp/perf-6.6.0-rc1/tools/include/asm-generic/unaligned.h:13:29: error: packed attribute causes inefficient alignment for 'x' [-Werror=attributes]
+     13 |         const struct { type x; } __packed *__pptr = (typeof(__pptr))(ptr);      \
+        |                             ^
+  /tmp/perf-6.6.0-rc1/tools/include/asm-generic/unaligned.h:27:28: note: in expansion of macro '__get_unaligned_t'
+     27 |         return le16_to_cpu(__get_unaligned_t(__le16, p));
+        |                            ^~~~~~~~~~~~~~~~~
+
+This comes from the kernel, where the -Wattributes and -Wpacked isn't
+used, -Wpacked is already disabled, do it for the attributes as well.
+
+Fixes: a91c987254651443 ("perf tools: Add get_unaligned_leNN()")
+functions: 
+fixes: a91c98725465(common)
+diff --git a/tools/include/asm-generic/unaligned.h b/tools/include/asm-generic/unaligned.h
+index 156743d399ae..2fd551915c20 100644
+--- a/tools/include/asm-generic/unaligned.h
++++ b/tools/include/asm-generic/unaligned.h
+@@ -9,4 +9,5 @@
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wpacked"
++#pragma GCC diagnostic ignored "-Wattributes"
+ 
+ #define __get_unaligned_t(type, ptr) ({						\
+
+##### B408
+=== c6e316ac0553 B 2023-11-09 +5/-0
+drivers: perf: Check find_first_bit() return value
+
+We must check the return value of find_first_bit() before using the
+return value as an index array since it happens to overflow the array
+and then panic:
+
+[  107.318430] Kernel BUG [#1]
+[  107.319434] CPU: 3 PID: 1238 Comm: kill Tainted: G            E      6.6.0-rc6ubuntu-defconfig #2
+[  107.319465] Hardware name: riscv-virtio,qemu (DT)
+[  107.319551] epc : pmu_sbi_ovf_handler+0x3a4/0x3ae
+[  107.319840]  ra : pmu_sbi_ovf_handler+0x52/0x3ae
+[  107.319868] epc : ffffffff80a0a77c ra : ffffffff80a0a42a sp : ffffaf83fecda350
+[  107.319884]  gp : ffffffff823961a8 tp : ffffaf8083db1dc0 t0 : ffffaf83fecda480
+[  107.319899]  t1 : ffffffff80cafe62 t2 : 000000000000ff00 s0 : ffffaf83fecda520
+[  107.319921]  s1 : ffffaf83fecda380 a0 : 00000018fca29df0 a1 : ffffffffffffffff
+[  107.319936]  a2 : 0000000001073734 a3 : 0000000000000004 a4 : 0000000000000000
+[  107.319951]  a5 : 0000000000000040 a6 : 000000001d1c8774 a7 : 0000000000504d55
+[  107.319965]  s2 : ffffffff82451f10 s3 : ffffffff82724e70 s4 : 000000000000003f
+[  107.319980]  s5 : 0000000000000011 s6 : ffffaf8083db27c0 s7 : 0000000000000000
+[  107.319995]  s8 : 0000000000000001 s9 : 00007fffb45d6558 s10: 00007fffb45d81a0
+[  107.320009]  s11: ffffaf7ffff60000 t3 : 0000000000000004 t4 : 0000000000000000
+[  107.320023]  t5 : ffffaf7f80000000 t6 : ffffaf8000000000
+[  107.320037] status: 0000000200000100 badaddr: 0000000000000000 cause: 0000000000000003
+[  107.320081] [<ffffffff80a0a77c>] pmu_sbi_ovf_handler+0x3a4/0x3ae
+[  107.320112] [<ffffffff800b42d0>] handle_percpu_devid_irq+0x9e/0x1a0
+[  107.320131] [<ffffffff800ad92c>] generic_handle_domain_irq+0x28/0x36
+[  107.320148] [<ffffffff8065f9f8>] riscv_intc_irq+0x36/0x4e
+[  107.320166] [<ffffffff80caf4a0>] handle_riscv_irq+0x54/0x86
+[  107.320189] [<ffffffff80cb0036>] do_irq+0x64/0x96
+[  107.320271] Code: 85a6 855e b097 ff7f 80e7 9220 b709 9002 4501 bbd9 (9002) 6097
+[  107.320585] ---[ end trace 0000000000000000 ]---
+[  107.320704] Kernel panic - not syncing: Fatal exception in interrupt
+[  107.320775] SMP: stopping secondary CPUs
+[  107.321219] Kernel Offset: 0x0 from 0xffffffff80000000
+[  107.333051] ---[ end Kernel panic - not syncing: Fatal exception in interrupt ]---
+
+Fixes: 4905ec2fb7e6 ("RISC-V: Add sscofpmf extension support")
+functions: drivers/perf/riscv_pmu_sbi.c:pmu_sbi_ovf_handler
+fixes: 4905ec2fb7e6(riscv)
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 9a51053b1f99..0b5053152ee6 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -686,4 +686,9 @@ static irqreturn_t pmu_sbi_ovf_handler(int irq, void *dev)
+ 	/* Firmware counter don't support overflow yet */
+ 	fidx = find_first_bit(cpu_hw_evt->used_hw_ctrs, RISCV_MAX_COUNTERS);
++	if (fidx == RISCV_MAX_COUNTERS) {
++		csr_clear(CSR_SIP, BIT(riscv_pmu_irq_num));
++		return IRQ_NONE;
++	}
++
+ 	event = cpu_hw_evt->events[fidx];
+ 	if (!event) {
+
+##### B409
+=== e257da571536 B 2023-11-12 +1/-1
+wifi: iwlwifi: fix system commands group ordering
+
+The commands should be sorted inside the group definition.
+Fix the ordering so we won't get following warning:
+WARN_ON(iwl_cmd_groups_verify_sorted(trans_cfg))
+
+Fixes: b6e3d1ba4fcf ("wifi: iwlwifi: mvm: implement new firmware API for statistics")
+functions: 
+fixes: b6e3d1ba4fcf(common)
+diff --git a/drivers/net/wireless/intel/iwlwifi/mvm/ops.c b/drivers/net/wireless/intel/iwlwifi/mvm/ops.c
+index fef86a8b4163..1627b2f819db 100644
+--- a/drivers/net/wireless/intel/iwlwifi/mvm/ops.c
++++ b/drivers/net/wireless/intel/iwlwifi/mvm/ops.c
+@@ -551,7 +551,7 @@ static const struct iwl_hcmd_names iwl_mvm_system_names[] = {
+ 	HCMD_NAME(RFI_GET_FREQ_TABLE_CMD),
+ 	HCMD_NAME(SYSTEM_FEATURES_CONTROL_CMD),
+-	HCMD_NAME(RFI_DEACTIVATE_NOTIF),
+ 	HCMD_NAME(SYSTEM_STATISTICS_CMD),
+ 	HCMD_NAME(SYSTEM_STATISTICS_END_NOTIF),
++	HCMD_NAME(RFI_DEACTIVATE_NOTIF),
+ };
+ 
+
+##### B410
+=== b91cf01cf3e6 B 2023-12-04 +8/-1
+dt-bindings: timer: thead,c900-aclint-mtimer: separate mtime and mtimecmp regs
+
+The timer registers of aclint don't follow the clint layout and can
+be mapped on any different offset. As sg2042 uses separated timer
+and mswi for its clint, it should follow the aclint spec and have
+separated registers.
+
+The previous patch introduced a new type of T-HEAD aclint timer which
+has clint timer layout. Although it has the clint timer layout, it
+should follow the aclint spec and uses the separated mtime and mtimecmp
+regs. So a ABI change is needed to make the timer fit the aclint spec.
+
+To make T-HEAD aclint timer more closer to the aclint spec, use
+regs-names to represent the mtimecmp register, which can avoid hack
+for unsupport mtime register of T-HEAD aclint timer.
+
+Also, as T-HEAD aclint only supports mtimecmp, it is unnecessary to
+implement the whole aclint spec. To make this binding T-HEAD specific,
+only add reg-name for existed register. For details, see the discussion
+in the last link.
+
+Fixes: 4734449f7311 ("dt-bindings: timer: Add Sophgo sg2042 CLINT timer")
+functions: 
+fixes: 4734449f7311(common)
+diff --git a/Documentation/devicetree/bindings/timer/thead,c900-aclint-mtimer.yaml b/Documentation/devicetree/bindings/timer/thead,c900-aclint-mtimer.yaml
+index fbd235650e52..2e92bcdeb423 100644
+--- a/Documentation/devicetree/bindings/timer/thead,c900-aclint-mtimer.yaml
++++ b/Documentation/devicetree/bindings/timer/thead,c900-aclint-mtimer.yaml
+@@ -18,5 +18,10 @@ properties:
+ 
+   reg:
+-    maxItems: 1
++    items:
++      - description: MTIMECMP Registers
++
++  reg-names:
++    items:
++      - const: mtimecmp
+ 
+   interrupts-extended:
+@@ -29,4 +34,5 @@ required:
+   - compatible
+   - reg
++  - reg-names
+   - interrupts-extended
+ 
+@@ -40,4 +46,5 @@ examples:
+                             <&cpu4intc 7>;
+       reg = <0xac000000 0x00010000>;
++      reg-names = "mtimecmp";
+     };
+ ...
+
+##### B411
+=== 1ddeeac2dffd B 2023-12-06 +1/-0
+media: chips-media: wave5: Requires GENERIC_ALLOCATOR
+
+This driver uses the API that is provided by GENERIC_ALLOCATOR API, so
+select it to prevent build errors:
+
+riscv32-linux-ld: drivers/media/platform/chips-media/wave5/wave5-vpu.o: in function `.L37':
+wave5-vpu.c:(.text+0x468): undefined reference to `of_gen_pool_get'
+riscv32-linux-ld: drivers/media/platform/chips-media/wave5/wave5-vdi.o: in function `.L116':
+wave5-vdi.c:(.text+0xaac): undefined reference to `gen_pool_dma_alloc'
+riscv32-linux-ld: drivers/media/platform/chips-media/wave5/wave5-vdi.o: in function `wave5_vdi_free_sram':
+wave5-vdi.c:(.text+0xb60): undefined reference to `gen_pool_free_owner'
+
+Fixes: 9707a6254a8a ("media: chips-media: wave5: Add the v4l2 layer")
+functions: 
+fixes: 9707a6254a8a(common)
+diff --git a/drivers/media/platform/chips-media/wave5/Kconfig b/drivers/media/platform/chips-media/wave5/Kconfig
+index 9ccc1f7e32f3..f1bcef5177bd 100644
+--- a/drivers/media/platform/chips-media/wave5/Kconfig
++++ b/drivers/media/platform/chips-media/wave5/Kconfig
+@@ -8,4 +8,5 @@ config VIDEO_WAVE_VPU
+ 	select VIDEOBUF2_VMALLOC
+ 	select V4L2_MEM2MEM_DEV
++	select GENERIC_ALLOCATOR
+ 	help
+ 	  Chips&Media stateful encoder and decoder driver.
+
+##### B412
+=== 3279f526952f B 2023-12-07 +6/-4
+KVM: riscv: selftests: Fix get-reg-list print_reg defaults
+
+print_reg() will print everything it knows when it encounters
+a register ID it's unfamiliar with in the default cases of its
+decoding switches. Fix several issues with these (until now,
+never tested) paths; missing newlines in printfs, missing
+complement operator in mask, and missing return in order to
+avoid continuing to decode.
+
+Fixes: 62d0c458f828 ("KVM: riscv: selftests: get-reg-list print_reg should never fail")
+functions: tools/testing/selftests/kvm/riscv/get-reg-list.c:print_reg
+fixes: 62d0c458f828(common)
+diff --git a/tools/testing/selftests/kvm/riscv/get-reg-list.c b/tools/testing/selftests/kvm/riscv/get-reg-list.c
+index 6bedaea95395..25de4b8bc347 100644
+--- a/tools/testing/selftests/kvm/riscv/get-reg-list.c
++++ b/tools/testing/selftests/kvm/riscv/get-reg-list.c
+@@ -459,6 +459,7 @@ void print_reg(const char *prefix, __u64 id)
+ 		break;
+ 	default:
+-		printf("\tKVM_REG_RISCV | (%lld << KVM_REG_SIZE_SHIFT) | 0x%llx /* UNKNOWN */,",
+-		       (id & KVM_REG_SIZE_MASK) >> KVM_REG_SIZE_SHIFT, id & REG_MASK);
++		printf("\tKVM_REG_RISCV | (%lld << KVM_REG_SIZE_SHIFT) | 0x%llx /* UNKNOWN */,\n",
++		       (id & KVM_REG_SIZE_MASK) >> KVM_REG_SIZE_SHIFT, id & ~REG_MASK);
++		return;
+ 	}
+ 
+@@ -497,6 +498,7 @@ void print_reg(const char *prefix, __u64 id)
+ 		break;
+ 	default:
+-		printf("\tKVM_REG_RISCV | %s | 0x%llx /* UNKNOWN */,",
+-				reg_size, id & REG_MASK);
++		printf("\tKVM_REG_RISCV | %s | 0x%llx /* UNKNOWN */,\n",
++				reg_size, id & ~REG_MASK);
++		return;
+ 	}
+ }
+
+##### B413
+=== a452816132d6 B 2023-12-27 +2/-2
+dt-bindings: riscv: cpus: Clarify mmu-type interpretation
+
+The current description implies that only a single address translation
+mode is available to the operating system. However, some implementations
+support multiple address translation modes, and the operating system is
+free to choose between them.
+
+Per the RISC-V privileged specification, Sv48 implementations must also
+implement Sv39, and likewise Sv57 implies support for Sv48. This means
+it is possible to describe all supported address translation modes using
+a single value, by naming the largest supported mode. This appears to
+have been the intended usage of the property, so note it explicitly.
+
+Fixes: 4fd669a8c487 ("dt-bindings: riscv: convert cpu binding to json-schema")
+functions: 
+fixes: 4fd669a8c487(common)
+diff --git a/Documentation/devicetree/bindings/riscv/cpus.yaml b/Documentation/devicetree/bindings/riscv/cpus.yaml
+index 23646b684ea2..72f8af482818 100644
+--- a/Documentation/devicetree/bindings/riscv/cpus.yaml
++++ b/Documentation/devicetree/bindings/riscv/cpus.yaml
+@@ -64,6 +64,6 @@ properties:
+   mmu-type:
+     description:
+-      Identifies the MMU address translation mode used on this
+-      hart.  These values originate from the RISC-V Privileged
++      Identifies the largest MMU address translation mode supported by
++      this hart.  These values originate from the RISC-V Privileged
+       Specification document, available from
+       https://riscv.org/specifications/
+
+##### B414
+=== 4a693ce65b18 B 2023-12-29 +12/-2
+kdump: defer the insertion of crashkernel resources
+
+In /proc/iomem, sub-regions should be inserted after their parent,
+otherwise the insertion of parent resource fails.  But after generic
+crashkernel reservation applied, in both RISC-V and ARM64 (LoongArch will
+also use generic reservation later on), crashkernel resources are inserted
+before their parent, which causes the parent disappear in /proc/iomem.  So
+we defer the insertion of crashkernel resources to an early_initcall().
+
+1, Without 'crashkernel' parameter:
+
+ 100d0100-100d01ff : LOON0001:00
+   100d0100-100d01ff : LOON0001:00 LOON0001:00
+ 100e0000-100e0bff : LOON0002:00
+   100e0000-100e0bff : LOON0002:00 LOON0002:00
+ 1fe001e0-1fe001e7 : serial
+ 90400000-fa17ffff : System RAM
+   f6220000-f622ffff : Reserved
+   f9ee0000-f9ee3fff : Reserved
+   fa120000-fa17ffff : Reserved
+ fa190000-fe0bffff : System RAM
+   fa190000-fa1bffff : Reserved
+ fe4e0000-47fffffff : System RAM
+   43c000000-441ffffff : Reserved
+   47ff98000-47ffa3fff : Reserved
+   47ffa4000-47ffa7fff : Reserved
+   47ffa8000-47ffabfff : Reserved
+   47ffac000-47ffaffff : Reserved
+   47ffb0000-47ffb3fff : Reserved
+
+2, With 'crashkernel' parameter, before this patch:
+
+ 100d0100-100d01ff : LOON0001:00
+   100d0100-100d01ff : LOON0001:00 LOON0001:00
+ 100e0000-100e0bff : LOON0002:00
+   100e0000-100e0bff : LOON0002:00 LOON0002:00
+ 1fe001e0-1fe001e7 : serial
+ e6200000-f61fffff : Crash kernel
+ fa190000-fe0bffff : System RAM
+   fa190000-fa1bffff : Reserved
+ fe4e0000-47fffffff : System RAM
+functions: kernel/crash_core.c:reserve_crashkernel_low, kernel/crash_core.c:reserve_crashkernel_generic
+fixes: 0ab97169aa05(common)
+diff --git a/kernel/crash_core.c b/kernel/crash_core.c
+index d48315667752..4e2cac71b84f 100644
+--- a/kernel/crash_core.c
++++ b/kernel/crash_core.c
+@@ -377,5 +377,4 @@ static int __init reserve_crashkernel_low(unsigned long long low_size)
+ 	crashk_low_res.start = low_base;
+ 	crashk_low_res.end   = low_base + low_size - 1;
+-	insert_resource(&iomem_resource, &crashk_low_res);
+ #endif
+ 	return 0;
+@@ -459,6 +458,17 @@ void __init reserve_crashkernel_generic(char *cmdline,
+ 	crashk_res.start = crash_base;
+ 	crashk_res.end = crash_base + crash_size - 1;
+-	insert_resource(&iomem_resource, &crashk_res);
+ }
++
++static __init int insert_crashkernel_resources(void)
++{
++	if (crashk_res.start < crashk_res.end)
++		insert_resource(&iomem_resource, &crashk_res);
++
++	if (crashk_low_res.start < crashk_low_res.end)
++		insert_resource(&iomem_resource, &crashk_low_res);
++
++	return 0;
++}
++early_initcall(insert_crashkernel_resources);
+ #endif
+ 
+
+##### B415
+=== 58f1e9d3a304 B 2024-01-02 +2/-2
+cxl/region: use %pap format to print resource_size_t
+
+Use "%pap" to print a resource_size_t (phys_addr_t derived type)
+to prevent build warnings on 32-bit arches (seen on i386 and
+riscv-32).
+
+../drivers/cxl/core/region.c: In function 'alloc_hpa':
+../drivers/cxl/core/region.c:556:25: warning: format '%llx' expects argument of type 'long long unsigned int', but argument 5 has type 'resource_size_t' {aka 'unsigned int'} [-Wformat=]
+  556 |                         "HPA allocation error (%ld) for size:%#llx in %s %pr\n",
+
+Fixes: 7984d22f1315 ("cxl/region: Add dev_dbg() detail on failure to allocate HPA space")
+functions: drivers/cxl/core/region.c:alloc_hpa
+fixes: 7984d22f1315(common)
+diff --git a/drivers/cxl/core/region.c b/drivers/cxl/core/region.c
+index d904f9752bc3..0e88f1aed018 100644
+--- a/drivers/cxl/core/region.c
++++ b/drivers/cxl/core/region.c
+@@ -554,6 +554,6 @@ static int alloc_hpa(struct cxl_region *cxlr, resource_size_t size)
+ 	if (IS_ERR(res)) {
+ 		dev_dbg(&cxlr->dev,
+-			"HPA allocation error (%ld) for size:%#llx in %s %pr\n",
+-			PTR_ERR(res), size, cxlrd->res->name, cxlrd->res);
++			"HPA allocation error (%ld) for size:%pap in %s %pr\n",
++			PTR_ERR(res), &size, cxlrd->res->name, cxlrd->res);
+ 		return PTR_ERR(res);
+ 	}
+
+##### B416
+=== 0de65288d75f B 2024-01-17 +8/-10
+RISC-V: selftests: cbo: Ensure asm operands match constraints
+
+The 'i' constraint expects a constant operand, which fn and its
+constant derivative MK_CBO(fn) are, but passing fn through a function
+as a parameter and using a local variable for MK_CBO(fn) allow the
+compiler to lose sight of that when no optimization is done. Use
+a macro instead of a function and skip the local variable to ensure
+the compiler uses constants, matching the asm constraints.
+
+Fixes: a29e2a48afe3 ("RISC-V: selftests: Add CBO tests")
+functions: tools/testing/selftests/riscv/hwprobe/cbo.c:cbo_insn
+fixes: a29e2a48afe3(common)
+diff --git a/tools/testing/selftests/riscv/hwprobe/cbo.c b/tools/testing/selftests/riscv/hwprobe/cbo.c
+index c6a83ab11e22..c537d52fafc5 100644
+--- a/tools/testing/selftests/riscv/hwprobe/cbo.c
++++ b/tools/testing/selftests/riscv/hwprobe/cbo.c
+@@ -37,14 +37,12 @@ static void sigill_handler(int sig, siginfo_t *info, void *context)
+ }
+ 
+-static void cbo_insn(char *base, int fn)
+-{
+-	uint32_t insn = MK_CBO(fn);
+-
+-	asm volatile(
+-	"mv	a0, %0\n"
+-	"li	a1, %1\n"
+-	".4byte	%2\n"
+-	: : "r" (base), "i" (fn), "i" (insn) : "a0", "a1", "memory");
+-}
++#define cbo_insn(base, fn)							\
++({										\
++	asm volatile(								\
++	"mv	a0, %0\n"							\
++	"li	a1, %1\n"							\
++	".4byte	%2\n"								\
++	: : "r" (base), "i" (fn), "i" (MK_CBO(fn)) : "a0", "a1", "memory");	\
++})
+ 
+ static void cbo_inval(char *base) { cbo_insn(base, 0); }
+
+##### B417
+=== 9c92006b896c B 2024-01-31 +7/-1
+irqchip/sifive-plic: Enable interrupt if needed before EOI
+
+RISC-V PLIC cannot "end-of-interrupt" (EOI) disabled interrupts, as
+explained in the description of Interrupt Completion in the PLIC spec:
+
+"The PLIC signals it has completed executing an interrupt handler by
+writing the interrupt ID it received from the claim to the claim/complete
+register. The PLIC does not check whether the completion ID is the same
+as the last claim ID for that target. If the completion ID does not match
+an interrupt source that *is currently enabled* for the target, the
+completion is silently ignored."
+
+Commit 69ea463021be ("irqchip/sifive-plic: Fixup EOI failed when masked")
+ensured that EOI is successful by enabling interrupt first, before EOI.
+
+Commit a1706a1c5062 ("irqchip/sifive-plic: Separate the enable and mask
+operations") removed the interrupt enabling code from the previous
+commit, because it assumes that interrupt should already be enabled at the
+point of EOI.
+
+However, this is incorrect: there is a window after a hart claiming an
+interrupt and before irq_desc->lock getting acquired, interrupt can be
+disabled during this window. Thus, EOI can be invoked while the interrupt
+is disabled, effectively nullify this EOI. This results in the interrupt
+never gets asserted again, and the device who uses this interrupt appears
+frozen.
+
+Make sure that interrupt is really enabled before EOI.
+
+Fixes: a1706a1c5062 ("irqchip/sifive-plic: Separate the enable and mask operations")
+functions: drivers/irqchip/irq-sifive-plic.c:plic_irq_eoi
+fixes: a1706a1c5062(common)
+diff --git a/drivers/irqchip/irq-sifive-plic.c b/drivers/irqchip/irq-sifive-plic.c
+index 5b7bc4fd9517..bf0b40b0fad4 100644
+--- a/drivers/irqchip/irq-sifive-plic.c
++++ b/drivers/irqchip/irq-sifive-plic.c
+@@ -149,5 +149,11 @@ static void plic_irq_eoi(struct irq_data *d)
+ 	struct plic_handler *handler = this_cpu_ptr(&plic_handlers);
+ 
+-	writel(d->hwirq, handler->hart_base + CONTEXT_CLAIM);
++	if (unlikely(irqd_irq_disabled(d))) {
++		plic_toggle(handler, d->hwirq, 1);
++		writel(d->hwirq, handler->hart_base + CONTEXT_CLAIM);
++		plic_toggle(handler, d->hwirq, 0);
++	} else {
++		writel(d->hwirq, handler->hart_base + CONTEXT_CLAIM);
++	}
+ }
+ 
+
+##### B418
+=== 9bd405c48b0a B 2024-02-03 +4/-0
+cache: ax45mp_cache: Align end size to cache boundary in ax45mp_dma_cache_wback()
+
+Align the end size to cache boundary size in ax45mp_dma_cache_wback()
+callback likewise done in ax45mp_dma_cache_inv() callback.
+
+Additionally return early in case of start == end.
+
+Fixes: d34599bcd2e4 ("cache: Add L2 cache management for Andes AX45MP RISC-V core")
+functions: drivers/cache/ax45mp_cache.c:ax45mp_dma_cache_wback
+fixes: d34599bcd2e4(common)
+diff --git a/drivers/cache/ax45mp_cache.c b/drivers/cache/ax45mp_cache.c
+index 57186c58dc84..1d7dd3d2c101 100644
+--- a/drivers/cache/ax45mp_cache.c
++++ b/drivers/cache/ax45mp_cache.c
+@@ -130,6 +130,10 @@ static void ax45mp_dma_cache_wback(phys_addr_t paddr, size_t size)
+ 	unsigned long flags;
+ 
++	if (unlikely(start == end))
++		return;
++
+ 	line_size = ax45mp_priv.ax45mp_cache_line_size;
+ 	start = start & (~(line_size - 1));
++	end = ((end + line_size - 1) & (~(line_size - 1)));
+ 	local_irq_save(flags);
+ 	ax45mp_cpu_dcache_wb_range(start, end);
+
+##### B419
+=== 8b79d4e99407 B 2024-02-14 +5/-3
+tty: hvc: Don't enable the RISC-V SBI console by default
+
+The new SBI console has the same problem as the old one: there's only
+one shared backing hardware and no synchronization, so the two drivers
+end up stepping on each other.  This was the same issue the old SBI-0.1
+console drivers had, but that was disabled by default when SBI-0.1 was.
+
+So just mark the new driver as nonportable.
+
+Fixes: 88ead68e764c ("tty: Add SBI debug console support to HVC SBI driver")
+functions: 
+fixes: 88ead68e764c(common)
+diff --git a/drivers/tty/hvc/Kconfig b/drivers/tty/hvc/Kconfig
+index 6e05c5c7bca1..c2a4e88b328f 100644
+--- a/drivers/tty/hvc/Kconfig
++++ b/drivers/tty/hvc/Kconfig
+@@ -109,11 +109,13 @@ config HVC_DCC_SERIALIZE_SMP
+ config HVC_RISCV_SBI
+ 	bool "RISC-V SBI console support"
+-	depends on RISCV_SBI
++	depends on RISCV_SBI && NONPORTABLE
+ 	select HVC_DRIVER
+ 	help
+ 	  This enables support for console output via RISC-V SBI calls, which
+-	  is normally used only during boot to output printk.
++	  is normally used only during boot to output printk.  This driver
++	  conflicts with real console drivers and should not be enabled on
++	  systems that directly access the console.
+ 
+-	  If you don't know what do to here, say Y.
++	  If you don't know what do to here, say N.
+ 
+ config HVCS
+
+##### B420
+=== 8690bbcf3b70 B 2024-02-15 +112/-0
+Introduce cpu_dcache_is_aliasing() across all architectures
+
+Introduce a generic way to query whether the data cache is virtually
+aliased on all architectures. Its purpose is to ensure that subsystems
+which are incompatible with virtually aliased data caches (e.g. FS_DAX)
+can reliably query this.
+
+For data cache aliasing, there are three scenarios dependending on the
+architecture. Here is a breakdown based on my understanding:
+
+A) The data cache is always aliasing:
+
+* arc
+* csky
+* m68k (note: shared memory mappings are incoherent ? SHMLBA is missing there.)
+* sh
+* parisc
+
+B) The data cache aliasing is statically known or depends on querying CPU
+   state at runtime:
+
+* arm (cache_is_vivt() || cache_is_vipt_aliasing())
+* mips (cpu_has_dc_aliases)
+* nios2 (NIOS2_DCACHE_SIZE > PAGE_SIZE)
+* sparc32 (vac_cache_size > PAGE_SIZE)
+* sparc64 (L1DCACHE_SIZE > PAGE_SIZE)
+* xtensa (DCACHE_WAY_SIZE > PAGE_SIZE)
+
+C) The data cache is never aliasing:
+
+* alpha
+* arm64 (aarch64)
+* hexagon
+* loongarch (but with incoherent write buffers, which are disabled since
+             commit d23b7795 ("LoongArch: Change SHMLBA from SZ_64K to PAGE_SIZE"))
+* microblaze
+* openrisc
+* powerpc
+* riscv
+* s390
+* um
+functions: 
+fixes: d92576f1167c(common)
+ arch/nios2/include/asm/cachetype.h  | 10 ++++++++++
+ arch/parisc/Kconfig                 |  1 +
+ arch/parisc/include/asm/cachetype.h |  9 +++++++++
+ arch/sh/Kconfig                     |  1 +
+ arch/sh/include/asm/cachetype.h     |  9 +++++++++
+ arch/sparc/Kconfig                  |  1 +
+ arch/sparc/include/asm/cachetype.h  | 14 ++++++++++++++
+ arch/xtensa/Kconfig                 |  1 +
+ arch/xtensa/include/asm/cachetype.h | 10 ++++++++++
+ include/linux/cacheinfo.h           |  6 ++++++
+ mm/Kconfig                          |  6 ++++++
+ 22 files changed, 112 insertions(+)
+diff --git a/arch/arc/Kconfig b/arch/arc/Kconfig
+index 1b0483c51cc1..7d294a3242a4 100644
+--- a/arch/arc/Kconfig
++++ b/arch/arc/Kconfig
+@@ -7,4 +7,5 @@ config ARC
+ 	def_bool y
+ 	select ARC_TIMERS
++	select ARCH_HAS_CPU_CACHE_ALIASING
+ 	select ARCH_HAS_CACHE_LINE_SIZE
+ 	select ARCH_HAS_DEBUG_VM_PGTABLE
+diff --git a/arch/arc/include/asm/cachetype.h b/arch/arc/include/asm/cachetype.h
+new file mode 100644
+index 000000000000..05fc7ed59712
+--- /dev/null
++++ b/arch/arc/include/asm/cachetype.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __ASM_ARC_CACHETYPE_H
++#define __ASM_ARC_CACHETYPE_H
++
++#include <linux/types.h>
++
++#define cpu_dcache_is_aliasing()	true
++
++#endif
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 0af6709570d1..66a8e64b226e 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -6,4 +6,5 @@ config ARM
+ 	select ARCH_CORRECT_STACKTRACE_ON_KRETPROBE if HAVE_KRETPROBES && FRAME_POINTER && !ARM_UNWIND
+ 	select ARCH_HAS_BINFMT_FLAT
++	select ARCH_HAS_CPU_CACHE_ALIASING
+ 	select ARCH_HAS_CPU_FINALIZE_INIT if MMU
+ 	select ARCH_HAS_CURRENT_STACK_POINTER
+diff --git a/arch/arm/include/asm/cachetype.h b/arch/arm/include/asm/cachetype.h
+index e8c30430be33..b9dbe1d4c8fe 100644
+--- a/arch/arm/include/asm/cachetype.h
++++ b/arch/arm/include/asm/cachetype.h
+@@ -21,4 +21,6 @@ extern unsigned int cacheid;
+ #define icache_is_pipt()		cacheid_is(CACHEID_PIPT)
+ 
++#define cpu_dcache_is_aliasing()	(cache_is_vivt() || cache_is_vipt_aliasing())
++
+ /*
+  * __LINUX_ARM_ARCH__ is the minimum supported CPU architecture
+diff --git a/arch/csky/Kconfig b/arch/csky/Kconfig
+index cf2a6fd7dff8..8a91eccf76dc 100644
+--- a/arch/csky/Kconfig
++++ b/arch/csky/Kconfig
+@@ -3,4 +3,5 @@ config CSKY
+ 	def_bool y
+ 	select ARCH_32BIT_OFF_T
++	select ARCH_HAS_CPU_CACHE_ALIASING
+ 	select ARCH_HAS_DMA_PREP_COHERENT
+ 	select ARCH_HAS_GCOV_PROFILE_ALL
+diff --git a/arch/csky/include/asm/cachetype.h b/arch/csky/include/asm/cachetype.h
+new file mode 100644
+index 000000000000..98cbe3af662f
+--- /dev/null
+... (222 more diff lines)
+
+##### B421
+=== 678c607ecf8a B 2024-02-26 +7/-3
+irqchip/riscv-intc: Fix low-level interrupt handler setup for AIA
+
+Use riscv_intc_aia_irq() as the low-level interrupt handler instead of the
+existing riscv_intc_irq() default handler to make demultiplexing work
+correctly.
+
+Also print "using AIA" in the INTC boot banner when AIA is available.
+
+Fixes: 3c46fc5b5507 ("irqchip/riscv-intc: Add support for RISC-V AIA")
+functions: drivers/irqchip/irq-riscv-intc.c:riscv_intc_init_common
+fixes: 3c46fc5b5507(common)
+diff --git a/drivers/irqchip/irq-riscv-intc.c b/drivers/irqchip/irq-riscv-intc.c
+index cccb65339982..f87aeab460eb 100644
+--- a/drivers/irqchip/irq-riscv-intc.c
++++ b/drivers/irqchip/irq-riscv-intc.c
+@@ -184,5 +184,8 @@ static int __init riscv_intc_init_common(struct fwnode_handle *fn, struct irq_ch
+ 	}
+ 
+-	rc = set_handle_irq(&riscv_intc_irq);
++	if (riscv_isa_extension_available(NULL, SxAIA))
++		rc = set_handle_irq(&riscv_intc_aia_irq);
++	else
++		rc = set_handle_irq(&riscv_intc_irq);
+ 	if (rc) {
+ 		pr_err("failed to set irq handler\n");
+@@ -192,6 +195,7 @@ static int __init riscv_intc_init_common(struct fwnode_handle *fn, struct irq_ch
+ 	riscv_set_intc_hwnode_fn(riscv_intc_hwnode);
+ 
+-	pr_info("%d local interrupts mapped\n",
+-		riscv_isa_extension_available(NULL, SxAIA) ? 64 : riscv_intc_nr_irqs);
++	pr_info("%d local interrupts mapped%s\n",
++		riscv_isa_extension_available(NULL, SxAIA) ? 64 : riscv_intc_nr_irqs,
++		riscv_isa_extension_available(NULL, SxAIA) ? " using AIA" : "");
+ 	if (riscv_intc_custom_nr_irqs)
+ 		pr_info("%d custom local interrupts mapped\n", riscv_intc_custom_nr_irqs);
+
+##### B422
+=== 65730fe8f4fb B 2024-02-27 +2/-0
+drivers: perf: added capabilities for legacy PMU
+
+Added the PERF_PMU_CAP_NO_INTERRUPT flag because the legacy pmu driver
+does not provide sampling capabilities
+
+Added the PERF_PMU_CAP_NO_EXCLUDE flag because the legacy pmu driver
+does not provide the ability to disable counter incrementation in
+different privilege modes
+
+Fixes: 9b3e150e310e ("RISC-V: Add a simple platform driver for RISC-V  legacy perf")
+functions: drivers/perf/riscv_pmu_legacy.c:pmu_legacy_init
+fixes: 9b3e150e310e(common)
+diff --git a/drivers/perf/riscv_pmu_legacy.c b/drivers/perf/riscv_pmu_legacy.c
+index 79fdd667922e..a85fc9a15f03 100644
+--- a/drivers/perf/riscv_pmu_legacy.c
++++ b/drivers/perf/riscv_pmu_legacy.c
+@@ -118,4 +118,6 @@ static void pmu_legacy_init(struct riscv_pmu *pmu)
+ 	pmu->event_unmapped = pmu_legacy_event_unmapped;
+ 	pmu->csr_index = pmu_legacy_csr_index;
++	pmu->pmu.capabilities |= PERF_PMU_CAP_NO_INTERRUPT;
++	pmu->pmu.capabilities |= PERF_PMU_CAP_NO_EXCLUDE;
+ 
+ 	perf_pmu_register(&pmu->pmu, "cpu", PERF_TYPE_RAW);
+
+##### B423
+=== 682dc133f83e B 2024-02-27 +12/-14
+drivers: perf: ctr_get_width function for legacy is not defined
+
+With parameters CONFIG_RISCV_PMU_LEGACY=y and CONFIG_RISCV_PMU_SBI=n
+linux kernel crashes when you try perf record:
+
+$ perf record ls
+[ 46.749286] Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
+[ 46.750199] Oops [#1]
+[ 46.750342] Modules linked in:
+[ 46.750608] CPU: 0 PID: 107 Comm: perf-exec Not tainted 6.6.0 #2
+[ 46.750906] Hardware name: riscv-virtio,qemu (DT)
+[ 46.751184] epc : 0x0
+[ 46.751430] ra : arch_perf_update_userpage+0x54/0x13e
+[ 46.751680] epc : 0000000000000000 ra : ffffffff8072ee52 sp : ff2000000022b8f0
+[ 46.751958] gp : ffffffff81505988 tp : ff6000000290d400 t0 : ff2000000022b9c0
+[ 46.752229] t1 : 0000000000000001 t2 : 0000000000000003 s0 : ff2000000022b930
+[ 46.752451] s1 : ff600000028fb000 a0 : 0000000000000000 a1 : ff600000028fb000
+[ 46.752673] a2 : 0000000ae2751268 a3 : 00000000004fb708 a4 : 0000000000000004
+[ 46.752895] a5 : 0000000000000000 a6 : 000000000017ffe3 a7 : 00000000000000d2
+[ 46.753117] s2 : ff600000028fb000 s3 : 0000000ae2751268 s4 : 0000000000000000
+[ 46.753338] s5 : ffffffff8153e290 s6 : ff600000863b9000 s7 : ff60000002961078
+[ 46.753562] s8 : ff60000002961048 s9 : ff60000002961058 s10: 0000000000000001
+[ 46.753783] s11: 0000000000000018 t3 : ffffffffffffffff t4 : ffffffffffffffff
+[ 46.754005] t5 : ff6000000292270c t6 : ff2000000022bb30
+[ 46.754179] status: 0000000200000100 badaddr: 0000000000000000 cause: 000000000000000c
+[ 46.754653] Code: Unable to access instruction at 0xffffffffffffffec.
+[ 46.754939] ---[ end trace 0000000000000000 ]---
+[ 46.755131] note: perf-exec[107] exited with irqs disabled
+[ 46.755546] note: perf-exec[107] exited with preempt_count 4
+
+This happens because in the legacy case the ctr_get_width function was not
+defined, but it is used in arch_perf_update_userpage.
+
+Also remove extra check in riscv_pmu_ctr_get_width_mask
+
+Fixes: cc4c07c89aad ("drivers: perf: Implement perf event mmap support  in the SBI backend")
+functions: drivers/perf/riscv_pmu.c:riscv_pmu_ctr_get_width_mask, drivers/perf/riscv_pmu_legacy.c:pmu_legacy_init
+fixes: cc4c07c89aad(common)
+diff --git a/drivers/perf/riscv_pmu.c b/drivers/perf/riscv_pmu.c
+index 0dda70e1ef90..c78a6fd6c57f 100644
+--- a/drivers/perf/riscv_pmu.c
++++ b/drivers/perf/riscv_pmu.c
+@@ -151,17 +151,9 @@ u64 riscv_pmu_ctr_get_width_mask(struct perf_event *event)
+ 	struct hw_perf_event *hwc = &event->hw;
+ 
+-	if (!rvpmu->ctr_get_width)
+-	/**
+-	 * If the pmu driver doesn't support counter width, set it to default
+-	 * maximum allowed by the specification.
+-	 */
+-		cwidth = 63;
+-	else {
+-		if (hwc->idx == -1)
+-			/* Handle init case where idx is not initialized yet */
+-			cwidth = rvpmu->ctr_get_width(0);
+-		else
+-			cwidth = rvpmu->ctr_get_width(hwc->idx);
+-	}
++	if (hwc->idx == -1)
++		/* Handle init case where idx is not initialized yet */
++		cwidth = rvpmu->ctr_get_width(0);
++	else
++		cwidth = rvpmu->ctr_get_width(hwc->idx);
+ 
+ 	return GENMASK_ULL(cwidth, 0);
+diff --git a/drivers/perf/riscv_pmu_legacy.c b/drivers/perf/riscv_pmu_legacy.c
+index a85fc9a15f03..fa0bccf4edf2 100644
+--- a/drivers/perf/riscv_pmu_legacy.c
++++ b/drivers/perf/riscv_pmu_legacy.c
+@@ -38,4 +38,10 @@ static int pmu_legacy_event_map(struct perf_event *event, u64 *config)
+ }
+ 
++/* cycle & instret are always 64 bit, one bit less according to SBI spec */
++static int pmu_legacy_ctr_get_width(int idx)
++{
++	return 63;
++}
++
+ static u64 pmu_legacy_read_ctr(struct perf_event *event)
+ {
+@@ -112,5 +118,5 @@ static void pmu_legacy_init(struct riscv_pmu *pmu)
+ 	pmu->event_map = pmu_legacy_event_map;
+ 	pmu->ctr_get_idx = pmu_legacy_ctr_get_idx;
+-	pmu->ctr_get_width = NULL;
++	pmu->ctr_get_width = pmu_legacy_ctr_get_width;
+ 	pmu->ctr_clear_idx = NULL;
+ 	pmu->ctr_read = pmu_legacy_read_ctr;
+
+##### B424
+=== 8248ca30ef89 B 2024-03-07 +3/-0
+clocksource/drivers/timer-riscv: Clear timer interrupt on timer initialization
+
+In the RISC-V specification, the stimecmp register doesn't have a default
+value. To prevent the timer interrupt from being triggered during timer
+initialization, clear the timer interrupt by writing stimecmp with a
+maximum value.
+
+Fixes: 9f7a8ff6391f ("RISC-V: Prefer sstc extension if available")
+functions: drivers/clocksource/timer-riscv.c:riscv_timer_starting_cpu
+fixes: 9f7a8ff6391f(common)
+diff --git a/drivers/clocksource/timer-riscv.c b/drivers/clocksource/timer-riscv.c
+index e66dcbd66566..79bb9a98baa7 100644
+--- a/drivers/clocksource/timer-riscv.c
++++ b/drivers/clocksource/timer-riscv.c
+@@ -109,4 +109,7 @@ static int riscv_timer_starting_cpu(unsigned int cpu)
+ 	struct clock_event_device *ce = per_cpu_ptr(&riscv_clock_event, cpu);
+ 
++	/* Clear timer interrupt */
++	riscv_clock_event_stop();
++
+ 	ce->cpumask = cpumask_of(cpu);
+ 	ce->irq = riscv_clock_event_irq;

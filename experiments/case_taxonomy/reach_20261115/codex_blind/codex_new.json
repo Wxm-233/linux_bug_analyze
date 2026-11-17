@@ -1,0 +1,86 @@
+[
+  {
+    "k": 1,
+    "loc": "mm/memory.c:873",
+    "verdict": "不可能",
+    "why": "当前直接调用者及 vm_normal_folio_pmd 包装后的调用者，均直接检查 pmd_present，或从已排除非 present 项的 NUMA、uffd-rwp、权限更新分支传入 PMD。zap_huge_pmd 的 is_present 也直接来自 pmd_present，迁移项和 device-private 项走另一分支，因此 riscv 上会混用 special 位的非 present 项到不了此处。"
+  },
+  {
+    "k": 2,
+    "loc": "mm/gup.c:1068",
+    "verdict": "不可能",
+    "why": "get_gate_page 只在 in_gate_area 命中时调用：x86_64 的 vsyscall 页由启动时的固定内核映射建立，arm 的高向量页也由 create_mapping 建立，均不会换出或迁移为这里讨论的非 present 编码。x86 的 XONLY 模式没有相应 PTE，会被 pte_none 等检查提前排除；loongarch、mips 没有可命中的 gate 入口。"
+  },
+  {
+    "k": 3,
+    "loc": "mm/hmm.c:578",
+    "verdict": "不可能",
+    "why": "hugetlb 迁移项等非 present 项确实可能在不要求 fault 的查询中走到这次 pte_pfn，但 pte_to_hmm_pfn_flags 已把其有效标志清为零。要求有效页时 hmm_pte_need_fault 会在此前转去 fault；不要求时结果不带 HMM_PFN_VALID，PFN 字段按接口契约不可使用，当前无 fault 查询调用者也先检查该位，因此未找到读错影响结果的路径。"
+  },
+  {
+    "k": 4,
+    "loc": "mm/khugepaged.c:654",
+    "verdict": "不可能",
+    "why": "isolate 失败时 release_pte_pages 只倒序处理已扫描的前缀，--_pte 排除了当前失败项，而前缀中的非空项均已通过 pte_present 检查，pte_none_or_zero 也只把 present 的零页算作零页。copy_failed 的入口则已经整段 isolate 成功，且 mmap 写锁、匿名反向映射锁或已锁住的 folio 保证清理期间不会变成交换项或迁移项；依据不是那个仅告警的 VM_WARN。"
+  },
+  {
+    "k": 5,
+    "loc": "mm/ksm.c:1464",
+    "verdict": "不可能",
+    "why": "唯一调用链 try_to_merge_one_page 先要求 write_protect_page 成功，后者明确拒绝 !pte_present(entry)，并把 present 的 entry 返回为 orig_pte。replace_page 在 PTE 锁内先验证当前项与 orig_pte 相同，直到 flush_cache_page 之间也未替换该项，因此这次重新读取不可能拿到非 present 项。"
+  },
+  {
+    "k": 6,
+    "loc": "mm/mapping_dirty_helpers.c:96",
+    "verdict": "不可能",
+    "why": "当前 clean_record_shared_mapping_range 的实际调用者只有 vmwgfx，扫描的是 TTM 设备映射，ttm_bo_mmap_obj 拒绝 COW 并设置 VM_PFNMAP | VM_IO。其 fault 插入 PFN 映射，TTM 换出前先撤销用户映射，不会把 TTM 的 shmem 交换项装进这些 PTE；VM_SPECIAL 又使该映射不能注册 userfaultfd。故当前可达的是 present 项或 pte_none，空项的 pte_dirty 为假，未找到交换项、迁移项或 uffd 标记被误清理的路径。"
+  },
+  {
+    "k": 7,
+    "loc": "mm/memory.c:2494",
+    "verdict": "可能",
+    "why": "x86_64 上，当前 ext4 DAX 的共享可写映射只额外设置 VM_HUGEPAGE，可通过 WP_ASYNC 的仅 WP 注册检查，再由 UFFDIO_WRITEPROTECT 给未填充位置装入 PTE_MARKER_UFFD_WP。写缺页经 handle_pte_marker、do_shared_fault、ext4_dax_fault、dax_fault_iter，以 write=true 进入 vmf_insert_page_mkwrite 和本函数，标记仍在 PTE 中。该版本 x86 的 pte_pfn 会把这个标记读成 0，与非零的 DAX 页 PFN 不同，因而错误返回 -EFAULT，向上传成 VM_FAULT_SIGBUS。"
+  },
+  {
+    "k": 8,
+    "loc": "mm/memory.c:2495",
+    "verdict": "可能",
+    "why": "与第 7 条相同，x86_64 上 ext4 DAX 共享可写映射的异步 uffd-wp 未填充标记可沿写缺页路径进入此分支。标记被 pte_pfn 读成 0，而 is_zero_pfn 检查的是共享零页的实际 PFN，在 zero_page_pfn 非零的常规配置下为假，触发无依据的 WARN_ON_ONCE，随后还会把缺页处理变成 SIGBUS。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/memory.c:2824",
+    "verdict": "不可能",
+    "why": "这次调用位于 mkwrite 为真的分支，而当前 insert_pfn 的活调用链 vmf_insert_pfn_prot、vmf_insert_mixed 均传 false。全树检索确认唯一能经 __vm_insert_mixed 传 true 的 vmf_insert_mixed_mkwrite 只有声明和定义，没有调用或取址，因此当前版本中该报告行没有可执行入口。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/memory.c:2825",
+    "verdict": "不可能",
+    "why": "此告警与第 9 条处于同一个 mkwrite=true 分支；当前所有活跃的 insert_pfn 调用均传 false。能传 true 的 vmf_insert_mixed_mkwrite 在整个 df2908090cda 树中没有调用或取址，所以无法形成非 present 项触发该告警的当前代码路径。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/migrate_device.c:1093",
+    "verdict": "不可能",
+    "why": "flush 初始化为 false，只在 orig_pte 通过 pte_present 且确认是零页后置为 true；其余非空非 present 项直接跳到 unlock_abort。该受限调用又被 if (flush) 守卫，orig_pte 是未改变的局部快照，因此这里一定处理 present 的原零页项。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/mprotect.c:733",
+    "verdict": "可能",
+    "why": "可能路径是 x86_64 上 FUSE DAX 的 MAP_PRIVATE 写时复制页换出后，对仍带 VM_MIXEDMAP 的 VMA 执行 mprotect(PROT_NONE)。在缓存地址宽度保留为 36 位的 L1TF CPU、l1tf=off、无 CAP_SYS_ADMIN 且相应高地址没有有效 memmap 时，offset=2^26 的交换项会被 pte_pfn 读成 2^23，达到 l1tf_pfn_limit，从而错误返回 -EACCES。arch_max_swapfile_size 只在缓解未关闭时将 offset 限在此阈值以下，因此此判断必须附带关闭缓解及超过 256 GiB 的交换区条件，普通小 offset 不构成这个反例。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/vmscan.c:3610",
+    "verdict": "不可能",
+    "why": "此前 get_pte_pfn(ptent, ...) 对 !pte_present 的同一份快照返回 -1，调用者立即 continue，故能到 pte_dirty 的 ptent 已为 present。整个遍历持有 PTE 锁，folio_pte_batch_flags 也只在原快照上合并 young/dirty 位，不会把它换成非 present 项。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/vmscan.c:4350",
+    "verdict": "不可能",
+    "why": "lru_gen_look_around 入口断言持有 pvmw->ptl，循环先用 get_pte_pfn 检查当前 ptent，非 present 项返回 -1 后被跳过。后续批量处理只合并同一 present 快照的访问位和脏位，因此该 pte_dirty 不会作用于交换项、迁移项或 uffd 标记。"
+  }
+]

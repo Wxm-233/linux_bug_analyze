@@ -1,0 +1,58 @@
+commit 19b482c29b6f3805f1d8e93015847b89e2f7f3b1
+Author:     Muchun Song <muchun.song@linux.dev>
+AuthorDate: Tue Mar 22 14:42:05 2022 -0700
+Commit:     Linus Torvalds <torvalds@linux-foundation.org>
+CommitDate: Tue Mar 22 15:57:04 2022 -0700
+
+    mm: shmem: fix missing cache flush in shmem_mfill_atomic_pte()
+    
+    userfaultfd calls shmem_mfill_atomic_pte() which does not do any cache
+    flushing for the target page.  Then the target page will be mapped to
+    the user space with a different address (user address), which might have
+    an alias issue with the kernel address used to copy the data from the
+    user to.  Insert flush_dcache_page() in non-zero-page case.  And replace
+    clear_highpage() with clear_user_highpage() which already considers the
+    cache maintenance.
+    
+    Link: https://lkml.kernel.org/r/20220210123058.79206-6-songmuchun@bytedance.com
+    Fixes: 8d1039634206 ("userfaultfd: shmem: add shmem_mfill_zeropage_pte for userfaultfd support")
+    Fixes: 4c27fe4c4c84 ("userfaultfd: shmem: add shmem_mcopy_atomic_pte for userfaultfd support")
+    Signed-off-by: Muchun Song <songmuchun@bytedance.com>
+    Reviewed-by: Mike Kravetz <mike.kravetz@oracle.com>
+    Cc: Axel Rasmussen <axelrasmussen@google.com>
+    Cc: David Rientjes <rientjes@google.com>
+    Cc: Fam Zheng <fam.zheng@bytedance.com>
+    Cc: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+    Cc: Lars Persson <lars.persson@axis.com>
+    Cc: Peter Xu <peterx@redhat.com>
+    Cc: Xiongchun Duan <duanxiongchun@bytedance.com>
+    Cc: Zi Yan <ziy@nvidia.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/shmem.c b/mm/shmem.c
+index f21eb0ef8ae0..01fd227b6947 100644
+--- a/mm/shmem.c
++++ b/mm/shmem.c
+@@ -2359,18 +2359,20 @@ int shmem_mfill_atomic_pte(struct mm_struct *dst_mm,
+ 
+ 			/* fallback to copy_from_user outside mmap_lock */
+ 			if (unlikely(ret)) {
+ 				*pagep = page;
+ 				ret = -ENOENT;
+ 				/* don't free the page */
+ 				goto out_unacct_blocks;
+ 			}
++
++			flush_dcache_page(page);
+ 		} else {		/* ZEROPAGE */
+-			clear_highpage(page);
++			clear_user_highpage(page, dst_addr);
+ 		}
+ 	} else {
+ 		page = *pagep;
+ 		*pagep = NULL;
+ 	}
+ 
+ 	VM_BUG_ON(PageLocked(page));
+ 	VM_BUG_ON(PageSwapBacked(page));

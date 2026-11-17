@@ -1,0 +1,25 @@
+commit f3336b48cf9d3f2d1fc78e3289c0ded2f00876ee
+Subject: riscv: mm: Define DIRECT_MAP_PHYSMEM_END
+
+
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index a1a7c6520a09..5d5756bda82e 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -93,6 +93,16 @@
+  */
+ #define vmemmap		((struct page *)VMEMMAP_START - vmemmap_start_pfn)
+ 
++/* Needed to limit get_free_mem_region() */
++#if defined(CONFIG_FLATMEM)
++#define DIRECT_MAP_PHYSMEM_END (phys_ram_base + KERN_VIRT_SIZE - 1)
++#elif defined(CONFIG_SPARSEMEM_VMEMMAP)
++#define DIRECT_MAP_PHYSMEM_END \
++	((vmemmap_start_pfn + VMEMMAP_SIZE / sizeof(struct page)) * PAGE_SIZE - 1)
++#elif defined(CONFIG_SPARSEMEM)
++/* DIRECT_MAP_PHYSMEM_END is not limited by VA space assignment in this case */
++#endif
++
+ #define PCI_IO_SIZE      SZ_16M
+ #define PCI_IO_END       VMEMMAP_START
+ #define PCI_IO_START     (PCI_IO_END - PCI_IO_SIZE)

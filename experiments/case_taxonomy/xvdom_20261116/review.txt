@@ -1,0 +1,1290 @@
+==========================================================================================
+[1] include/linux/pgtable.h:537  函数 ptep_test_and_clear_young  接口 pte_mkold（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 arm64, riscv, s390 上会改变某些非 present 项或空项的值
+    出错的输入类：arm64: np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex, np.dp_r.plain …; riscv: np.dexcl.ex, np.dp_r.ex, np.dp_w.ex, np.marker.ex, np.mig_r.ex, np.mig_re.ex …; s390: none, np.dp_r.ex, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.marker.ex …
+    507 static inline pud_t pudp_get(pud_t *pudp)
+    508 {
+    509 	return READ_ONCE(*pudp);
+    510 }
+    511 #endif
+    512 
+    513 #ifndef p4dp_get
+    514 static inline p4d_t p4dp_get(p4d_t *p4dp)
+    515 {
+    516 	return READ_ONCE(*p4dp);
+    517 }
+    518 #endif
+    519 
+    520 #ifndef pgdp_get
+    521 static inline pgd_t pgdp_get(pgd_t *pgdp)
+    522 {
+    523 	return READ_ONCE(*pgdp);
+    524 }
+    525 #endif
+    526 
+    527 #ifndef __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
+    528 static inline bool ptep_test_and_clear_young(struct vm_area_struct *vma,
+    529 		unsigned long address, pte_t *ptep)
+    530 {
+    531 	pte_t pte = ptep_get(ptep);
+    532 	bool young = true;
+    533 
+    534 	if (!pte_young(pte))
+    535 		young = false;
+    536 	else
+>>  537 		set_pte_at(vma->vm_mm, address, ptep, pte_mkold(pte));
+    538 	return young;
+    539 }
+    540 #endif
+    541 
+    542 #ifndef __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG
+    543 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)
+    544 static inline bool pmdp_test_and_clear_young(struct vm_area_struct *vma,
+    545 		unsigned long address, pmd_t *pmdp)
+==========================================================================================
+[2] include/linux/pgtable.h:553  函数 pmdp_test_and_clear_young  接口 pmd_mkold（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 arm64, s390 上会改变某些非 present 项或空项的值
+    出错的输入类：arm64: np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.plain, np.dp_w.sd, np.dp_w.uf …; s390: none, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.plain, np.dp_w.sd …
+    523 	return READ_ONCE(*pgdp);
+    524 }
+    525 #endif
+    526 
+    527 #ifndef __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG
+    528 static inline bool ptep_test_and_clear_young(struct vm_area_struct *vma,
+    529 		unsigned long address, pte_t *ptep)
+    530 {
+    531 	pte_t pte = ptep_get(ptep);
+    532 	bool young = true;
+    533 
+    534 	if (!pte_young(pte))
+    535 		young = false;
+    536 	else
+    537 		set_pte_at(vma->vm_mm, address, ptep, pte_mkold(pte));
+    538 	return young;
+    539 }
+    540 #endif
+    541 
+    542 #ifndef __HAVE_ARCH_PMDP_TEST_AND_CLEAR_YOUNG
+    543 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)
+    544 static inline bool pmdp_test_and_clear_young(struct vm_area_struct *vma,
+    545 		unsigned long address, pmd_t *pmdp)
+    546 {
+    547 	pmd_t pmd = *pmdp;
+    548 	bool young = true;
+    549 
+    550 	if (!pmd_young(pmd))
+    551 		young = false;
+    552 	else
+>>  553 		set_pmd_at(vma->vm_mm, address, pmdp, pmd_mkold(pmd));
+    554 	return young;
+    555 }
+    556 #else
+    557 static inline bool pmdp_test_and_clear_young(struct vm_area_struct *vma,
+    558 		unsigned long address, pmd_t *pmdp)
+    559 {
+    560 	BUILD_BUG();
+    561 	return false;
+==========================================================================================
+[3] mm/swapfile.c:2491  函数 unuse_pte  接口 pte_swp_exclusive（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 loongarch, arm 上对某些 present 项或空项读出 1
+    出错的输入类：loongarch: pr.all, pr.dirty, pr.plain, pr.protnone, pr.sd, pr.special …; arm: pr.protnone
+   2461 		dec_mm_counter(vma->vm_mm, MM_SWAPENTS);
+   2462 		if (hwpoisoned) {
+   2463 			swp_entry = make_hwpoison_entry(page);
+   2464 		} else {
+   2465 			swp_entry = make_poisoned_swp_entry();
+   2466 		}
+   2467 		new_pte = swp_entry_to_pte(swp_entry);
+   2468 		ret = 0;
+   2469 		goto setpte;
+   2470 	}
+   2471 
+   2472 	/*
+   2473 	 * Some architectures may have to restore extra metadata to the page
+   2474 	 * when reading from swap. This metadata may be indexed by swap entry
+   2475 	 * so this must be called before folio_put_swap().
+   2476 	 */
+   2477 	arch_swap_restore(folio_swap(entry, folio), folio);
+   2478 
+   2479 	dec_mm_counter(vma->vm_mm, MM_SWAPENTS);
+   2480 	inc_mm_counter(vma->vm_mm, MM_ANONPAGES);
+   2481 	folio_get(folio);
+   2482 	if (folio == swapcache) {
+   2483 		rmap_t rmap_flags = RMAP_NONE;
+   2484 
+   2485 		/*
+   2486 		 * See do_swap_page(): writeback would be problematic.
+   2487 		 * However, we do a folio_wait_writeback() just before this
+   2488 		 * call and have the folio locked.
+   2489 		 */
+   2490 		VM_BUG_ON_FOLIO(folio_test_writeback(folio), folio);
+>> 2491 		if (pte_swp_exclusive(old_pte))
+   2492 			rmap_flags |= RMAP_EXCLUSIVE;
+   2493 		/*
+   2494 		 * We currently only expect small !anon folios, which are either
+   2495 		 * fully exclusive or fully shared. If we ever get large folios
+   2496 		 * here, we have to be careful.
+   2497 		 */
+   2498 		if (!folio_test_anon(folio)) {
+   2499 			VM_WARN_ON_ONCE(folio_test_large(folio));
+==========================================================================================
+[4] include/linux/swapops.h:73  函数 pte_swp_clear_flags  接口 pte_swp_exclusive（S 组）  来源 param
+    只对交换格式项有定义的读接口；编码表：在 loongarch, arm 上对某些 present 项或空项读出 1
+    出错的输入类：loongarch: pr.all, pr.dirty, pr.plain, pr.protnone, pr.sd, pr.special …; arm: pr.protnone
+     43 #define SWP_PFN_MASK		(BIT(SWP_PFN_BITS) - 1)
+     44 
+     45 /**
+     46  * Migration swap entry specific bitfield definitions.  Layout:
+     47  *
+     48  *   |----------+--------------------|
+     49  *   | swp_type | swp_offset         |
+     50  *   |----------+--------+-+-+-------|
+     51  *   |          | resv   |D|A|  PFN  |
+     52  *   |----------+--------+-+-+-------|
+     53  *
+     54  * @SWP_MIG_YOUNG_BIT: Whether the page used to have young bit set (bit A)
+     55  * @SWP_MIG_DIRTY_BIT: Whether the page used to have dirty bit set (bit D)
+     56  *
+     57  * Note: A/D bits will be stored in migration entries iff there're enough
+     58  * free bits in arch specific swp offset.  By default we'll ignore A/D bits
+     59  * when migrating a page.  Please refer to migration_entry_supports_ad()
+     60  * for more information.  If there're more bits besides PFN and A/D bits,
+     61  * they should be reserved and always be zeros.
+     62  */
+     63 #define SWP_MIG_YOUNG_BIT		(SWP_PFN_BITS)
+     64 #define SWP_MIG_DIRTY_BIT		(SWP_PFN_BITS + 1)
+     65 #define SWP_MIG_TOTAL_BITS		(SWP_PFN_BITS + 2)
+     66 
+     67 #define SWP_MIG_YOUNG			BIT(SWP_MIG_YOUNG_BIT)
+     68 #define SWP_MIG_DIRTY			BIT(SWP_MIG_DIRTY_BIT)
+     69 
+     70 /* Clear all flags but only keep swp_entry_t related information */
+     71 static inline pte_t pte_swp_clear_flags(pte_t pte)
+     72 {
+>>   73 	if (pte_swp_exclusive(pte))
+     74 		pte = pte_swp_clear_exclusive(pte);
+     75 	if (pte_swp_soft_dirty(pte))
+     76 		pte = pte_swp_clear_soft_dirty(pte);
+     77 	if (pte_swp_uffd(pte))
+     78 		pte = pte_swp_clear_uffd(pte);
+     79 	return pte;
+     80 }
+     81 
+==========================================================================================
+[5] include/linux/swapops.h:74  函数 pte_swp_clear_flags  接口 pte_swp_clear_exclusive（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 loongarch, arm 上会改变 present 项或空项的值
+    出错的输入类：loongarch: pr.all, pr.dirty, pr.plain, pr.protnone, pr.sd, pr.special …; arm: pr.protnone
+     44 
+     45 /**
+     46  * Migration swap entry specific bitfield definitions.  Layout:
+     47  *
+     48  *   |----------+--------------------|
+     49  *   | swp_type | swp_offset         |
+     50  *   |----------+--------+-+-+-------|
+     51  *   |          | resv   |D|A|  PFN  |
+     52  *   |----------+--------+-+-+-------|
+     53  *
+     54  * @SWP_MIG_YOUNG_BIT: Whether the page used to have young bit set (bit A)
+     55  * @SWP_MIG_DIRTY_BIT: Whether the page used to have dirty bit set (bit D)
+     56  *
+     57  * Note: A/D bits will be stored in migration entries iff there're enough
+     58  * free bits in arch specific swp offset.  By default we'll ignore A/D bits
+     59  * when migrating a page.  Please refer to migration_entry_supports_ad()
+     60  * for more information.  If there're more bits besides PFN and A/D bits,
+     61  * they should be reserved and always be zeros.
+     62  */
+     63 #define SWP_MIG_YOUNG_BIT		(SWP_PFN_BITS)
+     64 #define SWP_MIG_DIRTY_BIT		(SWP_PFN_BITS + 1)
+     65 #define SWP_MIG_TOTAL_BITS		(SWP_PFN_BITS + 2)
+     66 
+     67 #define SWP_MIG_YOUNG			BIT(SWP_MIG_YOUNG_BIT)
+     68 #define SWP_MIG_DIRTY			BIT(SWP_MIG_DIRTY_BIT)
+     69 
+     70 /* Clear all flags but only keep swp_entry_t related information */
+     71 static inline pte_t pte_swp_clear_flags(pte_t pte)
+     72 {
+     73 	if (pte_swp_exclusive(pte))
+>>   74 		pte = pte_swp_clear_exclusive(pte);
+     75 	if (pte_swp_soft_dirty(pte))
+     76 		pte = pte_swp_clear_soft_dirty(pte);
+     77 	if (pte_swp_uffd(pte))
+     78 		pte = pte_swp_clear_uffd(pte);
+     79 	return pte;
+     80 }
+     81 
+     82 /*
+==========================================================================================
+[6] include/linux/pgtable.h:1050  函数 ptep_set_wrprotect  接口 pte_wrprotect（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, riscv, powerpc, s390, arm 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: np.dexcl.sd, np.dp_r.sd, np.dp_w.sd, np.marker.sd, np.mig_r.sd, np.mig_re.sd …; arm64: none, np.dp_r.ex, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.ex …; riscv: none, np.dexcl.ex, np.dexcl.plain, np.dp_r.ex, np.dp_r.plain, np.dp_w.ex …; powerpc: np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.marker.ex, np.marker.plain …; s390: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; arm: none, np.marker.plain, np.marker.sd, np.marker.uf, np.mig_r.plain, np.mig_r.sd …
+   1020 #endif
+   1021 
+   1022 #ifndef __HAVE_ARCH_PMDP_HUGE_CLEAR_FLUSH
+   1023 extern pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma,
+   1024 			      unsigned long address,
+   1025 			      pmd_t *pmdp);
+   1026 extern pud_t pudp_huge_clear_flush(struct vm_area_struct *vma,
+   1027 			      unsigned long address,
+   1028 			      pud_t *pudp);
+   1029 #endif
+   1030 
+   1031 #ifndef pte_mkwrite
+   1032 static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
+   1033 {
+   1034 	return pte_mkwrite_novma(pte);
+   1035 }
+   1036 #endif
+   1037 
+   1038 #if defined(CONFIG_ARCH_WANT_PMD_MKWRITE) && !defined(pmd_mkwrite)
+   1039 static inline pmd_t pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma)
+   1040 {
+   1041 	return pmd_mkwrite_novma(pmd);
+   1042 }
+   1043 #endif
+   1044 
+   1045 #ifndef __HAVE_ARCH_PTEP_SET_WRPROTECT
+   1046 struct mm_struct;
+   1047 static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long address, pte_t *ptep)
+   1048 {
+   1049 	pte_t old_pte = ptep_get(ptep);
+>> 1050 	set_pte_at(mm, address, ptep, pte_wrprotect(old_pte));
+   1051 }
+   1052 #endif
+   1053 
+   1054 #ifndef ptep_try_set
+   1055 /**
+   1056  * ptep_try_set - atomically set an empty kernel PTE
+   1057  * @ptep: page table entry
+   1058  * @new_pte: value to install
+==========================================================================================
+[7] mm/mapping_dirty_helpers.c:43  函数 wp_pte  接口 pte_wrprotect（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, riscv, powerpc, s390, arm 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: np.dexcl.sd, np.dp_r.sd, np.dp_w.sd, np.marker.sd, np.mig_r.sd, np.mig_re.sd …; arm64: none, np.dp_r.ex, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.ex …; riscv: none, np.dexcl.ex, np.dexcl.plain, np.dp_r.ex, np.dp_r.plain, np.dp_w.ex …; powerpc: np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.marker.ex, np.marker.plain …; s390: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; arm: none, np.marker.plain, np.marker.sd, np.marker.uf, np.mig_r.plain, np.mig_r.sd …
+     13  * @tlbflush_start: Address of first modified pte
+     14  * @tlbflush_end: Address of last modified pte + 1
+     15  * @total: Total number of modified ptes
+     16  */
+     17 struct wp_walk {
+     18 	struct mmu_notifier_range range;
+     19 	unsigned long tlbflush_start;
+     20 	unsigned long tlbflush_end;
+     21 	unsigned long total;
+     22 };
+     23 
+     24 /**
+     25  * wp_pte - Write-protect a pte
+     26  * @pte: Pointer to the pte
+     27  * @addr: The start of protecting virtual address
+     28  * @end: The end of protecting virtual address
+     29  * @walk: pagetable walk callback argument
+     30  *
+     31  * The function write-protects a pte and records the range in
+     32  * virtual address space of touched ptes for efficient range TLB flushes.
+     33  */
+     34 static int wp_pte(pte_t *pte, unsigned long addr, unsigned long end,
+     35 		  struct mm_walk *walk)
+     36 {
+     37 	struct wp_walk *wpwalk = walk->private;
+     38 	pte_t ptent = ptep_get(pte);
+     39 
+     40 	if (pte_write(ptent)) {
+     41 		pte_t old_pte = ptep_modify_prot_start(walk->vma, addr, pte);
+     42 
+>>   43 		ptent = pte_wrprotect(old_pte);
+     44 		ptep_modify_prot_commit(walk->vma, addr, pte, old_pte, ptent);
+     45 		wpwalk->total++;
+     46 		wpwalk->tlbflush_start = min(wpwalk->tlbflush_start, addr);
+     47 		wpwalk->tlbflush_end = max(wpwalk->tlbflush_end,
+     48 					   addr + PAGE_SIZE);
+     49 	}
+     50 
+     51 	return 0;
+==========================================================================================
+[8] include/linux/pgtable.h:1222  函数 pmdp_set_wrprotect  接口 pmd_wrprotect（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, riscv, powerpc, s390 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: np.dp_r.sd, np.dp_w.sd, np.mig_r.sd, np.mig_re.sd, np.mig_w.sd; arm64: none, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.plain, np.dp_w.sd …; riscv: none, np.dp_r.plain, np.dp_w.plain, np.mig_r.plain, np.mig_re.plain, np.mig_w.plain; powerpc: np.mig_re.plain, np.mig_re.sd, np.mig_re.uf, np.mig_w.plain, np.mig_w.sd, np.mig_w.uf; s390: none
+   1192 		ptep++;
+   1193 		addr += PAGE_SIZE;
+   1194 	}
+   1195 
+   1196 	return young;
+   1197 }
+   1198 #endif
+   1199 
+   1200 /*
+   1201  * On some architectures hardware does not set page access bit when accessing
+   1202  * memory page, it is responsibility of software setting this bit. It brings
+   1203  * out extra page fault penalty to track page access bit. For optimization page
+   1204  * access bit can be set during all page fault flow on these arches.
+   1205  * To be differentiate with macro pte_mkyoung, this macro is used on platforms
+   1206  * where software maintains page access bit.
+   1207  */
+   1208 #ifndef pte_sw_mkyoung
+   1209 static inline pte_t pte_sw_mkyoung(pte_t pte)
+   1210 {
+   1211 	return pte;
+   1212 }
+   1213 #define pte_sw_mkyoung	pte_sw_mkyoung
+   1214 #endif
+   1215 
+   1216 #ifndef __HAVE_ARCH_PMDP_SET_WRPROTECT
+   1217 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   1218 static inline void pmdp_set_wrprotect(struct mm_struct *mm,
+   1219 				      unsigned long address, pmd_t *pmdp)
+   1220 {
+   1221 	pmd_t old_pmd = *pmdp;
+>> 1222 	set_pmd_at(mm, address, pmdp, pmd_wrprotect(old_pmd));
+   1223 }
+   1224 #else
+   1225 static inline void pmdp_set_wrprotect(struct mm_struct *mm,
+   1226 				      unsigned long address, pmd_t *pmdp)
+   1227 {
+   1228 	BUILD_BUG();
+   1229 }
+   1230 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+==========================================================================================
+[9] mm/mapping_dirty_helpers.c:101  函数 clean_record_pte  接口 pte_mkclean（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, riscv, s390, arm 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex, np.dp_r.plain …; arm64: none, np.dp_r.ex, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.ex …; riscv: np.dp_r.ex, np.dp_r.plain, np.marker.ex, np.marker.plain, np.mig_r.ex, np.mig_r.plain …; s390: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.marker.ex …; arm: np.marker.ex, np.marker.plain, np.marker.sd, np.marker.uf, np.mig_r.ex, np.mig_r.plain …
+     71 };
+     72 
+     73 #define to_clean_walk(_wpwalk) container_of(_wpwalk, struct clean_walk, base)
+     74 
+     75 /**
+     76  * clean_record_pte - Clean a pte and record its address space offset in a
+     77  * bitmap
+     78  * @pte: Pointer to the pte
+     79  * @addr: The start of virtual address to be clean
+     80  * @end: The end of virtual address to be clean
+     81  * @walk: pagetable walk callback argument
+     82  *
+     83  * The function cleans a pte and records the range in
+     84  * virtual address space of touched ptes for efficient TLB flushes.
+     85  * It also records dirty ptes in a bitmap representing page offsets
+     86  * in the address_space, as well as the first and last of the bits
+     87  * touched.
+     88  */
+     89 static int clean_record_pte(pte_t *pte, unsigned long addr,
+     90 			    unsigned long end, struct mm_walk *walk)
+     91 {
+     92 	struct wp_walk *wpwalk = walk->private;
+     93 	struct clean_walk *cwalk = to_clean_walk(wpwalk);
+     94 	pte_t ptent = ptep_get(pte);
+     95 
+     96 	if (pte_dirty(ptent)) {
+     97 		pgoff_t pgoff = ((addr - walk->vma->vm_start) >> PAGE_SHIFT) +
+     98 			vma_start_pgoff(walk->vma) - cwalk->bitmap_pgoff;
+     99 		pte_t old_pte = ptep_modify_prot_start(walk->vma, addr, pte);
+    100 
+>>  101 		ptent = pte_mkclean(old_pte);
+    102 		ptep_modify_prot_commit(walk->vma, addr, pte, old_pte, ptent);
+    103 
+    104 		wpwalk->total++;
+    105 		wpwalk->tlbflush_start = min(wpwalk->tlbflush_start, addr);
+    106 		wpwalk->tlbflush_end = max(wpwalk->tlbflush_end,
+    107 					   addr + PAGE_SIZE);
+    108 
+    109 		__set_bit(pgoff, cwalk->bitmap);
+==========================================================================================
+[10] mm/migrate.c:395  函数 remove_migration_pte  接口 pte_swp_soft_dirty（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+    365 #ifdef CONFIG_ARCH_HAS_PMD_SOFTLEAVES
+    366 		/* PMD-mapped THP migration entry */
+    367 		if (!pvmw.pte) {
+    368 			VM_BUG_ON_FOLIO(folio_test_hugetlb(folio) ||
+    369 					!folio_test_pmd_mappable(folio), folio);
+    370 			remove_migration_pmd(&pvmw, folio);
+    371 			continue;
+    372 		}
+    373 #endif
+    374 		if (folio_test_hugetlb(folio))
+    375 			old_pte = huge_ptep_get(vma->vm_mm, pvmw.address,
+    376 						pvmw.pte);
+    377 		else
+    378 			old_pte = ptep_get(pvmw.pte);
+    379 
+    380 		entry = softleaf_from_pte(old_pte);
+    381 		if (folio_test_large(folio) && !folio_test_hugetlb(folio))
+    382 			idx = softleaf_to_pfn(entry) - pvmw.pfn;
+    383 
+    384 		if (rmap_walk_arg->map_unused_to_zeropage &&
+    385 		    try_to_map_unused_to_zeropage(&pvmw, folio, old_pte, idx))
+    386 			continue;
+    387 
+    388 		folio_get(folio);
+    389 		new = folio_page(folio, idx);
+    390 		pte = mk_pte(new, READ_ONCE(vma->vm_page_prot));
+    391 		if (!softleaf_is_migration_young(entry))
+    392 			pte = pte_mkold(pte);
+    393 		if (folio_test_dirty(folio) && softleaf_is_migration_dirty(entry))
+    394 			pte = pte_mkdirty(pte);
+>>  395 		if (pte_swp_soft_dirty(old_pte))
+    396 			pte = pte_mksoft_dirty(pte);
+    397 		else
+    398 			pte = pte_clear_soft_dirty(pte);
+    399 
+    400 		if (softleaf_is_migration_write(entry))
+    401 			pte = pte_mkwrite(pte, vma);
+    402 		else if (pte_swp_uffd(old_pte))
+    403 			pte = pte_mkuffd(pte);
+==========================================================================================
+[11] mm/migrate.c:420  函数 remove_migration_pte  接口 pte_swp_soft_dirty（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+    390 		pte = mk_pte(new, READ_ONCE(vma->vm_page_prot));
+    391 		if (!softleaf_is_migration_young(entry))
+    392 			pte = pte_mkold(pte);
+    393 		if (folio_test_dirty(folio) && softleaf_is_migration_dirty(entry))
+    394 			pte = pte_mkdirty(pte);
+    395 		if (pte_swp_soft_dirty(old_pte))
+    396 			pte = pte_mksoft_dirty(pte);
+    397 		else
+    398 			pte = pte_clear_soft_dirty(pte);
+    399 
+    400 		if (softleaf_is_migration_write(entry))
+    401 			pte = pte_mkwrite(pte, vma);
+    402 		else if (pte_swp_uffd(old_pte))
+    403 			pte = pte_mkuffd(pte);
+    404 
+    405 		/* See do_swap_page(): restore PAGE_NONE for RWP */
+    406 		if (pte_swp_uffd(old_pte) && userfaultfd_rwp(vma))
+    407 			pte = pte_modify(pte, PAGE_NONE);
+    408 
+    409 		if (folio_test_anon(folio) && !softleaf_is_migration_read(entry))
+    410 			rmap_flags |= RMAP_EXCLUSIVE;
+    411 
+    412 		if (unlikely(is_device_private_page(new))) {
+    413 			if (pte_write(pte))
+    414 				entry = make_writable_device_private_entry(
+    415 							page_to_pfn(new));
+    416 			else
+    417 				entry = make_readable_device_private_entry(
+    418 							page_to_pfn(new));
+    419 			pte = softleaf_to_pte(entry);
+>>  420 			if (pte_swp_soft_dirty(old_pte))
+    421 				pte = pte_swp_mksoft_dirty(pte);
+    422 			if (pte_swp_uffd(old_pte))
+    423 				pte = pte_swp_mkuffd(pte);
+    424 		}
+    425 
+    426 #ifdef CONFIG_HUGETLB_PAGE
+    427 		if (folio_test_hugetlb(folio)) {
+    428 			struct hstate *h = hstate_vma(vma);
+==========================================================================================
+[12] mm/swapfile.c:2510  函数 unuse_pte  接口 pte_swp_soft_dirty（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+   2480 	inc_mm_counter(vma->vm_mm, MM_ANONPAGES);
+   2481 	folio_get(folio);
+   2482 	if (folio == swapcache) {
+   2483 		rmap_t rmap_flags = RMAP_NONE;
+   2484 
+   2485 		/*
+   2486 		 * See do_swap_page(): writeback would be problematic.
+   2487 		 * However, we do a folio_wait_writeback() just before this
+   2488 		 * call and have the folio locked.
+   2489 		 */
+   2490 		VM_BUG_ON_FOLIO(folio_test_writeback(folio), folio);
+   2491 		if (pte_swp_exclusive(old_pte))
+   2492 			rmap_flags |= RMAP_EXCLUSIVE;
+   2493 		/*
+   2494 		 * We currently only expect small !anon folios, which are either
+   2495 		 * fully exclusive or fully shared. If we ever get large folios
+   2496 		 * here, we have to be careful.
+   2497 		 */
+   2498 		if (!folio_test_anon(folio)) {
+   2499 			VM_WARN_ON_ONCE(folio_test_large(folio));
+   2500 			VM_WARN_ON_FOLIO(!folio_test_locked(folio), folio);
+   2501 			folio_add_new_anon_rmap(folio, vma, addr, rmap_flags);
+   2502 		} else {
+   2503 			folio_add_anon_rmap_pte(folio, page, vma, addr, rmap_flags);
+   2504 		}
+   2505 	} else { /* ksm created a completely new copy */
+   2506 		folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
+   2507 		folio_add_lru_vma(folio, vma);
+   2508 	}
+   2509 	new_pte = pte_mkold(mk_pte(page, vma->vm_page_prot));
+>> 2510 	if (pte_swp_soft_dirty(old_pte))
+   2511 		new_pte = pte_mksoft_dirty(new_pte);
+   2512 	if (pte_swp_uffd(old_pte))
+   2513 		new_pte = pte_mkuffd(new_pte);
+   2514 
+   2515 	/* See do_swap_page(): restore PAGE_NONE for RWP */
+   2516 	if (pte_swp_uffd(old_pte) && userfaultfd_rwp(vma))
+   2517 		new_pte = pte_modify(new_pte, PAGE_NONE);
+   2518 
+==========================================================================================
+[13] include/linux/swapops.h:75  函数 pte_swp_clear_flags  接口 pte_swp_soft_dirty（S 组）  来源 param
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+     45 /**
+     46  * Migration swap entry specific bitfield definitions.  Layout:
+     47  *
+     48  *   |----------+--------------------|
+     49  *   | swp_type | swp_offset         |
+     50  *   |----------+--------+-+-+-------|
+     51  *   |          | resv   |D|A|  PFN  |
+     52  *   |----------+--------+-+-+-------|
+     53  *
+     54  * @SWP_MIG_YOUNG_BIT: Whether the page used to have young bit set (bit A)
+     55  * @SWP_MIG_DIRTY_BIT: Whether the page used to have dirty bit set (bit D)
+     56  *
+     57  * Note: A/D bits will be stored in migration entries iff there're enough
+     58  * free bits in arch specific swp offset.  By default we'll ignore A/D bits
+     59  * when migrating a page.  Please refer to migration_entry_supports_ad()
+     60  * for more information.  If there're more bits besides PFN and A/D bits,
+     61  * they should be reserved and always be zeros.
+     62  */
+     63 #define SWP_MIG_YOUNG_BIT		(SWP_PFN_BITS)
+     64 #define SWP_MIG_DIRTY_BIT		(SWP_PFN_BITS + 1)
+     65 #define SWP_MIG_TOTAL_BITS		(SWP_PFN_BITS + 2)
+     66 
+     67 #define SWP_MIG_YOUNG			BIT(SWP_MIG_YOUNG_BIT)
+     68 #define SWP_MIG_DIRTY			BIT(SWP_MIG_DIRTY_BIT)
+     69 
+     70 /* Clear all flags but only keep swp_entry_t related information */
+     71 static inline pte_t pte_swp_clear_flags(pte_t pte)
+     72 {
+     73 	if (pte_swp_exclusive(pte))
+     74 		pte = pte_swp_clear_exclusive(pte);
+>>   75 	if (pte_swp_soft_dirty(pte))
+     76 		pte = pte_swp_clear_soft_dirty(pte);
+     77 	if (pte_swp_uffd(pte))
+     78 		pte = pte_swp_clear_uffd(pte);
+     79 	return pte;
+     80 }
+     81 
+     82 /*
+     83  * Store a type+offset into a swp_entry_t in an arch-independent format
+==========================================================================================
+[14] include/linux/swapops.h:76  函数 pte_swp_clear_flags  接口 pte_swp_clear_soft_dirty（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 x86_64, powerpc, s390 上会改变 present 项或空项的值
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+     46  * Migration swap entry specific bitfield definitions.  Layout:
+     47  *
+     48  *   |----------+--------------------|
+     49  *   | swp_type | swp_offset         |
+     50  *   |----------+--------+-+-+-------|
+     51  *   |          | resv   |D|A|  PFN  |
+     52  *   |----------+--------+-+-+-------|
+     53  *
+     54  * @SWP_MIG_YOUNG_BIT: Whether the page used to have young bit set (bit A)
+     55  * @SWP_MIG_DIRTY_BIT: Whether the page used to have dirty bit set (bit D)
+     56  *
+     57  * Note: A/D bits will be stored in migration entries iff there're enough
+     58  * free bits in arch specific swp offset.  By default we'll ignore A/D bits
+     59  * when migrating a page.  Please refer to migration_entry_supports_ad()
+     60  * for more information.  If there're more bits besides PFN and A/D bits,
+     61  * they should be reserved and always be zeros.
+     62  */
+     63 #define SWP_MIG_YOUNG_BIT		(SWP_PFN_BITS)
+     64 #define SWP_MIG_DIRTY_BIT		(SWP_PFN_BITS + 1)
+     65 #define SWP_MIG_TOTAL_BITS		(SWP_PFN_BITS + 2)
+     66 
+     67 #define SWP_MIG_YOUNG			BIT(SWP_MIG_YOUNG_BIT)
+     68 #define SWP_MIG_DIRTY			BIT(SWP_MIG_DIRTY_BIT)
+     69 
+     70 /* Clear all flags but only keep swp_entry_t related information */
+     71 static inline pte_t pte_swp_clear_flags(pte_t pte)
+     72 {
+     73 	if (pte_swp_exclusive(pte))
+     74 		pte = pte_swp_clear_exclusive(pte);
+     75 	if (pte_swp_soft_dirty(pte))
+>>   76 		pte = pte_swp_clear_soft_dirty(pte);
+     77 	if (pte_swp_uffd(pte))
+     78 		pte = pte_swp_clear_uffd(pte);
+     79 	return pte;
+     80 }
+     81 
+     82 /*
+     83  * Store a type+offset into a swp_entry_t in an arch-independent format
+     84  */
+==========================================================================================
+[15] mm/huge_memory.c:1868  函数 copy_huge_non_present_pmd  接口 pmd_swp_mksoft_dirty（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 x86_64, powerpc, s390 上会改变 present 项或空项的值
+    出错的输入类：x86_64: none, pr.all, pr.protnone, pr.uffd; powerpc: none; s390: none, pr.plain, pr.protnone, pr.special, pr.uffd, pr.write …
+   1838 	pmd_t entry;
+   1839 
+   1840 	entry = pmd_mkyoung(*pmd);
+   1841 	if (write)
+   1842 		entry = pmd_mkdirty(entry);
+   1843 	if (pmdp_set_access_flags(vma, addr & HPAGE_PMD_MASK,
+   1844 				  pmd, entry, write)) {
+   1845 		update_mmu_cache_pmd(vma, addr, pmd);
+   1846 		return true;
+   1847 	}
+   1848 
+   1849 	return false;
+   1850 }
+   1851 
+   1852 static void copy_huge_non_present_pmd(
+   1853 		struct mm_struct *dst_mm, struct mm_struct *src_mm,
+   1854 		pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
+   1855 		struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+   1856 		pmd_t pmd, pgtable_t pgtable)
+   1857 {
+   1858 	softleaf_t entry = softleaf_from_pmd(pmd);
+   1859 	struct folio *src_folio;
+   1860 
+   1861 	VM_WARN_ON_ONCE(!pmd_is_valid_softleaf(pmd));
+   1862 
+   1863 	if (softleaf_is_migration_write(entry) ||
+   1864 	    softleaf_is_migration_read_exclusive(entry)) {
+   1865 		entry = make_readable_migration_entry(swp_offset(entry));
+   1866 		pmd = softleaf_to_pmd(entry);
+   1867 		if (pmd_swp_soft_dirty(*src_pmd))
+>> 1868 			pmd = pmd_swp_mksoft_dirty(pmd);
+   1869 		if (pmd_swp_uffd(*src_pmd))
+   1870 			pmd = pmd_swp_mkuffd(pmd);
+   1871 		set_pmd_at(src_mm, addr, src_pmd, pmd);
+   1872 	} else if (softleaf_is_device_private(entry)) {
+   1873 		/*
+   1874 		 * For device private entries, since there are no
+   1875 		 * read exclusive entries, writable = !readable
+   1876 		 */
+==========================================================================================
+[16] mm/huge_memory.c:1882  函数 copy_huge_non_present_pmd  接口 pmd_swp_mksoft_dirty（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 x86_64, powerpc, s390 上会改变 present 项或空项的值
+    出错的输入类：x86_64: none, pr.all, pr.protnone, pr.uffd; powerpc: none; s390: none, pr.plain, pr.protnone, pr.special, pr.uffd, pr.write …
+   1852 static void copy_huge_non_present_pmd(
+   1853 		struct mm_struct *dst_mm, struct mm_struct *src_mm,
+   1854 		pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
+   1855 		struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+   1856 		pmd_t pmd, pgtable_t pgtable)
+   1857 {
+   1858 	softleaf_t entry = softleaf_from_pmd(pmd);
+   1859 	struct folio *src_folio;
+   1860 
+   1861 	VM_WARN_ON_ONCE(!pmd_is_valid_softleaf(pmd));
+   1862 
+   1863 	if (softleaf_is_migration_write(entry) ||
+   1864 	    softleaf_is_migration_read_exclusive(entry)) {
+   1865 		entry = make_readable_migration_entry(swp_offset(entry));
+   1866 		pmd = softleaf_to_pmd(entry);
+   1867 		if (pmd_swp_soft_dirty(*src_pmd))
+   1868 			pmd = pmd_swp_mksoft_dirty(pmd);
+   1869 		if (pmd_swp_uffd(*src_pmd))
+   1870 			pmd = pmd_swp_mkuffd(pmd);
+   1871 		set_pmd_at(src_mm, addr, src_pmd, pmd);
+   1872 	} else if (softleaf_is_device_private(entry)) {
+   1873 		/*
+   1874 		 * For device private entries, since there are no
+   1875 		 * read exclusive entries, writable = !readable
+   1876 		 */
+   1877 		if (softleaf_is_device_private_write(entry)) {
+   1878 			entry = make_readable_device_private_entry(swp_offset(entry));
+   1879 			pmd = softleaf_to_pmd(entry);
+   1880 
+   1881 			if (pmd_swp_soft_dirty(*src_pmd))
+>> 1882 				pmd = pmd_swp_mksoft_dirty(pmd);
+   1883 			if (pmd_swp_uffd(*src_pmd))
+   1884 				pmd = pmd_swp_mkuffd(pmd);
+   1885 			set_pmd_at(src_mm, addr, src_pmd, pmd);
+   1886 		}
+   1887 
+   1888 		src_folio = softleaf_to_folio(entry);
+   1889 		VM_WARN_ON(!folio_test_large(src_folio));
+   1890 
+==========================================================================================
+[17] mm/memory.c:956  函数 restore_exclusive_pte  接口 pte_swp_soft_dirty（S 组）  来源 param
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+    926  * @address: the virtual address
+    927  * @ptep: pte pointer into the locked page table mapping the folio page
+    928  * @orig_pte: pte value at @ptep
+    929  *
+    930  * Restore a device-exclusive non-swap entry to an ordinary present pte.
+    931  *
+    932  * The folio and the page table must be locked, and MMU notifiers must have
+    933  * been called to invalidate any (exclusive) device mappings.
+    934  *
+    935  * Locking the folio makes sure that anybody who just converted the pte to
+    936  * a device-exclusive entry can map it into the device to make forward
+    937  * progress without others converting it back until the folio was unlocked.
+    938  *
+    939  * If the folio lock ever becomes an issue, we can stop relying on the folio
+    940  * lock; it might make some scenarios with heavy thrashing less likely to
+    941  * make forward progress, but these scenarios might not be valid use cases.
+    942  *
+    943  * Note that the folio lock does not protect against all cases of concurrent
+    944  * page table modifications (e.g., MADV_DONTNEED, mprotect), so device drivers
+    945  * must use MMU notifiers to sync against any concurrent changes.
+    946  */
+    947 static void restore_exclusive_pte(struct vm_area_struct *vma,
+    948 		struct folio *folio, struct page *page, unsigned long address,
+    949 		pte_t *ptep, pte_t orig_pte)
+    950 {
+    951 	pte_t pte;
+    952 
+    953 	VM_WARN_ON_FOLIO(!folio_test_locked(folio), folio);
+    954 
+    955 	pte = pte_mkold(mk_pte(page, READ_ONCE(vma->vm_page_prot)));
+>>  956 	if (pte_swp_soft_dirty(orig_pte))
+    957 		pte = pte_mksoft_dirty(pte);
+    958 
+    959 	if (pte_swp_uffd(orig_pte))
+    960 		pte = pte_mkuffd(pte);
+    961 
+    962 	/* See do_swap_page(): restore PAGE_NONE for RWP */
+    963 	if (pte_swp_uffd(orig_pte) && userfaultfd_rwp(vma))
+    964 		pte = pte_modify(pte, PAGE_NONE);
+==========================================================================================
+[18] mm/migrate.c:328  函数 try_to_map_unused_to_zeropage  接口 pte_swp_soft_dirty（S 组）  来源 param
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+    298 
+    299 static bool try_to_map_unused_to_zeropage(struct page_vma_mapped_walk *pvmw,
+    300 		struct folio *folio, pte_t old_pte, unsigned long idx)
+    301 {
+    302 	struct page *page = folio_page(folio, idx);
+    303 	pte_t newpte;
+    304 
+    305 	if (PageCompound(page) || PageHWPoison(page))
+    306 		return false;
+    307 
+    308 	VM_BUG_ON_PAGE(!PageAnon(page), page);
+    309 	VM_BUG_ON_PAGE(!PageLocked(page), page);
+    310 	VM_BUG_ON_PAGE(pte_present(old_pte), page);
+    311 	VM_WARN_ON_ONCE_FOLIO(folio_is_device_private(folio), folio);
+    312 
+    313 	if (folio_test_mlocked(folio) || (pvmw->vma->vm_flags & VM_LOCKED) ||
+    314 	    mm_forbids_zeropage(pvmw->vma->vm_mm))
+    315 		return false;
+    316 
+    317 	/*
+    318 	 * The pmd entry mapping the old thp was flushed and the pte mapping
+    319 	 * this subpage has been non present. If the subpage is only zero-filled
+    320 	 * then map it to the shared zeropage.
+    321 	 */
+    322 	if (!pages_identical(page, ZERO_PAGE(0)))
+    323 		return false;
+    324 
+    325 	newpte = pte_mkspecial(pfn_pte(zero_pfn(pvmw->address),
+    326 					pvmw->vma->vm_page_prot));
+    327 
+>>  328 	if (pte_swp_soft_dirty(old_pte))
+    329 		newpte = pte_mksoft_dirty(newpte);
+    330 	if (pte_swp_uffd(old_pte))
+    331 		newpte = pte_mkuffd(newpte);
+    332 
+    333 	/* See remove_migration_pte(): restore PAGE_NONE for RWP */
+    334 	if (pte_swp_uffd(old_pte) && userfaultfd_rwp(pvmw->vma))
+    335 		newpte = pte_modify(newpte, PAGE_NONE);
+    336 
+==========================================================================================
+[19] mm/rmap.c:2133  函数 swp_pte_prepare  接口 pte_swp_soft_dirty（S 组）  来源 param
+    只对交换格式项有定义的读接口；编码表：在 x86_64, powerpc, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; powerpc: pr.all, pr.dirty, pr.sd; s390: pr.all, pr.dirty, pr.sd
+   2103 
+   2104 	/*
+   2105 	 * Additional references could be due to GUP or speculative lookups.
+   2106 	 * GUP users must mark the folio dirty if there was a modification.
+   2107 	 * This folio cannot be reclaimed right now either way, so act just
+   2108 	 * like nothing happened. We'll come back here later and detect if the
+   2109 	 * folio was dirtied when the additional reference is gone.
+   2110 	 */
+   2111 	if (ref_count != 1 + map_count)
+   2112 		return false;
+   2113 
+   2114 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, -nr_pages);
+   2115 	return true;
+   2116 }
+   2117 
+   2118 static pte_t swp_pte_prepare(swp_entry_t entry, pte_t old_pte,
+   2119 		bool anon_exclusive)
+   2120 {
+   2121 	pte_t swp_pte = swp_entry_to_pte(entry);
+   2122 
+   2123 	if (anon_exclusive)
+   2124 		swp_pte = pte_swp_mkexclusive(swp_pte);
+   2125 
+   2126 	if (likely(pte_present(old_pte))) {
+   2127 		if (pte_soft_dirty(old_pte))
+   2128 			swp_pte = pte_swp_mksoft_dirty(swp_pte);
+   2129 		if (pte_uffd(old_pte))
+   2130 			swp_pte = pte_swp_mkuffd(swp_pte);
+   2131 	} else {
+   2132 		/* Device-exclusive entry */
+>> 2133 		if (pte_swp_soft_dirty(old_pte))
+   2134 			swp_pte = pte_swp_mksoft_dirty(swp_pte);
+   2135 		if (pte_swp_uffd(old_pte))
+   2136 			swp_pte = pte_swp_mkuffd(swp_pte);
+   2137 	}
+   2138 
+   2139 	return swp_pte;
+   2140 }
+   2141 
+==========================================================================================
+[20] fs/proc/task_mmu.c:2510  函数 make_uffd_wp_pte  接口 pte_mkuffd（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: none, np.dexcl.sd, np.dp_r.sd, np.dp_w.sd, np.marker.sd, np.mig_r.sd …; arm64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …
+   2480 
+   2481 		if (!pte_swp_uffd_any(pte)) {
+   2482 			if (userfaultfd_wp(vma))
+   2483 				categories |= PAGE_IS_WRITTEN;
+   2484 			if (userfaultfd_rwp(vma))
+   2485 				categories |= PAGE_IS_ACCESSED;
+   2486 		}
+   2487 
+   2488 		entry = softleaf_from_pte(pte);
+   2489 		if (softleaf_is_guard_marker(entry))
+   2490 			categories |= PAGE_IS_GUARD;
+   2491 		else if ((p->masks_of_interest & PAGE_IS_FILE) &&
+   2492 			 softleaf_has_pfn(entry) &&
+   2493 			 !folio_test_anon(softleaf_to_folio(entry)))
+   2494 			categories |= PAGE_IS_FILE;
+   2495 
+   2496 		if (pte_swp_soft_dirty(pte))
+   2497 			categories |= PAGE_IS_SOFT_DIRTY;
+   2498 	}
+   2499 
+   2500 	return categories;
+   2501 }
+   2502 
+   2503 static void make_uffd_wp_pte(struct vm_area_struct *vma,
+   2504 			     unsigned long addr, pte_t *pte, pte_t ptent)
+   2505 {
+   2506 	if (pte_present(ptent)) {
+   2507 		pte_t old_pte;
+   2508 
+   2509 		old_pte = ptep_modify_prot_start(vma, addr, pte);
+>> 2510 		ptent = pte_mkuffd(old_pte);
+   2511 		ptep_modify_prot_commit(vma, addr, pte, old_pte, ptent);
+   2512 	} else if (pte_none(ptent)) {
+   2513 		set_pte_at(vma->vm_mm, addr, pte,
+   2514 			   make_pte_marker(PTE_MARKER_UFFD_WP));
+   2515 	} else {
+   2516 		ptent = pte_swp_mkuffd(ptent);
+   2517 		set_pte_at(vma->vm_mm, addr, pte, ptent);
+   2518 	}
+==========================================================================================
+[21] mm/huge_memory.c:5051  函数 set_pmd_migration_entry  接口 pmd_swp_soft_dirty（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 x86_64, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; s390: pr.all, pr.dirty, pr.sd
+   5021 		struct page *page)
+   5022 {
+   5023 	struct folio *folio = page_folio(page);
+   5024 	struct vm_area_struct *vma = pvmw->vma;
+   5025 	struct mm_struct *mm = vma->vm_mm;
+   5026 	unsigned long address = pvmw->address;
+   5027 	bool anon_exclusive, present, writable, softdirty, uffd_wp;
+   5028 	pmd_t pmdval;
+   5029 	swp_entry_t entry;
+   5030 	pmd_t pmdswp;
+   5031 
+   5032 	if (!(pvmw->pmd && !pvmw->pte))
+   5033 		return 0;
+   5034 
+   5035 	present = pmd_present(*pvmw->pmd);
+   5036 	if (likely(present)) {
+   5037 		flush_cache_range(vma, address, address + HPAGE_PMD_SIZE);
+   5038 
+   5039 		pmdval = pmdp_invalidate(vma, address, pvmw->pmd);
+   5040 
+   5041 		writable = pmd_write(pmdval);
+   5042 		softdirty = pmd_soft_dirty(pmdval);
+   5043 		uffd_wp = pmd_uffd(pmdval);
+   5044 	} else {
+   5045 		softleaf_t old_entry;
+   5046 
+   5047 		pmdval = pmdp_huge_get_and_clear(vma->vm_mm, address, pvmw->pmd);
+   5048 		old_entry = softleaf_from_pmd(pmdval);
+   5049 
+   5050 		writable = softleaf_is_device_private_write(old_entry);
+>> 5051 		softdirty = pmd_swp_soft_dirty(pmdval);
+   5052 		uffd_wp = pmd_swp_uffd(pmdval);
+   5053 	}
+   5054 
+   5055 	/* See folio_try_share_anon_rmap_pmd(): invalidate PMD first. */
+   5056 	anon_exclusive = folio_test_anon(folio) && PageAnonExclusive(page);
+   5057 	if (anon_exclusive && folio_try_share_anon_rmap_pmd(folio, page)) {
+   5058 		set_pmd_at(mm, address, pvmw->pmd, pmdval);
+   5059 		return -EBUSY;
+==========================================================================================
+[22] mm/huge_memory.c:5110  函数 remove_migration_pmd  接口 pmd_swp_soft_dirty（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 x86_64, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; s390: pr.all, pr.dirty, pr.sd
+   5080 	if (softdirty)
+   5081 		pmdswp = pmd_swp_mksoft_dirty(pmdswp);
+   5082 	if (uffd_wp)
+   5083 		pmdswp = pmd_swp_mkuffd(pmdswp);
+   5084 	set_pmd_at(mm, address, pvmw->pmd, pmdswp);
+   5085 
+   5086 	/* Migration entry installed: cleanup rmap, folio. */
+   5087 	folio_remove_rmap_pmd(folio, page, vma);
+   5088 	folio_put(folio);
+   5089 	trace_set_migration_pmd(address, pmd_val(pmdswp));
+   5090 
+   5091 	return 0;
+   5092 }
+   5093 
+   5094 void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct folio *folio)
+   5095 {
+   5096 	struct vm_area_struct *vma = pvmw->vma;
+   5097 	struct mm_struct *mm = vma->vm_mm;
+   5098 	unsigned long address = pvmw->address;
+   5099 	unsigned long haddr = address & HPAGE_PMD_MASK;
+   5100 	pmd_t pmde;
+   5101 	softleaf_t entry;
+   5102 
+   5103 	if (!(pvmw->pmd && !pvmw->pte))
+   5104 		return;
+   5105 
+   5106 	entry = softleaf_from_pmd(*pvmw->pmd);
+   5107 	folio_get(folio);
+   5108 	pmde = folio_mk_pmd(folio, READ_ONCE(vma->vm_page_prot));
+   5109 
+>> 5110 	if (pmd_swp_soft_dirty(*pvmw->pmd))
+   5111 		pmde = pmd_mksoft_dirty(pmde);
+   5112 	if (softleaf_is_migration_write(entry))
+   5113 		pmde = pmd_mkwrite(pmde, vma);
+   5114 	if (pmd_swp_uffd(*pvmw->pmd))
+   5115 		pmde = pmd_mkuffd(pmde);
+   5116 
+   5117 	/* See do_swap_page(): restore PAGE_NONE for RWP */
+   5118 	if (pmd_swp_uffd(*pvmw->pmd) && userfaultfd_rwp(vma))
+==========================================================================================
+[23] mm/huge_memory.c:5136  函数 remove_migration_pmd  接口 pmd_swp_soft_dirty（S 组）  来源 read
+    只对交换格式项有定义的读接口；编码表：在 x86_64, s390 上对某些 present 项或空项读出 1
+    出错的输入类：x86_64: pr.write; s390: pr.all, pr.dirty, pr.sd
+   5106 	entry = softleaf_from_pmd(*pvmw->pmd);
+   5107 	folio_get(folio);
+   5108 	pmde = folio_mk_pmd(folio, READ_ONCE(vma->vm_page_prot));
+   5109 
+   5110 	if (pmd_swp_soft_dirty(*pvmw->pmd))
+   5111 		pmde = pmd_mksoft_dirty(pmde);
+   5112 	if (softleaf_is_migration_write(entry))
+   5113 		pmde = pmd_mkwrite(pmde, vma);
+   5114 	if (pmd_swp_uffd(*pvmw->pmd))
+   5115 		pmde = pmd_mkuffd(pmde);
+   5116 
+   5117 	/* See do_swap_page(): restore PAGE_NONE for RWP */
+   5118 	if (pmd_swp_uffd(*pvmw->pmd) && userfaultfd_rwp(vma))
+   5119 		pmde = pmd_modify(pmde, PAGE_NONE);
+   5120 
+   5121 	if (!softleaf_is_migration_young(entry))
+   5122 		pmde = pmd_mkold(pmde);
+   5123 	/* NOTE: this may contain setting soft-dirty on some archs */
+   5124 	if (folio_test_dirty(folio) && softleaf_is_migration_dirty(entry))
+   5125 		pmde = pmd_mkdirty(pmde);
+   5126 
+   5127 	if (folio_is_device_private(folio)) {
+   5128 		swp_entry_t entry;
+   5129 
+   5130 		if (pmd_write(pmde))
+   5131 			entry = make_writable_device_private_entry(folio_pfn(folio));
+   5132 		else
+   5133 			entry = make_readable_device_private_entry(folio_pfn(folio));
+   5134 		pmde = softleaf_to_pmd(entry);
+   5135 
+>> 5136 		if (pmd_swp_soft_dirty(*pvmw->pmd))
+   5137 			pmde = pmd_swp_mksoft_dirty(pmde);
+   5138 		if (pmd_swp_uffd(*pvmw->pmd))
+   5139 			pmde = pmd_swp_mkuffd(pmde);
+   5140 	}
+   5141 
+   5142 	if (folio_test_anon(folio)) {
+   5143 		rmap_t rmap_flags = RMAP_NONE;
+   5144 
+==========================================================================================
+[24] mm/huge_memory.c:1870  函数 copy_huge_non_present_pmd  接口 pmd_swp_mkuffd（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 x86_64, arm64 上会改变 present 项或空项的值
+    出错的输入类：x86_64: none, pr.protnone; arm64: none, pr.all, pr.dirty, pr.plain, pr.protnone, pr.sd …
+   1840 	entry = pmd_mkyoung(*pmd);
+   1841 	if (write)
+   1842 		entry = pmd_mkdirty(entry);
+   1843 	if (pmdp_set_access_flags(vma, addr & HPAGE_PMD_MASK,
+   1844 				  pmd, entry, write)) {
+   1845 		update_mmu_cache_pmd(vma, addr, pmd);
+   1846 		return true;
+   1847 	}
+   1848 
+   1849 	return false;
+   1850 }
+   1851 
+   1852 static void copy_huge_non_present_pmd(
+   1853 		struct mm_struct *dst_mm, struct mm_struct *src_mm,
+   1854 		pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
+   1855 		struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+   1856 		pmd_t pmd, pgtable_t pgtable)
+   1857 {
+   1858 	softleaf_t entry = softleaf_from_pmd(pmd);
+   1859 	struct folio *src_folio;
+   1860 
+   1861 	VM_WARN_ON_ONCE(!pmd_is_valid_softleaf(pmd));
+   1862 
+   1863 	if (softleaf_is_migration_write(entry) ||
+   1864 	    softleaf_is_migration_read_exclusive(entry)) {
+   1865 		entry = make_readable_migration_entry(swp_offset(entry));
+   1866 		pmd = softleaf_to_pmd(entry);
+   1867 		if (pmd_swp_soft_dirty(*src_pmd))
+   1868 			pmd = pmd_swp_mksoft_dirty(pmd);
+   1869 		if (pmd_swp_uffd(*src_pmd))
+>> 1870 			pmd = pmd_swp_mkuffd(pmd);
+   1871 		set_pmd_at(src_mm, addr, src_pmd, pmd);
+   1872 	} else if (softleaf_is_device_private(entry)) {
+   1873 		/*
+   1874 		 * For device private entries, since there are no
+   1875 		 * read exclusive entries, writable = !readable
+   1876 		 */
+   1877 		if (softleaf_is_device_private_write(entry)) {
+   1878 			entry = make_readable_device_private_entry(swp_offset(entry));
+==========================================================================================
+[25] mm/huge_memory.c:1884  函数 copy_huge_non_present_pmd  接口 pmd_swp_mkuffd（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 x86_64, arm64 上会改变 present 项或空项的值
+    出错的输入类：x86_64: none, pr.protnone; arm64: none, pr.all, pr.dirty, pr.plain, pr.protnone, pr.sd …
+   1854 		pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
+   1855 		struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
+   1856 		pmd_t pmd, pgtable_t pgtable)
+   1857 {
+   1858 	softleaf_t entry = softleaf_from_pmd(pmd);
+   1859 	struct folio *src_folio;
+   1860 
+   1861 	VM_WARN_ON_ONCE(!pmd_is_valid_softleaf(pmd));
+   1862 
+   1863 	if (softleaf_is_migration_write(entry) ||
+   1864 	    softleaf_is_migration_read_exclusive(entry)) {
+   1865 		entry = make_readable_migration_entry(swp_offset(entry));
+   1866 		pmd = softleaf_to_pmd(entry);
+   1867 		if (pmd_swp_soft_dirty(*src_pmd))
+   1868 			pmd = pmd_swp_mksoft_dirty(pmd);
+   1869 		if (pmd_swp_uffd(*src_pmd))
+   1870 			pmd = pmd_swp_mkuffd(pmd);
+   1871 		set_pmd_at(src_mm, addr, src_pmd, pmd);
+   1872 	} else if (softleaf_is_device_private(entry)) {
+   1873 		/*
+   1874 		 * For device private entries, since there are no
+   1875 		 * read exclusive entries, writable = !readable
+   1876 		 */
+   1877 		if (softleaf_is_device_private_write(entry)) {
+   1878 			entry = make_readable_device_private_entry(swp_offset(entry));
+   1879 			pmd = softleaf_to_pmd(entry);
+   1880 
+   1881 			if (pmd_swp_soft_dirty(*src_pmd))
+   1882 				pmd = pmd_swp_mksoft_dirty(pmd);
+   1883 			if (pmd_swp_uffd(*src_pmd))
+>> 1884 				pmd = pmd_swp_mkuffd(pmd);
+   1885 			set_pmd_at(src_mm, addr, src_pmd, pmd);
+   1886 		}
+   1887 
+   1888 		src_folio = softleaf_to_folio(entry);
+   1889 		VM_WARN_ON(!folio_test_large(src_folio));
+   1890 
+   1891 		folio_get(src_folio);
+   1892 		/*
+==========================================================================================
+[26] mm/userfaultfd.c:1454  函数 move_swap_pte  接口 pte_swp_mkuffd（MS 组）  来源 param
+    只对交换格式项有定义的修改接口；编码表：在 x86_64, arm64 上会改变 present 项或空项的值
+    出错的输入类：x86_64: none, pr.protnone; arm64: none, pr.all, pr.dirty, pr.plain, pr.protnone, pr.sd …
+   1424 	/*
+   1425 	 * The src_folio resides in the swapcache, requiring an update to its
+   1426 	 * index and mapping to align with the dst_vma, where a swap-in may
+   1427 	 * occur and hit the swapcache after moving the PTE.
+   1428 	 */
+   1429 	if (src_folio) {
+   1430 		folio_move_anon_rmap(src_folio, dst_vma);
+   1431 		src_folio->index = linear_anon_page_index(dst_vma, dst_addr);
+   1432 	} else {
+   1433 		/*
+   1434 		 * Check if the swap entry is cached after acquiring the src_pte
+   1435 		 * lock. Otherwise, we might miss a newly loaded swap cache folio.
+   1436 		 *
+   1437 		 * We are trying to catch newly added swap cache, the only possible case is
+   1438 		 * when a folio is swapped in and out again staying in swap cache, using the
+   1439 		 * same entry before the PTE check above. The PTL is acquired and released
+   1440 		 * twice, each time after updating the swap table. So holding
+   1441 		 * the PTL here ensures we see the updated value.
+   1442 		 */
+   1443 		if (swap_cache_has_folio(entry)) {
+   1444 			double_pt_unlock(dst_ptl, src_ptl);
+   1445 			return -EAGAIN;
+   1446 		}
+   1447 	}
+   1448 
+   1449 	orig_src_pte = ptep_get_and_clear(mm, src_addr, src_pte);
+   1450 	if (pgtable_supports_soft_dirty())
+   1451 		orig_src_pte = pte_swp_mksoft_dirty(orig_src_pte);
+   1452 	/* Re-arm RWP on the moved swap entry if dst_vma is RWP-registered. */
+   1453 	if (userfaultfd_rwp(dst_vma))
+>> 1454 		orig_src_pte = pte_swp_mkuffd(orig_src_pte);
+   1455 	set_pte_at(mm, dst_addr, dst_pte, orig_src_pte);
+   1456 	double_pt_unlock(dst_ptl, src_ptl);
+   1457 
+   1458 	return PAGE_SIZE;
+   1459 }
+   1460 
+   1461 static int move_zeropage_pte(struct mm_struct *mm,
+   1462 			     struct vm_area_struct *dst_vma,
+==========================================================================================
+[27] mm/memory.c:4400  函数 do_wp_page  接口 pte_clear_uffd（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex, np.dp_r.plain …
+   4370  * done any necessary COW.
+   4371  *
+   4372  * In case of FAULT_FLAG_WRITE, we also mark the page dirty at this point even
+   4373  * though the page will change only once the write actually happens. This
+   4374  * avoids a few races, and potentially makes it more efficient.
+   4375  *
+   4376  * We enter with either the VMA lock or the mmap_lock held (see
+   4377  * FAULT_FLAG_VMA_LOCK) and pte both mapped and locked. We return with
+   4378  * the same lock still held, but pte unmapped and unlocked.
+   4379  */
+   4380 static vm_fault_t do_wp_page(struct vm_fault *vmf)
+   4381 	__releases(vmf->ptl)
+   4382 {
+   4383 	const bool unshare = vmf->flags & FAULT_FLAG_UNSHARE;
+   4384 	struct vm_area_struct *vma = vmf->vma;
+   4385 	struct folio *folio = NULL;
+   4386 	pte_t pte;
+   4387 
+   4388 	if (likely(!unshare)) {
+   4389 		if (userfaultfd_pte_wp(vma, ptep_get(vmf->pte))) {
+   4390 			if (!userfaultfd_wp_async(vma)) {
+   4391 				pte_unmap_unlock(vmf->pte, vmf->ptl);
+   4392 				return handle_userfault(vmf, VM_UFFD_WP);
+   4393 			}
+   4394 
+   4395 			/*
+   4396 			 * Nothing needed (cache flush, TLB invalidations,
+   4397 			 * etc.) because we're only removing the uffd-wp bit,
+   4398 			 * which is completely invisible to the user.
+   4399 			 */
+>> 4400 			pte = pte_clear_uffd(ptep_get(vmf->pte));
+   4401 
+   4402 			set_pte_at(vma->vm_mm, vmf->address, vmf->pte, pte);
+   4403 			/*
+   4404 			 * Update this to be prepared for following up CoW
+   4405 			 * handling
+   4406 			 */
+   4407 			vmf->orig_pte = pte;
+   4408 		}
+==========================================================================================
+[28] include/linux/pgtable.h:1034  函数 pte_mkwrite  接口 pte_mkwrite_novma（MG 组）  来源 param
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, riscv, loongarch, powerpc, s390, arm, mips 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.uf, np.dp_r.ex, np.dp_r.plain …; arm64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; riscv: none, np.dexcl.ex, np.dexcl.plain, np.dp_r.ex, np.dp_r.plain, np.dp_w.ex …; loongarch: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; powerpc: none, np.dp_r.ex, np.dp_r.plain, np.dp_r.sd, np.dp_r.uf, np.dp_w.ex …; s390: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.marker.ex …; arm: np.marker.ex, np.mig_r.ex, np.mig_re.ex, np.mig_w.ex, np.swap.ex; mips: none, np.marker.ex, np.marker.plain, np.marker.sd, np.marker.uf, np.mig_r.ex …
+   1004 {
+   1005 	(void)addr;
+   1006 
+   1007 	for (;;) {
+   1008 		pte_clear(mm, addr, ptep);
+   1009 		if (--nr == 0)
+   1010 			break;
+   1011 		ptep++;
+   1012 		addr += PAGE_SIZE;
+   1013 	}
+   1014 }
+   1015 
+   1016 #ifndef __HAVE_ARCH_PTEP_CLEAR_FLUSH
+   1017 extern pte_t ptep_clear_flush(struct vm_area_struct *vma,
+   1018 			      unsigned long address,
+   1019 			      pte_t *ptep);
+   1020 #endif
+   1021 
+   1022 #ifndef __HAVE_ARCH_PMDP_HUGE_CLEAR_FLUSH
+   1023 extern pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma,
+   1024 			      unsigned long address,
+   1025 			      pmd_t *pmdp);
+   1026 extern pud_t pudp_huge_clear_flush(struct vm_area_struct *vma,
+   1027 			      unsigned long address,
+   1028 			      pud_t *pudp);
+   1029 #endif
+   1030 
+   1031 #ifndef pte_mkwrite
+   1032 static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
+   1033 {
+>> 1034 	return pte_mkwrite_novma(pte);
+   1035 }
+   1036 #endif
+   1037 
+   1038 #if defined(CONFIG_ARCH_WANT_PMD_MKWRITE) && !defined(pmd_mkwrite)
+   1039 static inline pmd_t pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma)
+   1040 {
+   1041 	return pmd_mkwrite_novma(pmd);
+   1042 }
+==========================================================================================
+[29] include/linux/pgtable.h:885  函数 get_and_clear_full_ptes  接口 pte_mkdirty（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, loongarch, powerpc, s390, arm, mips 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; arm64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; loongarch: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; powerpc: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; s390: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; arm: none, np.swap.ex, np.swap.plain, np.swap.sd, np.swap.uf; mips: none, np.marker.ex, np.marker.plain, np.marker.sd, np.marker.uf, np.mig_r.ex …
+    855 /**
+    856  * get_and_clear_full_ptes - Clear present PTEs that map consecutive pages of
+    857  *			     the same folio, collecting dirty/accessed bits.
+    858  * @mm: Address space the pages are mapped into.
+    859  * @addr: Address the first page is mapped at.
+    860  * @ptep: Page table pointer for the first entry.
+    861  * @nr: Number of entries to clear.
+    862  * @full: Whether we are clearing a full mm.
+    863  *
+    864  * May be overridden by the architecture; otherwise, implemented as a simple
+    865  * loop over ptep_get_and_clear_full(), merging dirty/accessed bits into the
+    866  * returned PTE.
+    867  *
+    868  * Note that PTE bits in the PTE range besides the PFN can differ. For example,
+    869  * some PTEs might be write-protected.
+    870  *
+    871  * Context: The caller holds the page table lock.  The PTEs map consecutive
+    872  * pages that belong to the same folio.  The PTEs are all in the same PMD.
+    873  */
+    874 static inline pte_t get_and_clear_full_ptes(struct mm_struct *mm,
+    875 		unsigned long addr, pte_t *ptep, unsigned int nr, int full)
+    876 {
+    877 	pte_t pte, tmp_pte;
+    878 
+    879 	pte = ptep_get_and_clear_full(mm, addr, ptep, full);
+    880 	while (--nr) {
+    881 		ptep++;
+    882 		addr += PAGE_SIZE;
+    883 		tmp_pte = ptep_get_and_clear_full(mm, addr, ptep, full);
+    884 		if (pte_dirty(tmp_pte))
+>>  885 			pte = pte_mkdirty(pte);
+    886 		if (pte_young(tmp_pte))
+    887 			pte = pte_mkyoung(pte);
+    888 	}
+    889 	return pte;
+    890 }
+    891 #endif
+    892 
+    893 /**
+==========================================================================================
+[30] include/linux/pgtable.h:1680  函数 modify_prot_start_ptes  接口 pte_mkdirty（MG 组）  来源 read
+    只对 present 项有定义的修改接口；编码表：在 x86_64, arm64, loongarch, powerpc, s390, arm, mips 上会改变某些非 present 项或空项的值
+    出错的输入类：x86_64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; arm64: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; loongarch: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; powerpc: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; s390: none, np.dexcl.ex, np.dexcl.plain, np.dexcl.sd, np.dexcl.uf, np.dp_r.ex …; arm: none, np.swap.ex, np.swap.plain, np.swap.sd, np.swap.uf; mips: none, np.marker.ex, np.marker.plain, np.marker.sd, np.marker.uf, np.mig_r.ex …
+   1650  * Please see the comment above ptep_modify_prot_start() for full description.
+   1651  *
+   1652  * @vma: The virtual memory area the pages are mapped into.
+   1653  * @addr: Address the first page is mapped at.
+   1654  * @ptep: Page table pointer for the first entry.
+   1655  * @nr: Number of entries.
+   1656  *
+   1657  * May be overridden by the architecture; otherwise, implemented as a simple
+   1658  * loop over ptep_modify_prot_start(), collecting the a/d bits from each pte
+   1659  * in the batch.
+   1660  *
+   1661  * Note that PTE bits in the PTE batch besides the PFN can differ.
+   1662  *
+   1663  * Context: The caller holds the page table lock.  The PTEs map consecutive
+   1664  * pages that belong to the same folio. All other PTE bits must be identical for
+   1665  * all PTEs in the batch except for young and dirty bits.  The PTEs are all in
+   1666  * the same PMD.
+   1667  */
+   1668 #ifndef modify_prot_start_ptes
+   1669 static inline pte_t modify_prot_start_ptes(struct vm_area_struct *vma,
+   1670 		unsigned long addr, pte_t *ptep, unsigned int nr)
+   1671 {
+   1672 	pte_t pte, tmp_pte;
+   1673 
+   1674 	pte = ptep_modify_prot_start(vma, addr, ptep);
+   1675 	while (--nr) {
+   1676 		ptep++;
+   1677 		addr += PAGE_SIZE;
+   1678 		tmp_pte = ptep_modify_prot_start(vma, addr, ptep);
+   1679 		if (pte_dirty(tmp_pte))
+>> 1680 			pte = pte_mkdirty(pte);
+   1681 		if (pte_young(tmp_pte))
+   1682 			pte = pte_mkyoung(pte);
+   1683 	}
+   1684 	return pte;
+   1685 }
+   1686 #endif
+   1687 
+   1688 /**

@@ -1,0 +1,558 @@
+##### A336 bbb622488749 RISC-V: KVM: Disable the kernel perf counter during configure
+样本集标签：M10 K2 S1 掩盖0；对应物：arch/arm64/kvm/pmu-emul.c:kvm_pmu_create_perf_event（attr.disabled）；理由：perf计数器创建时须禁用（arm64 KVM PMU同）
+--- 说明 ---
+RISC-V: KVM: Disable the kernel perf counter during configure
+The perf event should be marked disabled during the creation as
+it is not ready to be scheduled until there is SBI PMU start call
+or config matching is called with auto start. Otherwise, event add/start
+gets called during perf_event_create_kernel_counter function.
+It will be enabled and scheduled to run via perf_event_enable during
+either the above mentioned scenario.
+Fixes: 0cb74b65d2e5 ("RISC-V: KVM: Implement perf support without sampling")
+Reviewed-by: Andrew Jones <ajones@ventanamicro.com>
+Signed-off-by: Atish Patra <atishp@rivosinc.com>
+Link: https://lore.kernel.org/r/20250303-kvm_pmu_improve-v2-1-41d177e45929@rivosinc.com
+Signed-off-by: Anup Patel <anup@brainfault.org>
+--- 改动 ---
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 2707a51b082c..78ac3216a54d 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -666,6 +666,7 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 		.type = etype,
+ 		.size = sizeof(struct perf_event_attr),
+ 		.pinned = true,
++		.disabled = true,
+ 		/*
+ 		 * It should never reach here if the platform doesn't support the sscofpmf
+ 		 * extension as mode filtering won't work without it.
+
+##### A339 2d117e67f318 RISC-V: KVM: Teardown riscv specific bits after kvm_exit
+样本集标签：M6 K1 S0 掩盖0；对应物：virt/kvm/kvm_main.c:kvm_exit；理由：卸载顺序须与公共kvm_exit一致
+--- 说明 ---
+RISC-V: KVM: Teardown riscv specific bits after kvm_exit
+During a module removal, kvm_exit invokes arch specific disable
+call which disables AIA. However, we invoke aia_exit before kvm_exit
+resulting in the following warning. KVM kernel module can't be inserted
+afterwards due to inconsistent state of IRQ.
+[25469.031389] percpu IRQ 31 still enabled on CPU0!
+[25469.031732] WARNING: CPU: 3 PID: 943 at kernel/irq/manage.c:2476 __free_percpu_irq+0xa2/0x150
+[25469.031804] Modules linked in: kvm(-)
+[25469.031848] CPU: 3 UID: 0 PID: 943 Comm: rmmod Not tainted 6.14.0-rc5-06947-g91c763118f47-dirty #2
+[25469.031905] Hardware name: riscv-virtio,qemu (DT)
+[25469.031928] epc : __free_percpu_irq+0xa2/0x150
+[25469.031976]  ra : __free_percpu_irq+0xa2/0x150
+[25469.032197] epc : ffffffff8007db1e ra : ffffffff8007db1e sp : ff2000000088bd50
+[25469.032241]  gp : ffffffff8131cef8 tp : ff60000080b96400 t0 : ff2000000088baf8
+--- 改动 ---
+diff --git a/arch/riscv/kvm/main.c b/arch/riscv/kvm/main.c
+index 1fa8be5ee509..4b24705dc63a 100644
+--- a/arch/riscv/kvm/main.c
++++ b/arch/riscv/kvm/main.c
+@@ -172,8 +172,8 @@ module_init(riscv_kvm_init);
+ 
+ static void __exit riscv_kvm_exit(void)
+ {
+-	kvm_riscv_teardown();
+-
+ 	kvm_exit();
++
++	kvm_riscv_teardown();
+ }
+ module_exit(riscv_kvm_exit);
+
+##### A344 453805f0a28f riscv: misaligned: enable IRQs while handling misaligned accesses
+样本集标签：M5 K2 S1 掩盖2；对应物：arch/arm64/kernel/entry-common.c（el0异常处理先开中断）；理由：来自用户态的陷入处理中访问用户内存须开中断
+--- 说明 ---
+riscv: misaligned: enable IRQs while handling misaligned accesses
+We can safely reenable IRQs if coming from userspace. This allows to
+access user memory that could potentially trigger a page fault.
+Fixes: b686ecdeacf6 ("riscv: misaligned: Restrict user access to kernel memory")
+Signed-off-by: Clément Léger <cleger@rivosinc.com>
+Reviewed-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+Link: https://lore.kernel.org/r/20250422162324.956065-3-cleger@rivosinc.com
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index b1d991c78a23..9c83848797a7 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -220,19 +220,23 @@ static void do_trap_misaligned(struct pt_regs *regs, enum misaligned_access_type
+ {
+ 	irqentry_state_t state;
+ 
+-	if (user_mode(regs))
++	if (user_mode(regs)) {
+ 		irqentry_enter_from_user_mode(regs);
+-	else
++		local_irq_enable();
++	} else {
+ 		state = irqentry_nmi_enter(regs);
++	}
+ 
+ 	if (misaligned_handler[type].handler(regs))
+ 		do_trap_error(regs, SIGBUS, BUS_ADRALN, regs->epc,
+ 			      misaligned_handler[type].type_str);
+ 
+-	if (user_mode(regs))
++	if (user_mode(regs)) {
++		local_irq_disable();
+ 		irqentry_exit_to_user_mode(regs);
+-	else
++	} else {
+ 		irqentry_nmi_exit(regs, state);
++	}
+ }
+ 
+ asmlinkage __visible __trap_section void do_trap_load_misaligned(struct pt_regs *regs)
+
+##### A350 59305202c67f mm/ptdump: take the memory hotplug lock inside ptdump_walk_pgd()
+样本集标签：M4 K3 S2 掩盖2；对应物：mm/ptdump.c:ptdump_check_wx；理由：ptdump遍历与内存热拔并发；arm64、RISC-V、s390同样只在debugfs路径加锁，check_wx路径漏了
+--- 说明 ---
+mm/ptdump: take the memory hotplug lock inside ptdump_walk_pgd()
+Memory hot remove unmaps and tears down various kernel page table regions
+as required.  The ptdump code can race with concurrent modifications of
+the kernel page tables.  When leaf entries are modified concurrently, the
+dump code may log stale or inconsistent information for a VA range, but
+this is otherwise not harmful.
+But when intermediate levels of kernel page table are freed, the dump code
+will continue to use memory that has been freed and potentially
+reallocated for another purpose.  In such cases, the ptdump code may
+dereference bogus addresses, leading to a number of potential problems.
+To avoid the above mentioned race condition, platforms such as arm64,
+riscv and s390 take memory hotplug lock, while dumping kernel page table
+via the sysfs interface /sys/kernel/debug/kernel_page_tables.
+Similar race condition exists while checking for pages that might have
+--- 改动 ---
+diff --git a/arch/arm64/mm/ptdump_debugfs.c b/arch/arm64/mm/ptdump_debugfs.c
+index 68bf1a125502..1e308328c079 100644
+--- a/arch/arm64/mm/ptdump_debugfs.c
++++ b/arch/arm64/mm/ptdump_debugfs.c
+@@ -1,6 +1,5 @@
+ // SPDX-License-Identifier: GPL-2.0
+ #include <linux/debugfs.h>
+-#include <linux/memory_hotplug.h>
+ #include <linux/seq_file.h>
+ 
+ #include <asm/ptdump.h>
+@@ -9,9 +8,7 @@ static int ptdump_show(struct seq_file *m, void *v)
+ {
+ 	struct ptdump_info *info = m->private;
+ 
+-	get_online_mems();
+ 	ptdump_walk(m, info);
+-	put_online_mems();
+ 	return 0;
+ }
+ DEFINE_SHOW_ATTRIBUTE(ptdump);
+diff --git a/arch/riscv/mm/ptdump.c b/arch/riscv/mm/ptdump.c
+index 32922550a50a..3b51690cc876 100644
+--- a/arch/riscv/mm/ptdump.c
++++ b/arch/riscv/mm/ptdump.c
+@@ -6,7 +6,6 @@
+ #include <linux/efi.h>
+ #include <linux/init.h>
+ #include <linux/debugfs.h>
+-#include <linux/memory_hotplug.h>
+ #include <linux/seq_file.h>
+ #include <linux/ptdump.h>
+ 
+@@ -413,9 +412,7 @@ bool ptdump_check_wx(void)
+ 
+ static int ptdump_show(struct seq_file *m, void *v)
+ {
+-	get_online_mems();
+ 	ptdump_walk(m, m->private);
+-	put_online_mems();
+ 
+ 	return 0;
+ }
+diff --git a/arch/s390/mm/dump_pagetables.c b/arch/s390/mm/dump_pagetables.c
+index ac604b176660..9af2aae0a515 100644
+--- a/arch/s390/mm/dump_pagetables.c
++++ b/arch/s390/mm/dump_pagetables.c
+@@ -247,11 +247,9 @@ static int ptdump_show(struct seq_file *m, void *v)
+ 		.marker = markers,
+ 	};
+ 
+-	get_online_mems();
+ 	mutex_lock(&cpa_mutex);
+ 	ptdump_walk_pgd(&st.ptdump, &init_mm, NULL);
+ 	mutex_unlock(&cpa_mutex);
+-	put_online_mems();
+ 	return 0;
+ }
+ DEFINE_SHOW_ATTRIBUTE(ptdump);
+diff --git a/mm/ptdump.c b/mm/ptdump.c
+index 61a352aa12ed..b600c7f864b8 100644
+--- a/mm/ptdump.c
++++ b/mm/ptdump.c
+@@ -176,6 +176,7 @@ void ptdump_walk_pgd(struct ptdump_state *st, struct mm_struct *mm, pgd_t *pgd)
+ {
+ 	const struct ptdump_range *range = st->range;
+ 
++	get_online_mems();
+ 	mmap_write_lock(mm);
+ 	while (range->start != range->end) {
+ 		walk_page_range_debug(mm, range->start, range->end,
+@@ -183,6 +184,7 @@ void ptdump_walk_pgd(struct ptdump_state *st, struct mm_struct *mm, pgd_t *pgd)
+ 		range++;
+ 	}
+ 	mmap_write_unlock(mm);
++	put_online_mems();
+ 
+ 	/* Flush out the last page */
+ 	st->note_page_flush(st);
+
+##### A359 8c5fa3764fac RISC-V: KVM: Remove automatic I/O mapping for VM_PFNMAP
+样本集标签：M8 K1 S0 掩盖4；对应物：arch/arm64/kvm/mmu.c:kvm_arch_prepare_memory_region（VM_PFNMAP判断）；理由：公共vfio改变vm_pgoff语义
+--- 说明 ---
+RISC-V: KVM: Remove automatic I/O mapping for VM_PFNMAP
+As of commit aac6db75a9fc ("vfio/pci: Use unmap_mapping_range()"),
+vm_pgoff may no longer guaranteed to hold the PFN for VM_PFNMAP
+regions. Using vma->vm_pgoff to derive the HPA here may therefore
+produce incorrect mappings.
+Instead, I/O mappings for such regions can be established on-demand
+during g-stage page faults, making the upfront ioremap in this path
+is unnecessary.
+Fixes: aac6db75a9fc ("vfio/pci: Use unmap_mapping_range()")
+Signed-off-by: Fangyu Yu <fangyu.yu@linux.alibaba.com>
+Tested-by: Daniel Henrique Barboza <dbarboza@ventanamicro.com>
+Reviewed-by: Guo Ren <guoren@kernel.org>
+Reviewed-by: Anup Patel <anup@brainfault.org>
+Link: https://lore.kernel.org/r/20251021142131.78796-1-fangyu.yu@linux.alibaba.com
+--- 改动 ---
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index 525fb5a330c0..58f5f3536ffd 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -171,7 +171,6 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
+ 				enum kvm_mr_change change)
+ {
+ 	hva_t hva, reg_end, size;
+-	gpa_t base_gpa;
+ 	bool writable;
+ 	int ret = 0;
+ 
+@@ -190,15 +189,13 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
+ 	hva = new->userspace_addr;
+ 	size = new->npages << PAGE_SHIFT;
+ 	reg_end = hva + size;
+-	base_gpa = new->base_gfn << PAGE_SHIFT;
+ 	writable = !(new->flags & KVM_MEM_READONLY);
+ 
+ 	mmap_read_lock(current->mm);
+ 
+ 	/*
+ 	 * A memory region could potentially cover multiple VMAs, and
+-	 * any holes between them, so iterate over all of them to find
+-	 * out if we can map any of them right now.
++	 * any holes between them, so iterate over all of them.
+ 	 *
+ 	 *     +--------------------------------------------+
+ 	 * +---------------+----------------+   +----------------+
+@@ -209,7 +206,7 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
+ 	 */
+ 	do {
+ 		struct vm_area_struct *vma;
+-		hva_t vm_start, vm_end;
++		hva_t vm_end;
+ 
+ 		vma = find_vma_intersection(current->mm, hva, reg_end);
+ 		if (!vma)
+@@ -225,36 +222,18 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
+ 		}
+ 
+ 		/* Take the intersection of this VMA with the memory region */
+-		vm_start = max(hva, vma->vm_start);
+ 		vm_end = min(reg_end, vma->vm_end);
+ 
+ 		if (vma->vm_flags & VM_PFNMAP) {
+-			gpa_t gpa = base_gpa + (vm_start - hva);
+-			phys_addr_t pa;
+-
+-			pa = (phys_addr_t)vma->vm_pgoff << PAGE_SHIFT;
+-			pa += vm_start - vma->vm_start;
+-
+ 			/* IO region dirty page logging not allowed */
+ 			if (new->flags & KVM_MEM_LOG_DIRTY_PAGES) {
+ 				ret = -EINVAL;
+ 				goto out;
+ 			}
+-
+-			ret = kvm_riscv_mmu_ioremap(kvm, gpa, pa, vm_end - vm_start,
+-						    writable, false);
+-			if (ret)
+-				break;
+ 		}
+ 		hva = vm_end;
+ 	} while (hva < reg_end);
+ 
+-	if (change == KVM_MR_FLAGS_ONLY)
+-		goto out;
+-
+-	if (ret)
+-		kvm_riscv_mmu_iounmap(kvm, base_gpa, size);
+-
+ out:
+ 	mmap_read_unlock(current->mm);
+ 	return ret;
+
+##### A368 b342166cbcf9 RISC-V: KVM: Skip THP support check during dirty logging
+样本集标签：M10 K2 S1 掩盖0；对应物：arch/arm64/kvm/mmu.c:user_mem_abort（logging_active时force_pte）；理由：脏页记录时须强制页粒度（arm64 KVM同）
+--- 说明 ---
+RISC-V: KVM: Skip THP support check during dirty logging
+When dirty logging is enabled, guest stage mappings are forced to
+PAGE_SIZE granularity. Changing the mapping page size at this point
+is incorrect.
+Fixes: ed7ae7a34bea ("RISC-V: KVM: Transparent huge page support")
+Signed-off-by: Wang Yechao <wang.yechao255@zte.com.cn>
+Reviewed-by: Anup Patel <anup@brainfault.org>
+Link: https://lore.kernel.org/r/20260226191231140_X1Juus7s2kgVlc0ZyW_K@zte.com.cn
+Signed-off-by: Anup Patel <anup@brainfault.org>
+--- 改动 ---
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index 87c8f41482c5..088d33ba90ed 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -539,7 +539,7 @@ int kvm_riscv_mmu_map(struct kvm_vcpu *vcpu, struct kvm_memory_slot *memslot,
+ 		goto out_unlock;
+ 
+ 	/* Check if we are backed by a THP and thus use block mapping if possible */
+-	if (vma_pagesize == PAGE_SIZE)
++	if (!logging && (vma_pagesize == PAGE_SIZE))
+ 		vma_pagesize = transparent_hugepage_adjust(kvm, memslot, hva, &hfn, &gpa);
+ 
+ 	if (writable) {
+
+##### A379 6b60a128c2f4 riscv: patch: Avoid early phys_to_page()
+样本集标签：M8 K2 S2 掩盖0；对应物：arch/arm64/kernel/patching.c（arm64同修8d09e2d569f6）；理由：公共sparse_init后移（arm64同修8d09e2d569f6）
+--- 说明 ---
+riscv: patch: Avoid early phys_to_page()
+Similarly to commit 8d09e2d569f6 ("arm64: patching: avoid early
+page_to_phys()"), avoid using phys_to_page() for the kernel address case
+in patch_map().
+Since this is called from apply_boot_alternatives() in setup_arch(), and
+commit 4267739cabb8 ("arch, mm: consolidate initialization of SPARSE
+memory model") has moved sparse_init() to after setup_arch(),
+phys_to_page() is not available there yet, and it panics on boot with
+SPARSEMEM on RV32, which does not use SPARSEMEM_VMEMMAP.
+Reported-by: Thomas Weißschuh <thomas.weissschuh@linutronix.de>
+Closes: https://lore.kernel.org/r/20260223144108-dcace0b9-02e8-4b67-a7ce-f263bed36f26@linutronix.de/
+Fixes: 4267739cabb8 ("arch, mm: consolidate initialization of SPARSE memory model")
+Suggested-by: Mike Rapoport <rppt@kernel.org>
+Signed-off-by: Vivian Wang <wangruikang@iscas.ac.cn>
+--- 改动 ---
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index db13c9ddf9e3..16b243376f36 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -42,19 +42,20 @@ static inline bool is_kernel_exittext(uintptr_t addr)
+ static __always_inline void *patch_map(void *addr, const unsigned int fixmap)
+ {
+ 	uintptr_t uintaddr = (uintptr_t) addr;
+-	struct page *page;
++	phys_addr_t phys;
+ 
+-	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr))
+-		page = phys_to_page(__pa_symbol(addr));
+-	else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
+-		page = vmalloc_to_page(addr);
+-	else
+-		return addr;
++	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr)) {
++		phys = __pa_symbol(addr);
++	} else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX)) {
++		struct page *page = vmalloc_to_page(addr);
+ 
+-	BUG_ON(!page);
++		BUG_ON(!page);
++		phys = page_to_phys(page) + offset_in_page(addr);
++	} else {
++		return addr;
++	}
+ 
+-	return (void *)set_fixmap_offset(fixmap, page_to_phys(page) +
+-					 offset_in_page(addr));
++	return (void *)set_fixmap_offset(fixmap, phys);
+ }
+ 
+ static void patch_unmap(int fixmap)
+
+##### A380 a216e24fc947 RISC-V: KVM: Fix lost write protection on huge pages during dirty logging
+样本集标签：M3 K2 S1 掩盖0；对应物：arch/arm64/kvm/mmu.c（写保护覆盖整块）；理由：大页写保护须覆盖整块
+--- 说明 ---
+RISC-V: KVM: Fix lost write protection on huge pages during dirty logging
+When enabling dirty log in small chunks (e.g., QEMU default chunk
+size of 256K), the chunk size is always smaller than the page size
+of huge pages (1G or 2M) used in the gstage page tables. This caused
+the write protection to be incorrectly skipped for huge PTEs because
+the condition `(end - addr) >= page_size` was not satisfied.
+Remove the size check in `kvm_riscv_gstage_wp_range()` to ensure huge
+PTEs are always write-protected regardless of the chunk size. Additionally,
+explicitly align the address down to the page size before invoking
+`kvm_riscv_gstage_op_pte()` to guarantee that the address passed to the
+operation function is page-aligned.
+This fixes the issue where dirty pages might not be tracked correctly
+when using huge pages.
+Fixes: 9d05c1fee837 ("RISC-V: KVM: Implement stage2 page table programming")
+--- 改动 ---
+diff --git a/arch/riscv/kvm/gstage.c b/arch/riscv/kvm/gstage.c
+index b67d60d722c2..d2001d508046 100644
+--- a/arch/riscv/kvm/gstage.c
++++ b/arch/riscv/kvm/gstage.c
+@@ -304,10 +304,9 @@ void kvm_riscv_gstage_wp_range(struct kvm_gstage *gstage, gpa_t start, gpa_t end
+ 		if (!found_leaf)
+ 			goto next;
+ 
+-		if (!(addr & (page_size - 1)) && ((end - addr) >= page_size))
+-			kvm_riscv_gstage_op_pte(gstage, addr, ptep,
+-						ptep_level, GSTAGE_OP_WP);
+-
++		addr = ALIGN_DOWN(addr, page_size);
++		kvm_riscv_gstage_op_pte(gstage, addr, ptep,
++					ptep_level, GSTAGE_OP_WP);
+ next:
+ 		addr += page_size;
+ 	}
+
+##### A387 5eb6d68fe24d RISC-V: KVM: Fix ebreak self test failure
+样本集标签：M10 K2 S1 掩盖0；对应物：arch/arm64/kvm/guest.c:kvm_arch_vcpu_ioctl_set_guest_debug；理由：KVM_SET_GUEST_DEBUG语义（公共KVM接口）
+--- 说明 ---
+RISC-V: KVM: Fix ebreak self test failure
+The ebreak self test enables/disables guest debugging as a part of the
+test. However the KVM_SET_GUEST_DEBUG ioctl doesn't actually do it.
+Fixing it by calling kvm_riscv_vcpu_config_guest_debug.
+Fixes: 6ed523e2b612 ("RISC-V: KVM: Factor-out VCPU config into separate sources")
+Signed-off-by: Mayuresh Chitale <mayuresh.chitale@oss.qualcomm.com>
+Reviewed-by: Anup Patel <anup@brainfault.org>
+Link: https://lore.kernel.org/r/20260525095930.3924905-1-mayuresh.chitale@oss.qualcomm.com
+Signed-off-by: Anup Patel <anup@brainfault.org>
+--- 改动 ---
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index a73690eda84b..cf6e231e76e2 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -538,6 +538,7 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
+ 	else
+ 		vcpu->guest_debug = 0;
+ 
++	kvm_riscv_vcpu_config_guest_debug(vcpu);
+ 	return 0;
+ }
+ 
+
+##### A392 5fc6e7d45373 riscv: kexec_file: Fix crashk_low_res not exclude bug
+样本集标签：M8 K2 S1 掩盖4；对应物：arch/arm64/kernel/machine_kexec_file.c:prepare_elf_headers（排除crashk_low_res）；理由：crashkernel低端区间排除（arm64先做）
+--- 说明 ---
+riscv: kexec_file: Fix crashk_low_res not exclude bug
+As done in commit 944a45abfabc ("arm64: kdump: Reimplement crashkernel=X")
+and commit 4831be702b95 ("arm64/kexec: Fix missing extra range for
+crashkres_low.") for arm64, while implementing crashkernel=X,[high,low],
+riscv should have excluded the "crashk_low_res" reserved ranges from
+the crash kernel memory to prevent them from being exported through
+/proc/vmcore, and the exclusion would need an extra crash_mem range.
+Just simply tested on qemu with crashkernel=4G with kexec in [1] mentioned
+in [2]. And the second kernel can be started normally.
+	# dmesg | grep crash
+	[    0.000000] crashkernel low memory reserved: 0xf8000000 - 0x100000000 (128 MB)
+	[    0.000000] crashkernel reserved: 0x000000017fe00000 - 0x000000027fe00000 (4096 MB)
+[1]: https://github.com/chenjh005/kexec-tools/tree/build-test-riscv-v2
+[2]: https://lore.kernel.org/all/20230726175000.2536220-1-chenjiahao16@huawei.com/
+--- 改动 ---
+diff --git a/arch/riscv/kernel/machine_kexec_file.c b/arch/riscv/kernel/machine_kexec_file.c
+index 59d4bbc848a8..fa2946aa9b8f 100644
+--- a/arch/riscv/kernel/machine_kexec_file.c
++++ b/arch/riscv/kernel/machine_kexec_file.c
+@@ -62,7 +62,7 @@ static int prepare_elf_headers(void **addr, unsigned long *sz)
+ 	unsigned int nr_ranges;
+ 	int ret;
+ 
+-	nr_ranges = 1; /* For exclusion of crashkernel region */
++	nr_ranges = 2; /* For exclusion of crashkernel region */
+ 	walk_system_ram_res(0, -1, &nr_ranges, get_nr_ram_ranges_callback);
+ 
+ 	cmem = kmalloc_flex(*cmem, ranges, nr_ranges);
+@@ -77,8 +77,16 @@ static int prepare_elf_headers(void **addr, unsigned long *sz)
+ 
+ 	/* Exclude crashkernel region */
+ 	ret = crash_exclude_mem_range(cmem, crashk_res.start, crashk_res.end);
+-	if (!ret)
+-		ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
++	if (ret)
++		goto out;
++
++	if (crashk_low_res.end) {
++		ret = crash_exclude_mem_range(cmem, crashk_low_res.start, crashk_low_res.end);
++		if (ret)
++			goto out;
++	}
++
++	ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
+ 
+ out:
+ 	kfree(cmem);
+
+##### A393 81bbcff0c053 riscv: Prevent NULL pointer dereference in machine_kexec_prepare()
+样本集标签：M8 K3 S0 掩盖0；对应物：security/integrity/ima/ima_kexec.c（可能产生空缓冲区）；理由：IMA产生空buf
+--- 说明 ---
+riscv: Prevent NULL pointer dereference in machine_kexec_prepare()
+A NULL pointer dereference issue is noticed in riscv's
+machine_kexec_prepare(), where image->segment[i].buf might be NULL and
+copied unchecked.
+The NULL buf comes from ima_add_kexec_buffer(), where kbuf is added by
+kexec_add_buffer(), but kbuf.buffer is NULL, then it is copied without
+a check in machine_kexec_prepare():
+  kexec_file_load
+    -> kimage_file_alloc_init()
+       -> kimage_file_prepare_segments()
+          -> ima_add_kexec_buffer()
+             -> kexec_add_buffer()
+    -> machine_kexec_prepare()
+       -> memcpy()
+--- 改动 ---
+diff --git a/arch/riscv/kernel/machine_kexec.c b/arch/riscv/kernel/machine_kexec.c
+index 2306ce3e5f22..738df176ff6f 100644
+--- a/arch/riscv/kernel/machine_kexec.c
++++ b/arch/riscv/kernel/machine_kexec.c
+@@ -41,6 +41,9 @@ machine_kexec_prepare(struct kimage *image)
+ 		if (image->segment[i].memsz <= sizeof(fdt))
+ 			continue;
+ 
++		if (!image->segment[i].buf)
++			continue;
++
+ 		if (image->file_mode)
+ 			memcpy(&fdt, image->segment[i].buf, sizeof(fdt));
+ 		else if (copy_from_user(&fdt, image->segment[i].buf, sizeof(fdt)))
+
+##### A398 e8f3e9ba146a RISC-V: KVM: Allow memslots ending at the GPA limit
+样本集标签：M7 K2 S1 掩盖0；对应物：arch/arm64/kvm/mmu.c:kvm_arch_prepare_memory_region（按IPA上限检查）；理由：memslot边界（与其他架构一致）
+--- 说明 ---
+RISC-V: KVM: Allow memslots ending at the GPA limit
+KVM memslots describe half-open ranges [base_gfn, base_gfn + npages). A
+slot ending exactly at the guest physical-address limit has its final page
+below that limit and is valid.
+The current greater-than-or-equal comparison rejects a valid boundary case.
+Use a strict greater-than comparison, matching equivalent KVM architecture
+checks.
+Fixes: 9d05c1fee837 ("RISC-V: KVM: Implement stage2 page table programming")
+Signed-off-by: Pengpeng Hou <pengpeng@iscas.ac.cn>
+Reviewed-by: Anup Patel <anup@brainfault.org>
+Link: https://lore.kernel.org/r/20260718033646.002.31dc89f2-caplitmus-rv@iscas.ac.cn
+Signed-off-by: Anup Patel <anup@brainfault.org>
+--- 改动 ---
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index d9040c394933..6035b5ec9503 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -272,7 +272,7 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
+ 	 * Prevent userspace from creating a memory region outside of the GPA
+ 	 * space addressable by the KVM guest GPA space.
+ 	 */
+-	if ((new->base_gfn + new->npages) >=
++	if ((new->base_gfn + new->npages) >
+ 	     kvm_riscv_gstage_gpa_size(kvm->arch.pgd_levels) >> PAGE_SHIFT)
+ 		return -EFAULT;
+ 
+

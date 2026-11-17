@@ -1,0 +1,242 @@
+[
+ {
+  "k": 1,
+  "loc": "fs/jfs/namei.c:1225",
+  "verdict": "不可能",
+  "why": "jfs 的 inode 号是 32 位（盘上格式），存进 ino_t 不会丢位。"
+ },
+ {
+  "k": 2,
+  "loc": "fs/ubifs/tnc.c:3536",
+  "verdict": "不可能",
+  "why": "ubifs 的 inode 号是 32 位（key 里只有 32 位），i_ino 读出来不会超过 32 位。"
+ },
+ {
+  "k": 3,
+  "loc": "fs/iomap/direct-io.c:832",
+  "verdict": "不可能",
+  "why": "iomi.pos - dio->i_size 不超过这次 I/O 的长度（≤ MAX_RW_COUNT），值小。"
+ },
+ {
+  "k": 4,
+  "loc": "arch/powerpc/kernel/time.c:978",
+  "verdict": "不可能",
+  "why": "y = rb 在 do_div(rb, divisor) 之后，rb 已是商，余数小于除数，商小于 2^32。"
+ },
+ {
+  "k": 5,
+  "loc": "fs/btrfs/lru_cache.c:51",
+  "verdict": "不可能",
+  "why": "btrfs lru_cache.h 注释说明了 maple tree 的键在 32 位上只有 32 位，每个槽存链表并比较完整的 u64 键，已专门处理。"
+ },
+ {
+  "k": 6,
+  "loc": "fs/iomap/direct-io.c:120",
+  "verdict": "不可能",
+  "why": "dio->size 是这次直接 I/O 完成的字节数，不超过请求长度（≤ MAX_RW_COUNT）。"
+ },
+ {
+  "k": 7,
+  "loc": "fs/isofs/inode.c:1025",
+  "verdict": "不可能",
+  "why": "后面有 if (iblock != b_off) 打印“block number too large”并中止，已检查截断。"
+ },
+ {
+  "k": 8,
+  "loc": "fs/btrfs/send.c:5436",
+  "verdict": "不可能",
+  "why": "len = min(end - offset, read_size)，不超过 read_size（发送缓冲区大小）。"
+ },
+ {
+  "k": 9,
+  "loc": "fs/btrfs/free-space-cache.c:1455",
+  "verdict": "不可能",
+  "why": "第 3 个实参 dirty_len 不超过 PAGE_SIZE。"
+ },
+ {
+  "k": 10,
+  "loc": "fs/udf/namei.c:171",
+  "verdict": "不可能",
+  "why": "内联在 ICB 里的目录数据，i_size 小于一个块。"
+ },
+ {
+  "k": 11,
+  "loc": "fs/jfs/jfs_imap.c:1377",
+  "verdict": "不可能",
+  "why": "jfs 的 inode 号是 32 位。"
+ },
+ {
+  "k": 12,
+  "loc": "fs/btrfs/inode.c:6886",
+  "verdict": "可能",
+  "why": "btrfs 的 objectid 是 u64，root->inodes 以 unsigned long 为下标；32 位上相差 2^32 的两个 inode 号落在同一槽，xa_store 覆盖旧的 inode 并触发 WARN_ON，xa_release 释放错误的预留。需要子卷里 inode 号超过 2^32（例如在 64 位机器上长期使用后拿到 32 位上挂载）。同一子系统的 lru_cache 已专门为此用链表处理，这里没有。"
+ },
+ {
+  "k": 13,
+  "loc": "fs/jbd2/journal.c:1719",
+  "verdict": "不可能",
+  "why": "first、last 来自 be32_to_cpu，值不超过 32 位。"
+ },
+ {
+  "k": 14,
+  "loc": "kernel/time/timekeeping.c:771",
+  "verdict": "不可能",
+  "why": "ktime_sec 是开机以来的单调秒数，32 位能表示 136 年。"
+ },
+ {
+  "k": 15,
+  "loc": "fs/qnx4/dir.c:32",
+  "verdict": "不可能",
+  "why": "qnx4 的 i_size 在盘上是 32 位，pos < i_size，右移 9 位后很小。"
+ },
+ {
+  "k": 16,
+  "loc": "fs/xfs/xfs_filestream.c:373",
+  "verdict": "可能",
+  "why": "XFS 在 32 位上可以挂载不超过 16TB 的文件系统，inode64（默认）下 inode 号可以超过 2^32；mru cache 的键是 unsigned long，相差 2^32 的两个 inode 会撞键，filestream 关联到错误的目录或插入失败，分配位置错误。后果只是分配策略。"
+ },
+ {
+  "k": 17,
+  "loc": "fs/xfs/xfs_filestream.c:215",
+  "verdict": "可能",
+  "why": "同 16：父目录 inode 号 pino 截断后查 mru cache，可能取到别的目录的关联。"
+ },
+ {
+  "k": 18,
+  "loc": "fs/exfat/namei.c:771",
+  "verdict": "不可能",
+  "why": "目录版本号截断后与完整值比较，超过 2^32 后只会一直判失效、多查一次，不会出错；而且需要目录改动 2^32 次。"
+ },
+ {
+  "k": 19,
+  "loc": "fs/nfsd/vfs.c:754",
+  "verdict": "不可能",
+  "why": "count 上一行已被 min_t 限制到 4MB。"
+ },
+ {
+  "k": 20,
+  "loc": "fs/smb/client/file.c:3480",
+  "verdict": "不可能",
+  "why": "i_blocks 超过 2^32 个 512 字节块（2TB）的交换文件在 32 位上无意义，交换区大小本来就受限。"
+ },
+ {
+  "k": 21,
+  "loc": "fs/f2fs/inode.c:1049",
+  "verdict": "不可能",
+  "why": "f2fs 的 nid 是 32 位，i_ino 不超过 32 位。"
+ },
+ {
+  "k": 22,
+  "loc": "fs/ext4/extents.c:4704",
+  "verdict": "不可能",
+  "why": "第 4 个实参 map.m_len << blkbits：未写区段最多 32767 块，乘 64KB 块仍小于 2^31。"
+ },
+ {
+  "k": 23,
+  "loc": "lib/vsprintf.c:128",
+  "verdict": "不可能",
+  "why": "simple_strtoul 的语义就是返回 unsigned long，截断是函数的定义。"
+ },
+ {
+  "k": 24,
+  "loc": "fs/ceph/file.c:1265",
+  "verdict": "不可能",
+  "why": "i_size - *ki_pos 不超过本次读的字节数。"
+ },
+ {
+  "k": 25,
+  "loc": "fs/ubifs/journal.c:1945",
+  "verdict": "不可能",
+  "why": "ubifs inode 号 32 位。"
+ },
+ {
+  "k": 26,
+  "loc": "fs/f2fs/inline.c:243",
+  "verdict": "不可能",
+  "why": "f2fs nid 32 位。"
+ },
+ {
+  "k": 27,
+  "loc": "kernel/bpf/trampoline.c:1321",
+  "verdict": "可能",
+  "why": "u64_stats_add 的 val 是 unsigned long；可睡眠的 BPF 程序单次运行超过 2^32 ns（约 4.3 秒）时，duration 截断，run_time_ns 统计偏小。后果只是统计值。"
+ },
+ {
+  "k": 28,
+  "loc": "fs/vboxsf/super.c:260",
+  "verdict": "不可能",
+  "why": "vboxsf 的 i_ino 由 idr 分配（int），不超过 32 位。"
+ },
+ {
+  "k": 29,
+  "loc": "kernel/fail_function.c:125",
+  "verdict": "不可能",
+  "why": "注入的返回值本来就放在 unsigned long 的寄存器里，32 位上返回值就是 32 位，截断是设计。"
+ },
+ {
+  "k": 30,
+  "loc": "fs/ext4/xattr.c:2288",
+  "verdict": "不可能",
+  "why": "ea_inode 的大小不超过 XATTR_SIZE_MAX（64KB）。"
+ },
+ {
+  "k": 31,
+  "loc": "fs/f2fs/inline.c:624",
+  "verdict": "不可能",
+  "why": "f2fs nid 32 位。"
+ },
+ {
+  "k": 32,
+  "loc": "fs/quota/quota_v1.c:140",
+  "verdict": "不可能",
+  "why": "isize >> 10 超过 32 位要 4TB 的配额文件，不可能。"
+ },
+ {
+  "k": 33,
+  "loc": "arch/x86/kernel/setup.c:389",
+  "verdict": "不可能",
+  "why": "i386 内核不设 XLF_CAN_BE_LOADED_ABOVE_4G，引导程序把 initrd 放在 4GB 以下。"
+ },
+ {
+  "k": 34,
+  "loc": "fs/ntfs/wof.c:644",
+  "verdict": "不可能",
+  "why": "copy_start - folio_start 是页内偏移，值小。"
+ },
+ {
+  "k": 35,
+  "loc": "fs/f2fs/inline.c:123",
+  "verdict": "不可能",
+  "why": "f2fs nid 32 位。"
+ },
+ {
+  "k": 36,
+  "loc": "arch/powerpc/kernel/legacy_serial.c:201",
+  "verdict": "说不清",
+  "why": "powerpc32 不开 PHYS_64BIT 时 phys_addr_t 是 32 位；设备树给出 4GB 以上的串口地址会被截断。需要配置与板子不匹配（36 位寻址的板子通常会选 PHYS_64BIT），不确定。"
+ },
+ {
+  "k": 37,
+  "loc": "fs/hpfs/inode.c:217",
+  "verdict": "不可能",
+  "why": "hpfs 的 inode 号是 fnode 扇区号，32 位。"
+ },
+ {
+  "k": 38,
+  "loc": "fs/nfs/nfs42proc.c:511",
+  "verdict": "不可能",
+  "why": "write_res.count 是服务器返回的写入字节数，不超过请求长度（size_t）。"
+ },
+ {
+  "k": 39,
+  "loc": "fs/ext4/ialloc.c:270",
+  "verdict": "不可能",
+  "why": "ext4 inode 号 32 位。"
+ },
+ {
+  "k": 40,
+  "loc": "fs/nfs/nfs42proc.c:434",
+  "verdict": "不可能",
+  "why": "args->count 来自 copy_file_range 的 size_t 长度。"
+ }
+]

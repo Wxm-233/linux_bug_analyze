@@ -1,0 +1,46 @@
+commit ec87a82ca8740891bce9e93e79ea2cd6c2d70ac8
+Subject: KVM: riscv: Fix Spectre-v1 in AIA CSR access
+
+
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index cac3c2b51d72..38de97d2f5b8 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -13,6 +13,7 @@
+ #include <linux/irqchip/riscv-imsic.h>
+ #include <linux/irqdomain.h>
+ #include <linux/kvm_host.h>
++#include <linux/nospec.h>
+ #include <linux/percpu.h>
+ #include <linux/spinlock.h>
+ #include <asm/cpufeature.h>
+@@ -182,10 +183,13 @@ int kvm_riscv_vcpu_aia_get_csr(struct kvm_vcpu *vcpu,
+ 			       unsigned long *out_val)
+ {
+ 	struct kvm_vcpu_aia_csr *csr = &vcpu->arch.aia_context.guest_csr;
++	unsigned long regs_max = sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long);
+ 
+-	if (reg_num >= sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long))
++	if (reg_num >= regs_max)
+ 		return -ENOENT;
+ 
++	reg_num = array_index_nospec(reg_num, regs_max);
++
+ 	*out_val = 0;
+ 	if (kvm_riscv_aia_available())
+ 		*out_val = ((unsigned long *)csr)[reg_num];
+@@ -198,10 +202,13 @@ int kvm_riscv_vcpu_aia_set_csr(struct kvm_vcpu *vcpu,
+ 			       unsigned long val)
+ {
+ 	struct kvm_vcpu_aia_csr *csr = &vcpu->arch.aia_context.guest_csr;
++	unsigned long regs_max = sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long);
+ 
+-	if (reg_num >= sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long))
++	if (reg_num >= regs_max)
+ 		return -ENOENT;
+ 
++	reg_num = array_index_nospec(reg_num, regs_max);
++
+ 	if (kvm_riscv_aia_available()) {
+ 		((unsigned long *)csr)[reg_num] = val;
+ 

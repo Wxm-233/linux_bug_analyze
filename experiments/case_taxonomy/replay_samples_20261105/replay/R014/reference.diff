@@ -1,0 +1,20 @@
+commit 588a513d34257fdde95a9f0df0202e31998e85c6
+Subject: arm64: Fix race condition on PG_dcache_clean in __sync_icache_dcache()
+
+
+diff --git a/arch/arm64/mm/flush.c b/arch/arm64/mm/flush.c
+index ac485163a4a7..6d44c028d1c9 100644
+--- a/arch/arm64/mm/flush.c
++++ b/arch/arm64/mm/flush.c
+@@ -55,8 +55,10 @@ void __sync_icache_dcache(pte_t pte)
+ {
+ 	struct page *page = pte_page(pte);
+ 
+-	if (!test_and_set_bit(PG_dcache_clean, &page->flags))
++	if (!test_bit(PG_dcache_clean, &page->flags)) {
+ 		sync_icache_aliases(page_address(page), page_size(page));
++		set_bit(PG_dcache_clean, &page->flags);
++	}
+ }
+ EXPORT_SYMBOL_GPL(__sync_icache_dcache);
+ 

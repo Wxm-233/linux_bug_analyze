@@ -1,0 +1,1318 @@
+
+##### A100
+=== 5ba7a75a53df A 2024-08-19 +2/-2
+riscv: Fix toolchain vector detection
+
+A recent change to gcc flags rv64iv as no longer valid:
+
+   cc1: sorry, unimplemented: Currently the 'V' implementation
+   requires the 'M' extension
+
+and as a result vector support is disabled. Fix this by adding m
+to our toolchain vector detection code.
+
+Fixes: fa8e7cce55da ("riscv: Enable Vector code to be built")
+functions: 
+fixes: fa8e7cce55da(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 0f3cd7c3a436..939ea7f6a228 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -553,6 +553,6 @@ config TOOLCHAIN_HAS_V
+ 	bool
+ 	default y
+-	depends on !64BIT || $(cc-option,-mabi=lp64 -march=rv64iv)
+-	depends on !32BIT || $(cc-option,-mabi=ilp32 -march=rv32iv)
++	depends on !64BIT || $(cc-option,-mabi=lp64 -march=rv64imv)
++	depends on !32BIT || $(cc-option,-mabi=ilp32 -march=rv32imv)
+ 	depends on LLD_VERSION >= 140000 || LD_VERSION >= 23800
+ 	depends on AS_HAS_OPTION_ARCH
+
+##### A101
+=== 2116988d5372 A 2024-08-26 +2/-24
+riscv: mm: Do not restrict mmap address based on hint
+
+The hint address should not forcefully restrict the addresses returned
+by mmap as this causes mmap to report ENOMEM when there is memory still
+available.
+
+Fixes: b5b4287accd7 ("riscv: mm: Use hint address in mmap if available")
+Fixes: add2cc6b6515 ("RISC-V: mm: Restrict address space for sv39,sv48,sv57")
+functions: 
+fixes: b5b4287accd7(riscv), add2cc6b6515(riscv)
+diff --git a/arch/riscv/include/asm/processor.h b/arch/riscv/include/asm/processor.h
+index 8702b8721a27..efa1b3519b23 100644
+--- a/arch/riscv/include/asm/processor.h
++++ b/arch/riscv/include/asm/processor.h
+@@ -15,34 +15,12 @@
+ #include <asm/ptrace.h>
+ 
+-/*
+- * addr is a hint to the maximum userspace address that mmap should provide, so
+- * this macro needs to return the largest address space available so that
+- * mmap_end < addr, being mmap_end the top of that address space.
+- * See Documentation/arch/riscv/vm-layout.rst for more details.
+- */
+ #define arch_get_mmap_end(addr, len, flags)			\
+ ({								\
+-	unsigned long mmap_end;					\
+-	typeof(addr) _addr = (addr);				\
+-	if ((_addr) == 0 || is_compat_task() ||			\
+-	    ((_addr + len) > BIT(VA_BITS - 1)))			\
+-		mmap_end = STACK_TOP_MAX;			\
+-	else							\
+-		mmap_end = (_addr + len);			\
+-	mmap_end;						\
++	STACK_TOP_MAX;						\
+ })
+ 
+ #define arch_get_mmap_base(addr, base)				\
+ ({								\
+-	unsigned long mmap_base;				\
+-	typeof(addr) _addr = (addr);				\
+-	typeof(base) _base = (base);				\
+-	unsigned long rnd_gap = DEFAULT_MAP_WINDOW - (_base);	\
+-	if ((_addr) == 0 || is_compat_task() || 		\
+-	    ((_addr + len) > BIT(VA_BITS - 1)))			\
+-		mmap_base = (_base);				\
+-	else							\
+-		mmap_base = (_addr + len) - rnd_gap;		\
+-	mmap_base;						\
++	base;							\
+ })
+ 
+
+##### A102
+=== 1ff95eb2bebd A 2024-08-29 +72/-65
+riscv: Fix RISCV_ALTERNATIVE_EARLY
+
+RISCV_ALTERNATIVE_EARLY will issue sbi_ecall() very early in the boot
+process, before the first memory mapping is setup so we can't have any
+instrumentation happening here.
+
+In addition, when the kernel is relocatable, we must also not issue any
+relocation this early since they would have been patched virtually only.
+
+So, instead of disabling instrumentation for the whole kernel/sbi.c file
+and compiling it with -fno-pie, simply move __sbi_ecall() and
+__sbi_base_ecall() into their own file where this is fixed.
+
+Fixes: 1745cfafebdf ("riscv: don't use global static vars to store alternative data")
+functions: arch/riscv/kernel/sbi.c:__sbi_ecall, arch/riscv/kernel/sbi.c:sbi_err_map_linux_errno, arch/riscv/kernel/sbi.c:__sbi_base_ecall
+fixes: 1745cfafebdf(riscv)
+ arch/riscv/include/asm/sbi.h  | 20 +++++++++++++++++++-
+ arch/riscv/kernel/Makefile    |  6 +++++-
+ arch/riscv/kernel/sbi.c       | 63 ---------------------------------------------------------------
+ arch/riscv/kernel/sbi_ecall.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 72 insertions(+), 65 deletions(-)
+diff --git a/arch/riscv/include/asm/sbi.h b/arch/riscv/include/asm/sbi.h
+index 7cffd4ffecd0..7bd3746028c9 100644
+--- a/arch/riscv/include/asm/sbi.h
++++ b/arch/riscv/include/asm/sbi.h
+@@ -10,4 +10,5 @@
+ #include <linux/types.h>
+ #include <linux/cpumask.h>
++#include <linux/jump_label.h>
+ 
+ #ifdef CONFIG_RISCV_SBI
+@@ -305,4 +306,5 @@ struct sbiret {
+ 
+ void sbi_init(void);
++long __sbi_base_ecall(int fid);
+ struct sbiret __sbi_ecall(unsigned long arg0, unsigned long arg1,
+ 			  unsigned long arg2, unsigned long arg3,
+@@ -374,5 +376,21 @@ static inline unsigned long sbi_mk_version(unsigned long major,
+ }
+ 
+-int sbi_err_map_linux_errno(int err);
++static inline int sbi_err_map_linux_errno(int err)
++{
++	switch (err) {
++	case SBI_SUCCESS:
++		return 0;
++	case SBI_ERR_DENIED:
++		return -EPERM;
++	case SBI_ERR_INVALID_PARAM:
++		return -EINVAL;
++	case SBI_ERR_INVALID_ADDRESS:
++		return -EFAULT;
++	case SBI_ERR_NOT_SUPPORTED:
++	case SBI_ERR_FAILURE:
++	default:
++		return -ENOTSUPP;
++	};
++}
+ 
+ extern bool sbi_debug_console_available;
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index 06d407f1b30b..7f88cc4931f5 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -21,15 +21,19 @@ ifdef CONFIG_RISCV_ALTERNATIVE_EARLY
+ CFLAGS_alternative.o := -mcmodel=medany
+ CFLAGS_cpufeature.o := -mcmodel=medany
++CFLAGS_sbi_ecall.o := -mcmodel=medany
+ ifdef CONFIG_FTRACE
+ CFLAGS_REMOVE_alternative.o = $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_cpufeature.o = $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_sbi_ecall.o = $(CC_FLAGS_FTRACE)
+ endif
+ ifdef CONFIG_RELOCATABLE
+ CFLAGS_alternative.o += -fno-pie
+ CFLAGS_cpufeature.o += -fno-pie
++CFLAGS_sbi_ecall.o += -fno-pie
+ endif
+ ifdef CONFIG_KASAN
+ KASAN_SANITIZE_alternative.o := n
+ KASAN_SANITIZE_cpufeature.o := n
+... (146 more diff lines)
+
+##### A103
+=== 7c1e5b9690b0 A 2024-09-03 +6/-6
+riscv: Disable preemption while handling PR_RISCV_CTX_SW_FENCEI_OFF
+
+The icache will be flushed in switch_to() if force_icache_flush is true,
+or in flush_icache_deferred() if icache_stale_mask is set. Between
+setting force_icache_flush to false and calculating the new
+icache_stale_mask, preemption needs to be disabled. There are two
+reasons for this:
+
+1. If CPU migration happens between force_icache_flush = false, and the
+   icache_stale_mask is set, an icache flush will not be emitted.
+2. smp_processor_id() is used in set_icache_stale_mask() to mark the
+   current CPU as not needing another flush since a flush will have
+   happened either by userspace or by the kernel when performing the
+   migration. smp_processor_id() is currently called twice with preemption
+   enabled which causes a race condition. It allows
+   icache_stale_mask to be populated with inconsistent CPU ids.
+
+Resolve these two issues by setting the icache_stale_mask before setting
+force_icache_flush to false, and using get_cpu()/put_cpu() to obtain the
+smp_processor_id().
+
+Fixes: 6b9391b581fd ("riscv: Include riscv_set_icache_flush_ctx prctl")
+functions: arch/riscv/mm/cacheflush.c:set_icache_stale_mask, arch/riscv/mm/cacheflush.c:riscv_set_icache_flush_ctx
+fixes: 6b9391b581fd(riscv)
+diff --git a/arch/riscv/mm/cacheflush.c b/arch/riscv/mm/cacheflush.c
+index a03c994eed3b..b81672729887 100644
+--- a/arch/riscv/mm/cacheflush.c
++++ b/arch/riscv/mm/cacheflush.c
+@@ -159,4 +159,5 @@ void __init riscv_init_cbo_blocksizes(void)
+ static void set_icache_stale_mask(void)
+ {
++	int cpu = get_cpu();
+ 	cpumask_t *mask;
+ 	bool stale_cpu;
+@@ -169,8 +170,9 @@ static void set_icache_stale_mask(void)
+ 	 */
+ 	mask = &current->mm->context.icache_stale_mask;
+-	stale_cpu = cpumask_test_cpu(smp_processor_id(), mask);
++	stale_cpu = cpumask_test_cpu(cpu, mask);
+ 
+ 	cpumask_setall(mask);
+-	cpumask_assign_cpu(smp_processor_id(), mask, stale_cpu);
++	cpumask_assign_cpu(cpu, mask, stale_cpu);
++	put_cpu();
+ }
+ #endif
+@@ -240,12 +242,10 @@ int riscv_set_icache_flush_ctx(unsigned long ctx, unsigned long scope)
+ 		switch (scope) {
+ 		case PR_RISCV_SCOPE_PER_PROCESS:
+-			current->mm->context.force_icache_flush = false;
+-
+ 			set_icache_stale_mask();
++			current->mm->context.force_icache_flush = false;
+ 			break;
+ 		case PR_RISCV_SCOPE_PER_THREAD:
+-			current->thread.force_icache_flush = false;
+-
+ 			set_icache_stale_mask();
++			current->thread.force_icache_flush = false;
+ 			break;
+ 		default:
+
+##### A104
+=== 31daa34315d4 A 2024-09-17 +29/-1
+crash, powerpc: default to CRASH_DUMP=n on PPC_BOOK3S_32
+
+Fixes boot failures on 6.9 on PPC_BOOK3S_32 machines using Open Firmware. 
+On these machines, the kernel refuses to boot from non-zero
+PHYSICAL_START, which occurs when CRASH_DUMP is on.
+
+Since most PPC_BOOK3S_32 machines boot via Open Firmware, it should
+default to off for them.  Users booting via some other mechanism can still
+turn it on explicitly.
+
+Does not change the default on any other architectures for the
+time being.
+
+Fixes: 75bc255a7444 ("crash: clean up kdump related config items")
+functions: 
+fixes: 75bc255a7444(common)
+ arch/arm/Kconfig       | 3 +++
+ arch/arm64/Kconfig     | 3 +++
+ arch/loongarch/Kconfig | 3 +++
+ arch/mips/Kconfig      | 3 +++
+ arch/powerpc/Kconfig   | 4 ++++
+ arch/riscv/Kconfig     | 3 +++
+ arch/s390/Kconfig      | 3 +++
+ arch/sh/Kconfig        | 3 +++
+ arch/x86/Kconfig       | 3 +++
+ kernel/Kconfig.kexec   | 2 +-
+ 10 files changed, 29 insertions(+), 1 deletion(-)
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 749179a1d162..202397be76d8 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -1599,4 +1599,7 @@ config ARCH_SUPPORTS_CRASH_DUMP
+ 	def_bool y
+ 
++config ARCH_DEFAULT_CRASH_DUMP
++	def_bool y
++
+ config AUTO_ZRELADDR
+ 	bool "Auto calculation of the decompressed kernel image address" if !ARCH_MULTIPLATFORM
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index fd9df6dcc593..22ea2705becc 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -1577,4 +1577,7 @@ config ARCH_SUPPORTS_CRASH_DUMP
+ 	def_bool y
+ 
++config ARCH_DEFAULT_CRASH_DUMP
++	def_bool y
++
+ config ARCH_HAS_GENERIC_CRASHKERNEL_RESERVATION
+ 	def_bool CRASH_RESERVE
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index bb35c34f86d2..d9fce0fd475a 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -605,4 +605,7 @@ config ARCH_SUPPORTS_CRASH_DUMP
+ 	def_bool y
+ 
++config ARCH_DEFAULT_CRASH_DUMP
++	def_bool y
++
+ config ARCH_SELECTS_CRASH_DUMP
+ 	def_bool y
+diff --git a/arch/mips/Kconfig b/arch/mips/Kconfig
+index 397edf05dd72..467b10f4361a 100644
+--- a/arch/mips/Kconfig
++++ b/arch/mips/Kconfig
+@@ -2877,4 +2877,7 @@ config ARCH_SUPPORTS_CRASH_DUMP
+ 	def_bool y
+ 
++config ARCH_DEFAULT_CRASH_DUMP
++	def_bool y
++
+ config PHYSICAL_START
+ 	hex "Physical address where the kernel is loaded"
+diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
+index 8094a01974cc..1a2ff0276365 100644
+--- a/arch/powerpc/Kconfig
++++ b/arch/powerpc/Kconfig
+@@ -685,4 +685,8 @@ config ARCH_SUPPORTS_CRASH_DUMP
+ 	def_bool PPC64 || PPC_BOOK3S_32 || PPC_85xx || (44x && !SMP)
+ 
++config ARCH_DEFAULT_CRASH_DUMP
++	bool
++	default y if !PPC_BOOK3S_32
++
+ config ARCH_SELECTS_CRASH_DUMP
+... (60 more diff lines)
+
+##### A105
+=== cfb10de18538 A 2024-09-17 +7/-3
+riscv: Fix kernel stack size when KASAN is enabled
+
+We use Kconfig to select the kernel stack size, doubling the default
+size if KASAN is enabled.
+
+But that actually only works if KASAN is selected from the beginning,
+meaning that if KASAN config is added later (for example using
+menuconfig), CONFIG_THREAD_SIZE_ORDER won't be updated, keeping the
+default size, which is not enough for KASAN as reported in [1].
+
+So fix this by moving the logic to compute the right kernel stack into a
+header.
+
+Fixes: a7555f6b62e7 ("riscv: stack: Add config of thread stack size")
+functions: 
+fixes: a7555f6b62e7(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 22dc5ea4196c..62545946ecf4 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -778,6 +778,5 @@ config THREAD_SIZE_ORDER
+ 	int "Kernel stack size (in power-of-two numbers of page size)" if VMAP_STACK && EXPERT
+ 	range 0 4
+-	default 1 if 32BIT && !KASAN
+-	default 3 if 64BIT && KASAN
++	default 1 if 32BIT
+ 	default 2
+ 	help
+diff --git a/arch/riscv/include/asm/thread_info.h b/arch/riscv/include/asm/thread_info.h
+index ebe52f96da34..9c10fb180f43 100644
+--- a/arch/riscv/include/asm/thread_info.h
++++ b/arch/riscv/include/asm/thread_info.h
+@@ -14,5 +14,10 @@
+ 
+ /* thread information allocation */
+-#define THREAD_SIZE_ORDER	CONFIG_THREAD_SIZE_ORDER
++#ifdef CONFIG_KASAN
++#define KASAN_STACK_ORDER	1
++#else
++#define KASAN_STACK_ORDER	0
++#endif
++#define THREAD_SIZE_ORDER	(CONFIG_THREAD_SIZE_ORDER + KASAN_STACK_ORDER)
+ #define THREAD_SIZE		(PAGE_SIZE << THREAD_SIZE_ORDER)
+ 
+
+##### A106
+=== d41373a4b910 A 2024-09-29 +1/-1
+riscv: efi: Set NX compat flag in PE/COFF header
+
+The IMAGE_DLLCHARACTERISTICS_NX_COMPAT informs the firmware that the
+EFI binary does not rely on pages that are both executable and
+writable.
+
+The flag is used by some distro versions of GRUB to decide if the EFI
+binary may be executed.
+
+As the Linux kernel neither has RWX sections nor needs RWX pages for
+relocation we should set the flag.
+
+Fixes: cb7d2dd5612a ("RISC-V: Add PE/COFF header for EFI stub")
+functions: 
+fixes: cb7d2dd5612a(riscv)
+diff --git a/arch/riscv/kernel/efi-header.S b/arch/riscv/kernel/efi-header.S
+index 515b2dfbca75..c5f17c2710b5 100644
+--- a/arch/riscv/kernel/efi-header.S
++++ b/arch/riscv/kernel/efi-header.S
+@@ -65,5 +65,5 @@ extra_header_fields:
+ 	.long	0					// CheckSum
+ 	.short	IMAGE_SUBSYSTEM_EFI_APPLICATION		// Subsystem
+-	.short	0					// DllCharacteristics
++	.short	IMAGE_DLL_CHARACTERISTICS_NX_COMPAT	// DllCharacteristics
+ 	.quad	0					// SizeOfStackReserve
+ 	.quad	0					// SizeOfStackCommit
+
+##### A107
+=== 33549fcf37ec A 2024-10-01 +2/-2
+RISC-V: disallow gcc + rust builds
+
+During the discussion before supporting rust on riscv, it was decided
+not to support gcc yet, due to differences in extension handling
+compared to llvm (only the version of libclang matching the c compiler
+is supported). Recently Jason Montleon reported [1] that building with
+gcc caused build issues, due to unsupported arguments being passed to
+libclang. After some discussion between myself and Miguel, it is better
+to disable gcc + rust builds to match the original intent, and
+subsequently support it when an appropriate set of extensions can be
+deduced from the version of libclang.
+
+Fixes: 70a57b247251a ("RISC-V: enable building 64-bit kernels with rust support")
+functions: 
+fixes: 70a57b247251(riscv)
+diff --git a/Documentation/rust/arch-support.rst b/Documentation/rust/arch-support.rst
+index 750ff371570a..54be7ddf3e57 100644
+--- a/Documentation/rust/arch-support.rst
++++ b/Documentation/rust/arch-support.rst
+@@ -18,5 +18,5 @@ Architecture   Level of support  Constraints
+ ``arm64``      Maintained        Little Endian only.
+ ``loongarch``  Maintained        \-
+-``riscv``      Maintained        ``riscv64`` only.
++``riscv``      Maintained        ``riscv64`` and LLVM/Clang only.
+ ``um``         Maintained        \-
+ ``x86``        Maintained        ``x86_64`` only.
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 62545946ecf4..f4c570538d55 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -178,5 +178,5 @@ config RISCV
+ 	select HAVE_RETHOOK if !XIP_KERNEL
+ 	select HAVE_RSEQ
+-	select HAVE_RUST if RUSTC_SUPPORTS_RISCV
++	select HAVE_RUST if RUSTC_SUPPORTS_RISCV && CC_IS_CLANG
+ 	select HAVE_SAMPLE_FTRACE_DIRECT
+ 	select HAVE_SAMPLE_FTRACE_DIRECT_MULTI
+
+##### A108
+=== 164f66de6bb6 A 2024-10-08 +0/-2
+riscv: Remove duplicated GET_RM
+
+The macro GET_RM defined twice in this file, one can be removed.
+
+Fixes: 956d705dd279 ("riscv: Unaligned load/store handling for M_MODE")
+functions: 
+fixes: 956d705dd279(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index d4fd8af7aaf5..1b9867136b61 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -137,6 +137,4 @@
+ 	(ulong *)((ulong)(regs) + REG_OFFSET(insn, pos))
+ 
+-#define GET_RM(insn)			(((insn) >> 12) & 7)
+-
+ #define GET_RS1(insn, regs)		(*REG_PTR(insn, SH_RS1, regs))
+ #define GET_RS2(insn, regs)		(*REG_PTR(insn, SH_RS2, regs))
+
+##### A109
+=== 30a59cc79754 A 2024-10-08 +3/-1
+riscv, bpf: Fix possible infinite tailcall when CONFIG_CFI_CLANG is enabled
+
+When CONFIG_CFI_CLANG is enabled, the number of prologue instructions
+skipped by tailcall needs to include the kcfi instruction, otherwise the
+TCC will be initialized every tailcall is called, which may result in
+infinite tailcalls.
+
+Fixes: e63985ecd226 ("bpf, riscv64/cfi: Support kCFI + BPF on riscv64")
+functions: arch/riscv/net/bpf_jit_comp64.c:__build_epilogue
+fixes: e63985ecd226(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 99f34409fb60..91bd5082c4d8 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -19,4 +19,5 @@
+ #define RV_FENTRY_NINSNS 2
+ #define RV_FENTRY_NBYTES (RV_FENTRY_NINSNS * 4)
++#define RV_KCFI_NINSNS (IS_ENABLED(CONFIG_CFI_CLANG) ? 1 : 0)
+ /* imm that allows emit_imm to emit max count insns */
+ #define RV_MAX_COUNT_IMM 0x7FFF7FF7FF7FF7FF
+@@ -272,5 +273,6 @@ static void __build_epilogue(bool is_tail_call, struct rv_jit_context *ctx)
+ 		emit_addiw(RV_REG_A0, RV_REG_A5, 0, ctx);
+ 	emit_jalr(RV_REG_ZERO, is_tail_call ? RV_REG_T3 : RV_REG_RA,
+-		  is_tail_call ? (RV_FENTRY_NINSNS + 1) * 4 : 0, /* skip reserved nops and TCC init */
++		  /* kcfi, fentry and TCC init insns will be skipped on tailcall */
++		  is_tail_call ? (RV_KCFI_NINSNS + RV_FENTRY_NINSNS + 1) * 4 : 0,
+ 		  ctx);
+ }
+
+##### A110
+=== 46d4e5ac6f2f A 2024-10-08 +0/-2
+riscv: Remove unused GENERATING_ASM_OFFSETS
+
+The macro is not used in the current version of kernel, it looks like
+can be removed to avoid a build warning:
+
+../arch/riscv/kernel/asm-offsets.c: At top level:
+../arch/riscv/kernel/asm-offsets.c:7: warning: macro "GENERATING_ASM_OFFSETS" is not used [-Wunused-macros]
+    7 | #define GENERATING_ASM_OFFSETS
+
+Fixes: 9639a44394b9 ("RISC-V: Provide a cleaner raw_smp_processor_id()")
+functions: 
+fixes: 9639a44394b9(riscv)
+diff --git a/arch/riscv/kernel/asm-offsets.c b/arch/riscv/kernel/asm-offsets.c
+index e94180ba432f..c2f3129a8e5c 100644
+--- a/arch/riscv/kernel/asm-offsets.c
++++ b/arch/riscv/kernel/asm-offsets.c
+@@ -5,6 +5,4 @@
+  */
+ 
+-#define GENERATING_ASM_OFFSETS
+-
+ #include <linux/kbuild.h>
+ #include <linux/mm.h>
+
+##### A111
+=== afedc3126e11 A 2024-10-09 +16/-1
+riscv: Do not use fortify in early code
+
+Early code designates the code executed when the MMU is not yet enabled,
+and this comes with some limitations (see
+Documentation/arch/riscv/boot.rst, section "Pre-MMU execution").
+
+FORTIFY_SOURCE must be disabled then since it can trigger kernel panics
+as reported in [1].
+
+Fixes: a35707c3d850 ("riscv: add memory-type errata for T-Head")
+Fixes: 26e7aacb83df ("riscv: Allow to downgrade paging mode from the command line")
+functions: 
+fixes: a35707c3d850(riscv), 26e7aacb83df(riscv)
+diff --git a/arch/riscv/errata/Makefile b/arch/riscv/errata/Makefile
+index 8a2739485123..f0da9d7b39c3 100644
+--- a/arch/riscv/errata/Makefile
++++ b/arch/riscv/errata/Makefile
+@@ -3,4 +3,10 @@ KBUILD_CFLAGS += -fno-pie
+ endif
+ 
++ifdef CONFIG_RISCV_ALTERNATIVE_EARLY
++ifdef CONFIG_FORTIFY_SOURCE
++KBUILD_CFLAGS += -D__NO_FORTIFY
++endif
++endif
++
+ obj-$(CONFIG_ERRATA_ANDES) += andes/
+ obj-$(CONFIG_ERRATA_SIFIVE) += sifive/
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index 7f88cc4931f5..69dc8aaab3fb 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -37,4 +37,9 @@ KASAN_SANITIZE_cpufeature.o := n
+ KASAN_SANITIZE_sbi_ecall.o := n
+ endif
++ifdef CONFIG_FORTIFY_SOURCE
++CFLAGS_alternative.o += -D__NO_FORTIFY
++CFLAGS_cpufeature.o += -D__NO_FORTIFY
++CFLAGS_sbi_ecall.o += -D__NO_FORTIFY
++endif
+ endif
+ 
+diff --git a/arch/riscv/kernel/pi/Makefile b/arch/riscv/kernel/pi/Makefile
+index d5bf1bc7de62..81d69d45c06c 100644
+--- a/arch/riscv/kernel/pi/Makefile
++++ b/arch/riscv/kernel/pi/Makefile
+@@ -17,6 +17,10 @@ KBUILD_CFLAGS	+= -mcmodel=medany
+ 
+ CFLAGS_cmdline_early.o += -D__NO_FORTIFY
+-CFLAGS_lib-fdt_ro.o += -D__NO_FORTIFY
+ CFLAGS_fdt_early.o += -D__NO_FORTIFY
++# lib/string.c already defines __NO_FORTIFY
++CFLAGS_ctype.o += -D__NO_FORTIFY
++CFLAGS_lib-fdt.o += -D__NO_FORTIFY
++CFLAGS_lib-fdt_ro.o += -D__NO_FORTIFY
++CFLAGS_archrandom_early.o += -D__NO_FORTIFY
+ 
+ $(obj)/%.pi.o: OBJCOPYFLAGS := --prefix-symbols=__pi_ \
+
+##### A112
+=== 1966db682f06 A 2024-10-14 +2/-2
+RISC-V: ACPI: fix early_ioremap to early_memremap
+
+When SVPBMT is enabled, __acpi_map_table() will directly access the
+data in DDR through the IO attribute, rather than through hardware
+cache consistency, resulting in incorrect data in the obtained ACPI
+table.
+
+The log: ACPI: [ACPI:0x18] Invalid zero length.
+
+We do not assume whether the bootloader flushes or not. We should
+access in a cacheable way instead of maintaining cache consistency
+by software.
+
+Fixes: 3b426d4b5b14 ("RISC-V: ACPI : Fix for usage of pointers in different address space")
+functions: arch/riscv/kernel/acpi.c:__acpi_map_table, arch/riscv/kernel/acpi.c:__acpi_unmap_table
+fixes: 3b426d4b5b14(riscv)
+diff --git a/arch/riscv/kernel/acpi.c b/arch/riscv/kernel/acpi.c
+index 6e0d333f57e5..2fd29695a788 100644
+--- a/arch/riscv/kernel/acpi.c
++++ b/arch/riscv/kernel/acpi.c
+@@ -211,5 +211,5 @@ void __init __iomem *__acpi_map_table(unsigned long phys, unsigned long size)
+ 		return NULL;
+ 
+-	return early_ioremap(phys, size);
++	return early_memremap(phys, size);
+ }
+ 
+@@ -219,5 +219,5 @@ void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
+ 		return;
+ 
+-	early_iounmap(map, size);
++	early_memunmap(map, size);
+ }
+ 
+
+##### A113
+=== bf40167d54d5 A 2024-10-16 +1/-0
+riscv: vdso: Prevent the compiler from inserting calls to memset()
+
+The compiler is smart enough to insert a call to memset() in
+riscv_vdso_get_cpus(), which generates a dynamic relocation.
+
+So prevent this by using -fno-builtin option.
+
+Fixes: e2c0cdfba7f6 ("RISC-V: User-facing API")
+functions: 
+fixes: e2c0cdfba7f6(riscv)
+diff --git a/arch/riscv/kernel/vdso/Makefile b/arch/riscv/kernel/vdso/Makefile
+index 960feb1526ca..3f1c4b2d0b06 100644
+--- a/arch/riscv/kernel/vdso/Makefile
++++ b/arch/riscv/kernel/vdso/Makefile
+@@ -19,4 +19,5 @@ obj-vdso = $(patsubst %, %.o, $(vdso-syms)) note.o
+ ccflags-y := -fno-stack-protector
+ ccflags-y += -DDISABLE_BRANCH_PROFILING
++ccflags-y += -fno-builtin
+ 
+ ifneq ($(c-gettimeofday-y),)
+
+##### A114
+=== 8d20a739f17a A 2024-10-17 +9/-7
+RISC-V: Check scalar unaligned access on all CPUs
+
+Originally, the check_unaligned_access_emulated_all_cpus function
+only checked the boot hart. This fixes the function to check all
+harts.
+
+Fixes: 71c54b3d169d ("riscv: report misaligned accesses emulation to hwprobe")
+functions: arch/riscv/kernel/traps_misaligned.c:check_unaligned_access_emulated, arch/riscv/kernel/traps_misaligned.c:check_unaligned_access_emulated_all_cpus
+fixes: 71c54b3d169d(riscv)
+ arch/riscv/include/asm/cpufeature.h  |  2 ++
+ arch/riscv/kernel/traps_misaligned.c | 14 +++++++-------
+ 2 files changed, 9 insertions(+), 7 deletions(-)
+diff --git a/arch/riscv/include/asm/cpufeature.h b/arch/riscv/include/asm/cpufeature.h
+index 45f9c1171a48..dfa5cdddd367 100644
+--- a/arch/riscv/include/asm/cpufeature.h
++++ b/arch/riscv/include/asm/cpufeature.h
+@@ -9,4 +9,5 @@
+ #include <linux/bitmap.h>
+ #include <linux/jump_label.h>
++#include <linux/workqueue.h>
+ #include <asm/hwcap.h>
+ #include <asm/alternative-macros.h>
+@@ -61,4 +62,5 @@ void riscv_user_isa_enable(void);
+ #if defined(CONFIG_RISCV_MISALIGNED)
+ bool check_unaligned_access_emulated_all_cpus(void);
++void check_unaligned_access_emulated(struct work_struct *work __always_unused);
+ void unaligned_emulation_finish(void);
+ bool unaligned_ctl_available(void);
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index d4fd8af7aaf5..d076dde5ad20 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -527,9 +527,9 @@ int handle_misaligned_store(struct pt_regs *regs)
+ }
+ 
+-static bool check_unaligned_access_emulated(int cpu)
++void check_unaligned_access_emulated(struct work_struct *work __always_unused)
+ {
++	int cpu = smp_processor_id();
+ 	long *mas_ptr = per_cpu_ptr(&misaligned_access_speed, cpu);
+ 	unsigned long tmp_var, tmp_val;
+-	bool misaligned_emu_detected;
+ 
+ 	*mas_ptr = RISCV_HWPROBE_MISALIGNED_SCALAR_UNKNOWN;
+@@ -539,5 +539,4 @@ static bool check_unaligned_access_emulated(int cpu)
+ 		: [tmp] "=r" (tmp_val) : [ptr] "r" (&tmp_var) : "memory");
+ 
+-	misaligned_emu_detected = (*mas_ptr == RISCV_HWPROBE_MISALIGNED_SCALAR_EMULATED);
+ 	/*
+ 	 * If unaligned_ctl is already set, this means that we detected that all
+@@ -545,11 +544,9 @@ static bool check_unaligned_access_emulated(int cpu)
+ 	 * when hotplugging the new cpu, this is something we don't handle.
+ 	 */
+-	if (unlikely(unaligned_ctl && !misaligned_emu_detected)) {
++	if (unlikely(unaligned_ctl && (*mas_ptr != RISCV_HWPROBE_MISALIGNED_SCALAR_EMULATED))) {
+ 		pr_crit("CPU misaligned accesses non homogeneous (expected all emulated)\n");
+ 		while (true)
+ 			cpu_relax();
+ 	}
+-
+-	return misaligned_emu_detected;
+ }
+ 
+@@ -563,6 +560,9 @@ bool check_unaligned_access_emulated_all_cpus(void)
+ 	 * CPU.
+ 	 */
++	schedule_on_each_cpu(check_unaligned_access_emulated);
++
+ 	for_each_online_cpu(cpu)
+-		if (!check_unaligned_access_emulated(cpu))
++		if (per_cpu(misaligned_access_speed, cpu)
++		    != RISCV_HWPROBE_MISALIGNED_SCALAR_EMULATED)
+... (2 more diff lines)
+
+##### A115
+=== b2473a359763 A 2024-10-23 +36/-29
+of/fdt: add dt_phys arg to early_init_dt_scan and early_init_dt_verify
+
+ __pa() is only intended to be used for linear map addresses and using
+it for initial_boot_params which is in fixmap for arm64 will give an
+incorrect value. Hence save the physical address when it is known at
+boot time when calling early_init_dt_scan for arm64 and use it at kexec
+time instead of converting the virtual address using __pa().
+
+Note that arm64 doesn't need the FDT region reserved in the DT as the
+kernel explicitly reserves the passed in FDT. Therefore, only a debug
+warning is fixed with this change.
+
+Fixes: ac10be5cdbfa ("arm64: Use common of_kexec_alloc_and_setup_fdt()")
+functions: arch/arc/kernel/devtree.c:setup_machine_fdt, arch/arm/kernel/devtree.c:setup_machine_fdt, arch/arm64/kernel/setup.c:setup_machine_fdt, arch/csky/kernel/setup.c:csky_start, arch/loongarch/kernel/setup.c:fdt_setup, arch/microblaze/kernel/prom.c:early_init_devtree, arch/mips/kernel/prom.c:__dt_setup_arch, arch/mips/kernel/relocate.c:relocate_kernel, arch/nios2/kernel/prom.c:early_init_devtree, arch/openrisc/kernel/prom.c:early_init_devtree, arch/powerpc/kernel/dt_cpu_ftrs.c:dt_cpu_ftrs_init, arch/powerpc/kernel/prom.c:early_init_devtree
+fixes: ac10be5cdbfa(common)
+ arch/powerpc/kernel/dt_cpu_ftrs.c      |  2 +-
+ arch/powerpc/kernel/prom.c             |  2 +-
+ arch/powerpc/platforms/pseries/plpks.c |  2 +-
+ arch/riscv/kernel/setup.c              |  2 +-
+ arch/sh/kernel/setup.c                 |  2 +-
+ arch/um/kernel/dtb.c                   |  2 +-
+ arch/x86/kernel/devicetree.c           |  2 +-
+ arch/xtensa/kernel/setup.c             |  2 +-
+ drivers/of/fdt.c                       | 14 ++++++++------
+ drivers/of/kexec.c                     |  2 +-
+ include/linux/of_fdt.h                 |  5 +++--
+ 21 files changed, 36 insertions(+), 29 deletions(-)
+diff --git a/arch/arc/kernel/devtree.c b/arch/arc/kernel/devtree.c
+index 4c9e61457b2f..cc6ac7d128aa 100644
+--- a/arch/arc/kernel/devtree.c
++++ b/arch/arc/kernel/devtree.c
+@@ -63,5 +63,5 @@ const struct machine_desc * __init setup_machine_fdt(void *dt)
+ 	unsigned long dt_root;
+ 
+-	if (!early_init_dt_scan(dt))
++	if (!early_init_dt_scan(dt, __pa(dt)))
+ 		return NULL;
+ 
+diff --git a/arch/arm/kernel/devtree.c b/arch/arm/kernel/devtree.c
+index fdb74e64206a..3b78966e750a 100644
+--- a/arch/arm/kernel/devtree.c
++++ b/arch/arm/kernel/devtree.c
+@@ -201,5 +201,5 @@ const struct machine_desc * __init setup_machine_fdt(void *dt_virt)
+ 	mdesc_best = &__mach_desc_GENERIC_DT;
+ 
+-	if (!dt_virt || !early_init_dt_verify(dt_virt))
++	if (!dt_virt || !early_init_dt_verify(dt_virt, __pa(dt_virt)))
+ 		return NULL;
+ 
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index b22d28ec8028..87f61fd6783c 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -176,5 +176,9 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
+ 		memblock_reserve(dt_phys, size);
+ 
+-	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
++	/*
++	 * dt_virt is a fixmap address, hence __pa(dt_virt) can't be used.
++	 * Pass dt_phys directly.
++	 */
++	if (!early_init_dt_scan(dt_virt, dt_phys)) {
+ 		pr_crit("\n"
+ 			"Error: invalid device tree blob at physical address %pa (virtual address 0x%px)\n"
+diff --git a/arch/csky/kernel/setup.c b/arch/csky/kernel/setup.c
+index 51012e90780d..fe715b707fd0 100644
+--- a/arch/csky/kernel/setup.c
++++ b/arch/csky/kernel/setup.c
+@@ -113,7 +113,7 @@ asmlinkage __visible void __init csky_start(unsigned int unused,
+ 
+ 	if (dtb_start == NULL)
+-		early_init_dt_scan(__dtb_start);
++		early_init_dt_scan(__dtb_start, __pa(dtb_start));
+ 	else
+-		early_init_dt_scan(dtb_start);
++		early_init_dt_scan(dtb_start, __pa(dtb_start));
+ 
+ 	start_kernel();
+diff --git a/arch/loongarch/kernel/setup.c b/arch/loongarch/kernel/setup.c
+index 00e307203ddb..10d878204018 100644
+--- a/arch/loongarch/kernel/setup.c
++++ b/arch/loongarch/kernel/setup.c
+@@ -291,5 +291,5 @@ static void __init fdt_setup(void)
+ 		return;
+ 
+-	early_init_dt_scan(fdt_pointer);
++	early_init_dt_scan(fdt_pointer, __pa(fdt_pointer));
+... (224 more diff lines)
+
+##### A116
+=== 0eb512779d64 A 2024-11-08 +12/-0
+riscv: Fix default misaligned access trap
+
+Commit d1703dc7bc8e ("RISC-V: Detect unaligned vector accesses
+supported") removed the default handlers for handle_misaligned_load()
+and handle_misaligned_store(). When the kernel is compiled without
+RISCV_SCALAR_MISALIGNED, these handlers are never defined, causing
+compilation errors.
+
+Fixes: d1703dc7bc8e ("RISC-V: Detect unaligned vector accesses supported")
+functions: 
+fixes: d1703dc7bc8e(riscv)
+diff --git a/arch/riscv/include/asm/entry-common.h b/arch/riscv/include/asm/entry-common.h
+index 7b32d2b08bb6..b28ccc6cdeea 100644
+--- a/arch/riscv/include/asm/entry-common.h
++++ b/arch/riscv/include/asm/entry-common.h
+@@ -26,6 +26,18 @@ void handle_page_fault(struct pt_regs *regs);
+ void handle_break(struct pt_regs *regs);
+ 
++#ifdef CONFIG_RISCV_MISALIGNED
+ int handle_misaligned_load(struct pt_regs *regs);
+ int handle_misaligned_store(struct pt_regs *regs);
++#else
++static inline int handle_misaligned_load(struct pt_regs *regs)
++{
++	return -1;
++}
++
++static inline int handle_misaligned_store(struct pt_regs *regs)
++{
++	return -1;
++}
++#endif
+ 
+ #endif /* _ASM_RISCV_ENTRY_COMMON_H */
+
+##### A117
+=== a4a58f510bd8 A 2024-11-09 +0/-1
+riscv: Remove unused TASK_TI_FLAGS
+
+Since commit f0bddf50586d ("riscv: entry: Convert to generic
+entry"), TASK_TI_FLAGS is not used any more, so remove it.
+
+Fixes: f0bddf50586d ("riscv: entry: Convert to generic entry")
+functions: arch/riscv/kernel/asm-offsets.c:asm_offsets
+fixes: f0bddf50586d(riscv)
+diff --git a/arch/riscv/kernel/asm-offsets.c b/arch/riscv/kernel/asm-offsets.c
+index e89455a6a0e5..16490755304e 100644
+--- a/arch/riscv/kernel/asm-offsets.c
++++ b/arch/riscv/kernel/asm-offsets.c
+@@ -37,5 +37,4 @@ void asm_offsets(void)
+ 
+ 	OFFSET(TASK_TI_CPU, task_struct, thread_info.cpu);
+-	OFFSET(TASK_TI_FLAGS, task_struct, thread_info.flags);
+ 	OFFSET(TASK_TI_PREEMPT_COUNT, task_struct, thread_info.preempt_count);
+ 	OFFSET(TASK_TI_KERNEL_SP, task_struct, thread_info.kernel_sp);
+
+##### A118
+=== 6a97f4118ac0 A 2024-11-18 +3/-3
+riscv: Fix sleeping in invalid context in die()
+
+die() can be called in exception handler, and therefore cannot sleep.
+However, die() takes spinlock_t which can sleep with PREEMPT_RT enabled.
+That causes the following warning:
+
+BUG: sleeping function called from invalid context at kernel/locking/spinlock_rt.c:48
+in_atomic(): 1, irqs_disabled(): 1, non_block: 0, pid: 285, name: mutex
+preempt_count: 110001, expected: 0
+RCU nest depth: 0, expected: 0
+CPU: 0 UID: 0 PID: 285 Comm: mutex Not tainted 6.12.0-rc7-00022-ge19049cf7d56-dirty #234
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+    dump_backtrace+0x1c/0x24
+    show_stack+0x2c/0x38
+    dump_stack_lvl+0x5a/0x72
+    dump_stack+0x14/0x1c
+    __might_resched+0x130/0x13a
+    rt_spin_lock+0x2a/0x5c
+    die+0x24/0x112
+    do_trap_insn_illegal+0xa0/0xea
+    _new_vmalloc_restore_context_a0+0xcc/0xd8
+Oops - illegal instruction [#1]
+
+Switch to use raw_spinlock_t, which does not sleep even with PREEMPT_RT
+enabled.
+
+Fixes: 76d2a0493a17 ("RISC-V: Init and Halt Code")
+functions: arch/riscv/kernel/traps.c:die
+fixes: 76d2a0493a17(riscv)
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 51ebfd23e007..8ff8e8b36524 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -36,5 +36,5 @@
+ int show_unhandled_signals = 1;
+ 
+-static DEFINE_SPINLOCK(die_lock);
++static DEFINE_RAW_SPINLOCK(die_lock);
+ 
+ static int copy_code(struct pt_regs *regs, u16 *val, const u16 *insns)
+@@ -82,5 +82,5 @@ void die(struct pt_regs *regs, const char *str)
+ 	oops_enter();
+ 
+-	spin_lock_irqsave(&die_lock, flags);
++	raw_spin_lock_irqsave(&die_lock, flags);
+ 	console_verbose();
+ 	bust_spinlocks(1);
+@@ -101,5 +101,5 @@ void die(struct pt_regs *regs, const char *str)
+ 	bust_spinlocks(0);
+ 	add_taint(TAINT_DIE, LOCKDEP_NOW_UNRELIABLE);
+-	spin_unlock_irqrestore(&die_lock, flags);
++	raw_spin_unlock_irqrestore(&die_lock, flags);
+ 	oops_exit();
+ 
+
+##### A119
+=== 21f1b85c8912 A 2024-11-20 +4/-3
+riscv: mm: Do not call pmd dtor on vmemmap page table teardown
+
+The vmemmap's, which is used for RV64 with SPARSEMEM_VMEMMAP, page
+tables are populated using pmd (page middle directory) hugetables.
+However, the pmd allocation is not using the generic mechanism used by
+the VMA code (e.g. pmd_alloc()), or the RISC-V specific
+create_pgd_mapping()/alloc_pmd_late(). Instead, the vmemmap page table
+code allocates a page, and calls vmemmap_set_pmd(). This results in
+that the pmd ctor is *not* called, nor would it make sense to do so.
+
+Now, when tearing down a vmemmap page table pmd, the cleanup code
+would unconditionally, and incorrectly call the pmd dtor, which
+results in a crash (best case).
+
+This issue was found when running the HMM selftests:
+
+  | tools/testing/selftests/mm# ./test_hmm.sh smoke
+  | ... # when unloading the test_hmm.ko module
+  | page: refcount:1 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x10915b
+  | flags: 0x1000000000000000(node=0|zone=1)
+  | raw: 1000000000000000 0000000000000000 dead000000000122 0000000000000000
+  | raw: 0000000000000000 0000000000000000 00000001ffffffff 0000000000000000
+  | page dumped because: VM_BUG_ON_PAGE(ptdesc->pmd_huge_pte)
+  | ------------[ cut here ]------------
+  | kernel BUG at include/linux/mm.h:3080!
+  | Kernel BUG [#1]
+  | Modules linked in: test_hmm(-) sch_fq_codel fuse drm drm_panel_orientation_quirks backlight dm_mod
+  | CPU: 1 UID: 0 PID: 514 Comm: modprobe Tainted: G        W          6.12.0-00982-gf2a4f1682d07 #2
+  | Tainted: [W]=WARN
+  | Hardware name: riscv-virtio qemu/qemu, BIOS 2024.10 10/01/2024
+  | epc : remove_pgd_mapping+0xbec/0x1070
+  |  ra : remove_pgd_mapping+0xbec/0x1070
+  | epc : ffffffff80010a68 ra : ffffffff80010a68 sp : ff20000000a73940
+  |  gp : ffffffff827b2d88 tp : ff6000008785da40 t0 : ffffffff80fbce04
+  |  t1 : 0720072007200720 t2 : 706d756420656761 s0 : ff20000000a73a50
+  |  s1 : ff6000008915cff8 a0 : 0000000000000039 a1 : 0000000000000008
+  |  a2 : ff600003fff0de20 a3 : 0000000000000000 a4 : 0000000000000000
+  |  a5 : 0000000000000000 a6 : c0000000ffffefff a7 : ffffffff824469b8
+  |  s2 : ff1c0000022456c0 s3 : ff1ffffffdbfffff s4 : ff6000008915c000
+  |  s5 : ff6000008915c000 s6 : ff6000008915c000 s7 : ff1ffffffdc00000
+  |  s8 : 0000000000000001 s9 : ff1ffffffdc00000 s10: ffffffff819a31f0
+functions: arch/riscv/mm/init.c:free_pmd_table, arch/riscv/mm/init.c:remove_pud_mapping
+fixes: c75a74f4ba19(riscv)
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 0e8c20adcd98..fc53ce748c80 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -1567,5 +1567,5 @@ static void __meminit free_pte_table(pte_t *pte_start, pmd_t *pmd)
+ }
+ 
+-static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud)
++static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud, bool is_vmemmap)
+ {
+ 	struct page *page = pud_page(*pud);
+@@ -1580,5 +1580,6 @@ static void __meminit free_pmd_table(pmd_t *pmd_start, pud_t *pud)
+ 	}
+ 
+-	pagetable_pmd_dtor(ptdesc);
++	if (!is_vmemmap)
++		pagetable_pmd_dtor(ptdesc);
+ 	if (PageReserved(page))
+ 		free_reserved_page(page);
+@@ -1704,5 +1705,5 @@ static void __meminit remove_pud_mapping(pud_t *pud_base, unsigned long addr, un
+ 
+ 		if (pgtable_l4_enabled)
+-			free_pmd_table(pmd_base, pudp);
++			free_pmd_table(pmd_base, pudp, is_vmemmap);
+ 	}
+ }
+
+##### A120
+=== 03f0b548537f A 2024-11-28 +4/-14
+riscv: module: remove relocation_head rel_entry member allocation
+
+relocation_head's list_head member, rel_entry, doesn't need to be
+allocated, its storage can just be part of the allocated relocation_head.
+Remove the pointer which allows to get rid of the allocation as well as
+an existing memory leak found by Kai Zhang using kmemleak.
+
+Fixes: 8fd6c5142395 ("riscv: Add remaining module relocations")
+functions: arch/riscv/kernel/module.c:process_accumulated_relocations, arch/riscv/kernel/module.c:add_relocation_to_accumulate
+fixes: 8fd6c5142395(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index 1cd461f3d872..47d0ebeec93c 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -24,5 +24,5 @@ struct used_bucket {
+ struct relocation_head {
+ 	struct hlist_node node;
+-	struct list_head *rel_entry;
++	struct list_head rel_entry;
+ 	void *location;
+ };
+@@ -635,5 +635,5 @@ process_accumulated_relocations(struct module *me,
+ 			list_for_each_entry_safe(rel_entry_iter,
+ 						 rel_entry_iter_tmp,
+-						 rel_head_iter->rel_entry,
++						 &rel_head_iter->rel_entry,
+ 						 head) {
+ 				curr_type = rel_entry_iter->type;
+@@ -705,14 +705,5 @@ static int add_relocation_to_accumulate(struct module *me, int type,
+ 		}
+ 
+-		rel_head->rel_entry =
+-			kmalloc(sizeof(struct list_head), GFP_KERNEL);
+-
+-		if (!rel_head->rel_entry) {
+-			kfree(entry);
+-			kfree(rel_head);
+-			return -ENOMEM;
+-		}
+-
+-		INIT_LIST_HEAD(rel_head->rel_entry);
++		INIT_LIST_HEAD(&rel_head->rel_entry);
+ 		rel_head->location = location;
+ 		INIT_HLIST_NODE(&rel_head->node);
+@@ -723,5 +714,4 @@ static int add_relocation_to_accumulate(struct module *me, int type,
+ 			if (!bucket) {
+ 				kfree(entry);
+-				kfree(rel_head->rel_entry);
+ 				kfree(rel_head);
+ 				return -ENOMEM;
+@@ -736,5 +726,5 @@ static int add_relocation_to_accumulate(struct module *me, int type,
+ 
+ 	/* Add relocation to head of discovered rel_head */
+-	list_add_tail(&entry->head, rel_head->rel_entry);
++	list_add_tail(&entry->head, &rel_head->rel_entry);
+ 
+ 	return 0;
+
+##### A121
+=== 51356ce60e59 A 2024-12-09 +4/-1
+riscv: stacktrace: fix backtracing through exceptions
+
+Prior to commit 5d5fc33ce58e ("riscv: Improve exception and system call
+latency"), backtrace through exception worked since ra was filled with
+ret_from_exception symbol address and the stacktrace code checked 'pc' to
+be equal to that symbol. Now that handle_exception uses regular 'call'
+instructions, this isn't working anymore and backtrace stops at
+handle_exception(). Since there are multiple call site to C code in the
+exception handling path, rather than checking multiple potential return
+addresses, add a new symbol at the end of exception handling and check pc
+to be in that range.
+
+Fixes: 5d5fc33ce58e ("riscv: Improve exception and system call latency")
+functions: arch/riscv/kernel/stacktrace.c:walk_stackframe
+fixes: 5d5fc33ce58e(riscv)
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index c200d329d4bd..7a6c48e6d211 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -279,4 +279,5 @@ SYM_CODE_START_NOALIGN(ret_from_exception)
+ 	sret
+ #endif
++SYM_INNER_LABEL(ret_from_exception_end, SYM_L_GLOBAL)
+ SYM_CODE_END(ret_from_exception)
+ ASM_NOKPROBE(ret_from_exception)
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index 153a2db4c5fa..d4355c770c36 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -18,4 +18,5 @@
+ 
+ extern asmlinkage void handle_exception(void);
++extern unsigned long ret_from_exception_end;
+ 
+ static inline int fp_is_valid(unsigned long fp, unsigned long sp)
+@@ -72,5 +73,6 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			pc = ftrace_graph_ret_addr(current, &graph_idx, frame->ra,
+ 						   &frame->ra);
+-			if (pc == (unsigned long)handle_exception) {
++			if (pc >= (unsigned long)handle_exception &&
++			    pc < (unsigned long)&ret_from_exception_end) {
+ 				if (unlikely(!__kernel_text_address(pc) || !fn(arg, pc)))
+ 					break;
+
+##### A122
+=== b3431a8bb336 A 2024-12-09 +3/-1
+riscv: Fix IPIs usage in kfence_protect_page()
+
+flush_tlb_kernel_range() may use IPIs to flush the TLBs of all the
+cores, which triggers the following warning when the irqs are disabled:
+
+[    3.455330] WARNING: CPU: 1 PID: 0 at kernel/smp.c:815 smp_call_function_many_cond+0x452/0x520
+[    3.456647] Modules linked in:
+[    3.457218] CPU: 1 UID: 0 PID: 0 Comm: swapper/1 Not tainted 6.12.0-rc7-00010-g91d3de7240b8 #1
+[    3.457416] Hardware name: QEMU QEMU Virtual Machine, BIOS
+[    3.457633] epc : smp_call_function_many_cond+0x452/0x520
+[    3.457736]  ra : on_each_cpu_cond_mask+0x1e/0x30
+[    3.457786] epc : ffffffff800b669a ra : ffffffff800b67c2 sp : ff2000000000bb50
+[    3.457824]  gp : ffffffff815212b8 tp : ff6000008014f080 t0 : 000000000000003f
+[    3.457859]  t1 : ffffffff815221e0 t2 : 000000000000000f s0 : ff2000000000bc10
+[    3.457920]  s1 : 0000000000000040 a0 : ffffffff815221e0 a1 : 0000000000000001
+[    3.457953]  a2 : 0000000000010000 a3 : 0000000000000003 a4 : 0000000000000000
+[    3.458006]  a5 : 0000000000000000 a6 : ffffffffffffffff a7 : 0000000000000000
+[    3.458042]  s2 : ffffffff815223be s3 : 00fffffffffff000 s4 : ff600001ffe38fc0
+[    3.458076]  s5 : ff600001ff950d00 s6 : 0000000200000120 s7 : 0000000000000001
+[    3.458109]  s8 : 0000000000000001 s9 : ff60000080841ef0 s10: 0000000000000001
+[    3.458141]  s11: ffffffff81524812 t3 : 0000000000000001 t4 : ff60000080092bc0
+[    3.458172]  t5 : 0000000000000000 t6 : ff200000000236d0
+[    3.458203] status: 0000000200000100 badaddr: ffffffff800b669a cause: 0000000000000003
+[    3.458373] [<ffffffff800b669a>] smp_call_function_many_cond+0x452/0x520
+[    3.458593] [<ffffffff800b67c2>] on_each_cpu_cond_mask+0x1e/0x30
+[    3.458625] [<ffffffff8000e4ca>] __flush_tlb_range+0x118/0x1ca
+[    3.458656] [<ffffffff8000e6b2>] flush_tlb_kernel_range+0x1e/0x26
+[    3.458683] [<ffffffff801ea56a>] kfence_protect+0xc0/0xce
+[    3.458717] [<ffffffff801e9456>] kfence_guarded_free+0xc6/0x1c0
+[    3.458742] [<ffffffff801e9d6c>] __kfence_free+0x62/0xc6
+[    3.458764] [<ffffffff801c57d8>] kfree+0x106/0x32c
+[    3.458786] [<ffffffff80588cf2>] detach_buf_split+0x188/0x1a8
+[    3.458816] [<ffffffff8058708c>] virtqueue_get_buf_ctx+0xb6/0x1f6
+[    3.458839] [<ffffffff805871da>] virtqueue_get_buf+0xe/0x16
+[    3.458880] [<ffffffff80613d6a>] virtblk_done+0x5c/0xe2
+[    3.458908] [<ffffffff8058766e>] vring_interrupt+0x6a/0x74
+[    3.458930] [<ffffffff800747d8>] __handle_irq_event_percpu+0x7c/0xe2
+[    3.458956] [<ffffffff800748f0>] handle_irq_event+0x3c/0x86
+[    3.458978] [<ffffffff800786cc>] handle_simple_irq+0x9e/0xbe
+[    3.459004] [<ffffffff80073934>] generic_handle_domain_irq+0x1c/0x2a
+[    3.459027] [<ffffffff804bf87c>] imsic_handle_irq+0xba/0x120
+functions: 
+fixes: 47513f243b45(riscv)
+diff --git a/arch/riscv/include/asm/kfence.h b/arch/riscv/include/asm/kfence.h
+index 7388edd88986..d08bf7fb3aee 100644
+--- a/arch/riscv/include/asm/kfence.h
++++ b/arch/riscv/include/asm/kfence.h
+@@ -23,5 +23,7 @@ static inline bool kfence_protect_page(unsigned long addr, bool protect)
+ 		set_pte(pte, __pte(pte_val(ptep_get(pte)) | _PAGE_PRESENT));
+ 
+-	flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++	preempt_disable();
++	local_flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++	preempt_enable();
+ 
+ 	return true;
+
+##### A123
+=== f754f27e98f8 A 2024-12-09 +18/-2
+riscv: mm: Fix the out of bound issue of vmemmap address
+
+In sparse vmemmap model, the virtual address of vmemmap is calculated as:
+((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT)).
+And the struct page's va can be calculated with an offset:
+(vmemmap + (pfn)).
+
+However, when initializing struct pages, kernel actually starts from the
+first page from the same section that phys_ram_base belongs to. If the
+first page's physical address is not (phys_ram_base >> PAGE_SHIFT), then
+we get an va below VMEMMAP_START when calculating va for it's struct page.
+
+For example, if phys_ram_base starts from 0x82000000 with pfn 0x82000, the
+first page in the same section is actually pfn 0x80000. During
+init_unavailable_range(), we will initialize struct page for pfn 0x80000
+with virtual address ((struct page *)VMEMMAP_START - 0x2000), which is
+below VMEMMAP_START as well as PCI_IO_END.
+
+This commit fixes this bug by introducing a new variable
+'vmemmap_start_pfn' which is aligned with memory section size and using
+it to calculate vmemmap address instead of phys_ram_base.
+
+Fixes: a11dd49dcb93 ("riscv: Sparse-Memory/vmemmap out-of-bounds fix")
+functions: arch/riscv/mm/init.c:setup_bootmem, arch/riscv/mm/init.c:setup_vm
+fixes: a11dd49dcb93(riscv)
+ arch/riscv/include/asm/page.h    |  1 +
+ arch/riscv/include/asm/pgtable.h |  2 +-
+ arch/riscv/mm/init.c             | 17 ++++++++++++++++-
+ 3 files changed, 18 insertions(+), 2 deletions(-)
+diff --git a/arch/riscv/include/asm/page.h b/arch/riscv/include/asm/page.h
+index 71aabc5c6713..125f5ecd9565 100644
+--- a/arch/riscv/include/asm/page.h
++++ b/arch/riscv/include/asm/page.h
+@@ -123,4 +123,5 @@ struct kernel_mapping {
+ extern struct kernel_mapping kernel_map;
+ extern phys_addr_t phys_ram_base;
++extern unsigned long vmemmap_start_pfn;
+ 
+ #define is_kernel_mapping(x)	\
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index d4e99eef90ac..050fdc49b5ad 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -88,5 +88,5 @@
+  * is configured with CONFIG_SPARSEMEM_VMEMMAP enabled.
+  */
+-#define vmemmap		((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT))
++#define vmemmap		((struct page *)VMEMMAP_START - vmemmap_start_pfn)
+ 
+ #define PCI_IO_SIZE      SZ_16M
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index fc53ce748c80..8d167e09f1fe 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -34,4 +34,5 @@
+ #include <asm/sections.h>
+ #include <asm/soc.h>
++#include <asm/sparsemem.h>
+ #include <asm/tlbflush.h>
+ 
+@@ -63,4 +64,11 @@ phys_addr_t phys_ram_base __ro_after_init;
+ EXPORT_SYMBOL(phys_ram_base);
+ 
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++#define VMEMMAP_ADDR_ALIGN	(1ULL << SECTION_SIZE_BITS)
++
++unsigned long vmemmap_start_pfn __ro_after_init;
++EXPORT_SYMBOL(vmemmap_start_pfn);
++#endif
++
+ unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)]
+ 							__page_aligned_bss;
+@@ -241,6 +249,10 @@ static void __init setup_bootmem(void)
+ 	 * at worst, we map the linear mapping with PMD mappings.
+ 	 */
+-	if (!IS_ENABLED(CONFIG_XIP_KERNEL))
++	if (!IS_ENABLED(CONFIG_XIP_KERNEL)) {
+ 		phys_ram_base = memblock_start_of_DRAM() & PMD_MASK;
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++		vmemmap_start_pfn = round_down(phys_ram_base, VMEMMAP_ADDR_ALIGN) >> PAGE_SHIFT;
++#endif
++	}
+ 
+ 	/*
+@@ -1102,4 +1114,7 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
+ 
+ 	phys_ram_base = CONFIG_PHYS_RAM_BASE;
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++	vmemmap_start_pfn = round_down(phys_ram_base, VMEMMAP_ADDR_ALIGN) >> PAGE_SHIFT;
+... (3 more diff lines)
+
+##### A124
+=== fc58db9aeb15 A 2024-12-12 +6/-7
+drivers/perf: riscv: Fix Platform firmware event data
+
+Platform firmware event data field is allowed to be 62 bits for
+Linux as uppper most two bits are reserved to indicate SBI fw or
+platform specific firmware events.
+However, the event data field is masked as per the hardware raw
+event mask which is not correct.
+
+Fix the platform firmware event data field with proper mask.
+
+Fixes: f0c9363db2dd ("perf/riscv-sbi: Add platform specific firmware event handling")
+functions: drivers/perf/riscv_pmu_sbi.c:pmu_sbi_event_map
+fixes: f0c9363db2dd(riscv)
+diff --git a/arch/riscv/include/asm/sbi.h b/arch/riscv/include/asm/sbi.h
+index 6c82318065cf..3d250824178b 100644
+--- a/arch/riscv/include/asm/sbi.h
++++ b/arch/riscv/include/asm/sbi.h
+@@ -160,4 +160,5 @@ struct riscv_pmu_snapshot_data {
+ 
+ #define RISCV_PMU_RAW_EVENT_MASK GENMASK_ULL(47, 0)
++#define RISCV_PMU_PLAT_FW_EVENT_MASK GENMASK_ULL(61, 0)
+ #define RISCV_PMU_RAW_EVENT_IDX 0x20000
+ #define RISCV_PLAT_FW_EVENT	0xFFFF
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 1aa303f76cc7..3473ba02abf3 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -508,5 +508,4 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
+ 	u32 type = event->attr.type;
+ 	u64 config = event->attr.config;
+-	u64 raw_config_val;
+ 	int ret;
+ 
+@@ -529,5 +528,5 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
+ 		/*
+ 		 * As per SBI specification, the upper 16 bits must be unused
+-		 * for a raw event.
++		 * for a hardware raw event.
+ 		 * Bits 63:62 are used to distinguish between raw events
+ 		 * 00 - Hardware raw event
+@@ -535,13 +534,12 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
+ 		 * 11 - Risc-V platform specific firmware event
+ 		 */
+-		raw_config_val = config & RISCV_PMU_RAW_EVENT_MASK;
++
+ 		switch (config >> 62) {
+ 		case 0:
+ 			ret = RISCV_PMU_RAW_EVENT_IDX;
+-			*econfig = raw_config_val;
++			*econfig = config & RISCV_PMU_RAW_EVENT_MASK;
+ 			break;
+ 		case 2:
+-			ret = (raw_config_val & 0xFFFF) |
+-				(SBI_PMU_EVENT_TYPE_FW << 16);
++			ret = (config & 0xFFFF) | (SBI_PMU_EVENT_TYPE_FW << 16);
+ 			break;
+ 		case 3:
+@@ -552,5 +550,5 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
+ 			 */
+ 			ret = SBI_PMU_EVENT_TYPE_FW << 16 | RISCV_PLAT_FW_EVENT;
+-			*econfig = raw_config_val;
++			*econfig = config & RISCV_PMU_PLAT_FW_EVENT_MASK;
+ 			break;
+ 		}

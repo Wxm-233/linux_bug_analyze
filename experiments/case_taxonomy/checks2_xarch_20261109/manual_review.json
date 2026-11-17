@@ -1,0 +1,813 @@
+{
+ "reviewer": "Claude",
+ "date": "2026-11-09",
+ "source": "flags_current.json",
+ "total_distinct": 253,
+ "seed": 20261109,
+ "sampled": 40,
+ "counts": {
+  "不是": 39,
+  "疑似真问题": 1
+ },
+ "suspected_real_ratio": 0.025,
+ "threshold": 0.25,
+ "noise_acceptable": false,
+ "reason_codes": {
+  "arch_feature": "对照架构特有的功能（MTE、PAT、IO-APIC、vsyscall、x32、内存加密、GICC 等），riscv 没有这一功能，用公共默认实现合理",
+  "param_reassign": "对照架构改写的是参数变量本身（如 coherent = true、p += BIT_WORD(nr)），不是对外的副作用；来自判据允许的 p#N 键",
+  "errno_benign": "错误码不同，但调用方只区分成功与失败，或只把错误码原样返回",
+  "config": "riscv 当前配置没有打开相应功能（BPF_JIT、RELOCATABLE→MODULE_SECTIONS），用公共弱定义是预期行为",
+  "common_default": "公共代码已经给了合适的默认值，riscv 不必再写",
+  "log_arg": "差异只在日志/WARN 的实参上",
+  "suspected": "riscv 缺的行为，公共调用方或用户态依赖它，可能导致错误"
+ },
+ "reason_counts": {
+  "log_arg": 1,
+  "arch_feature": 25,
+  "config": 2,
+  "errno_benign": 5,
+  "suspected": 1,
+  "param_reassign": 6,
+  "common_default": 1
+ },
+ "items": [
+  {
+   "index": 2,
+   "type": "arg-diff",
+   "family": "arch_setup_dma_ops",
+   "detail": "__warn_printk#3:['64']vs['128']",
+   "riscv": [
+    "arch/riscv/mm/dma-noncoherent.c:131"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/mm/dma-mapping.c:41"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "log_arg"
+   ],
+   "note": "arm64 的 WARN 打印 ARCH_DMA_MINALIGN（128），riscv 打印 64"
+  },
+  {
+   "index": 12,
+   "type": "call-missing",
+   "family": "arch_exit_to_user_mode_work",
+   "detail": "send_sig_fault",
+   "riscv": [
+    "include/linux/irq-entry-common.h:126"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/include/asm/entry-common.h:16"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 处理 MTE 异步标签错误时发信号"
+  },
+  {
+   "index": 22,
+   "type": "call-missing",
+   "family": "bpf_int_jit_compile",
+   "detail": "pcpu_alloc_noprof",
+   "riscv": [
+    "kernel/bpf/core.c:3213"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/net/bpf_jit_comp.c:2156",
+     "kernel/bpf/core.c:3213"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "config"
+   ],
+   "note": "riscv defconfig 没开 BPF_JIT，用 kernel/bpf/core.c 的弱定义"
+  },
+  {
+   "index": 24,
+   "type": "call-missing",
+   "family": "kvm_arch_init_vm",
+   "detail": "bitmap_zero",
+   "riscv": [
+    "arch/riscv/kvm/vm.c:31"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/arm.c:222"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 初始化自己的 vCPU 特性位图"
+  },
+  {
+   "index": 35,
+   "type": "errno-diff",
+   "family": "apply_relocate_add",
+   "detail": "-8",
+   "riscv": [
+    "arch/riscv/kernel/module.c:766"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kernel/module.c:231"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "errno_benign"
+   ],
+   "note": "load_module 只把错误码向上返回"
+  },
+  {
+   "index": 41,
+   "type": "errno-diff",
+   "family": "bpf_arch_text_invalidate",
+   "detail": "-22",
+   "riscv": [
+    "kernel/bpf/core.c:3355"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/net/bpf_jit_comp.c:273",
+     "kernel/bpf/core.c:3355"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "errno_benign"
+   ],
+   "note": ""
+  },
+  {
+   "index": 46,
+   "type": "errno-diff",
+   "family": "kvm_arch_vm_ioctl",
+   "detail": "-14,-6",
+   "riscv": [
+    "arch/riscv/kvm/vm.c:268"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/arm.c:2034"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "errno_benign",
+    "arch_feature"
+   ],
+   "note": "arm64 的 VM ioctl 更多"
+  },
+  {
+   "index": 47,
+   "type": "errno-diff",
+   "family": "kvm_set_msi",
+   "detail": "-19",
+   "riscv": [
+    "arch/riscv/kvm/vm.c:68"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/vgic/vgic-irqfd.c:92"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "errno_benign"
+   ],
+   "note": ""
+  },
+  {
+   "index": 48,
+   "type": "errno-diff",
+   "family": "kvm_vm_ioctl_irq_line",
+   "detail": "-22",
+   "riscv": [
+    "arch/riscv/kvm/vm.c:59"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/arm.c:1495"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "errno_benign"
+   ],
+   "note": ""
+  },
+  {
+   "index": 52,
+   "type": "stub",
+   "family": "acpi_arch_get_root_pointer",
+   "detail": "const",
+   "riscv": [
+    "include/linux/acpi.h:814"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/include/asm/acpi.h:167"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 从 boot_params 取 RSDP"
+  },
+  {
+   "index": 54,
+   "type": "stub",
+   "family": "acpi_get_override_irq",
+   "detail": "const",
+   "riscv": [
+    "include/linux/acpi.h:400"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/apic/io_apic.c:790"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 IO-APIC"
+  },
+  {
+   "index": 55,
+   "type": "stub",
+   "family": "acpi_numa_gicc_affinity_init",
+   "detail": "empty",
+   "riscv": [
+    "include/linux/acpi.h:279"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kernel/acpi_numa.c:81"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 GICC 亲和性；riscv 有对应的 RINTC 路径"
+  },
+  {
+   "index": 64,
+   "type": "stub",
+   "family": "arch_disable_smp_support",
+   "detail": "empty",
+   "riscv": [
+    "kernel/smp.c:1064"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/smpboot.c:1150",
+     "kernel/smp.c:1064"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 专用"
+  },
+  {
+   "index": 74,
+   "type": "stub",
+   "family": "arch_io_reserve_memtype_wc",
+   "detail": "const",
+   "riscv": [
+    "include/linux/io.h:171"
+   ],
+   "counterparts": {
+    "x86": [
+     "<invalid buffer>:356"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 PAT"
+  },
+  {
+   "index": 77,
+   "type": "stub",
+   "family": "arch_parse_elf_property",
+   "detail": "const",
+   "riscv": [
+    "include/linux/elf.h:89"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/include/asm/elf.h:260"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 解析 BTI 属性；riscv 没有选 ARCH_USE_GNU_PROPERTY"
+  },
+  {
+   "index": 81,
+   "type": "stub",
+   "family": "arch_prctl_spec_ctrl_get",
+   "detail": "const",
+   "riscv": [
+    "kernel/sys.c:2365"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/cpu/bugs.c:2735",
+     "kernel/sys.c:2365"
+    ],
+    "arm64": [
+     "arch/arm64/kernel/proton-pack.c:798",
+     "kernel/sys.c:2365"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "riscv 未实现投机控制 prctl，公共代码按“不支持”处理"
+  },
+  {
+   "index": 94,
+   "type": "stub",
+   "family": "arch_thaw_secondary_cpus_begin",
+   "detail": "empty",
+   "riscv": [
+    "kernel/cpu.c:1944"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/smpboot.c:1254",
+     "kernel/cpu.c:1944"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 专用"
+  },
+  {
+   "index": 95,
+   "type": "stub",
+   "family": "arch_thaw_secondary_cpus_end",
+   "detail": "empty",
+   "riscv": [
+    "kernel/cpu.c:1948"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/smpboot.c:1259",
+     "kernel/cpu.c:1948"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 专用"
+  },
+  {
+   "index": 102,
+   "type": "stub",
+   "family": "clocksource_arch_init",
+   "detail": "empty",
+   "riscv": [
+    "include/linux/clocksource.h:301"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/time.c:101"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 专用"
+  },
+  {
+   "index": 107,
+   "type": "stub",
+   "family": "efivar_reserved_space",
+   "detail": "const",
+   "riscv": [
+    "include/linux/efi.h:1046"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/platform/efi/quirks.c:117"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 EFI quirk"
+  },
+  {
+   "index": 108,
+   "type": "stub",
+   "family": "elf_core_extra_data_size",
+   "detail": "const",
+   "riscv": [
+    "include/linux/elfcore.h:130"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kernel/elfcore.c:116"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 MTE 标签写入 core dump"
+  },
+  {
+   "index": 119,
+   "type": "stub",
+   "family": "in_gate_area_no_mm",
+   "detail": "const",
+   "riscv": [
+    "include/linux/mm.h:5117"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/entry/vsyscall/vsyscall_64.c:350"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 vsyscall"
+  },
+  {
+   "index": 125,
+   "type": "stub",
+   "family": "kvm_arch_vcpu_blocking",
+   "detail": "empty",
+   "riscv": [
+    "arch/riscv/include/asm/kvm_host.h:290"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/include/asm/kvm_host.h:1894"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 AVIC/posted interrupt"
+  },
+  {
+   "index": 126,
+   "type": "stub",
+   "family": "kvm_arch_vcpu_precreate",
+   "detail": "const",
+   "riscv": [
+    "arch/riscv/kvm/vcpu.c:139"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/arm.c:526"
+    ]
+   },
+   "verdict": "疑似真问题",
+   "reasons": [
+    "suspected"
+   ],
+   "note": "arm64 在 vgic 初始化后拒绝创建 vCPU（-EBUSY）；riscv 恒返回 0。AIA 初始化（aia_device.c 的 aia_init）只给已有 vCPU 分配 IMSIC，之后创建的 vCPU 的 imsic_state 为空，各入口判空跳过，于是该 vCPU 静默地没有 IMSIC，用户态得不到错误。需动态验证；只在本地记录"
+  },
+  {
+   "index": 148,
+   "type": "stub",
+   "family": "set_memory_decrypted",
+   "detail": "const",
+   "riscv": [
+    "include/linux/set_memory.h:81"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/mm/pat/set_memory.c:2502"
+    ],
+    "arm64": [
+     "arch/arm64/mm/mem_encrypt.c:43"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "内存加密（x86 CoCo、arm64 Realm），riscv 未支持"
+  },
+  {
+   "index": 158,
+   "type": "stub",
+   "family": "vmemmap_populate_print_last",
+   "detail": "empty",
+   "riscv": [
+    "mm/sparse.c:238"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/mm/init_64.c:1548",
+     "mm/sparse.c:238"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 打印"
+  },
+  {
+   "index": 166,
+   "type": "write-missing",
+   "family": "arch_clear_bit",
+   "detail": "p#1",
+   "riscv": [
+    "arch/riscv/include/asm/bitops.h:270"
+   ],
+   "counterparts": {
+    "arm64": [
+     "include/asm-generic/bitops/atomic.h:22"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "param_reassign"
+   ],
+   "note": "asm-generic：p += BIT_WORD(nr)"
+  },
+  {
+   "index": 178,
+   "type": "write-missing",
+   "family": "arch_set_bit",
+   "detail": "p#1",
+   "riscv": [
+    "arch/riscv/include/asm/bitops.h:256"
+   ],
+   "counterparts": {
+    "arm64": [
+     "include/asm-generic/bitops/atomic.h:15"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "param_reassign"
+   ],
+   "note": "asm-generic：p += BIT_WORD(nr)"
+  },
+  {
+   "index": 179,
+   "type": "write-missing",
+   "family": "arch_setup_dma_ops",
+   "detail": "p#1",
+   "riscv": [
+    "arch/riscv/mm/dma-noncoherent.c:131"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/mm/dma-mapping.c:41"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "param_reassign"
+   ],
+   "note": "arm64：coherent = true"
+  },
+  {
+   "index": 198,
+   "type": "write-missing",
+   "family": "efi_arch_mem_reserve",
+   "detail": "efi_mem_range.attribute",
+   "riscv": [
+    "drivers/firmware/efi/efi.c:585"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/platform/efi/quirks.c:253",
+     "drivers/firmware/efi/efi.c:585"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 EFI quirk"
+  },
+  {
+   "index": 205,
+   "type": "write-missing",
+   "family": "elf_core_write_extra_phdrs",
+   "detail": "elf64_phdr.p_flags",
+   "riscv": [
+    "include/linux/elfcore.h:120"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kernel/elfcore.c:91"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 MTE 段"
+  },
+  {
+   "index": 214,
+   "type": "write-missing",
+   "family": "elf_coredump_extra_notes_write",
+   "detail": "elf64_note.n_type",
+   "riscv": [
+    "include/linux/elf.h:70"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/fpu/xstate.c:1966"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 xstate note"
+  },
+  {
+   "index": 215,
+   "type": "write-missing",
+   "family": "flush_tlb_kernel_range",
+   "detail": "p#0",
+   "riscv": [
+    "arch/riscv/mm/tlbflush.c:180"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/include/asm/tlbflush.h:651"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "param_reassign"
+   ],
+   "note": "arm64：start = round_down(start, stride)"
+  },
+  {
+   "index": 222,
+   "type": "write-missing",
+   "family": "kvm_arch_init_vm",
+   "detail": "kvm.max_vcpus",
+   "riscv": [
+    "arch/riscv/kvm/vm.c:31"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/arm.c:222"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "common_default"
+   ],
+   "note": "kvm_create_vm 已设 max_vcpus = KVM_MAX_VCPUS"
+  },
+  {
+   "index": 224,
+   "type": "write-missing",
+   "family": "kvm_arch_vcpu_ioctl_run",
+   "detail": "kvm_pmu.events",
+   "riscv": [
+    "arch/riscv/kvm/vcpu.c:892"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kvm/arm.c:1272"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "arm64 PMU 结构（定义在 include/kvm/arm_pmu.h，所以被当成共享）"
+  },
+  {
+   "index": 233,
+   "type": "write-missing",
+   "family": "module_frob_arch_sections",
+   "detail": "elf64_shdr.sh_type",
+   "riscv": [
+    "kernel/module/main.c:2925"
+   ],
+   "counterparts": {
+    "arm64": [
+     "arch/arm64/kernel/module-plts.c:280",
+     "kernel/module/main.c:2925"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "config"
+   ],
+   "note": "MODULE_SECTIONS 只在 RELOCATABLE 时选择，defconfig 未开"
+  },
+  {
+   "index": 245,
+   "type": "write-missing",
+   "family": "show_stack",
+   "detail": "p#1",
+   "riscv": [
+    "arch/riscv/kernel/stacktrace.c:152"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/dumpstack.c:325"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "param_reassign"
+   ],
+   "note": "x86：sp = get_stack_pointer(...)"
+  },
+  {
+   "index": 246,
+   "type": "write-missing",
+   "family": "sigaction_compat_abi",
+   "detail": "sigaction.sa_flags",
+   "riscv": [
+    "kernel/signal.c:4299"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/signal_64.c:402",
+     "kernel/signal.c:4299"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 x32 ABI"
+  },
+  {
+   "index": 248,
+   "type": "write-missing",
+   "family": "syscall_get_arguments",
+   "detail": "p#2",
+   "riscv": [
+    "arch/riscv/include/asm/syscall.h:67"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/include/asm/syscall.h:111"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "param_reassign"
+   ],
+   "note": "x86 ia32 版本 *args++"
+  },
+  {
+   "index": 252,
+   "type": "write-missing",
+   "family": "time_init",
+   "detail": "g:late_time_init",
+   "riscv": [
+    "arch/riscv/kernel/time.c:20"
+   ],
+   "counterparts": {
+    "x86": [
+     "arch/x86/kernel/time.c:93"
+    ]
+   },
+   "verdict": "不是",
+   "reasons": [
+    "arch_feature"
+   ],
+   "note": "x86 延后初始化 late_time_init"
+  }
+ ]
+}

@@ -1,0 +1,2697 @@
+########## 第1条  编号 A360  提交 c42458fcf54b  日期 2025-10-27
+
+【提交说明】
+riscv: Fix memory leak in module_frob_arch_sections()
+
+The current code directly overwrites the scratch pointer with the
+return value of kvrealloc(). If kvrealloc() fails and returns NULL,
+the original buffer becomes unreachable, causing a memory leak.
+
+Fix this by using a temporary variable to store kvrealloc()'s return
+value and only update the scratch pointer on success.
+
+Found via static anlaysis and this is similar to commit 42378a9ca553
+("bpf, verifier: Fix memory leak in array reallocation for stack state")
+
+Fixes: be17c0df6795 ("riscv: module: Optimize PLT/GOT entry counting")
+
+【改动统计】
+ arch/riscv/kernel/module-sections.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/module-sections.c b/arch/riscv/kernel/module-sections.c
+index 75551ac6504c..1675cbad8619 100644
+--- a/arch/riscv/kernel/module-sections.c
++++ b/arch/riscv/kernel/module-sections.c
+@@ -119,6 +119,7 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
+ 	unsigned int num_plts = 0;
+ 	unsigned int num_gots = 0;
+ 	Elf_Rela *scratch = NULL;
++	Elf_Rela *new_scratch;
+ 	size_t scratch_size = 0;
+ 	int i;
+ 
+@@ -168,9 +169,12 @@ int module_frob_arch_sections(Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
+ 		scratch_size_needed = (num_scratch_relas + num_relas) * sizeof(*scratch);
+ 		if (scratch_size_needed > scratch_size) {
+ 			scratch_size = scratch_size_needed;
+-			scratch = kvrealloc(scratch, scratch_size, GFP_KERNEL);
+-			if (!scratch)
++			new_scratch = kvrealloc(scratch, scratch_size, GFP_KERNEL);
++			if (!new_scratch) {
++				kvfree(scratch);
+ 				return -ENOMEM;
++			}
++			scratch = new_scratch;
+ 		}
+ 
+ 		for (size_t j = 0; j < num_relas; j++)
+
+
+########## 第2条  编号 A158  提交 61a74ad25462  日期 2025-04-11
+
+【提交说明】
+riscv: misaligned: fix sleeping function called during misaligned access handling
+
+Use copy_from_user_nofault() and copy_to_user_nofault() instead of
+copy_from/to_user functions in the misaligned access trap handlers.
+
+The following bug report was found when executing misaligned memory
+accesses:
+
+BUG: sleeping function called from invalid context at ./include/linux/uaccess.h:162
+in_atomic(): 0, irqs_disabled(): 1, non_block: 0, pid: 115, name: two
+preempt_count: 0, expected: 0
+CPU: 0 UID: 0 PID: 115 Comm: two Not tainted 6.14.0-rc5 #24
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+ [<ffffffff800160ea>] dump_backtrace+0x1c/0x24
+ [<ffffffff80002304>] show_stack+0x28/0x34
+ [<ffffffff80010fae>] dump_stack_lvl+0x4a/0x68
+ [<ffffffff80010fe0>] dump_stack+0x14/0x1c
+ [<ffffffff8004e44e>] __might_resched+0xfa/0x104
+ [<ffffffff8004e496>] __might_sleep+0x3e/0x62
+ [<ffffffff801963c4>] __might_fault+0x1c/0x24
+ [<ffffffff80425352>] _copy_from_user+0x28/0xaa
+ [<ffffffff8000296c>] handle_misaligned_store+0x204/0x254
+ [<ffffffff809eae82>] do_trap_store_misaligned+0x24/0xee
+ [<ffffffff809f4f1a>] handle_exception+0x146/0x152
+
+Fixes: b686ecdeacf6 ("riscv: misaligned: Restrict user access to kernel memory")
+Fixes: 441381506ba7 ("riscv: misaligned: remove CONFIG_RISCV_M_MODE specific code")
+
+【改动统计】
+ arch/riscv/kernel/traps_misaligned.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 4354c87c0376..0173ed80818c 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -441,7 +441,7 @@ static int handle_scalar_misaligned_load(struct pt_regs *regs)
+ 
+ 	val.data_u64 = 0;
+ 	if (user_mode(regs)) {
+-		if (copy_from_user(&val, (u8 __user *)addr, len))
++		if (copy_from_user_nofault(&val, (u8 __user *)addr, len))
+ 			return -1;
+ 	} else {
+ 		memcpy(&val, (u8 *)addr, len);
+@@ -539,7 +539,7 @@ static int handle_scalar_misaligned_store(struct pt_regs *regs)
+ 		return -EOPNOTSUPP;
+ 
+ 	if (user_mode(regs)) {
+-		if (copy_to_user((u8 __user *)addr, &val, len))
++		if (copy_to_user_nofault((u8 __user *)addr, &val, len))
+ 			return -1;
+ 	} else {
+ 		memcpy((u8 *)addr, &val, len);
+
+
+########## 第3条  编号 A225  提交 2dda6a9e09ee  日期 2026-03-03
+
+【提交说明】
+KVM: riscv: Fix Spectre-v1 in PMU counter access
+
+Guest-controlled counter indices received via SBI ecalls are used to
+index into the PMC array. Sanitize them with array_index_nospec()
+to prevent speculative out-of-bounds access.
+
+Similar to x86 commit 13c5183a4e64 ("KVM: x86: Protect MSR-based
+index computations in pmu.h from Spectre-v1/L1TF attacks").
+
+Fixes: 8f0153ecd3bf ("RISC-V: KVM: Add skeleton support for perf")
+
+【改动统计】
+ arch/riscv/kvm/vcpu_pmu.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index aec6b293968b..e873430e596b 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -10,6 +10,7 @@
+ #include <linux/errno.h>
+ #include <linux/err.h>
+ #include <linux/kvm_host.h>
++#include <linux/nospec.h>
+ #include <linux/perf/riscv_pmu.h>
+ #include <asm/csr.h>
+ #include <asm/kvm_vcpu_sbi.h>
+@@ -87,7 +88,8 @@ static void kvm_pmu_release_perf_event(struct kvm_pmc *pmc)
+ 
+ static u64 kvm_pmu_get_perf_event_hw_config(u32 sbi_event_code)
+ {
+-	return hw_event_perf_map[sbi_event_code];
++	return hw_event_perf_map[array_index_nospec(sbi_event_code,
++						    SBI_PMU_HW_GENERAL_MAX)];
+ }
+ 
+ static u64 kvm_pmu_get_perf_event_cache_config(u32 sbi_event_code)
+@@ -218,6 +220,7 @@ static int pmu_fw_ctr_read_hi(struct kvm_vcpu *vcpu, unsigned long cidx,
+ 		return -EINVAL;
+ 	}
+ 
++	cidx = array_index_nospec(cidx, RISCV_KVM_MAX_COUNTERS);
+ 	pmc = &kvpmu->pmc[cidx];
+ 
+ 	if (pmc->cinfo.type != SBI_PMU_CTR_TYPE_FW)
+@@ -244,6 +247,7 @@ static int pmu_ctr_read(struct kvm_vcpu *vcpu, unsigned long cidx,
+ 		return -EINVAL;
+ 	}
+ 
++	cidx = array_index_nospec(cidx, RISCV_KVM_MAX_COUNTERS);
+ 	pmc = &kvpmu->pmc[cidx];
+ 
+ 	if (pmc->cinfo.type == SBI_PMU_CTR_TYPE_FW) {
+@@ -525,6 +529,7 @@ int kvm_riscv_vcpu_pmu_ctr_info(struct kvm_vcpu *vcpu, unsigned long cidx,
+ 		return 0;
+ 	}
+ 
++	cidx = array_index_nospec(cidx, RISCV_KVM_MAX_COUNTERS);
+ 	retdata->out_val = kvpmu->pmc[cidx].cinfo.value;
+ 
+ 	return 0;
+@@ -559,7 +564,8 @@ int kvm_riscv_vcpu_pmu_ctr_start(struct kvm_vcpu *vcpu, unsigned long ctr_base,
+ 	}
+ 	/* Start the counters that have been configured and requested by the guest */
+ 	for_each_set_bit(i, &ctr_mask, RISCV_MAX_COUNTERS) {
+-		pmc_index = i + ctr_base;
++		pmc_index = array_index_nospec(i + ctr_base,
++					       RISCV_KVM_MAX_COUNTERS);
+ 		if (!test_bit(pmc_index, kvpmu->pmc_in_use))
+ 			continue;
+ 		/* The guest started the counter again. Reset the overflow status */
+@@ -630,7 +636,8 @@ int kvm_riscv_vcpu_pmu_ctr_stop(struct kvm_vcpu *vcpu, unsigned long ctr_base,
+ 
+ 	/* Stop the counters that have been configured and requested by the guest */
+ 	for_each_set_bit(i, &ctr_mask, RISCV_MAX_COUNTERS) {
+-		pmc_index = i + ctr_base;
++		pmc_index = array_index_nospec(i + ctr_base,
++					       RISCV_KVM_MAX_COUNTERS);
+ 		if (!test_bit(pmc_index, kvpmu->pmc_in_use))
+ 			continue;
+ 		pmc = &kvpmu->pmc[pmc_index];
+@@ -761,6 +768,7 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 		}
+ 	}
+ 
++	ctr_idx = array_index_nospec(ctr_idx, RISCV_KVM_MAX_COUNTERS);
+ 	pmc = &kvpmu->pmc[ctr_idx];
+ 	pmc->idx = ctr_idx;
+ 
+
+
+########## 第4条  编号 A250  提交 f51fed61eea0  日期 2026-06-12
+
+【提交说明】
+riscv: drop __init from vec_check_unaligned_access_speed_all_cpus
+
+This function runs within a kthread and need not necessarily finish
+before system finishes boot and free_initmem() unmaps the .init.text
+section. This function makes calls to SBI for probing unaligned access
+speed, and if this is slow for some reason (say some debug prints were
+added to SBI), the kthread can still be running at this point and result
+in an instruction page fault when trying to fetch from the freed region.
+
+[   25.642087] Unable to handle kernel paging request at virtual address ffffffff80a04ef8
+[   25.646694] Current vec_check_unali pgtable: 4K pagesize, 48-bit VAs, pgdp=0x00004000316e9000
+[   25.653170] [ffffffff80a04ef8] pgd=000010004be7e401, p4d=000010004be7e401, pud=000010004be7e001, pmd=000010000c3000e3
+[   25.661244] Oops [#1]
+[   25.662997] Modules linked in:
+[   25.665357] CPU: 3 UID: 0 PID: 42 Comm: vec_check_unali Not tainted 7.0.0-tt-blackhole-asrinivasan-00007-g30ff73f18211 #570 PREEMPTLAZY
+[   25.674669] Hardware name: Tenstorrent Blackhole (DT)
+[   25.678545] epc : vec_check_unaligned_access_speed_all_cpus+0x18/0x2c
+[   25.683458]  ra : vec_check_unaligned_access_speed_all_cpus+0x18/0x2c
+[   25.688372] epc : ffffffff80a04ef8 ra : ffffffff80a04ef8 sp : ffff8f8000203e20
+[   25.693874]  gp : ffffffff814dc168 tp : ffffaf8001ad9900 t0 : 0000000000000000
+[   25.699401]  t1 : fffffffffffffff0 t2 : ffffaf8001ad9a10 s0 : ffff8f8000203e30
+[   25.704912]  s1 : ffffaf80018dc780 a0 : 0000000000000000 a1 : 0000000000000002
+[   25.710407]  a2 : 00000000000001f0 a3 : 0000000000000018 a4 : 0000000000000000
+[   25.715917]  a5 : 0000000000000000 a6 : ffffaf8001c03d98 a7 : ffffaf8001c03e30
+[   25.721419]  s2 : ffff8f8000023c98 s3 : ffffaf8001aa1240 s4 : ffffffff80a04ee0
+[   25.726937]  s5 : 0000000000000000 s6 : 0000000000000000 s7 : 0000000000000000
+[   25.732450]  s8 : 0000000000000000 s9 : 0000000000000000 s10: 0000000000000000
+[   25.737944]  s11: 0000000000000000 t3 : 0000000000000002 t4 : 0000000000000402
+[   25.743481]  t5 : 0000000000000040 t6 : 0000000000000004 ssp : 0000000000000000
+[   25.749024] status: 0000000200000120 badaddr: ffffffff80a04ef8 cause: 000000000000000c
+[   25.755060] [<ffffffff80a04ef8>] vec_check_unaligned_access_speed_all_cpus+0x18/0x2c
+[   25.760964] [<ffffffff80047a10>] kthread+0xd8/0xfc
+[   25.764660] [<ffffffff80010c48>] ret_from_fork_kernel+0x18/0x1c4
+[   25.769220] [<ffffffff80895fe6>] ret_from_fork_kernel_asm+0x16/0x18
+[   25.774018] Code: cccc cccc cccc cccc cccc cccc cccc cccc cccc cccc (cccc) cccc
+
+Drop __init from its signature so that this doesn't happen.
+
+Fixes: a00e022be531 ("riscv: Annotate unaligned access init functions")
+Assisted-by: Claude:claude-opus-4-6
+
+【改动统计】
+ arch/riscv/kernel/unaligned_access_speed.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index bb57eb5d19df..5a5aa22124e7 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -289,7 +289,7 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ }
+ 
+ /* Measure unaligned access speed on all CPUs present at boot in parallel. */
+-static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++static int vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+ {
+ 	schedule_on_each_cpu(check_vector_unaligned_access);
+ 	riscv_hwprobe_complete_async_probe();
+@@ -297,7 +297,7 @@ static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __alway
+ 	return 0;
+ }
+ #else /* CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS */
+-static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++static int vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+ {
+ 	return 0;
+ }
+
+
+########## 第5条  编号 A176  提交 4cec89db80ba  日期 2025-07-07
+
+【提交说明】
+RISC-V: KVM: Move HGEI[E|P] CSR access to IMSIC virtualization
+
+Currently, the common AIA functions kvm_riscv_vcpu_aia_has_interrupts()
+and kvm_riscv_aia_wakeon_hgei() lookup HGEI line using an array of VCPU
+pointers before accessing HGEI[E|P] CSR which is slow and prone to race
+conditions because there is a separate per-hart lock for the VCPU pointer
+array and a separate per-VCPU rwlock for IMSIC VS-file (including HGEI
+line) used by the VCPU. Due to these race conditions, it is observed
+on QEMU RISC-V host that Guest VCPUs sleep in WFI and never wakeup even
+with interrupt pending in the IMSIC VS-file because VCPUs were waiting
+for HGEI wakeup on the wrong host CPU.
+
+The IMSIC virtualization already keeps track of the HGEI line and the
+associated IMSIC VS-file used by each VCPU so move the HGEI[E|P] CSR
+access to IMSIC virtualization so that costly HGEI line lookup can be
+avoided and likelihood of race-conditions when updating HGEI[E|P] CSR
+is also reduced.
+
+Fixes: 3385339296d1 ("RISC-V: KVM: Use IMSIC guest files when available")
+
+【改动统计】
+ arch/riscv/include/asm/kvm_aia.h  |  4 +++-
+ arch/riscv/include/asm/kvm_host.h |  3 +++
+ arch/riscv/kvm/aia.c              | 51 +++++++--------------------------------------------
+ arch/riscv/kvm/aia_imsic.c        | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ arch/riscv/kvm/vcpu.c             | 10 ----------
+ 5 files changed, 58 insertions(+), 55 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/kvm_aia.h b/arch/riscv/include/asm/kvm_aia.h
+index 3b643b9efc07..5acce285e56e 100644
+--- a/arch/riscv/include/asm/kvm_aia.h
++++ b/arch/riscv/include/asm/kvm_aia.h
+@@ -87,6 +87,9 @@ DECLARE_STATIC_KEY_FALSE(kvm_riscv_aia_available);
+ 
+ extern struct kvm_device_ops kvm_riscv_aia_device_ops;
+ 
++bool kvm_riscv_vcpu_aia_imsic_has_interrupt(struct kvm_vcpu *vcpu);
++void kvm_riscv_vcpu_aia_imsic_load(struct kvm_vcpu *vcpu, int cpu);
++void kvm_riscv_vcpu_aia_imsic_put(struct kvm_vcpu *vcpu);
+ void kvm_riscv_vcpu_aia_imsic_release(struct kvm_vcpu *vcpu);
+ int kvm_riscv_vcpu_aia_imsic_update(struct kvm_vcpu *vcpu);
+ 
+@@ -161,7 +164,6 @@ void kvm_riscv_aia_destroy_vm(struct kvm *kvm);
+ int kvm_riscv_aia_alloc_hgei(int cpu, struct kvm_vcpu *owner,
+ 			     void __iomem **hgei_va, phys_addr_t *hgei_pa);
+ void kvm_riscv_aia_free_hgei(int cpu, int hgei);
+-void kvm_riscv_aia_wakeon_hgei(struct kvm_vcpu *owner, bool enable);
+ 
+ void kvm_riscv_aia_enable(void);
+ void kvm_riscv_aia_disable(void);
+diff --git a/arch/riscv/include/asm/kvm_host.h b/arch/riscv/include/asm/kvm_host.h
+index 85cfebc32e4c..bcbf8b1ec115 100644
+--- a/arch/riscv/include/asm/kvm_host.h
++++ b/arch/riscv/include/asm/kvm_host.h
+@@ -306,6 +306,9 @@ static inline bool kvm_arch_pmi_in_guest(struct kvm_vcpu *vcpu)
+ 	return IS_ENABLED(CONFIG_GUEST_PERF_EVENTS) && !!vcpu;
+ }
+ 
++static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
++static inline void kvm_arch_vcpu_unblocking(struct kvm_vcpu *vcpu) {}
++
+ #define KVM_RISCV_GSTAGE_TLB_MIN_ORDER		12
+ 
+ void kvm_riscv_local_hfence_gvma_vmid_gpa(unsigned long vmid,
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index 19afd1f23537..dad318185660 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -30,28 +30,6 @@ unsigned int kvm_riscv_aia_nr_hgei;
+ unsigned int kvm_riscv_aia_max_ids;
+ DEFINE_STATIC_KEY_FALSE(kvm_riscv_aia_available);
+ 
+-static int aia_find_hgei(struct kvm_vcpu *owner)
+-{
+-	int i, hgei;
+-	unsigned long flags;
+-	struct aia_hgei_control *hgctrl = get_cpu_ptr(&aia_hgei);
+-
+-	raw_spin_lock_irqsave(&hgctrl->lock, flags);
+-
+-	hgei = -1;
+-	for (i = 1; i <= kvm_riscv_aia_nr_hgei; i++) {
+-		if (hgctrl->owners[i] == owner) {
+-			hgei = i;
+-			break;
+-		}
+-	}
+-
+-	raw_spin_unlock_irqrestore(&hgctrl->lock, flags);
+-
+-	put_cpu_ptr(&aia_hgei);
+-	return hgei;
+-}
+-
+ static inline unsigned long aia_hvictl_value(bool ext_irq_pending)
+ {
+ 	unsigned long hvictl;
+@@ -95,7 +73,6 @@ void kvm_riscv_vcpu_aia_sync_interrupts(struct kvm_vcpu *vcpu)
+ 
+ bool kvm_riscv_vcpu_aia_has_interrupts(struct kvm_vcpu *vcpu, u64 mask)
+ {
+-	int hgei;
+ 	unsigned long seip;
+ 
+ 	if (!kvm_riscv_aia_available())
+@@ -114,11 +91,7 @@ bool kvm_riscv_vcpu_aia_has_interrupts(struct kvm_vcpu *vcpu, u64 mask)
+ 	if (!kvm_riscv_aia_initialized(vcpu->kvm) || !seip)
+ 		return false;
+ 
+-	hgei = aia_find_hgei(vcpu);
+-	if (hgei > 0)
+-		return !!(ncsr_read(CSR_HGEIP) & BIT(hgei));
+-
+-	return false;
++	return kvm_riscv_vcpu_aia_imsic_has_interrupt(vcpu);
+ }
+ 
+ void kvm_riscv_vcpu_aia_update_hvip(struct kvm_vcpu *vcpu)
+@@ -164,6 +137,9 @@ void kvm_riscv_vcpu_aia_load(struct kvm_vcpu *vcpu, int cpu)
+ 		csr_write(CSR_HVIPRIO2H, csr->hviprio2h);
+ #endif
+ 	}
++
++	if (kvm_riscv_aia_initialized(vcpu->kvm))
++		kvm_riscv_vcpu_aia_imsic_load(vcpu, cpu);
+ }
+ 
+ void kvm_riscv_vcpu_aia_put(struct kvm_vcpu *vcpu)
+@@ -174,6 +150,9 @@ void kvm_riscv_vcpu_aia_put(struct kvm_vcpu *vcpu)
+ 	if (!kvm_riscv_aia_available())
+ 		return;
+ 
++	if (kvm_riscv_aia_initialized(vcpu->kvm))
++		kvm_riscv_vcpu_aia_imsic_put(vcpu);
++
+ 	if (kvm_riscv_nacl_available()) {
+ 		nsh = nacl_shmem();
+ 		csr->vsiselect = nacl_csr_read(nsh, CSR_VSISELECT);
+@@ -472,22 +451,6 @@ void kvm_riscv_aia_free_hgei(int cpu, int hgei)
+ 	raw_spin_unlock_irqrestore(&hgctrl->lock, flags);
+ }
+ 
+-void kvm_riscv_aia_wakeon_hgei(struct kvm_vcpu *owner, bool enable)
+-{
+-	int hgei;
+-
+-	if (!kvm_riscv_aia_available())
+-		return;
+-
+-	hgei = aia_find_hgei(owner);
+-	if (hgei > 0) {
+-		if (enable)
+-			csr_set(CSR_HGEIE, BIT(hgei));
+-		else
+-			csr_clear(CSR_HGEIE, BIT(hgei));
+-	}
+-}
+-
+ static irqreturn_t hgei_interrupt(int irq, void *dev_id)
+ {
+ 	int i;
+diff --git a/arch/riscv/kvm/aia_imsic.c b/arch/riscv/kvm/aia_imsic.c
+index 29ef9c2133a9..2ff865943ebb 100644
+--- a/arch/riscv/kvm/aia_imsic.c
++++ b/arch/riscv/kvm/aia_imsic.c
+@@ -676,6 +676,48 @@ static void imsic_swfile_update(struct kvm_vcpu *vcpu,
+ 	imsic_swfile_extirq_update(vcpu);
+ }
+ 
++bool kvm_riscv_vcpu_aia_imsic_has_interrupt(struct kvm_vcpu *vcpu)
++{
++	struct imsic *imsic = vcpu->arch.aia_context.imsic_state;
++	unsigned long flags;
++	bool ret = false;
++
++	/*
++	 * The IMSIC SW-file directly injects interrupt via hvip so
++	 * only check for interrupt when IMSIC VS-file is being used.
++	 */
++
++	read_lock_irqsave(&imsic->vsfile_lock, flags);
++	if (imsic->vsfile_cpu > -1)
++		ret = !!(csr_read(CSR_HGEIP) & BIT(imsic->vsfile_hgei));
++	read_unlock_irqrestore(&imsic->vsfile_lock, flags);
++
++	return ret;
++}
++
++void kvm_riscv_vcpu_aia_imsic_load(struct kvm_vcpu *vcpu, int cpu)
++{
++	/*
++	 * No need to explicitly clear HGEIE CSR bits because the
++	 * hgei interrupt handler (aka hgei_interrupt()) will always
++	 * clear it for us.
++	 */
++}
++
++void kvm_riscv_vcpu_aia_imsic_put(struct kvm_vcpu *vcpu)
++{
++	struct imsic *imsic = vcpu->arch.aia_context.imsic_state;
++	unsigned long flags;
++
++	if (!kvm_vcpu_is_blocking(vcpu))
++		return;
++
++	read_lock_irqsave(&imsic->vsfile_lock, flags);
++	if (imsic->vsfile_cpu > -1)
++		csr_set(CSR_HGEIE, BIT(imsic->vsfile_hgei));
++	read_unlock_irqrestore(&imsic->vsfile_lock, flags);
++}
++
+ void kvm_riscv_vcpu_aia_imsic_release(struct kvm_vcpu *vcpu)
+ {
+ 	unsigned long flags;
+@@ -781,6 +823,9 @@ int kvm_riscv_vcpu_aia_imsic_update(struct kvm_vcpu *vcpu)
+ 	 * producers to the new IMSIC VS-file.
+ 	 */
+ 
++	/* Ensure HGEIE CSR bit is zero before using the new IMSIC VS-file */
++	csr_clear(CSR_HGEIE, BIT(new_vsfile_hgei));
++
+ 	/* Zero-out new IMSIC VS-file */
+ 	imsic_vsfile_local_clear(new_vsfile_hgei, imsic->nr_hw_eix);
+ 
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index e0a01af426ff..0462863206ca 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+...（改动其余17行省略）
+
+
+########## 第6条  编号 A349  提交 6aba0cb5bba6  日期 2025-06-05
+
+【提交说明】
+RISC-V: KVM: Fix the size parameter check in SBI SFENCE calls
+
+As-per the SBI specification, an SBI remote fence operation applies
+to the entire address space if either:
+1) start_addr and size are both 0
+2) size is equal to 2^XLEN-1
+
+>From the above, only #1 is checked by SBI SFENCE calls so fix the
+size parameter check in SBI SFENCE calls to cover #2 as well.
+
+Fixes: 13acfec2dbcc ("RISC-V: KVM: Add remote HFENCE functions based on VCPU requests")
+
+【改动统计】
+ arch/riscv/kvm/vcpu_sbi_replace.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu_sbi_replace.c b/arch/riscv/kvm/vcpu_sbi_replace.c
+index 5fbf3f94f1e8..9752d2ffff68 100644
+--- a/arch/riscv/kvm/vcpu_sbi_replace.c
++++ b/arch/riscv/kvm/vcpu_sbi_replace.c
+@@ -103,7 +103,7 @@ static int kvm_sbi_ext_rfence_handler(struct kvm_vcpu *vcpu, struct kvm_run *run
+ 		kvm_riscv_vcpu_pmu_incr_fw(vcpu, SBI_PMU_FW_FENCE_I_SENT);
+ 		break;
+ 	case SBI_EXT_RFENCE_REMOTE_SFENCE_VMA:
+-		if (cp->a2 == 0 && cp->a3 == 0)
++		if ((cp->a2 == 0 && cp->a3 == 0) || cp->a3 == -1UL)
+ 			kvm_riscv_hfence_vvma_all(vcpu->kvm, hbase, hmask);
+ 		else
+ 			kvm_riscv_hfence_vvma_gva(vcpu->kvm, hbase, hmask,
+@@ -111,7 +111,7 @@ static int kvm_sbi_ext_rfence_handler(struct kvm_vcpu *vcpu, struct kvm_run *run
+ 		kvm_riscv_vcpu_pmu_incr_fw(vcpu, SBI_PMU_FW_HFENCE_VVMA_SENT);
+ 		break;
+ 	case SBI_EXT_RFENCE_REMOTE_SFENCE_VMA_ASID:
+-		if (cp->a2 == 0 && cp->a3 == 0)
++		if ((cp->a2 == 0 && cp->a3 == 0) || cp->a3 == -1UL)
+ 			kvm_riscv_hfence_vvma_asid_all(vcpu->kvm,
+ 						       hbase, hmask, cp->a4);
+ 		else
+
+
+########## 第7条  编号 A171  提交 890ba5be6335  日期 2025-06-19
+
+【提交说明】
+Revert "riscv: Define TASK_SIZE_MAX for __access_ok()"
+
+This reverts commit ad5643cf2f69 ("riscv: Define TASK_SIZE_MAX for
+__access_ok()").
+
+This commit changes TASK_SIZE_MAX to be LONG_MAX to optimize access_ok(),
+because the previous TASK_SIZE_MAX (default to TASK_SIZE) requires some
+computation.
+
+The reasoning was that all user addresses are less than LONG_MAX, and all
+kernel addresses are greater than LONG_MAX. Therefore access_ok() can
+filter kernel addresses.
+
+Addresses between TASK_SIZE and LONG_MAX are not valid user addresses, but
+access_ok() let them pass. That was thought to be okay, because they are
+not valid addresses at hardware level.
+
+Unfortunately, one case is missed: get_user_pages_fast() happily accepts
+addresses between TASK_SIZE and LONG_MAX. futex(), for instance, uses
+get_user_pages_fast(). This causes the problem reported by Robert [1].
+
+Therefore, revert this commit. TASK_SIZE_MAX is changed to the default:
+TASK_SIZE.
+
+This unfortunately reduces performance, because TASK_SIZE is more expensive
+to compute compared to LONG_MAX. But correctness first, we can think about
+optimization later, if required.
+
+Fixes: ad5643cf2f69 ("riscv: Define TASK_SIZE_MAX for __access_ok()")
+
+【改动统计】
+ arch/riscv/include/asm/pgtable.h | 1 -
+ 1 file changed, 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index a11816bbf9e7..521a995741cd 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -1075,7 +1075,6 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
+  */
+ #ifdef CONFIG_64BIT
+ #define TASK_SIZE_64	(PGDIR_SIZE * PTRS_PER_PGD / 2)
+-#define TASK_SIZE_MAX	LONG_MAX
+ 
+ #ifdef CONFIG_COMPAT
+ #define TASK_SIZE_32	(_AC(0x80000000, UL) - PAGE_SIZE)
+
+
+########## 第8条  编号 A288  提交 749b94b08005  日期 2023-12-13
+
+【提交说明】
+riscv: Fix module_alloc() that did not reset the linear mapping permissions
+
+After unloading a module, we must reset the linear mapping permissions,
+see the example below:
+
+Before unloading a module:
+
+0xffffaf809d65d000-0xffffaf809d6dc000    0x000000011d65d000       508K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6dc000-0xffffaf809d6dd000    0x000000011d6dc000         4K PTE .   ..     ..   D A G . . . R V
+0xffffaf809d6dd000-0xffffaf809d6e1000    0x000000011d6dd000        16K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X . R V
+
+After unloading a module:
+
+0xffffaf809d65d000-0xffffaf809d6e1000    0x000000011d65d000       528K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X W R V
+
+The last mapping is not reset and we end up with WX mappings in the linear
+mapping.
+
+So add VM_FLUSH_RESET_PERMS to our module_alloc() definition.
+
+Fixes: 0cff8bff7af8 ("riscv: avoid the PIC offset of static percpu data in module beyond 2G limits")
+
+【改动统计】
+ arch/riscv/kernel/module.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index aac019ed63b1..862834bb1d64 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -894,7 +894,8 @@ void *module_alloc(unsigned long size)
+ {
+ 	return __vmalloc_node_range(size, 1, MODULES_VADDR,
+ 				    MODULES_END, GFP_KERNEL,
+-				    PAGE_KERNEL, 0, NUMA_NO_NODE,
++				    PAGE_KERNEL, VM_FLUSH_RESET_PERMS,
++				    NUMA_NO_NODE,
+ 				    __builtin_return_address(0));
+ }
+ #endif
+
+
+########## 第9条  编号 A277  提交 f2aaa6215910  日期 2026-08-14
+
+【提交说明】
+riscv, bpf: Fix missing sign-ext for signed 1-byte and 2-byte kfunc args
+
+On RV64, the ABI requires sign-extension for signed 1-byte and 2-byte kfunc
+args. However, the RV64 JIT currently does not perform sign-extension for
+such kfunc args.
+
+Before commit 7ce090afbf72 ("bpf: Infer zext_dst based on static register
+liveness analysis"), state pruning could potentially omit zero-extension
+of 32-bit subregisters, which inadvertently masked the above issue by making
+the args appear as if they had been properly sign-extended. After that
+commit, the problem is exposed, causing the kfunc_call/kfunc_call_test4
+selftest to fail.
+
+Fix this by extending the existing sign-extension logic to handle signed
+1-byte and 2-byte kfunc args as well.
+
+Fixes: 443574b03387 ("riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi")
+
+【改动统计】
+ arch/riscv/net/bpf_jit_comp64.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 2504df1fa111..74efe4b138d2 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1823,9 +1823,10 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 
+ 			for (idx = 0; idx < fm->nr_args; idx++) {
+ 				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
++				bool sign = fm->arg_flags[idx] & BTF_FMODEL_SIGNED_ARG;
+ 
+-				if (fm->arg_size[idx] == sizeof(int))
+-					emit_sextw(reg, reg, ctx);
++				if (sign_extend(reg, reg, fm->arg_size[idx], sign, ctx))
++					return -EINVAL;
+ 			}
+ 		}
+ 
+
+
+########## 第10条  编号 A063  提交 d080a08b06b6  日期 2024-03-11
+
+【提交说明】
+riscv: Fix spurious errors from __get/put_kernel_nofault
+
+These macros did not initialize __kr_err, so they could fail even if
+the access did not fault.
+
+Fixes: d464118cdc41 ("riscv: implement __get_kernel_nofault and __put_user_nofault")
+
+【改动统计】
+ arch/riscv/include/asm/uaccess.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index ec0cab9fbddd..72ec1d9bd3f3 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -319,7 +319,7 @@ unsigned long __must_check clear_user(void __user *to, unsigned long n)
+ 
+ #define __get_kernel_nofault(dst, src, type, err_label)			\
+ do {									\
+-	long __kr_err;							\
++	long __kr_err = 0;						\
+ 									\
+ 	__get_user_nocheck(*((type *)(dst)), (type *)(src), __kr_err);	\
+ 	if (unlikely(__kr_err))						\
+@@ -328,7 +328,7 @@ do {									\
+ 
+ #define __put_kernel_nofault(dst, src, type, err_label)			\
+ do {									\
+-	long __kr_err;							\
++	long __kr_err = 0;						\
+ 									\
+ 	__put_user_nocheck(*((type *)(src)), (type *)(dst), __kr_err);	\
+ 	if (unlikely(__kr_err))						\
+
+
+########## 第11条  编号 B559  提交 9156585280f1  日期 2026-03-03
+
+【提交说明】
+ACPI: RIMT: Add dependency between iommu and devices
+
+EPROBE_DEFER ensures IOMMU devices are probed before the devices that
+depend on them. During shutdown, however, the IOMMU may be removed
+first, leading to issues. To avoid this, a device link is added
+which enforces the correct removal order.
+
+Fixes: 8f7729552582 ("ACPI: RISC-V: Add support for RIMT")
+
+【改动统计】
+ drivers/acpi/riscv/rimt.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+【改动内容】
+diff --git a/drivers/acpi/riscv/rimt.c b/drivers/acpi/riscv/rimt.c
+index 229c4a0d47a3..906282b0e63c 100644
+--- a/drivers/acpi/riscv/rimt.c
++++ b/drivers/acpi/riscv/rimt.c
+@@ -263,6 +263,13 @@ static int rimt_iommu_xlate(struct device *dev, struct acpi_rimt_node *node, u32
+ 	if (!rimt_fwnode)
+ 		return -EPROBE_DEFER;
+ 
++	/*
++	 * EPROBE_DEFER ensures IOMMU is probed before the devices that
++	 * depend on them. During shutdown, however, the IOMMU may be removed
++	 * first, leading to issues. To avoid this, a device link is added
++	 * which enforces the correct removal order.
++	 */
++	device_link_add(dev, rimt_fwnode->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
+ 	return acpi_iommu_fwspec_init(dev, deviceid, rimt_fwnode);
+ }
+ 
+
+
+########## 第12条  编号 B467  提交 c625154993d0  日期 2024-08-31
+
+【提交说明】
+drivers/perf: riscv: Align errno for unsupported perf event
+
+RISC-V perf driver does not yet support PERF_TYPE_BREAKPOINT. It would
+be more appropriate to return -EOPNOTSUPP or -ENOENT for this type in
+pmu_sbi_event_map. Considering that other implementations return -ENOENT
+for unsupported perf types, let's synchronize this behavior. Due to this
+reason, a riscv bpf testcases perf_skip fail. Meanwhile, align that
+behavior to the rest of proper place.
+
+Fixes: 9b3e150e310e ("RISC-V: Add a simple platform driver for RISC-V legacy perf")
+Fixes: 16d3b1af0944 ("perf: RISC-V: Check standard event availability")
+Fixes: e9991434596f ("RISC-V: Add perf platform driver based on SBI PMU extension")
+
+【改动统计】
+ drivers/perf/riscv_pmu_legacy.c | 4 ++--
+ drivers/perf/riscv_pmu_sbi.c    | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+【改动内容】
+diff --git a/drivers/perf/riscv_pmu_legacy.c b/drivers/perf/riscv_pmu_legacy.c
+index 04487ad7fba0..93c8e0fdb589 100644
+--- a/drivers/perf/riscv_pmu_legacy.c
++++ b/drivers/perf/riscv_pmu_legacy.c
+@@ -22,13 +22,13 @@ static int pmu_legacy_ctr_get_idx(struct perf_event *event)
+ 	struct perf_event_attr *attr = &event->attr;
+ 
+ 	if (event->attr.type != PERF_TYPE_HARDWARE)
+-		return -EOPNOTSUPP;
++		return -ENOENT;
+ 	if (attr->config == PERF_COUNT_HW_CPU_CYCLES)
+ 		return RISCV_PMU_LEGACY_CYCLE;
+ 	else if (attr->config == PERF_COUNT_HW_INSTRUCTIONS)
+ 		return RISCV_PMU_LEGACY_INSTRET;
+ 	else
+-		return -EOPNOTSUPP;
++		return -ENOENT;
+ }
+ 
+ /* For legacy config & counter index are same */
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 5c39fbd8ed04..391ca1422cae 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -309,7 +309,7 @@ static void pmu_sbi_check_event(struct sbi_pmu_event_data *edata)
+ 			  ret.value, 0x1, SBI_PMU_STOP_FLAG_RESET, 0, 0, 0);
+ 	} else if (ret.error == SBI_ERR_NOT_SUPPORTED) {
+ 		/* This event cannot be monitored by any counter */
+-		edata->event_idx = -EINVAL;
++		edata->event_idx = -ENOENT;
+ 	}
+ }
+ 
+@@ -556,7 +556,7 @@ static int pmu_sbi_event_map(struct perf_event *event, u64 *econfig)
+ 		}
+ 		break;
+ 	default:
+-		ret = -EINVAL;
++		ret = -ENOENT;
+ 		break;
+ 	}
+ 
+
+
+########## 第13条  编号 A166  提交 265d6aba165c  日期 2025-06-02
+
+【提交说明】
+riscv: uaccess: Only restore the CSR_STATUS SUM bit
+
+During switch to csrs will OR the value of the register into the
+corresponding csr. In this case we're only interested in restoring the
+SUM bit not the entire register.
+
+Fixes: 788aa64c01f1 ("riscv: save the SR_SUM status over switches")
+
+【改动统计】
+ arch/riscv/include/asm/processor.h | 2 +-
+ arch/riscv/kernel/asm-offsets.c    | 6 +++---
+ arch/riscv/kernel/entry.S          | 9 +++++----
+ 3 files changed, 9 insertions(+), 8 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/processor.h b/arch/riscv/include/asm/processor.h
+index 8111250f3c1b..24d3af4d3807 100644
+--- a/arch/riscv/include/asm/processor.h
++++ b/arch/riscv/include/asm/processor.h
+@@ -110,7 +110,7 @@ struct thread_struct {
+ 	struct __riscv_d_ext_state fstate;
+ 	unsigned long bad_cause;
+ 	unsigned long envcfg;
+-	unsigned long status;
++	unsigned long sum;
+ 	u32 riscv_v_flags;
+ 	u32 vstate_ctrl;
+ 	struct __riscv_v_ext_state vstate;
+diff --git a/arch/riscv/kernel/asm-offsets.c b/arch/riscv/kernel/asm-offsets.c
+index 9420ec6a50fd..6e8c0d6feae9 100644
+--- a/arch/riscv/kernel/asm-offsets.c
++++ b/arch/riscv/kernel/asm-offsets.c
+@@ -34,7 +34,7 @@ void asm_offsets(void)
+ 	OFFSET(TASK_THREAD_S9, task_struct, thread.s[9]);
+ 	OFFSET(TASK_THREAD_S10, task_struct, thread.s[10]);
+ 	OFFSET(TASK_THREAD_S11, task_struct, thread.s[11]);
+-	OFFSET(TASK_THREAD_STATUS, task_struct, thread.status);
++	OFFSET(TASK_THREAD_SUM, task_struct, thread.sum);
+ 
+ 	OFFSET(TASK_TI_CPU, task_struct, thread_info.cpu);
+ 	OFFSET(TASK_TI_PREEMPT_COUNT, task_struct, thread_info.preempt_count);
+@@ -347,8 +347,8 @@ void asm_offsets(void)
+ 		  offsetof(struct task_struct, thread.s[11])
+ 		- offsetof(struct task_struct, thread.ra)
+ 	);
+-	DEFINE(TASK_THREAD_STATUS_RA,
+-		  offsetof(struct task_struct, thread.status)
++	DEFINE(TASK_THREAD_SUM_RA,
++		  offsetof(struct task_struct, thread.sum)
+ 		- offsetof(struct task_struct, thread.ra)
+ 	);
+ 
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index 00bd0de9faa2..a49e19ce3a97 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -399,14 +399,15 @@ SYM_FUNC_START(__switch_to)
+ 	REG_S s11, TASK_THREAD_S11_RA(a3)
+ 
+ 	/* save the user space access flag */
+-	li    s0, SR_SUM
+-	csrr  s1, CSR_STATUS
+-	REG_S s1, TASK_THREAD_STATUS_RA(a3)
++	csrr  s0, CSR_STATUS
++	REG_S s0, TASK_THREAD_SUM_RA(a3)
+ 
+ 	/* Save the kernel shadow call stack pointer */
+ 	scs_save_current
+ 	/* Restore context from next->thread */
+-	REG_L s0,  TASK_THREAD_STATUS_RA(a4)
++	REG_L s0,  TASK_THREAD_SUM_RA(a4)
++	li    s1,  SR_SUM
++	and   s0,  s0, s1
+ 	csrs  CSR_STATUS, s0
+ 	REG_L ra,  TASK_THREAD_RA_RA(a4)
+ 	REG_L sp,  TASK_THREAD_SP_RA(a4)
+
+
+########## 第14条  编号 A233  提交 fe0cf82fdeb3  日期 2026-04-04
+
+【提交说明】
+riscv: smp: Remove outdated comment about disabling preemption
+
+Commit f1a0a376ca0c ("sched/core: Initialize the idle task with
+preemption disabled") removed a call to preempt_disable(), but not the
+associated comment. Remove the outdated comment.
+
+Fixes: f1a0a376ca0c ("sched/core: Initialize the idle task with preemption disabled")
+
+【改动统计】
+ arch/riscv/kernel/smpboot.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/smpboot.c b/arch/riscv/kernel/smpboot.c
+index d85916a3660c..0e6fe20c69a2 100644
+--- a/arch/riscv/kernel/smpboot.c
++++ b/arch/riscv/kernel/smpboot.c
+@@ -259,10 +259,6 @@ asmlinkage __visible void smp_callin(void)
+ #ifndef CONFIG_HOTPLUG_PARALLEL
+ 	complete(&cpu_running);
+ #endif
+-	/*
+-	 * Disable preemption before enabling interrupts, so we don't try to
+-	 * schedule a CPU that hasn't actually started yet.
+-	 */
+ 	local_irq_enable();
+ 	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+ }
+
+
+########## 第15条  编号 A098  提交 5aa09297a3dc  日期 2024-08-16
+
+【提交说明】
+RISC-V: KVM: Fix to allow hpmcounter31 from the guest
+
+The csr_fun defines a count parameter which defines the total number
+CSRs emulated in KVM starting from the base. This value should be
+equal to total number of counters possible for trap/emulation (32).
+
+Fixes: a9ac6c37521f ("RISC-V: KVM: Implement trap & emulate for hpmcounters")
+
+【改动统计】
+ arch/riscv/include/asm/kvm_vcpu_pmu.h | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/kvm_vcpu_pmu.h b/arch/riscv/include/asm/kvm_vcpu_pmu.h
+index c309daa2d75a..1d85b6617508 100644
+--- a/arch/riscv/include/asm/kvm_vcpu_pmu.h
++++ b/arch/riscv/include/asm/kvm_vcpu_pmu.h
+@@ -65,11 +65,11 @@ struct kvm_pmu {
+ 
+ #if defined(CONFIG_32BIT)
+ #define KVM_RISCV_VCPU_HPMCOUNTER_CSR_FUNCS \
+-{.base = CSR_CYCLEH,	.count = 31,	.func = kvm_riscv_vcpu_pmu_read_hpm }, \
+-{.base = CSR_CYCLE,	.count = 31,	.func = kvm_riscv_vcpu_pmu_read_hpm },
++{.base = CSR_CYCLEH,	.count = 32,	.func = kvm_riscv_vcpu_pmu_read_hpm }, \
++{.base = CSR_CYCLE,	.count = 32,	.func = kvm_riscv_vcpu_pmu_read_hpm },
+ #else
+ #define KVM_RISCV_VCPU_HPMCOUNTER_CSR_FUNCS \
+-{.base = CSR_CYCLE,	.count = 31,	.func = kvm_riscv_vcpu_pmu_read_hpm },
++{.base = CSR_CYCLE,	.count = 32,	.func = kvm_riscv_vcpu_pmu_read_hpm },
+ #endif
+ 
+ int kvm_riscv_vcpu_pmu_incr_fw(struct kvm_vcpu *vcpu, unsigned long fid);
+
+
+########## 第16条  编号 A336  提交 bbb622488749  日期 2025-03-03
+
+【提交说明】
+RISC-V: KVM: Disable the kernel perf counter during configure
+
+The perf event should be marked disabled during the creation as
+it is not ready to be scheduled until there is SBI PMU start call
+or config matching is called with auto start. Otherwise, event add/start
+gets called during perf_event_create_kernel_counter function.
+It will be enabled and scheduled to run via perf_event_enable during
+either the above mentioned scenario.
+
+Fixes: 0cb74b65d2e5 ("RISC-V: KVM: Implement perf support without sampling")
+
+【改动统计】
+ arch/riscv/kvm/vcpu_pmu.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 2707a51b082c..78ac3216a54d 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -666,6 +666,7 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 		.type = etype,
+ 		.size = sizeof(struct perf_event_attr),
+ 		.pinned = true,
++		.disabled = true,
+ 		/*
+ 		 * It should never reach here if the platform doesn't support the sscofpmf
+ 		 * extension as mode filtering won't work without it.
+
+
+########## 第17条  编号 A376  提交 310e2096b082  日期 2026-03-18
+
+【提交说明】
+RISC-V: KVM: Fix double-free of sdata in kvm_pmu_clear_snapshot_area()
+
+In kvm_riscv_vcpu_pmu_snapshot_set_shmem(), when kvm_vcpu_write_guest()
+fails, kvpmu->sdata is freed but not set to NULL. This leaves a dangling
+pointer that will be freed again when kvm_pmu_clear_snapshot_area() is
+called during vcpu teardown, triggering a KASAN double-free report.
+
+First free occurs in kvm_riscv_vcpu_pmu_snapshot_set_shmem():
+ kvm_riscv_vcpu_pmu_snapshot_set_shmem arch/riscv/kvm/vcpu_pmu.c:443
+ kvm_sbi_ext_pmu_handler arch/riscv/kvm/vcpu_sbi_pmu.c:74
+ kvm_riscv_vcpu_sbi_ecall arch/riscv/kvm/vcpu_sbi.c:608
+ kvm_riscv_vcpu_exit arch/riscv/kvm/vcpu_exit.c:240
+ kvm_arch_vcpu_ioctl_run arch/riscv/kvm/vcpu.c:1008
+ kvm_vcpu_ioctl virt/kvm/kvm_main.c:4476
+
+Second free (double-free) occurs in kvm_pmu_clear_snapshot_area():
+ kvm_pmu_clear_snapshot_area arch/riscv/kvm/vcpu_pmu.c:403 [inline]
+ kvm_riscv_vcpu_pmu_deinit.part arch/riscv/kvm/vcpu_pmu.c:905
+ kvm_riscv_vcpu_pmu_deinit arch/riscv/kvm/vcpu_pmu.c:893
+ kvm_arch_vcpu_destroy arch/riscv/kvm/vcpu.c:199
+ kvm_vcpu_destroy virt/kvm/kvm_main.c:469 [inline]
+ kvm_destroy_vcpus virt/kvm/kvm_main.c:489
+ kvm_arch_destroy_vm arch/riscv/kvm/vm.c:54
+ kvm_destroy_vm virt/kvm/kvm_main.c:1301 [inline]
+ kvm_put_kvm virt/kvm/kvm_main.c:1338
+ kvm_vm_release virt/kvm/kvm_main.c:1361
+
+Fix it by setting kvpmu->sdata to NULL after kfree() in
+kvm_riscv_vcpu_pmu_snapshot_set_shmem(), so that the subsequent
+kfree(NULL) in kvm_pmu_clear_snapshot_area() becomes a safe no-op.
+
+This bug was found by fuzzing the KVM RISC-V PMU interface.
+
+Fixes: c2f41ddbcdd756 ("RISC-V: KVM: Implement SBI PMU Snapshot feature")
+
+【改动统计】
+ arch/riscv/kvm/vcpu_pmu.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 9e9f3302cef8..bb6380ec7fc4 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -456,6 +456,7 @@ int kvm_riscv_vcpu_pmu_snapshot_set_shmem(struct kvm_vcpu *vcpu, unsigned long s
+ 	/* No need to check writable slot explicitly as kvm_vcpu_write_guest does it internally */
+ 	if (kvm_vcpu_write_guest(vcpu, saddr, kvpmu->sdata, snapshot_area_size)) {
+ 		kfree(kvpmu->sdata);
++		kvpmu->sdata = NULL;
+ 		sbiret = SBI_ERR_INVALID_ADDRESS;
+ 		goto out;
+ 	}
+
+
+########## 第18条  编号 A373  提交 7120a9d9e023  日期 2026-03-04
+
+【提交说明】
+RISC-V: KVM: Fix potential UAF in kvm_riscv_aia_imsic_has_attr()
+
+The KVM_DEV_RISCV_AIA_GRP_APLIC branch of aia_has_attr() was identified
+to have a race condition with concurrent KVM_SET_DEVICE_ATTR ioctls,
+leading to a use-after-free bug.
+
+Upon analyzing the code, it was discovered that the
+KVM_DEV_RISCV_AIA_GRP_IMSIC branch of aia_has_attr() suffers from the same
+lack of synchronization. It invokes kvm_riscv_aia_imsic_has_attr() without
+holding dev->kvm->lock.
+
+While aia_has_attr() is running, a concurrent aia_set_attr() could call
+aia_init() under the dev->kvm->lock. If aia_init() fails, it may trigger
+kvm_riscv_vcpu_aia_imsic_cleanup(), which frees imsic_state. Without proper
+locking, kvm_riscv_aia_imsic_has_attr() could attempt to access imsic_state
+while it is being deallocated.
+
+Although this specific path has not yet been reported by a fuzzer, it
+is logically identical to the APLIC issue. Fix this by acquiring the
+dev->kvm->lock before calling kvm_riscv_aia_imsic_has_attr(), ensuring
+consistency with the locking pattern used for other AIA attribute groups.
+
+Fixes: 5463091a51cf ("RISC-V: KVM: Expose IMSIC registers as attributes of AIA irqchip")
+
+【改动统计】
+ arch/riscv/kvm/aia_device.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/aia_device.c b/arch/riscv/kvm/aia_device.c
+index fb901947aefe..9a45c85239fe 100644
+--- a/arch/riscv/kvm/aia_device.c
++++ b/arch/riscv/kvm/aia_device.c
+@@ -471,7 +471,10 @@ static int aia_has_attr(struct kvm_device *dev, struct kvm_device_attr *attr)
+ 		mutex_unlock(&dev->kvm->lock);
+ 		break;
+ 	case KVM_DEV_RISCV_AIA_GRP_IMSIC:
+-		return kvm_riscv_aia_imsic_has_attr(dev->kvm, attr->attr);
++		mutex_lock(&dev->kvm->lock);
++		r = kvm_riscv_aia_imsic_has_attr(dev->kvm, attr->attr);
++		mutex_unlock(&dev->kvm->lock);
++		break;
+ 	}
+ 
+ 	return r;
+
+
+########## 第19条  编号 A144  提交 e8eb8e1bdae9  日期 2025-03-17
+
+【提交说明】
+riscv: fgraph: Select HAVE_FUNCTION_GRAPH_TRACER depends on HAVE_DYNAMIC_FTRACE_WITH_ARGS
+
+Currently, fgraph on riscv relies on the infrastructure of
+DYNAMIC_FTRACE_WITH_ARGS. However, DYNAMIC_FTRACE_WITH_ARGS may be
+turned off on riscv, which will cause the enabled fgraph to be abnormal.
+Therefore, let's select HAVE_FUNCTION_GRAPH_TRACER depends on
+HAVE_DYNAMIC_FTRACE_WITH_ARGS.
+
+Fixes: a3ed4157b7d8 ("fgraph: Replace fgraph_ret_regs with ftrace_regs")
+
+【改动统计】
+ arch/riscv/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bae5fd79d690..e2c80e88b5cd 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -150,7 +150,7 @@ config RISCV
+ 	select HAVE_DYNAMIC_FTRACE_WITH_ARGS if HAVE_DYNAMIC_FTRACE
+ 	select HAVE_FTRACE_GRAPH_FUNC
+ 	select HAVE_FTRACE_MCOUNT_RECORD if !XIP_KERNEL
+-	select HAVE_FUNCTION_GRAPH_TRACER
++	select HAVE_FUNCTION_GRAPH_TRACER if HAVE_DYNAMIC_FTRACE_WITH_ARGS
+ 	select HAVE_FUNCTION_GRAPH_FREGS
+ 	select HAVE_FUNCTION_TRACER if !XIP_KERNEL && !PREEMPTION
+ 	select HAVE_EBPF_JIT if MMU
+
+
+########## 第20条  编号 A185  提交 e61a12a4baf0  日期 2025-08-11
+
+【提交说明】
+RISC-V: KVM: Correct kvm_riscv_check_vcpu_requests() comment
+
+Correct `check_vcpu_requests` to `kvm_riscv_check_vcpu_requests` in
+comments.
+
+Fixes: f55ffaf89636 ("RISC-V: KVM: Enable ring-based dirty memory tracking")
+
+【改动统计】
+ arch/riscv/kvm/vcpu.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index f001e56403f9..3ebcfffaa978 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -683,7 +683,7 @@ void kvm_arch_vcpu_put(struct kvm_vcpu *vcpu)
+ }
+ 
+ /**
+- * check_vcpu_requests - check and handle pending vCPU requests
++ * kvm_riscv_check_vcpu_requests - check and handle pending vCPU requests
+  * @vcpu:	the VCPU pointer
+  *
+  * Return: 1 if we should enter the guest
+
+
+########## 第21条  编号 B464  提交 2840dadf0dde  日期 2024-08-26
+
+【提交说明】
+drivers: perf: Fix smp_processor_id() use in preemptible code
+
+As reported in [1], the use of smp_processor_id() in
+pmu_sbi_device_probe() must be protected by disabling the preemption, so
+simple use get_cpu()/put_cpu() instead.
+
+Fixes: a8625217a054 ("drivers/perf: riscv: Implement SBI PMU snapshot function")
+
+【改动统计】
+ drivers/perf/riscv_pmu_sbi.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 31a17a56eb3b..25b1b699b3e2 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -1373,11 +1373,15 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
+ 
+ 	/* SBI PMU Snapsphot is only available in SBI v2.0 */
+ 	if (sbi_v2_available) {
++		int cpu;
++
+ 		ret = pmu_sbi_snapshot_alloc(pmu);
+ 		if (ret)
+ 			goto out_unregister;
+ 
+-		ret = pmu_sbi_snapshot_setup(pmu, smp_processor_id());
++		cpu = get_cpu();
++
++		ret = pmu_sbi_snapshot_setup(pmu, cpu);
+ 		if (ret) {
+ 			/* Snapshot is an optional feature. Continue if not available */
+ 			pmu_sbi_snapshot_free(pmu);
+@@ -1391,6 +1395,7 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
+ 			 */
+ 			static_branch_enable(&sbi_pmu_snapshot_available);
+ 		}
++		put_cpu();
+ 	}
+ 
+ 	register_sysctl("kernel", sbi_pmu_sysctl_table);
+
+
+########## 第22条  编号 A036  提交 a179a4bfb694  日期 2024-01-17
+
+【提交说明】
+riscv: Fix hugetlb_mask_last_page() when NAPOT is enabled
+
+When NAPOT is enabled, a new hugepage size is available and then we need
+to make hugetlb_mask_last_page() aware of that.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+
+【改动统计】
+ arch/riscv/mm/hugetlbpage.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 865ac5c7d159..87406b26c3da 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -125,6 +125,26 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
+ 	return pte;
+ }
+ 
++unsigned long hugetlb_mask_last_page(struct hstate *h)
++{
++	unsigned long hp_size = huge_page_size(h);
++
++	switch (hp_size) {
++#ifndef __PAGETABLE_PMD_FOLDED
++	case PUD_SIZE:
++		return P4D_SIZE - PUD_SIZE;
++#endif
++	case PMD_SIZE:
++		return PUD_SIZE - PMD_SIZE;
++	case napot_cont_size(NAPOT_CONT64KB_ORDER):
++		return PMD_SIZE - napot_cont_size(NAPOT_CONT64KB_ORDER);
++	default:
++		break;
++	}
++
++	return 0UL;
++}
++
+ static pte_t get_clear_contig(struct mm_struct *mm,
+ 			      unsigned long addr,
+ 			      pte_t *ptep,
+
+
+########## 第23条  编号 A046  提交 d6cfd1770f20  日期 2024-01-31
+
+【提交说明】
+membarrier: riscv: Add full memory barrier in switch_mm()
+
+The membarrier system call requires a full memory barrier after storing
+to rq->curr, before going back to user-space.  The barrier is only
+needed when switching between processes: the barrier is implied by
+mmdrop() when switching from kernel to userspace, and it's not needed
+when switching from userspace to kernel.
+
+Rely on the feature/mechanism ARCH_HAS_MEMBARRIER_CALLBACKS and on the
+primitive membarrier_arch_switch_mm(), already adopted by the PowerPC
+architecture, to insert the required barrier.
+
+Fixes: fab957c11efe2f ("RISC-V: Atomic and Locking Code")
+
+【改动统计】
+ MAINTAINERS                         |  2 +-
+ arch/riscv/Kconfig                  |  1 +
+ arch/riscv/include/asm/membarrier.h | 31 +++++++++++++++++++++++++++++++
+ arch/riscv/mm/context.c             |  2 ++
+ kernel/sched/core.c                 |  5 +++--
+ 5 files changed, 38 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 8d1052fa6a69..2450e88d3e2c 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -14039,7 +14039,7 @@ M:	Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+ M:	"Paul E. McKenney" <paulmck@kernel.org>
+ L:	linux-kernel@vger.kernel.org
+ S:	Supported
+-F:	arch/powerpc/include/asm/membarrier.h
++F:	arch/*/include/asm/membarrier.h
+ F:	include/uapi/linux/membarrier.h
+ F:	kernel/sched/membarrier.c
+ 
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bffbd869a068..087abf9e51c6 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -27,6 +27,7 @@ config RISCV
+ 	select ARCH_HAS_GCOV_PROFILE_ALL
+ 	select ARCH_HAS_GIGANTIC_PAGE
+ 	select ARCH_HAS_KCOV
++	select ARCH_HAS_MEMBARRIER_CALLBACKS
+ 	select ARCH_HAS_MMIOWB
+ 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+ 	select ARCH_HAS_PMEM_API
+diff --git a/arch/riscv/include/asm/membarrier.h b/arch/riscv/include/asm/membarrier.h
+new file mode 100644
+index 000000000000..6c016ebb5020
+--- /dev/null
++++ b/arch/riscv/include/asm/membarrier.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _ASM_RISCV_MEMBARRIER_H
++#define _ASM_RISCV_MEMBARRIER_H
++
++static inline void membarrier_arch_switch_mm(struct mm_struct *prev,
++					     struct mm_struct *next,
++					     struct task_struct *tsk)
++{
++	/*
++	 * Only need the full barrier when switching between processes.
++	 * Barrier when switching from kernel to userspace is not
++	 * required here, given that it is implied by mmdrop(). Barrier
++	 * when switching from userspace to kernel is not needed after
++	 * store to rq->curr.
++	 */
++	if (IS_ENABLED(CONFIG_SMP) &&
++	    likely(!(atomic_read(&next->membarrier_state) &
++		     (MEMBARRIER_STATE_PRIVATE_EXPEDITED |
++		      MEMBARRIER_STATE_GLOBAL_EXPEDITED)) || !prev))
++		return;
++
++	/*
++	 * The membarrier system call requires a full memory barrier
++	 * after storing to rq->curr, before going back to user-space.
++	 * Matches a full barrier in the proximity of the membarrier
++	 * system call entry.
++	 */
++	smp_mb();
++}
++
++#endif /* _ASM_RISCV_MEMBARRIER_H */
+diff --git a/arch/riscv/mm/context.c b/arch/riscv/mm/context.c
+index 217fd4de6134..ba8eb3944687 100644
+--- a/arch/riscv/mm/context.c
++++ b/arch/riscv/mm/context.c
+@@ -323,6 +323,8 @@ void switch_mm(struct mm_struct *prev, struct mm_struct *next,
+ 	if (unlikely(prev == next))
+ 		return;
+ 
++	membarrier_arch_switch_mm(prev, next, task);
++
+ 	/*
+ 	 * Mark the current MM context as inactive, and the next as
+ 	 * active.  This is at least used by the icache flushing
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 9116bcc90346..c4ca8085885a 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -6709,8 +6709,9 @@ static void __sched notrace __schedule(unsigned int sched_mode)
+ 		 *
+ 		 * Here are the schemes providing that barrier on the
+ 		 * various architectures:
+-		 * - mm ? switch_mm() : mmdrop() for x86, s390, sparc, PowerPC.
+-		 *   switch_mm() rely on membarrier_arch_switch_mm() on PowerPC.
++		 * - mm ? switch_mm() : mmdrop() for x86, s390, sparc, PowerPC,
++		 *   RISC-V.  switch_mm() relies on membarrier_arch_switch_mm()
++		 *   on PowerPC and on RISC-V.
+ 		 * - finish_lock_switch() for weakly-ordered
+ 		 *   architectures where spin_unlock is a full barrier,
+ 		 * - switch_to() for arm64 (weakly-ordered, spin_unlock
+
+
+########## 第24条  编号 A058  提交 a11dd49dcb93  日期 2024-02-29
+
+【提交说明】
+riscv: Sparse-Memory/vmemmap out-of-bounds fix
+
+Offset vmemmap so that the first page of vmemmap will be mapped
+to the first page of physical memory in order to ensure that
+vmemmap’s bounds will be respected during
+pfn_to_page()/page_to_pfn() operations.
+The conversion macros will produce correct SV39/48/57 addresses
+for every possible/valid DRAM_BASE inside the physical memory limits.
+
+v2:Address Alex's comments
+
+Fixes: d95f1a542c3d ("RISC-V: Implement sparsemem")
+
+【改动统计】
+ arch/riscv/include/asm/pgtable.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 89f5f1bd6e46..6066822e7396 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -84,7 +84,7 @@
+  * Define vmemmap for pfn_to_page & page_to_pfn calls. Needed if kernel
+  * is configured with CONFIG_SPARSEMEM_VMEMMAP enabled.
+  */
+-#define vmemmap		((struct page *)VMEMMAP_START)
++#define vmemmap		((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT))
+ 
+ #define PCI_IO_SIZE      SZ_16M
+ #define PCI_IO_END       VMEMMAP_START
+
+
+########## 第25条  编号 A238  提交 f2abc305aa93  日期 2026-04-29
+
+【提交说明】
+riscv: Define __riscv_copy_{,vec_}{words,bytes}_unaligned() using SYM_TYPED_FUNC_START
+
+After commit 67bdd7b01387 ("riscv: Split out measure_cycles() for
+reuse") and commit c03ad15f7cf6 ("riscv: Reuse measure_cycles() in
+check_vector_unaligned_access()"), there are CFI failure when booting
+kernels with CONFIG_CFI=y:
+
+  CFI failure at measure_cycles+0x38/0xe0 (target: __riscv_copy_words_unaligned+0x0/0x50; expected type: ...)
+  CFI failure at measure_cycles+0x38/0xe0 (target: __riscv_copy_vec_words_unaligned+0x0/0x24; expected type: ...)
+
+The __riscv_copy_*_unaligned() functions are now called indirectly but
+they are not defined with SYM_TYPED_FUNC_START, which is required for
+assembly functions called indirectly from C to pass CFI checking. Switch
+to SYM_TYPED_FUNC_START to clear up the CFI failures.
+
+Fixes: 67bdd7b01387 ("riscv: Split out measure_cycles() for reuse")
+Fixes: c03ad15f7cf6 ("riscv: Reuse measure_cycles() in check_vector_unaligned_access()")
+
+【改动统计】
+ arch/riscv/kernel/copy-unaligned.S     | 5 +++--
+ arch/riscv/kernel/vec-copy-unaligned.S | 5 +++--
+ 2 files changed, 6 insertions(+), 4 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/copy-unaligned.S b/arch/riscv/kernel/copy-unaligned.S
+index 2b3d9398c113..90f3549621f7 100644
+--- a/arch/riscv/kernel/copy-unaligned.S
++++ b/arch/riscv/kernel/copy-unaligned.S
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: GPL-2.0 */
+ /* Copyright (C) 2023 Rivos Inc. */
+ 
++#include <linux/cfi_types.h>
+ #include <linux/linkage.h>
+ #include <asm/asm.h>
+ 
+@@ -9,7 +10,7 @@
+ /* void __riscv_copy_words_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using word loads and stores. */
+ /* Note: The size is truncated to a multiple of 8 * SZREG */
+-SYM_FUNC_START(__riscv_copy_words_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_words_unaligned)
+ 	andi  a4, a2, ~((8*SZREG)-1)
+ 	beqz  a4, 2f
+ 	add   a3, a1, a4
+@@ -41,7 +42,7 @@ SYM_FUNC_END(__riscv_copy_words_unaligned)
+ /* void __riscv_copy_bytes_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using only byte accesses. */
+ /* Note: The size is truncated to a multiple of 8 */
+-SYM_FUNC_START(__riscv_copy_bytes_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_bytes_unaligned)
+ 	andi a4, a2, ~(8-1)
+ 	beqz a4, 2f
+ 	add  a3, a1, a4
+diff --git a/arch/riscv/kernel/vec-copy-unaligned.S b/arch/riscv/kernel/vec-copy-unaligned.S
+index 7ce4de6f6e69..361039f7b944 100644
+--- a/arch/riscv/kernel/vec-copy-unaligned.S
++++ b/arch/riscv/kernel/vec-copy-unaligned.S
+@@ -2,6 +2,7 @@
+ /* Copyright (C) 2024 Rivos Inc. */
+ 
+ #include <linux/args.h>
++#include <linux/cfi_types.h>
+ #include <linux/linkage.h>
+ #include <asm/asm.h>
+ 
+@@ -16,7 +17,7 @@
+ /* void __riscv_copy_vec_words_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using word loads and stores. */
+ /* Note: The size is truncated to a multiple of WORD_EEW */
+-SYM_FUNC_START(__riscv_copy_vec_words_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_vec_words_unaligned)
+ 	andi  a4, a2, ~(WORD_EEW-1)
+ 	beqz  a4, 2f
+ 	add   a3, a1, a4
+@@ -38,7 +39,7 @@ SYM_FUNC_END(__riscv_copy_vec_words_unaligned)
+ /* void __riscv_copy_vec_bytes_unaligned(void *, const void *, size_t) */
+ /* Performs a memcpy without aligning buffers, using only byte accesses. */
+ /* Note: The size is truncated to a multiple of 8 */
+-SYM_FUNC_START(__riscv_copy_vec_bytes_unaligned)
++SYM_TYPED_FUNC_START(__riscv_copy_vec_bytes_unaligned)
+ 	andi a4, a2, ~(8-1)
+ 	beqz a4, 2f
+ 	add  a3, a1, a4
+
+
+########## 第26条  编号 B432  提交 8933cf4651e0  日期 2024-04-04
+
+【提交说明】
+rust: make mutually exclusive with CFI_CLANG
+
+On RISC-V and arm64, and presumably x86, if CFI_CLANG is enabled,
+loading a rust module will trigger a kernel panic. Support for
+sanitisers, including kcfi (CFI_CLANG), is in the works, but for now
+they're nightly-only options in rustc. Make RUST depend on !CFI_CLANG
+to prevent configuring a kernel without symmetrical support for kfi.
+
+[ Matthew Maurer writes [1]:
+
+    This patch is fine by me - the last patch needed for KCFI to be
+    functional in Rust just landed upstream last night, so we should
+    revisit this (in the form of enabling it) once we move to
+    `rustc-1.79.0` or later.
+
+  Ramon de C Valle also gave feedback [2] on the status of KCFI for
+  Rust and created a tracking issue [3] in upstream Rust.   - Miguel ]
+
+Fixes: 2f7ab1267dc9 ("Kbuild: add Rust support")
+[ Added feedback from the list, links, and used Cc for the tag. ]
+
+【改动统计】
+ init/Kconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+【改动内容】
+diff --git a/init/Kconfig b/init/Kconfig
+index b9a336a3d7d8..664bedb9a71f 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -1899,6 +1899,7 @@ config RUST
+ 	bool "Rust support"
+ 	depends on HAVE_RUST
+ 	depends on RUST_IS_AVAILABLE
++	depends on !CFI_CLANG
+ 	depends on !MODVERSIONS
+ 	depends on !GCC_PLUGINS
+ 	depends on !RANDSTRUCT
+
+
+########## 第27条  编号 B531  提交 b0f2942a1601  日期 2025-10-10
+
+【提交说明】
+kbuild: Use '--strip-unneeded-symbol' for removing module device table symbols
+
+After commit 5ab23c7923a1 ("modpost: Create modalias for builtin
+modules"), relocatable RISC-V kernels with CONFIG_KASAN=y start failing
+when attempting to strip the module device table symbols:
+
+  riscv64-linux-objcopy: not stripping symbol `__mod_device_table__kmod_irq_starfive_jh8100_intc__of__starfive_intc_irqchip_match_table' because it is named in a relocation
+  make[4]: *** [scripts/Makefile.vmlinux:97: vmlinux] Error 1
+
+The relocation appears to come from .LASANLOC5 in .data.rel.local:
+
+  $ llvm-objdump --disassemble-symbols=.LASANLOC5 --disassemble-all -r drivers/irqchip/irq-starfive-jh8100-intc.o
+
+  drivers/irqchip/irq-starfive-jh8100-intc.o:   file format elf64-littleriscv
+
+  Disassembly of section .data.rel.local:
+
+  0000000000000180 <.LASANLOC5>:
+  ...
+       1d0: 0000          unimp
+                  00000000000001d0:  R_RISCV_64   __mod_device_table__kmod_irq_starfive_jh8100_intc__of__starfive_intc_irqchip_match_table
+  ...
+
+This section appears to come from GCC for including additional
+information about global variables that may be protected by KASAN.
+
+There appears to be no way to opt out of the generation of these symbols
+through either a flag or attribute. Attempting to remove '.LASANLOC*'
+with '--strip-symbol' results in the same error as above because these
+symbols may refer to (thus have relocation between) each other.
+
+Avoid this build breakage by switching to '--strip-unneeded-symbol' for
+removing __mod_device_table__ symbols, as it will only remove the symbol
+when there is no relocation pointing to it. While this may result in a
+little more bloat in the symbol table in certain configurations, it is
+not as bad as outright build failures.
+
+Fixes: 5ab23c7923a1 ("modpost: Create modalias for builtin modules")
+
+【改动统计】
+ scripts/Makefile.vmlinux | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/scripts/Makefile.vmlinux b/scripts/Makefile.vmlinux
+index c02f85c2e241..ced4379550d7 100644
+--- a/scripts/Makefile.vmlinux
++++ b/scripts/Makefile.vmlinux
+@@ -87,7 +87,7 @@ remove-section-$(CONFIG_ARCH_VMLINUX_NEEDS_RELOCS) += '.rel*' '!.rel*.dyn'
+ # https://sourceware.org/git/?p=binutils-gdb.git;a=commit;h=c12d9fa2afe7abcbe407a00e15719e1a1350c2a7
+ remove-section-$(CONFIG_ARCH_VMLINUX_NEEDS_RELOCS) += '.rel.*'
+ 
+-remove-symbols := -w --strip-symbol='__mod_device_table__*'
++remove-symbols := -w --strip-unneeded-symbol='__mod_device_table__*'
+ 
+ # To avoid warnings: "empty loadable segment detected at ..." from GNU objcopy,
+ # it is necessary to remove the PT_LOAD flag from the segment.
+
+
+########## 第28条  编号 A112  提交 1966db682f06  日期 2024-10-14
+
+【提交说明】
+RISC-V: ACPI: fix early_ioremap to early_memremap
+
+When SVPBMT is enabled, __acpi_map_table() will directly access the
+data in DDR through the IO attribute, rather than through hardware
+cache consistency, resulting in incorrect data in the obtained ACPI
+table.
+
+The log: ACPI: [ACPI:0x18] Invalid zero length.
+
+We do not assume whether the bootloader flushes or not. We should
+access in a cacheable way instead of maintaining cache consistency
+by software.
+
+Fixes: 3b426d4b5b14 ("RISC-V: ACPI : Fix for usage of pointers in different address space")
+
+【改动统计】
+ arch/riscv/kernel/acpi.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/acpi.c b/arch/riscv/kernel/acpi.c
+index 6e0d333f57e5..2fd29695a788 100644
+--- a/arch/riscv/kernel/acpi.c
++++ b/arch/riscv/kernel/acpi.c
+@@ -210,7 +210,7 @@ void __init __iomem *__acpi_map_table(unsigned long phys, unsigned long size)
+ 	if (!size)
+ 		return NULL;
+ 
+-	return early_ioremap(phys, size);
++	return early_memremap(phys, size);
+ }
+ 
+ void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
+@@ -218,7 +218,7 @@ void __init __acpi_unmap_table(void __iomem *map, unsigned long size)
+ 	if (!map || !size)
+ 		return;
+ 
+-	early_iounmap(map, size);
++	early_memunmap(map, size);
+ }
+ 
+ void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
+
+
+########## 第29条  编号 A083  提交 23b2188920a2  日期 2024-06-13
+
+【提交说明】
+riscv: stacktrace: convert arch_stack_walk() to noinstr
+
+arch_stack_walk() is called intensively in function_graph when the
+kernel is compiled with CONFIG_TRACE_IRQFLAGS. As a result, the kernel
+logs a lot of arch_stack_walk and its sub-functions into the ftrace
+buffer. However, these functions should not appear on the trace log
+because they are part of the ftrace itself. This patch references what
+arm64 does for the smae function. So it further prevent the re-enter
+kprobe issue, which is also possible on riscv.
+
+Related-to: commit 0fbcd8abf337 ("arm64: Prohibit instrumentation on arch_stack_walk()")
+Fixes: 680341382da5 ("riscv: add CALLER_ADDRx support")
+
+【改动统计】
+ arch/riscv/kernel/stacktrace.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index 528ec7cc9a62..0d3f00eb0bae 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -156,7 +156,7 @@ unsigned long __get_wchan(struct task_struct *task)
+ 	return pc;
+ }
+ 
+-noinline void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
++noinline noinstr void arch_stack_walk(stack_trace_consume_fn consume_entry, void *cookie,
+ 		     struct task_struct *task, struct pt_regs *regs)
+ {
+ 	walk_stackframe(task, regs, consume_entry, cookie);
+
+
+########## 第30条  编号 A022  提交 5daa37264102  日期 2023-12-12
+
+【提交说明】
+riscv: Fixed wrong register in XIP_FIXUP_FLASH_OFFSET macro
+
+During the refactoring, a bug was introduced in the rarly used
+XIP_FIXUP_FLASH_OFFSET macro.
+
+Fixes: bee7fbc38579 ("RISC-V CPU Idle Support")
+Fixes: e7681beba992 ("RISC-V: Split out the XIP fixups into their own file")
+
+【改动统计】
+ arch/riscv/include/asm/xip_fixup.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/xip_fixup.h b/arch/riscv/include/asm/xip_fixup.h
+index d4ffc3c37649..b65bf6306f69 100644
+--- a/arch/riscv/include/asm/xip_fixup.h
++++ b/arch/riscv/include/asm/xip_fixup.h
+@@ -13,7 +13,7 @@
+         add \reg, \reg, t0
+ .endm
+ .macro XIP_FIXUP_FLASH_OFFSET reg
+-	la t1, __data_loc
++	la t0, __data_loc
+ 	REG_L t1, _xip_phys_offset
+ 	sub \reg, \reg, t1
+ 	add \reg, \reg, t0
+
+
+########## 第31条  编号 A065  提交 443574b03387  日期 2024-03-24
+
+【提交说明】
+riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi
+
+We encountered a failing case when running selftest in no_alu32 mode:
+
+The failure case is `kfunc_call/kfunc_call_test4` and its source code is
+like bellow:
+```
+long bpf_kfunc_call_test4(signed char a, short b, int c, long d) __ksym;
+int kfunc_call_test4(struct __sk_buff *skb)
+{
+	...
+	tmp = bpf_kfunc_call_test4(-3, -30, -200, -1000);
+	...
+}
+```
+
+And its corresponding asm code is:
+```
+0: r1 = -3
+1: r2 = -30
+2: r3 = 0xffffff38 # opcode: 18 03 00 00 38 ff ff ff 00 00 00 00 00 00 00 00
+4: r4 = -1000
+5: call bpf_kfunc_call_test4
+```
+
+insn 2 is parsed to ld_imm64 insn to emit 0x00000000ffffff38 imm, and
+converted to int type and then send to bpf_kfunc_call_test4. But since
+it is zero-extended in the bpf calling convention, riscv jit will
+directly treat it as an unsigned 32-bit int value, and then fails with
+the message "actual 4294966063 != expected -1234".
+
+The reason is the incompatibility between bpf and riscv abi, that is,
+bpf will do zero-extension on uint, but riscv64 requires sign-extension
+on int or uint. We can solve this problem by sign extending the 32-bit
+parameters in kfunc.
+
+The issue is related to [0], and thanks to Yonghong and Alexei.
+
+Fixes: d40c3847b485 ("riscv, bpf: Add kfunc support for RV64")
+
+【改动统计】
+ arch/riscv/net/bpf_jit_comp64.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index aac190085472..1adf2f39ce59 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1463,6 +1463,22 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *fm;
++			int idx;
++
++			fm = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!fm)
++				return -EINVAL;
++
++			for (idx = 0; idx < fm->nr_args; idx++) {
++				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
++
++				if (fm->arg_size[idx] == sizeof(int))
++					emit_sextw(reg, reg, ctx);
++			}
++		}
++
+ 		ret = emit_call(addr, fixed_addr, ctx);
+ 		if (ret)
+ 			return ret;
+
+
+########## 第32条  编号 A079  提交 a638b0461b58  日期 2024-05-23
+
+【提交说明】
+riscv: prevent pt_regs corruption for secondary idle threads
+
+Top of the kernel thread stack should be reserved for pt_regs. However
+this is not the case for the idle threads of the secondary boot harts.
+Their stacks overlap with their pt_regs, so both may get corrupted.
+
+Similar issue has been fixed for the primary hart, see c7cdd96eca28
+("riscv: prevent stack corruption by reserving task_pt_regs(p) early").
+However that fix was not propagated to the secondary harts. The problem
+has been noticed in some CPU hotplug tests with V enabled. The function
+smp_callin stored several registers on stack, corrupting top of pt_regs
+structure including status field. As a result, kernel attempted to save
+or restore inexistent V context.
+
+Fixes: 9a2451f18663 ("RISC-V: Avoid using per cpu array for ordered booting")
+Fixes: 2875fe056156 ("RISC-V: Add cpu_ops and modify default booting method")
+
+【改动统计】
+ arch/riscv/kernel/cpu_ops_sbi.c      | 2 +-
+ arch/riscv/kernel/cpu_ops_spinwait.c | 3 +--
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/cpu_ops_sbi.c b/arch/riscv/kernel/cpu_ops_sbi.c
+index 1cc7df740edd..e6fbaaf54956 100644
+--- a/arch/riscv/kernel/cpu_ops_sbi.c
++++ b/arch/riscv/kernel/cpu_ops_sbi.c
+@@ -72,7 +72,7 @@ static int sbi_cpu_start(unsigned int cpuid, struct task_struct *tidle)
+ 	/* Make sure tidle is updated */
+ 	smp_mb();
+ 	bdata->task_ptr = tidle;
+-	bdata->stack_ptr = task_stack_page(tidle) + THREAD_SIZE;
++	bdata->stack_ptr = task_pt_regs(tidle);
+ 	/* Make sure boot data is updated */
+ 	smp_mb();
+ 	hsm_data = __pa(bdata);
+diff --git a/arch/riscv/kernel/cpu_ops_spinwait.c b/arch/riscv/kernel/cpu_ops_spinwait.c
+index 613872b0a21a..24869eb88908 100644
+--- a/arch/riscv/kernel/cpu_ops_spinwait.c
++++ b/arch/riscv/kernel/cpu_ops_spinwait.c
+@@ -34,8 +34,7 @@ static void cpu_update_secondary_bootdata(unsigned int cpuid,
+ 
+ 	/* Make sure tidle is updated */
+ 	smp_mb();
+-	WRITE_ONCE(__cpu_spinwait_stack_pointer[hartid],
+-		   task_stack_page(tidle) + THREAD_SIZE);
++	WRITE_ONCE(__cpu_spinwait_stack_pointer[hartid], task_pt_regs(tidle));
+ 	WRITE_ONCE(__cpu_spinwait_task_pointer[hartid], tidle);
+ }
+ 
+
+
+########## 第33条  编号 B494  提交 68cb0139fec8  日期 2025-03-07
+
+【提交说明】
+cpuidle: Init cpuidle only for present CPUs
+
+for_each_possible_cpu() is currently used to initialize cpuidle
+in below cpuidle drivers:
+  drivers/cpuidle/cpuidle-arm.c
+  drivers/cpuidle/cpuidle-big_little.c
+  drivers/cpuidle/cpuidle-psci.c
+  drivers/cpuidle/cpuidle-qcom-spm.c
+  drivers/cpuidle/cpuidle-riscv-sbi.c
+
+However, in cpu_dev_register_generic(), for_each_present_cpu()
+is used to register CPU devices which means the CPU devices are
+only registered for present CPUs and not all possible CPUs.
+
+With nosmp or maxcpus=0, only the boot CPU is present, lead
+to the failure:
+
+  |  Failed to register cpuidle device for cpu1
+
+Then rollback to cancel all CPUs' cpuidle registration.
+
+Change for_each_possible_cpu() to for_each_present_cpu() in the
+above cpuidle drivers to ensure it only registers cpuidle devices
+for CPUs that are actually present.
+
+Fixes: b0c69e1214bc ("drivers: base: Use present CPUs in GENERIC_CPU_DEVICES")
+
+【改动统计】
+ drivers/cpuidle/cpuidle-arm.c        | 8 ++++----
+ drivers/cpuidle/cpuidle-big_little.c | 2 +-
+ drivers/cpuidle/cpuidle-psci.c       | 4 ++--
+ drivers/cpuidle/cpuidle-qcom-spm.c   | 2 +-
+ drivers/cpuidle/cpuidle-riscv-sbi.c  | 4 ++--
+ 5 files changed, 10 insertions(+), 10 deletions(-)
+
+【改动内容】
+diff --git a/drivers/cpuidle/cpuidle-arm.c b/drivers/cpuidle/cpuidle-arm.c
+index caba6f4bb1b7..e044fefdb816 100644
+--- a/drivers/cpuidle/cpuidle-arm.c
++++ b/drivers/cpuidle/cpuidle-arm.c
+@@ -137,9 +137,9 @@ static int __init arm_idle_init_cpu(int cpu)
+ /*
+  * arm_idle_init - Initializes arm cpuidle driver
+  *
+- * Initializes arm cpuidle driver for all CPUs, if any CPU fails
+- * to register cpuidle driver then rollback to cancel all CPUs
+- * registration.
++ * Initializes arm cpuidle driver for all present CPUs, if any
++ * CPU fails to register cpuidle driver then rollback to cancel
++ * all CPUs registration.
+  */
+ static int __init arm_idle_init(void)
+ {
+@@ -147,7 +147,7 @@ static int __init arm_idle_init(void)
+ 	struct cpuidle_driver *drv;
+ 	struct cpuidle_device *dev;
+ 
+-	for_each_possible_cpu(cpu) {
++	for_each_present_cpu(cpu) {
+ 		ret = arm_idle_init_cpu(cpu);
+ 		if (ret)
+ 			goto out_fail;
+diff --git a/drivers/cpuidle/cpuidle-big_little.c b/drivers/cpuidle/cpuidle-big_little.c
+index 74972deda0ea..4abba42fcc31 100644
+--- a/drivers/cpuidle/cpuidle-big_little.c
++++ b/drivers/cpuidle/cpuidle-big_little.c
+@@ -148,7 +148,7 @@ static int __init bl_idle_driver_init(struct cpuidle_driver *drv, int part_id)
+ 	if (!cpumask)
+ 		return -ENOMEM;
+ 
+-	for_each_possible_cpu(cpu)
++	for_each_present_cpu(cpu)
+ 		if (smp_cpuid_part(cpu) == part_id)
+ 			cpumask_set_cpu(cpu, cpumask);
+ 
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index 2562dc001fc1..a4594c3d6562 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -400,7 +400,7 @@ static int psci_idle_init_cpu(struct device *dev, int cpu)
+ /*
+  * psci_idle_probe - Initializes PSCI cpuidle driver
+  *
+- * Initializes PSCI cpuidle driver for all CPUs, if any CPU fails
++ * Initializes PSCI cpuidle driver for all present CPUs, if any CPU fails
+  * to register cpuidle driver then rollback to cancel all CPUs
+  * registration.
+  */
+@@ -410,7 +410,7 @@ static int psci_cpuidle_probe(struct platform_device *pdev)
+ 	struct cpuidle_driver *drv;
+ 	struct cpuidle_device *dev;
+ 
+-	for_each_possible_cpu(cpu) {
++	for_each_present_cpu(cpu) {
+ 		ret = psci_idle_init_cpu(&pdev->dev, cpu);
+ 		if (ret)
+ 			goto out_fail;
+diff --git a/drivers/cpuidle/cpuidle-qcom-spm.c b/drivers/cpuidle/cpuidle-qcom-spm.c
+index 3ab240e0e122..5f386761b156 100644
+--- a/drivers/cpuidle/cpuidle-qcom-spm.c
++++ b/drivers/cpuidle/cpuidle-qcom-spm.c
+@@ -135,7 +135,7 @@ static int spm_cpuidle_drv_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return dev_err_probe(&pdev->dev, ret, "set warm boot addr failed");
+ 
+-	for_each_possible_cpu(cpu) {
++	for_each_present_cpu(cpu) {
+ 		ret = spm_cpuidle_register(&pdev->dev, cpu);
+ 		if (ret && ret != -ENODEV) {
+ 			dev_err(&pdev->dev,
+diff --git a/drivers/cpuidle/cpuidle-riscv-sbi.c b/drivers/cpuidle/cpuidle-riscv-sbi.c
+index 0c92a628bbd4..0fe1ece9fbdc 100644
+--- a/drivers/cpuidle/cpuidle-riscv-sbi.c
++++ b/drivers/cpuidle/cpuidle-riscv-sbi.c
+@@ -529,8 +529,8 @@ static int sbi_cpuidle_probe(struct platform_device *pdev)
+ 			return ret;
+ 	}
+ 
+-	/* Initialize CPU idle driver for each CPU */
+-	for_each_possible_cpu(cpu) {
++	/* Initialize CPU idle driver for each present CPU */
++	for_each_present_cpu(cpu) {
+ 		ret = sbi_cpuidle_init_cpu(&pdev->dev, cpu);
+ 		if (ret) {
+ 			pr_debug("HART%ld: idle driver init failed\n",
+
+
+########## 第34条  编号 B414  提交 4a693ce65b18  日期 2023-12-29
+
+【提交说明】
+kdump: defer the insertion of crashkernel resources
+
+In /proc/iomem, sub-regions should be inserted after their parent,
+otherwise the insertion of parent resource fails.  But after generic
+crashkernel reservation applied, in both RISC-V and ARM64 (LoongArch will
+also use generic reservation later on), crashkernel resources are inserted
+before their parent, which causes the parent disappear in /proc/iomem.  So
+we defer the insertion of crashkernel resources to an early_initcall().
+
+1, Without 'crashkernel' parameter:
+
+ 100d0100-100d01ff : LOON0001:00
+   100d0100-100d01ff : LOON0001:00 LOON0001:00
+ 100e0000-100e0bff : LOON0002:00
+   100e0000-100e0bff : LOON0002:00 LOON0002:00
+ 1fe001e0-1fe001e7 : serial
+ 90400000-fa17ffff : System RAM
+   f6220000-f622ffff : Reserved
+   f9ee0000-f9ee3fff : Reserved
+   fa120000-fa17ffff : Reserved
+ fa190000-fe0bffff : System RAM
+   fa190000-fa1bffff : Reserved
+ fe4e0000-47fffffff : System RAM
+   43c000000-441ffffff : Reserved
+   47ff98000-47ffa3fff : Reserved
+   47ffa4000-47ffa7fff : Reserved
+   47ffa8000-47ffabfff : Reserved
+   47ffac000-47ffaffff : Reserved
+   47ffb0000-47ffb3fff : Reserved
+
+2, With 'crashkernel' parameter, before this patch:
+
+ 100d0100-100d01ff : LOON0001:00
+   100d0100-100d01ff : LOON0001:00 LOON0001:00
+ 100e0000-100e0bff : LOON0002:00
+   100e0000-100e0bff : LOON0002:00 LOON0002:00
+ 1fe001e0-1fe001e7 : serial
+ e6200000-f61fffff : Crash kernel
+ fa190000-fe0bffff : System RAM
+   fa190000-fa1bffff : Reserved
+ fe4e0000-47fffffff : System RAM
+   43c000000-441ffffff : Reserved
+   47ff98000-47ffa3fff : Reserved
+   47ffa4000-47ffa7fff : Reserved
+   47ffa8000-47ffabfff : Reserved
+   47ffac000-47ffaffff : Reserved
+   47ffb0000-47ffb3fff : Reserved
+
+3, With 'crashkernel' parameter, after this patch:
+
+ 100d0100-100d01ff : LOON0001:00
+   100d0100-100d01ff : LOON0001:00 LOON0001:00
+ 100e0000-100e0bff : LOON0002:00
+   100e0000-100e0bff : LOON0002:00 LOON0002:00
+ 1fe001e0-1fe001e7 : serial
+ 90400000-fa17ffff : System RAM
+   e6200000-f61fffff : Crash kernel
+   f6220000-f622ffff : Reserved
+   f9ee0000-f9ee3fff : Reserved
+   fa120000-fa17ffff : Reserved
+ fa190000-fe0bffff : System RAM
+   fa190000-fa1bffff : Reserved
+ fe4e0000-47fffffff : System RAM
+   43c000000-441ffffff : Reserved
+   47ff98000-47ffa3fff : Reserved
+   47ffa4000-47ffa7fff : Reserved
+   47ffa8000-47ffabfff : Reserved
+   47ffac000-47ffaffff : Reserved
+   47ffb0000-47ffb3fff : Reserved
+
+Fixes: 0ab97169aa05 ("crash_core: add generic function to do reservation")
+
+【改动统计】
+ kernel/crash_core.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/kernel/crash_core.c b/kernel/crash_core.c
+index d48315667752..4e2cac71b84f 100644
+--- a/kernel/crash_core.c
++++ b/kernel/crash_core.c
+@@ -376,7 +376,6 @@ static int __init reserve_crashkernel_low(unsigned long long low_size)
+ 
+ 	crashk_low_res.start = low_base;
+ 	crashk_low_res.end   = low_base + low_size - 1;
+-	insert_resource(&iomem_resource, &crashk_low_res);
+ #endif
+ 	return 0;
+ }
+@@ -458,8 +457,19 @@ void __init reserve_crashkernel_generic(char *cmdline,
+ 
+ 	crashk_res.start = crash_base;
+ 	crashk_res.end = crash_base + crash_size - 1;
+-	insert_resource(&iomem_resource, &crashk_res);
+ }
++
++static __init int insert_crashkernel_resources(void)
++{
++	if (crashk_res.start < crashk_res.end)
++		insert_resource(&iomem_resource, &crashk_res);
++
++	if (crashk_low_res.start < crashk_low_res.end)
++		insert_resource(&iomem_resource, &crashk_low_res);
++
++	return 0;
++}
++early_initcall(insert_crashkernel_resources);
+ #endif
+ 
+ int crash_prepare_elf64_headers(struct crash_mem *mem, int need_kernel_map,
+
+
+########## 第35条  编号 A026  提交 420370f3ae3d  日期 2023-12-14
+
+【提交说明】
+riscv: Check if the code to patch lies in the exit section
+
+Otherwise we fall through to vmalloc_to_page() which panics since the
+address does not lie in the vmalloc region.
+
+Fixes: 043cb41a85de ("riscv: introduce interfaces to patch kernel code")
+
+【改动统计】
+ arch/riscv/include/asm/sections.h   |  1 +
+ arch/riscv/kernel/patch.c           | 11 ++++++++++-
+ arch/riscv/kernel/vmlinux-xip.lds.S |  2 ++
+ arch/riscv/kernel/vmlinux.lds.S     |  2 ++
+ 4 files changed, 15 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/sections.h b/arch/riscv/include/asm/sections.h
+index 32336e8a17cb..a393d5035c54 100644
+--- a/arch/riscv/include/asm/sections.h
++++ b/arch/riscv/include/asm/sections.h
+@@ -13,6 +13,7 @@ extern char _start_kernel[];
+ extern char __init_data_begin[], __init_data_end[];
+ extern char __init_text_begin[], __init_text_end[];
+ extern char __alt_start[], __alt_end[];
++extern char __exittext_begin[], __exittext_end[];
+ 
+ static inline bool is_va_kernel_text(uintptr_t va)
+ {
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 13ee7bf589a1..37e87fdcf6a0 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -14,6 +14,7 @@
+ #include <asm/fixmap.h>
+ #include <asm/ftrace.h>
+ #include <asm/patch.h>
++#include <asm/sections.h>
+ 
+ struct patch_insn {
+ 	void *addr;
+@@ -25,6 +26,14 @@ struct patch_insn {
+ int riscv_patch_in_stop_machine = false;
+ 
+ #ifdef CONFIG_MMU
++
++static inline bool is_kernel_exittext(uintptr_t addr)
++{
++	return system_state < SYSTEM_RUNNING &&
++		addr >= (uintptr_t)__exittext_begin &&
++		addr < (uintptr_t)__exittext_end;
++}
++
+ /*
+  * The fix_to_virt(, idx) needs a const value (not a dynamic variable of
+  * reg-a0) or BUILD_BUG_ON failed with "idx >= __end_of_fixed_addresses".
+@@ -35,7 +44,7 @@ static __always_inline void *patch_map(void *addr, const unsigned int fixmap)
+ 	uintptr_t uintaddr = (uintptr_t) addr;
+ 	struct page *page;
+ 
+-	if (core_kernel_text(uintaddr))
++	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr))
+ 		page = phys_to_page(__pa_symbol(addr));
+ 	else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
+ 		page = vmalloc_to_page(addr);
+diff --git a/arch/riscv/kernel/vmlinux-xip.lds.S b/arch/riscv/kernel/vmlinux-xip.lds.S
+index 50767647fbc6..8c3daa1b0531 100644
+--- a/arch/riscv/kernel/vmlinux-xip.lds.S
++++ b/arch/riscv/kernel/vmlinux-xip.lds.S
+@@ -29,10 +29,12 @@ SECTIONS
+ 	HEAD_TEXT_SECTION
+ 	INIT_TEXT_SECTION(PAGE_SIZE)
+ 	/* we have to discard exit text and such at runtime, not link time */
++	__exittext_begin = .;
+ 	.exit.text :
+ 	{
+ 		EXIT_TEXT
+ 	}
++	__exittext_end = .;
+ 
+ 	.text : {
+ 		_text = .;
+diff --git a/arch/riscv/kernel/vmlinux.lds.S b/arch/riscv/kernel/vmlinux.lds.S
+index 492dd4b8f3d6..002ca58dd998 100644
+--- a/arch/riscv/kernel/vmlinux.lds.S
++++ b/arch/riscv/kernel/vmlinux.lds.S
+@@ -69,10 +69,12 @@ SECTIONS
+ 		__soc_builtin_dtb_table_end = .;
+ 	}
+ 	/* we have to discard exit text and such at runtime, not link time */
++	__exittext_begin = .;
+ 	.exit.text :
+ 	{
+ 		EXIT_TEXT
+ 	}
++	__exittext_end = .;
+ 
+ 	__init_text_end = .;
+ 	. = ALIGN(SECTION_ALIGN);
+
+
+########## 第36条  编号 A102  提交 1ff95eb2bebd  日期 2024-08-29
+
+【提交说明】
+riscv: Fix RISCV_ALTERNATIVE_EARLY
+
+RISCV_ALTERNATIVE_EARLY will issue sbi_ecall() very early in the boot
+process, before the first memory mapping is setup so we can't have any
+instrumentation happening here.
+
+In addition, when the kernel is relocatable, we must also not issue any
+relocation this early since they would have been patched virtually only.
+
+So, instead of disabling instrumentation for the whole kernel/sbi.c file
+and compiling it with -fno-pie, simply move __sbi_ecall() and
+__sbi_base_ecall() into their own file where this is fixed.
+
+Fixes: 1745cfafebdf ("riscv: don't use global static vars to store alternative data")
+
+【改动统计】
+ arch/riscv/include/asm/sbi.h  | 20 +++++++++++++++++++-
+ arch/riscv/kernel/Makefile    |  6 +++++-
+ arch/riscv/kernel/sbi.c       | 63 ---------------------------------------------------------------
+ arch/riscv/kernel/sbi_ecall.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 72 insertions(+), 65 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/sbi.h b/arch/riscv/include/asm/sbi.h
+index 7cffd4ffecd0..7bd3746028c9 100644
+--- a/arch/riscv/include/asm/sbi.h
++++ b/arch/riscv/include/asm/sbi.h
+@@ -9,6 +9,7 @@
+ 
+ #include <linux/types.h>
+ #include <linux/cpumask.h>
++#include <linux/jump_label.h>
+ 
+ #ifdef CONFIG_RISCV_SBI
+ enum sbi_ext_id {
+@@ -304,6 +305,7 @@ struct sbiret {
+ };
+ 
+ void sbi_init(void);
++long __sbi_base_ecall(int fid);
+ struct sbiret __sbi_ecall(unsigned long arg0, unsigned long arg1,
+ 			  unsigned long arg2, unsigned long arg3,
+ 			  unsigned long arg4, unsigned long arg5,
+@@ -373,7 +375,23 @@ static inline unsigned long sbi_mk_version(unsigned long major,
+ 		| (minor & SBI_SPEC_VERSION_MINOR_MASK);
+ }
+ 
+-int sbi_err_map_linux_errno(int err);
++static inline int sbi_err_map_linux_errno(int err)
++{
++	switch (err) {
++	case SBI_SUCCESS:
++		return 0;
++	case SBI_ERR_DENIED:
++		return -EPERM;
++	case SBI_ERR_INVALID_PARAM:
++		return -EINVAL;
++	case SBI_ERR_INVALID_ADDRESS:
++		return -EFAULT;
++	case SBI_ERR_NOT_SUPPORTED:
++	case SBI_ERR_FAILURE:
++	default:
++		return -ENOTSUPP;
++	};
++}
+ 
+ extern bool sbi_debug_console_available;
+ int sbi_debug_console_write(const char *bytes, unsigned int num_bytes);
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index 06d407f1b30b..7f88cc4931f5 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -20,17 +20,21 @@ endif
+ ifdef CONFIG_RISCV_ALTERNATIVE_EARLY
+ CFLAGS_alternative.o := -mcmodel=medany
+ CFLAGS_cpufeature.o := -mcmodel=medany
++CFLAGS_sbi_ecall.o := -mcmodel=medany
+ ifdef CONFIG_FTRACE
+ CFLAGS_REMOVE_alternative.o = $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_cpufeature.o = $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_sbi_ecall.o = $(CC_FLAGS_FTRACE)
+ endif
+ ifdef CONFIG_RELOCATABLE
+ CFLAGS_alternative.o += -fno-pie
+ CFLAGS_cpufeature.o += -fno-pie
++CFLAGS_sbi_ecall.o += -fno-pie
+ endif
+ ifdef CONFIG_KASAN
+ KASAN_SANITIZE_alternative.o := n
+ KASAN_SANITIZE_cpufeature.o := n
++KASAN_SANITIZE_sbi_ecall.o := n
+ endif
+ endif
+ 
+@@ -88,7 +92,7 @@ obj-$(CONFIG_DYNAMIC_FTRACE)	+= mcount-dyn.o
+ 
+ obj-$(CONFIG_PERF_EVENTS)	+= perf_callchain.o
+ obj-$(CONFIG_HAVE_PERF_REGS)	+= perf_regs.o
+-obj-$(CONFIG_RISCV_SBI)		+= sbi.o
++obj-$(CONFIG_RISCV_SBI)		+= sbi.o sbi_ecall.o
+ ifeq ($(CONFIG_RISCV_SBI), y)
+ obj-$(CONFIG_SMP)		+= sbi-ipi.o
+ obj-$(CONFIG_SMP) += cpu_ops_sbi.o
+diff --git a/arch/riscv/kernel/sbi.c b/arch/riscv/kernel/sbi.c
+index 837bdab2601b..1989b8cade1b 100644
+--- a/arch/riscv/kernel/sbi.c
++++ b/arch/riscv/kernel/sbi.c
+@@ -14,9 +14,6 @@
+ #include <asm/smp.h>
+ #include <asm/tlbflush.h>
+ 
+-#define CREATE_TRACE_POINTS
+-#include <asm/trace.h>
+-
+ /* default SBI version is 0.1 */
+ unsigned long sbi_spec_version __ro_after_init = SBI_SPEC_VERSION_DEFAULT;
+ EXPORT_SYMBOL(sbi_spec_version);
+@@ -27,55 +24,6 @@ static int (*__sbi_rfence)(int fid, const struct cpumask *cpu_mask,
+ 			   unsigned long start, unsigned long size,
+ 			   unsigned long arg4, unsigned long arg5) __ro_after_init;
+ 
+-struct sbiret __sbi_ecall(unsigned long arg0, unsigned long arg1,
+-			  unsigned long arg2, unsigned long arg3,
+-			  unsigned long arg4, unsigned long arg5,
+-			  int fid, int ext)
+-{
+-	struct sbiret ret;
+-
+-	trace_sbi_call(ext, fid);
+-
+-	register uintptr_t a0 asm ("a0") = (uintptr_t)(arg0);
+-	register uintptr_t a1 asm ("a1") = (uintptr_t)(arg1);
+-	register uintptr_t a2 asm ("a2") = (uintptr_t)(arg2);
+-	register uintptr_t a3 asm ("a3") = (uintptr_t)(arg3);
+-	register uintptr_t a4 asm ("a4") = (uintptr_t)(arg4);
+-	register uintptr_t a5 asm ("a5") = (uintptr_t)(arg5);
+-	register uintptr_t a6 asm ("a6") = (uintptr_t)(fid);
+-	register uintptr_t a7 asm ("a7") = (uintptr_t)(ext);
+-	asm volatile ("ecall"
+-		      : "+r" (a0), "+r" (a1)
+-		      : "r" (a2), "r" (a3), "r" (a4), "r" (a5), "r" (a6), "r" (a7)
+-		      : "memory");
+-	ret.error = a0;
+-	ret.value = a1;
+-
+-	trace_sbi_return(ext, ret.error, ret.value);
+-
+-	return ret;
+-}
+-EXPORT_SYMBOL(__sbi_ecall);
+-
+-int sbi_err_map_linux_errno(int err)
+-{
+-	switch (err) {
+-	case SBI_SUCCESS:
+-		return 0;
+-	case SBI_ERR_DENIED:
+-		return -EPERM;
+-	case SBI_ERR_INVALID_PARAM:
+-		return -EINVAL;
+-	case SBI_ERR_INVALID_ADDRESS:
+-		return -EFAULT;
+-	case SBI_ERR_NOT_SUPPORTED:
+-	case SBI_ERR_FAILURE:
+-	default:
+-		return -ENOTSUPP;
+-	};
+-}
+-EXPORT_SYMBOL(sbi_err_map_linux_errno);
+-
+ #ifdef CONFIG_RISCV_SBI_V01
+ static unsigned long __sbi_v01_cpumask_to_hartmask(const struct cpumask *cpu_mask)
+ {
+@@ -535,17 +483,6 @@ long sbi_probe_extension(int extid)
+ }
+ EXPORT_SYMBOL(sbi_probe_extension);
+ 
+-static long __sbi_base_ecall(int fid)
+-{
+-	struct sbiret ret;
+-
+-	ret = sbi_ecall(SBI_EXT_BASE, fid, 0, 0, 0, 0, 0, 0);
+-	if (!ret.error)
+-		return ret.value;
+-	else
+-		return sbi_err_map_linux_errno(ret.error);
+-}
+-
+ static inline long sbi_get_spec_version(void)
+ {
+ 	return __sbi_base_ecall(SBI_EXT_BASE_GET_SPEC_VERSION);
+diff --git a/arch/riscv/kernel/sbi_ecall.c b/arch/riscv/kernel/sbi_ecall.c
+new file mode 100644
+index 000000000000..24aabb4fbde3
+--- /dev/null
++++ b/arch/riscv/kernel/sbi_ecall.c
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: GPL-2.0
++/* Copyright (c) 2024 Rivos Inc. */
++
++#include <asm/sbi.h>
++#define CREATE_TRACE_POINTS
++#include <asm/trace.h>
++
++long __sbi_base_ecall(int fid)
++{
++	struct sbiret ret;
++
++	ret = sbi_ecall(SBI_EXT_BASE, fid, 0, 0, 0, 0, 0, 0);
++	if (!ret.error)
++		return ret.value;
++	else
++		return sbi_err_map_linux_errno(ret.error);
++}
++EXPORT_SYMBOL(__sbi_base_ecall);
++
++struct sbiret __sbi_ecall(unsigned long arg0, unsigned long arg1,
++			  unsigned long arg2, unsigned long arg3,
++			  unsigned long arg4, unsigned long arg5,
++			  int fid, int ext)
++{
++	struct sbiret ret;
++
+...（改动其余22行省略）
+
+
+########## 第37条  编号 A327  提交 b3134b8c1a1c  日期 2024-11-30
+
+【提交说明】
+riscv: Fixup boot failure when CONFIG_DEBUG_RT_MUTEXES=y
+
+When CONFIG_DEBUG_RT_MUTEXES=y, mutex_lock->rt_mutex_try_acquire
+would change from rt_mutex_cmpxchg_acquire to
+rt_mutex_slowtrylock():
+	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+	ret = __rt_mutex_slowtrylock(lock);
+	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+
+Because queued_spin_#ops to ticket_#ops is changed one by one by
+jump_label, raw_spin_lock/unlock would cause a deadlock during the
+changing.
+
+That means in arch/riscv/kernel/jump_label.c:
+1.
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock  -> queued_spin_lock
+			 |-> raw_spin_unlock -> queued_spin_unlock
+patch_insn_write -> change the raw_spin_lock to ticket_lock
+mutex_unlock(&text_mutex);
+...
+
+2. /* Dirty the lock value */
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock -> *ticket_lock*
+                         |-> raw_spin_unlock -> *queued_spin_unlock*
+			  /* BUG: ticket_lock with queued_spin_unlock */
+patch_insn_write  ->  change the raw_spin_unlock to ticket_unlock
+mutex_unlock(&text_mutex);
+...
+
+3. /* Dead lock */
+arch_jump_label_transform_queue() ->
+mutex_lock(&text_mutex); +-> raw_spin_lock -> ticket_lock /* deadlock! */
+                         |-> raw_spin_unlock -> ticket_unlock
+patch_insn_write -> change other raw_spin_#op -> ticket_#op
+mutex_unlock(&text_mutex);
+
+So, the solution is to disable mutex usage of
+arch_jump_label_transform_queue() during early_boot_irqs_disabled, just
+like we have done for stop_machine.
+
+Fixes: ab83647fadae ("riscv: Add qspinlock support")
+
+【改动统计】
+ arch/riscv/kernel/jump_label.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/jump_label.c b/arch/riscv/kernel/jump_label.c
+index 6eee6f736f68..654ed159c830 100644
+--- a/arch/riscv/kernel/jump_label.c
++++ b/arch/riscv/kernel/jump_label.c
+@@ -36,9 +36,15 @@ bool arch_jump_label_transform_queue(struct jump_entry *entry,
+ 		insn = RISCV_INSN_NOP;
+ 	}
+ 
+-	mutex_lock(&text_mutex);
+-	patch_insn_write(addr, &insn, sizeof(insn));
+-	mutex_unlock(&text_mutex);
++	if (early_boot_irqs_disabled) {
++		riscv_patch_in_stop_machine = 1;
++		patch_insn_write(addr, &insn, sizeof(insn));
++		riscv_patch_in_stop_machine = 0;
++	} else {
++		mutex_lock(&text_mutex);
++		patch_insn_write(addr, &insn, sizeof(insn));
++		mutex_unlock(&text_mutex);
++	}
+ 
+ 	return true;
+ }
+
+
+########## 第38条  编号 A069  提交 a370c2419e46  日期 2024-03-26
+
+【提交说明】
+riscv: Disable preemption when using patch_map()
+
+patch_map() uses fixmap mappings to circumvent the non-writability of
+the kernel text mapping.
+
+The __set_fixmap() function only flushes the current cpu tlb, it does
+not emit an IPI so we must make sure that while we use a fixmap mapping,
+the current task is not migrated on another cpu which could miss the
+newly introduced fixmap mapping.
+
+So in order to avoid any task migration, disable the preemption.
+
+Fixes: cad539baa48f ("riscv: implement a memset like function for text")
+Fixes: 0ff7c3b33127 ("riscv: Use text_mutex instead of patch_lock")
+
+【改动统计】
+ arch/riscv/kernel/patch.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 37e87fdcf6a0..30e12b310cab 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -80,6 +80,8 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	 */
+ 	lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+ 
+@@ -92,6 +94,8 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	if (across_pages)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return 0;
+ }
+ NOKPROBE_SYMBOL(__patch_insn_set);
+@@ -122,6 +126,8 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	if (!riscv_patch_in_stop_machine)
+ 		lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+ 
+@@ -134,6 +140,8 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 	if (across_pages)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return ret;
+ }
+ NOKPROBE_SYMBOL(__patch_insn_write);
+
+
+########## 第39条  编号 A234  提交 aad60bdd0b5a  日期 2026-04-07
+
+【提交说明】
+riscv: Fix fast_unaligned_access_speed_key not getting initialized
+
+The static key fast_unaligned_access_speed_key is supposed to be
+initialized after check_unaligned_access_all_cpus() has been completed.
+
+However, check_unaligned_access_all_cpus() has been moved to late_initcall
+while setting fast_unaligned_access_speed_key still happens at
+arch_initcall_sync, thus the static key does not get properly initialized.
+
+fast_unaligned_access_speed_key can still be initialized in CPU hotplug
+events, but that cannot be relied on.
+
+Move fast_unaligned_access_speed_key's initialization into
+check_unaligned_access_all_cpus() to fix this issue. This also prevent
+someone from moving one initcall while forgetting the other in the future.
+
+Fixes: 6455c6c11827 ("riscv: Clean up & optimize unaligned scalar access probe")
+
+【改动统计】
+ arch/riscv/kernel/unaligned_access_speed.c | 15 ++++-----------
+ 1 file changed, 4 insertions(+), 11 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 485ab1d105d3..11c781a4de73 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -235,17 +235,6 @@ static void set_unaligned_access_static_branches(void)
+ 	modify_unaligned_access_branches(&fast_and_online, num_online_cpus());
+ }
+ 
+-static int __init lock_and_set_unaligned_access_static_branch(void)
+-{
+-	cpus_read_lock();
+-	set_unaligned_access_static_branches();
+-	cpus_read_unlock();
+-
+-	return 0;
+-}
+-
+-arch_initcall_sync(lock_and_set_unaligned_access_static_branch);
+-
+ static int riscv_online_cpu(unsigned int cpu)
+ {
+ 	int ret = cpu_online_unaligned_access_init(cpu);
+@@ -440,6 +429,10 @@ static int __init check_unaligned_access_all_cpus(void)
+ 	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
+ 				  riscv_online_cpu_vec, NULL);
+ 
++	cpus_read_lock();
++	set_unaligned_access_static_branches();
++	cpus_read_unlock();
++
+ 	return 0;
+ }
+ 
+
+
+########## 第40条  编号 A331  提交 c6ec1e1b078d  日期 2025-02-10
+
+【提交说明】
+riscv: cpufeature: use bitmap_equal() instead of memcmp()
+
+Comparison of bitmaps should be done using bitmap_equal(), not memcmp(),
+use the former one to compare isa bitmaps.
+
+Fixes: 625034abd52a8c ("riscv: add ISA extensions validation callback")
+
+【改动统计】
+ arch/riscv/kernel/cpufeature.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index c6ba750536c3..40ac72e407b6 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -479,7 +479,7 @@ static void __init riscv_resolve_isa(unsigned long *source_isa,
+ 			if (bit < RISCV_ISA_EXT_BASE)
+ 				*this_hwcap |= isa2hwcap[bit];
+ 		}
+-	} while (loop && memcmp(prev_resolved_isa, resolved_isa, sizeof(prev_resolved_isa)));
++	} while (loop && !bitmap_equal(prev_resolved_isa, resolved_isa, RISCV_ISA_EXT_MAX));
+ }
+ 
+ static void __init match_isa_ext(const char *name, const char *name_end, unsigned long *bitmap)

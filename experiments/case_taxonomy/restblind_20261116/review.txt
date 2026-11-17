@@ -1,0 +1,1107 @@
+==========================================================================================
+[1] mm/mprotect.c:745  函数 prot_none_hugetlb_entry  接口 pte_pfn  来源 read  编码表：在 x86_64, loongarch, arm, mips 上对某些非 present 项读错
+    715 
+    716 	if (IS_ENABLED(CONFIG_ARCH_HAS_PTE_PROTNONE) &&
+    717 	    (cp_flags & MM_CP_UFFD_RWP))
+    718 		newprot = PAGE_NONE;
+    719 
+    720 	if (is_vm_hugetlb_page(vma))
+    721 		pages = hugetlb_change_protection(vma, start, end, newprot,
+    722 						  cp_flags);
+    723 	else
+    724 		pages = change_protection_range(tlb, vma, start, end, newprot,
+    725 						cp_flags);
+    726 
+    727 	return pages;
+    728 }
+    729 
+    730 static int prot_none_pte_entry(pte_t *pte, unsigned long addr,
+    731 			       unsigned long next, struct mm_walk *walk)
+    732 {
+    733 	return pfn_modify_allowed(pte_pfn(ptep_get(pte)),
+    734 				  *(pgprot_t *)(walk->private)) ?
+    735 		0 : -EACCES;
+    736 }
+    737 
+    738 #ifdef CONFIG_HUGETLB_PAGE
+    739 static int prot_none_hugetlb_entry(pte_t *pte, unsigned long hmask,
+    740 				   unsigned long addr, unsigned long next,
+    741 				   struct mm_walk *walk)
+    742 {
+    743 	const pte_t entry = huge_ptep_get(walk->mm, addr, pte);
+    744 
+>>  745 	if (pfn_modify_allowed(pte_pfn(entry), *(pgprot_t *)(walk->private)))
+    746 		return 0;
+    747 	return -EACCES;
+    748 }
+    749 #else
+    750 #define prot_none_hugetlb_entry	NULL
+    751 #endif
+    752 
+    753 static const struct mm_walk_ops prot_none_walk_ops = {
+==========================================================================================
+[2] mm/rmap.c:2016  函数 try_to_unmap_poisoned_hugetlb_one  接口 pte_pfn  来源 read  编码表：在 x86_64, loongarch, arm, mips 上对某些非 present 项读错
+   1986 {
+   1987 	DEFINE_FOLIO_VMA_WALK(pvmw, folio, vma, address, 0);
+   1988 	const unsigned long hsz = huge_page_size(hstate_vma(vma));
+   1989 	const enum ttu_flags flags = (enum ttu_flags)(long)arg;
+   1990 	struct mm_struct *mm = vma->vm_mm;
+   1991 	struct mmu_notifier_range range;
+   1992 	bool ret = true;
+   1993 	pte_t pteval;
+   1994 
+   1995 	/*
+   1996 	 * The try_to_unmap() is only passed a hugetlb folio in the case
+   1997 	 * where the hugetlb folio is poisoned.
+   1998 	 */
+   1999 	VM_WARN_ON_ONCE_FOLIO(!folio_test_hwpoison(folio), folio);
+   2000 	VM_WARN_ON_ONCE(!(flags & TTU_HWPOISON));
+   2001 
+   2002 	range.end = vma_address_end(&pvmw);
+   2003 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, vma->vm_mm,
+   2004 				address, range.end);
+   2005 	adjust_range_if_pmd_sharing_possible(vma, &range.start, &range.end);
+   2006 	mmu_notifier_invalidate_range_start(&range);
+   2007 
+   2008 	/* There is only a single mapping in a VMA. */
+   2009 	if (!page_vma_mapped_walk(&pvmw))
+   2010 		goto range_end;
+   2011 
+   2012 	VM_WARN_ON_ONCE(address != pvmw.address);
+   2013 
+   2014 	pteval = huge_ptep_get(mm, address, pvmw.pte);
+   2015 	VM_WARN_ON_ONCE(!pte_present(pteval));
+>> 2016 	VM_WARN_ON_ONCE(pte_pfn(pteval) != folio_pfn(folio));
+   2017 
+   2018 	/*
+   2019 	 * huge_pmd_unshare may unmap an entire PMD page. There is no way of
+   2020 	 * knowing exactly which PMDs may be cached for this mm, so we must
+   2021 	 * flush them all. start/end were already adjusted above to cover this
+   2022 	 * range.
+   2023 	 */
+   2024 	flush_cache_range(vma, range.start, range.end);
+==========================================================================================
+[3] mm/rmap.c:2625  函数 try_to_migrate_one  接口 pte_dirty  来源 read  编码表：在 x86_64, riscv, s390, arm 上对某些非 present 项读错
+   2595 			 * i_mmap_rwsem.  We can only try lock here and
+   2596 			 * fail if unsuccessful.
+   2597 			 */
+   2598 			if (!anon) {
+   2599 				struct mmu_gather tlb;
+   2600 
+   2601 				VM_BUG_ON(!(flags & TTU_RMAP_LOCKED));
+   2602 				if (!hugetlb_vma_trylock_write(vma)) {
+   2603 					page_vma_mapped_walk_done(&pvmw);
+   2604 					ret = false;
+   2605 					break;
+   2606 				}
+   2607 
+   2608 				tlb_gather_mmu_vma(&tlb, vma);
+   2609 				if (huge_pmd_unshare(&tlb, vma, address, pvmw.pte)) {
+   2610 					hugetlb_vma_unlock_write(vma);
+   2611 					huge_pmd_unshare_flush(&tlb, vma);
+   2612 					tlb_finish_mmu(&tlb);
+   2613 					/*
+   2614 					 * The PMD table was unmapped,
+   2615 					 * consequently unmapping the folio.
+   2616 					 */
+   2617 					page_vma_mapped_walk_done(&pvmw);
+   2618 					break;
+   2619 				}
+   2620 				hugetlb_vma_unlock_write(vma);
+   2621 				tlb_finish_mmu(&tlb);
+   2622 			}
+   2623 			/* Nuke the hugetlb page table entry */
+   2624 			pteval = huge_ptep_clear_flush(vma, address, pvmw.pte);
+>> 2625 			if (pte_dirty(pteval))
+   2626 				folio_mark_dirty(folio);
+   2627 			writable = pte_write(pteval);
+   2628 		} else if (likely(pte_present(pteval))) {
+   2629 			flush_cache_page(vma, address, pfn);
+   2630 			/* Nuke the page table entry. */
+   2631 			if (should_defer_flush(mm, flags)) {
+   2632 				/*
+   2633 				 * We clear the PTE but do not flush so potentially
+==========================================================================================
+[4] mm/memory.c:6214  函数 numa_rebuild_large_mapping  接口 pte_pfn  来源 param  编码表：在 x86_64, loongarch, arm, mips 上对某些非 present 项读错
+   6184 #ifdef CONFIG_NUMA_BALANCING
+   6185 	count_memcg_folio_events(folio, NUMA_HINT_FAULTS, 1);
+   6186 #endif
+   6187 	if (folio_nid(folio) == numa_node_id()) {
+   6188 		count_vm_numa_event(NUMA_HINT_FAULTS_LOCAL);
+   6189 		*flags |= TNF_FAULT_LOCAL;
+   6190 	}
+   6191 
+   6192 	return mpol_misplaced(folio, vmf, addr);
+   6193 }
+   6194 
+   6195 static void numa_rebuild_single_mapping(struct vm_fault *vmf, struct vm_area_struct *vma,
+   6196 					unsigned long fault_addr, pte_t *fault_pte,
+   6197 					bool writable)
+   6198 {
+   6199 	pte_t pte, old_pte;
+   6200 
+   6201 	old_pte = ptep_modify_prot_start(vma, fault_addr, fault_pte);
+   6202 	pte = pte_modify(old_pte, vma->vm_page_prot);
+   6203 	pte = pte_mkyoung(pte);
+   6204 	if (writable)
+   6205 		pte = pte_mkwrite(pte, vma);
+   6206 	ptep_modify_prot_commit(vma, fault_addr, fault_pte, old_pte, pte);
+   6207 	update_mmu_cache_range(vmf, vma, fault_addr, fault_pte, 1);
+   6208 }
+   6209 
+   6210 static void numa_rebuild_large_mapping(struct vm_fault *vmf, struct vm_area_struct *vma,
+   6211 				       struct folio *folio, pte_t fault_pte,
+   6212 				       bool ignore_writable, bool pte_write_upgrade)
+   6213 {
+>> 6214 	int nr = pte_pfn(fault_pte) - folio_pfn(folio);
+   6215 	unsigned long start, end, addr = vmf->address;
+   6216 	unsigned long addr_start = addr - (nr << PAGE_SHIFT);
+   6217 	unsigned long pt_start = ALIGN_DOWN(addr, PMD_SIZE);
+   6218 	pte_t *start_ptep;
+   6219 
+   6220 	/* Stay within the VMA and within the page table. */
+   6221 	start = max3(addr_start, pt_start, vma->vm_start);
+   6222 	end = min3(addr_start + folio_size(folio), pt_start + PMD_SIZE,
+==========================================================================================
+[5] mm/mprotect.c:85  函数 can_change_shared_pte_writable  接口 pte_pfn  来源 param  编码表：在 x86_64, loongarch, arm, mips 上对某些非 present 项读错
+     55 	if (userfaultfd_pte_wp(vma, pte))
+     56 		return false;
+     57 
+     58 	return true;
+     59 }
+     60 
+     61 static bool can_change_private_pte_writable(struct vm_area_struct *vma,
+     62 					    unsigned long addr, pte_t pte)
+     63 {
+     64 	struct page *page;
+     65 
+     66 	if (!maybe_change_pte_writable(vma, pte))
+     67 		return false;
+     68 
+     69 	/*
+     70 	 * Writable MAP_PRIVATE mapping: We can only special-case on
+     71 	 * exclusive anonymous pages, because we know that our
+     72 	 * write-fault handler similarly would map them writable without
+     73 	 * any additional checks while holding the PT lock.
+     74 	 */
+     75 	page = vm_normal_page(vma, addr, pte);
+     76 	return page && PageAnon(page) && PageAnonExclusive(page);
+     77 }
+     78 
+     79 static bool can_change_shared_pte_writable(struct vm_area_struct *vma,
+     80 					   pte_t pte)
+     81 {
+     82 	if (!maybe_change_pte_writable(vma, pte))
+     83 		return false;
+     84 
+>>   85 	VM_WARN_ON_ONCE(is_zero_pfn(pte_pfn(pte)) && pte_dirty(pte));
+     86 
+     87 	/*
+     88 	 * Writable MAP_SHARED mapping: "clean" might indicate that the FS still
+     89 	 * needs a real write-fault for writenotify
+     90 	 * (see vma_wants_writenotify()). If "dirty", the assumption is that the
+     91 	 * FS was already notified and we can simply mark the PTE writable
+     92 	 * just like the write-fault handler would do.
+     93 	 */
+==========================================================================================
+[6] mm/mprotect.c:85  函数 can_change_shared_pte_writable  接口 pte_dirty  来源 param  编码表：在 x86_64, riscv, s390, arm 上对某些非 present 项读错
+     55 	if (userfaultfd_pte_wp(vma, pte))
+     56 		return false;
+     57 
+     58 	return true;
+     59 }
+     60 
+     61 static bool can_change_private_pte_writable(struct vm_area_struct *vma,
+     62 					    unsigned long addr, pte_t pte)
+     63 {
+     64 	struct page *page;
+     65 
+     66 	if (!maybe_change_pte_writable(vma, pte))
+     67 		return false;
+     68 
+     69 	/*
+     70 	 * Writable MAP_PRIVATE mapping: We can only special-case on
+     71 	 * exclusive anonymous pages, because we know that our
+     72 	 * write-fault handler similarly would map them writable without
+     73 	 * any additional checks while holding the PT lock.
+     74 	 */
+     75 	page = vm_normal_page(vma, addr, pte);
+     76 	return page && PageAnon(page) && PageAnonExclusive(page);
+     77 }
+     78 
+     79 static bool can_change_shared_pte_writable(struct vm_area_struct *vma,
+     80 					   pte_t pte)
+     81 {
+     82 	if (!maybe_change_pte_writable(vma, pte))
+     83 		return false;
+     84 
+>>   85 	VM_WARN_ON_ONCE(is_zero_pfn(pte_pfn(pte)) && pte_dirty(pte));
+     86 
+     87 	/*
+     88 	 * Writable MAP_SHARED mapping: "clean" might indicate that the FS still
+     89 	 * needs a real write-fault for writenotify
+     90 	 * (see vma_wants_writenotify()). If "dirty", the assumption is that the
+     91 	 * FS was already notified and we can simply mark the PTE writable
+     92 	 * just like the write-fault handler would do.
+     93 	 */
+==========================================================================================
+[7] mm/mprotect.c:94  函数 can_change_shared_pte_writable  接口 pte_dirty  来源 param  编码表：在 x86_64, riscv, s390, arm 上对某些非 present 项读错
+     64 	struct page *page;
+     65 
+     66 	if (!maybe_change_pte_writable(vma, pte))
+     67 		return false;
+     68 
+     69 	/*
+     70 	 * Writable MAP_PRIVATE mapping: We can only special-case on
+     71 	 * exclusive anonymous pages, because we know that our
+     72 	 * write-fault handler similarly would map them writable without
+     73 	 * any additional checks while holding the PT lock.
+     74 	 */
+     75 	page = vm_normal_page(vma, addr, pte);
+     76 	return page && PageAnon(page) && PageAnonExclusive(page);
+     77 }
+     78 
+     79 static bool can_change_shared_pte_writable(struct vm_area_struct *vma,
+     80 					   pte_t pte)
+     81 {
+     82 	if (!maybe_change_pte_writable(vma, pte))
+     83 		return false;
+     84 
+     85 	VM_WARN_ON_ONCE(is_zero_pfn(pte_pfn(pte)) && pte_dirty(pte));
+     86 
+     87 	/*
+     88 	 * Writable MAP_SHARED mapping: "clean" might indicate that the FS still
+     89 	 * needs a real write-fault for writenotify
+     90 	 * (see vma_wants_writenotify()). If "dirty", the assumption is that the
+     91 	 * FS was already notified and we can simply mark the PTE writable
+     92 	 * just like the write-fault handler would do.
+     93 	 */
+>>   94 	return pte_dirty(pte);
+     95 }
+     96 
+     97 bool can_change_pte_writable(struct vm_area_struct *vma, unsigned long addr,
+     98 			     pte_t pte)
+     99 {
+    100 	if (!vma_test(vma, VMA_SHARED_BIT))
+    101 		return can_change_private_pte_writable(vma, addr, pte);
+    102 
+==========================================================================================
+[8] mm/rmap.c:747  函数 set_tlb_ubc_flush_pending  接口 pte_dirty  来源 param  编码表：在 x86_64, riscv, s390, arm 上对某些非 present 项读错
+    717 
+    718 	arch_tlbbatch_flush(&tlb_ubc->arch);
+    719 	tlb_ubc->flush_required = false;
+    720 	tlb_ubc->writable = false;
+    721 }
+    722 
+    723 /* Flush iff there are potentially writable TLB entries that can race with IO */
+    724 void try_to_unmap_flush_dirty(void)
+    725 {
+    726 	struct tlbflush_unmap_batch *tlb_ubc = &current->tlb_ubc;
+    727 
+    728 	if (tlb_ubc->writable)
+    729 		try_to_unmap_flush();
+    730 }
+    731 
+    732 /*
+    733  * Bits 0-14 of mm->tlb_flush_batched record pending generations.
+    734  * Bits 16-30 of mm->tlb_flush_batched bit record flushed generations.
+    735  */
+    736 #define TLB_FLUSH_BATCH_FLUSHED_SHIFT	16
+    737 #define TLB_FLUSH_BATCH_PENDING_MASK			\
+    738 	((1 << (TLB_FLUSH_BATCH_FLUSHED_SHIFT - 1)) - 1)
+    739 #define TLB_FLUSH_BATCH_PENDING_LARGE			\
+    740 	(TLB_FLUSH_BATCH_PENDING_MASK / 2)
+    741 
+    742 static void set_tlb_ubc_flush_pending(struct mm_struct *mm, pte_t pteval,
+    743 		unsigned long start, unsigned long end)
+    744 {
+    745 	struct tlbflush_unmap_batch *tlb_ubc = &current->tlb_ubc;
+    746 	int batch;
+>>  747 	bool writable = pte_dirty(pteval);
+    748 
+    749 	if (!pte_accessible(mm, pteval))
+    750 		return;
+    751 
+    752 	arch_tlbbatch_add_pending(&tlb_ubc->arch, mm, start, end);
+    753 	tlb_ubc->flush_required = true;
+    754 
+    755 	/*
+==========================================================================================
+[9] mm/vmscan.c:3443  函数 get_pte_pfn  接口 pte_pfn  来源 param  编码表：在 x86_64, loongarch, arm, mips 上对某些非 present 项读错
+   3413  */
+   3414 static bool get_next_vma(unsigned long mask, unsigned long size, struct mm_walk *args,
+   3415 			 unsigned long *vm_start, unsigned long *vm_end)
+   3416 {
+   3417 	unsigned long start = round_up(*vm_end, size);
+   3418 	unsigned long end = (start | ~mask) + 1;
+   3419 	VMA_ITERATOR(vmi, args->mm, start);
+   3420 
+   3421 	VM_WARN_ON_ONCE(mask & size);
+   3422 	VM_WARN_ON_ONCE((start & mask) != (*vm_start & mask));
+   3423 
+   3424 	for_each_vma(vmi, args->vma) {
+   3425 		if (end && end <= args->vma->vm_start)
+   3426 			return false;
+   3427 
+   3428 		if (should_skip_vma(args->vma->vm_start, args->vma->vm_end, args))
+   3429 			continue;
+   3430 
+   3431 		*vm_start = max(start, args->vma->vm_start);
+   3432 		*vm_end = min(end - 1, args->vma->vm_end - 1) + 1;
+   3433 
+   3434 		return true;
+   3435 	}
+   3436 
+   3437 	return false;
+   3438 }
+   3439 
+   3440 static unsigned long get_pte_pfn(pte_t pte, struct vm_area_struct *vma, unsigned long addr,
+   3441 				 struct pglist_data *pgdat)
+   3442 {
+>> 3443 	unsigned long pfn = pte_pfn(pte);
+   3444 
+   3445 	VM_WARN_ON_ONCE(addr < vma->vm_start || addr >= vma->vm_end);
+   3446 
+   3447 	if (!pte_present(pte) || is_zero_pfn(pfn))
+   3448 		return -1;
+   3449 
+   3450 	if (WARN_ON_ONCE(pte_special(pte)))
+   3451 		return -1;
+==========================================================================================
+[10] mm/huge_memory.c:1609  函数 insert_pmd  接口 pmd_pfn  来源 read  编码表：在 x86_64, riscv, loongarch 上对某些非 present 项读错
+   1579 		struct folio *folio;
+   1580 		unsigned long pfn;
+   1581 	};
+   1582 	bool is_folio;
+   1583 };
+   1584 
+   1585 static vm_fault_t insert_pmd(struct vm_area_struct *vma, unsigned long addr,
+   1586 		pmd_t *pmd, struct folio_or_pfn fop, pgprot_t prot,
+   1587 		bool write)
+   1588 {
+   1589 	struct mm_struct *mm = vma->vm_mm;
+   1590 	pgtable_t pgtable = NULL;
+   1591 	spinlock_t *ptl;
+   1592 	pmd_t entry;
+   1593 
+   1594 	if (addr < vma->vm_start || addr >= vma->vm_end)
+   1595 		return VM_FAULT_SIGBUS;
+   1596 
+   1597 	if (arch_needs_pgtable_deposit()) {
+   1598 		pgtable = pte_alloc_one(vma->vm_mm);
+   1599 		if (!pgtable)
+   1600 			return VM_FAULT_OOM;
+   1601 	}
+   1602 
+   1603 	ptl = pmd_lock(mm, pmd);
+   1604 	if (!pmd_none(*pmd)) {
+   1605 		const unsigned long pfn = fop.is_folio ? folio_pfn(fop.folio) :
+   1606 					  fop.pfn;
+   1607 
+   1608 		if (write) {
+>> 1609 			if (pmd_pfn(*pmd) != pfn) {
+   1610 				WARN_ON_ONCE(!is_huge_zero_pmd(*pmd));
+   1611 				goto out_unlock;
+   1612 			}
+   1613 			entry = pmd_mkyoung(*pmd);
+   1614 			entry = maybe_pmd_mkwrite(pmd_mkdirty(entry), vma);
+   1615 			if (pmdp_set_access_flags(vma, addr, pmd, entry, 1))
+   1616 				update_mmu_cache_pmd(vma, addr, pmd);
+   1617 		}
+==========================================================================================
+[11] mm/gup.c:725  函数 follow_huge_pmd  接口 pmd_write  来源 read  编码表：在 x86_64, powerpc 上对某些非 present 项读错
+    695 	/* ... and a write-fault isn't required for other reasons. */
+    696 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+    697 		return false;
+    698 	return !userfaultfd_huge_pmd_wp(vma, pmd);
+    699 }
+    700 
+    701 static struct page *follow_huge_pmd(struct vm_area_struct *vma,
+    702 				    unsigned long addr, pmd_t *pmd,
+    703 				    unsigned int flags,
+    704 				    unsigned long *page_mask)
+    705 {
+    706 	struct mm_struct *mm = vma->vm_mm;
+    707 	pmd_t pmdval = *pmd;
+    708 	struct page *page;
+    709 	int ret;
+    710 
+    711 	assert_spin_locked(pmd_lockptr(mm, pmd));
+    712 
+    713 	page = pmd_page(pmdval);
+    714 	if ((flags & FOLL_WRITE) &&
+    715 	    !can_follow_write_pmd(pmdval, page, vma, flags))
+    716 		return NULL;
+    717 
+    718 	/* Avoid dumping huge zero page */
+    719 	if ((flags & FOLL_DUMP) && is_huge_zero_pmd(pmdval))
+    720 		return ERR_PTR(-EFAULT);
+    721 
+    722 	if (pmd_protnone(*pmd) && !gup_can_follow_protnone(vma, flags))
+    723 		return NULL;
+    724 
+>>  725 	if (!pmd_write(pmdval) && gup_must_unshare(vma, flags, page))
+    726 		return ERR_PTR(-EMLINK);
+    727 
+    728 	VM_WARN_ON_ONCE_PAGE((flags & FOLL_PIN) && PageAnon(page) &&
+    729 			     !PageAnonExclusive(page), page);
+    730 
+    731 	ret = try_grab_folio(page_folio(page), 1, flags);
+    732 	if (ret)
+    733 		return ERR_PTR(ret);
+==========================================================================================
+[12] mm/huge_memory.c:1934  函数 copy_huge_pmd  接口 pmd_write  来源 read  编码表：在 x86_64, powerpc 上对某些非 present 项读错
+   1904 		pmd = pmd_swp_clear_uffd(pmd);
+   1905 	set_pmd_at(dst_mm, addr, dst_pmd, pmd);
+   1906 }
+   1907 
+   1908 int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+   1909 		  pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
+   1910 		  struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
+   1911 {
+   1912 	spinlock_t *dst_ptl, *src_ptl;
+   1913 	struct page *src_page;
+   1914 	struct folio *src_folio;
+   1915 	pmd_t pmd;
+   1916 	pgtable_t pgtable = NULL;
+   1917 	int ret = -ENOMEM;
+   1918 
+   1919 	pmd = pmdp_get_lockless(src_pmd);
+   1920 	if (unlikely(pmd_present(pmd) && pmd_special(pmd) &&
+   1921 		     !is_huge_zero_pmd(pmd))) {
+   1922 		dst_ptl = pmd_lock(dst_mm, dst_pmd);
+   1923 		src_ptl = pmd_lockptr(src_mm, src_pmd);
+   1924 		spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+   1925 		/*
+   1926 		 * No need to recheck the pmd, it can't change with write
+   1927 		 * mmap lock held here.
+   1928 		 *
+   1929 		 * Meanwhile, making sure it's not a CoW VMA with writable
+   1930 		 * mapping, otherwise it means either the anon page wrongly
+   1931 		 * applied special bit, or we made the PRIVATE mapping be
+   1932 		 * able to wrongly write to the backend MMIO.
+   1933 		 */
+>> 1934 		VM_WARN_ON_ONCE(vma_is_cow_mapping(src_vma) && pmd_write(pmd));
+   1935 		goto set_pmd;
+   1936 	}
+   1937 
+   1938 	/* Skip if can be re-fill on fault */
+   1939 	if (!vma_is_anonymous(dst_vma))
+   1940 		return 0;
+   1941 
+   1942 	pgtable = pte_alloc_one(dst_mm);
+==========================================================================================
+[13] mm/huge_memory.c:3183  函数 __split_huge_pmd_locked  接口 pmd_dirty  来源 read  编码表：在 x86_64, riscv 上对某些非 present 项读错
+   3153 	pte_t *pte;
+   3154 	int i;
+   3155 
+   3156 	VM_BUG_ON(haddr & ~HPAGE_PMD_MASK);
+   3157 	VM_BUG_ON_VMA(vma->vm_start > haddr, vma);
+   3158 	VM_BUG_ON_VMA(vma->vm_end < haddr + HPAGE_PMD_SIZE, vma);
+   3159 
+   3160 	VM_WARN_ON_ONCE(!pmd_is_valid_softleaf(*pmd) && !pmd_trans_huge(*pmd));
+   3161 
+   3162 	count_vm_event(THP_SPLIT_PMD);
+   3163 
+   3164 	if (!vma_is_anonymous(vma)) {
+   3165 		old_pmd = pmdp_huge_clear_flush(vma, haddr, pmd);
+   3166 		/*
+   3167 		 * We are going to unmap this huge page. So
+   3168 		 * just go ahead and zap it
+   3169 		 */
+   3170 		if (arch_needs_pgtable_deposit())
+   3171 			zap_deposited_table(mm, pmd);
+   3172 		if (vma_is_special_huge(vma))
+   3173 			return;
+   3174 		if (unlikely(pmd_is_migration_entry(old_pmd))) {
+   3175 			const softleaf_t old_entry = softleaf_from_pmd(old_pmd);
+   3176 
+   3177 			folio = softleaf_to_folio(old_entry);
+   3178 		} else if (is_huge_zero_pmd(old_pmd)) {
+   3179 			return;
+   3180 		} else {
+   3181 			page = pmd_page(old_pmd);
+   3182 			folio = page_folio(page);
+>> 3183 			if (!folio_test_dirty(folio) && pmd_dirty(old_pmd))
+   3184 				folio_mark_dirty(folio);
+   3185 			if (!folio_test_referenced(folio) && pmd_young(old_pmd))
+   3186 				folio_set_referenced(folio);
+   3187 			folio_remove_rmap_pmd(folio, page, vma);
+   3188 			add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+   3189 			folio_put(folio);
+   3190 			return;
+   3191 		}
+==========================================================================================
+[14] mm/huge_memory.c:3284  函数 __split_huge_pmd_locked  接口 pmd_dirty  来源 read  编码表：在 x86_64, riscv 上对某些非 present 项读错
+   3254 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
+   3255 						 vma, haddr, rmap_flags);
+   3256 		}
+   3257 	} else {
+   3258 		/*
+   3259 		 * Up to this point the pmd is present and huge and userland has
+   3260 		 * the whole access to the hugepage during the split (which
+   3261 		 * happens in place). If we overwrite the pmd with the not-huge
+   3262 		 * version pointing to the pte here (which of course we could if
+   3263 		 * all CPUs were bug free), userland could trigger a small page
+   3264 		 * size TLB miss on the small sized TLB while the hugepage TLB
+   3265 		 * entry is still established in the huge TLB. Some CPU doesn't
+   3266 		 * like that. See
+   3267 		 * http://support.amd.com/TechDocs/41322_10h_Rev_Gd.pdf, Erratum
+   3268 		 * 383 on page 105. Intel should be safe but is also warns that
+   3269 		 * it's only safe if the permission and cache attributes of the
+   3270 		 * two entries loaded in the two TLB is identical (which should
+   3271 		 * be the case here). But it is generally safer to never allow
+   3272 		 * small and huge TLB entries for the same virtual address to be
+   3273 		 * loaded simultaneously. So instead of doing "pmd_populate();
+   3274 		 * flush_pmd_tlb_range();" we first mark the current pmd
+   3275 		 * notpresent (atomically because here the pmd_trans_huge must
+   3276 		 * remain set at all times on the pmd until the split is
+   3277 		 * complete for this pmd), then we flush the SMP TLB and finally
+   3278 		 * we write the non-huge version of the pmd entry with
+   3279 		 * pmd_populate.
+   3280 		 */
+   3281 		old_pmd = pmdp_invalidate(vma, haddr, pmd);
+   3282 		page = pmd_page(old_pmd);
+   3283 		folio = page_folio(page);
+>> 3284 		if (pmd_dirty(old_pmd)) {
+   3285 			dirty = true;
+   3286 			folio_set_dirty(folio);
+   3287 		}
+   3288 		write = pmd_write(old_pmd);
+   3289 		young = pmd_young(old_pmd);
+   3290 		soft_dirty = pmd_soft_dirty(old_pmd);
+   3291 		uffd_wp = pmd_uffd(old_pmd);
+   3292 
+==========================================================================================
+[15] mm/huge_memory.c:3288  函数 __split_huge_pmd_locked  接口 pmd_write  来源 read  编码表：在 x86_64, powerpc 上对某些非 present 项读错
+   3258 		/*
+   3259 		 * Up to this point the pmd is present and huge and userland has
+   3260 		 * the whole access to the hugepage during the split (which
+   3261 		 * happens in place). If we overwrite the pmd with the not-huge
+   3262 		 * version pointing to the pte here (which of course we could if
+   3263 		 * all CPUs were bug free), userland could trigger a small page
+   3264 		 * size TLB miss on the small sized TLB while the hugepage TLB
+   3265 		 * entry is still established in the huge TLB. Some CPU doesn't
+   3266 		 * like that. See
+   3267 		 * http://support.amd.com/TechDocs/41322_10h_Rev_Gd.pdf, Erratum
+   3268 		 * 383 on page 105. Intel should be safe but is also warns that
+   3269 		 * it's only safe if the permission and cache attributes of the
+   3270 		 * two entries loaded in the two TLB is identical (which should
+   3271 		 * be the case here). But it is generally safer to never allow
+   3272 		 * small and huge TLB entries for the same virtual address to be
+   3273 		 * loaded simultaneously. So instead of doing "pmd_populate();
+   3274 		 * flush_pmd_tlb_range();" we first mark the current pmd
+   3275 		 * notpresent (atomically because here the pmd_trans_huge must
+   3276 		 * remain set at all times on the pmd until the split is
+   3277 		 * complete for this pmd), then we flush the SMP TLB and finally
+   3278 		 * we write the non-huge version of the pmd entry with
+   3279 		 * pmd_populate.
+   3280 		 */
+   3281 		old_pmd = pmdp_invalidate(vma, haddr, pmd);
+   3282 		page = pmd_page(old_pmd);
+   3283 		folio = page_folio(page);
+   3284 		if (pmd_dirty(old_pmd)) {
+   3285 			dirty = true;
+   3286 			folio_set_dirty(folio);
+   3287 		}
+>> 3288 		write = pmd_write(old_pmd);
+   3289 		young = pmd_young(old_pmd);
+   3290 		soft_dirty = pmd_soft_dirty(old_pmd);
+   3291 		uffd_wp = pmd_uffd(old_pmd);
+   3292 
+   3293 		VM_WARN_ON_FOLIO(!folio_ref_count(folio), folio);
+   3294 		VM_WARN_ON_FOLIO(!folio_test_anon(folio), folio);
+   3295 
+   3296 		/*
+==========================================================================================
+[16] mm/huge_memory.c:3523  函数 __discard_anon_folio_pmd_locked  接口 pmd_dirty  来源 read  编码表：在 x86_64, riscv 上对某些非 present 项读错
+   3493 {
+   3494 	enum ttu_flags ttu_flags = TTU_RMAP_LOCKED | TTU_SYNC |
+   3495 		TTU_BATCH_FLUSH;
+   3496 
+   3497 	VM_BUG_ON_FOLIO(!folio_test_large(folio), folio);
+   3498 
+   3499 	if (folio_test_pmd_mappable(folio))
+   3500 		ttu_flags |= TTU_SPLIT_HUGE_PMD;
+   3501 
+   3502 	/*
+   3503 	 * Anon pages need migration entries to preserve them, but file
+   3504 	 * pages can simply be left unmapped, then faulted back on demand.
+   3505 	 * If that is ever changed (perhaps for mlock), update remap_page().
+   3506 	 */
+   3507 	if (folio_test_anon(folio))
+   3508 		try_to_migrate(folio, ttu_flags);
+   3509 	else
+   3510 		try_to_unmap(folio, ttu_flags | TTU_IGNORE_MLOCK);
+   3511 
+   3512 	try_to_unmap_flush();
+   3513 }
+   3514 
+   3515 static bool __discard_anon_folio_pmd_locked(struct vm_area_struct *vma,
+   3516 					    unsigned long addr, pmd_t *pmdp,
+   3517 					    struct folio *folio)
+   3518 {
+   3519 	struct mm_struct *mm = vma->vm_mm;
+   3520 	int ref_count, map_count;
+   3521 	pmd_t orig_pmd = *pmdp;
+   3522 
+>> 3523 	if (pmd_dirty(orig_pmd))
+   3524 		folio_set_dirty(folio);
+   3525 	if (folio_test_dirty(folio) && !(vma->vm_flags & VM_DROPPABLE)) {
+   3526 		folio_set_swapbacked(folio);
+   3527 		return false;
+   3528 	}
+   3529 
+   3530 	orig_pmd = pmdp_huge_clear_flush(vma, addr, pmdp);
+   3531 
+==========================================================================================
+[17] mm/huge_memory.c:3555  函数 __discard_anon_folio_pmd_locked  接口 pmd_dirty  来源 read  编码表：在 x86_64, riscv 上对某些非 present 项读错
+   3525 	if (folio_test_dirty(folio) && !(vma->vm_flags & VM_DROPPABLE)) {
+   3526 		folio_set_swapbacked(folio);
+   3527 		return false;
+   3528 	}
+   3529 
+   3530 	orig_pmd = pmdp_huge_clear_flush(vma, addr, pmdp);
+   3531 
+   3532 	/*
+   3533 	 * Syncing against concurrent GUP-fast:
+   3534 	 * - clear PMD; barrier; read refcount
+   3535 	 * - inc refcount; barrier; read PMD
+   3536 	 */
+   3537 	smp_mb();
+   3538 
+   3539 	ref_count = folio_ref_count(folio);
+   3540 	map_count = folio_mapcount(folio);
+   3541 
+   3542 	/*
+   3543 	 * Order reads for folio refcount and dirty flag
+   3544 	 * (see comments in __remove_mapping()).
+   3545 	 */
+   3546 	smp_rmb();
+   3547 
+   3548 	/*
+   3549 	 * If the folio or its PMD is redirtied at this point, or if there
+   3550 	 * are unexpected references, we will give up to discard this folio
+   3551 	 * and remap it.
+   3552 	 *
+   3553 	 * The only folio refs must be one from isolation plus the rmap(s).
+   3554 	 */
+>> 3555 	if (pmd_dirty(orig_pmd))
+   3556 		folio_set_dirty(folio);
+   3557 	if (folio_test_dirty(folio) && !(vma->vm_flags & VM_DROPPABLE)) {
+   3558 		folio_set_swapbacked(folio);
+   3559 		set_pmd_at(mm, addr, pmdp, orig_pmd);
+   3560 		return false;
+   3561 	}
+   3562 
+   3563 	if (ref_count != map_count + 1) {
+==========================================================================================
+[18] mm/gup.c:689  函数 can_follow_write_pmd  接口 pmd_write  来源 param  编码表：在 x86_64, powerpc 上对某些非 present 项读错
+    659 	assert_spin_locked(pud_lockptr(mm, pudp));
+    660 
+    661 	if (!pud_present(pud))
+    662 		return NULL;
+    663 
+    664 	if ((flags & FOLL_WRITE) &&
+    665 	    !can_follow_write_pud(pud, pfn_to_page(pfn), vma, flags))
+    666 		return NULL;
+    667 
+    668 	pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
+    669 	page = pfn_to_page(pfn);
+    670 
+    671 	if (!pud_write(pud) && gup_must_unshare(vma, flags, page))
+    672 		return ERR_PTR(-EMLINK);
+    673 
+    674 	ret = try_grab_folio(page_folio(page), 1, flags);
+    675 	if (ret)
+    676 		page = ERR_PTR(ret);
+    677 	else
+    678 		*page_mask = HPAGE_PUD_NR - 1;
+    679 
+    680 	return page;
+    681 }
+    682 
+    683 /* FOLL_FORCE can write to even unwritable PMDs in COW mappings. */
+    684 static inline bool can_follow_write_pmd(pmd_t pmd, struct page *page,
+    685 					struct vm_area_struct *vma,
+    686 					unsigned int flags)
+    687 {
+    688 	/* If the pmd is writable, we can write to the page. */
+>>  689 	if (pmd_write(pmd))
+    690 		return true;
+    691 
+    692 	if (!can_follow_write_common(page, vma, flags))
+    693 		return false;
+    694 
+    695 	/* ... and a write-fault isn't required for other reasons. */
+    696 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+    697 		return false;
+==========================================================================================
+[19] mm/huge_memory.c:2246  函数 can_change_pmd_writable  接口 pmd_dirty  来源 param  编码表：在 x86_64, riscv 上对某些非 present 项读错
+   2216 	return VM_FAULT_FALLBACK;
+   2217 }
+   2218 
+   2219 static inline bool can_change_pmd_writable(struct vm_area_struct *vma,
+   2220 					   unsigned long addr, pmd_t pmd)
+   2221 {
+   2222 	struct page *page;
+   2223 
+   2224 	if (WARN_ON_ONCE(!(vma->vm_flags & VM_WRITE)))
+   2225 		return false;
+   2226 
+   2227 	/* Don't touch entries that are not even readable (NUMA hinting). */
+   2228 	if (pmd_protnone(pmd))
+   2229 		return false;
+   2230 
+   2231 	/* Do we need write faults for softdirty tracking? */
+   2232 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+   2233 		return false;
+   2234 
+   2235 	/* Do we need write faults for uffd-wp tracking? */
+   2236 	if (userfaultfd_huge_pmd_wp(vma, pmd))
+   2237 		return false;
+   2238 
+   2239 	if (!(vma->vm_flags & VM_SHARED)) {
+   2240 		/* See can_change_pte_writable(). */
+   2241 		page = vm_normal_page_pmd(vma, addr, pmd);
+   2242 		return page && PageAnon(page) && PageAnonExclusive(page);
+   2243 	}
+   2244 
+   2245 	/* See can_change_pte_writable(). */
+>> 2246 	return pmd_dirty(pmd);
+   2247 }
+   2248 
+   2249 vm_fault_t do_huge_pmd_uffd_rwp(struct vm_fault *vmf)
+   2250 {
+   2251 	struct vm_area_struct *vma = vmf->vma;
+   2252 	pmd_t pmd;
+   2253 
+   2254 	if (!userfaultfd_rwp_async(vma))
+==========================================================================================
+[20] mm/huge_memory.c:2723  函数 change_huge_pmd  接口 pmd_uffd  来源 read  编码表：在 x86_64 上对某些非 present 项读错
+   2693 		    pmd_t *pmd, unsigned long addr, pgprot_t newprot,
+   2694 		    unsigned long cp_flags)
+   2695 {
+   2696 	struct mm_struct *mm = vma->vm_mm;
+   2697 	spinlock_t *ptl;
+   2698 	pmd_t oldpmd, entry;
+   2699 	bool prot_numa = cp_flags & MM_CP_PROT_NUMA;
+   2700 	bool uffd_prot = cp_flags & (MM_CP_UFFD_WP | MM_CP_UFFD_RWP);
+   2701 	bool uffd_prot_resolve = cp_flags &
+   2702 		(MM_CP_UFFD_WP_RESOLVE | MM_CP_UFFD_RWP_RESOLVE);
+   2703 	int ret = 1;
+   2704 
+   2705 	tlb_change_page_size(tlb, HPAGE_PMD_SIZE);
+   2706 
+   2707 	if (prot_numa && !thp_migration_supported())
+   2708 		return 1;
+   2709 
+   2710 	ptl = __pmd_trans_huge_lock(pmd, vma);
+   2711 	if (!ptl)
+   2712 		return 0;
+   2713 
+   2714 	if (thp_migration_supported() && pmd_is_valid_softleaf(*pmd)) {
+   2715 		change_non_present_huge_pmd(mm, addr, pmd, uffd_prot,
+   2716 					    uffd_prot_resolve);
+   2717 		goto unlock;
+   2718 	}
+   2719 
+   2720 	/* Already in the desired state */
+   2721 	if (prot_numa && pmd_protnone(*pmd))
+   2722 		goto unlock;
+>> 2723 	if ((cp_flags & MM_CP_UFFD_RWP) && pmd_protnone(*pmd) && pmd_uffd(*pmd))
+   2724 		goto unlock;
+   2725 
+   2726 	if (prot_numa) {
+   2727 
+   2728 		/*
+   2729 		 * Avoid trapping faults against the zero page. The read-only
+   2730 		 * data is likely to be read-cached on the local CPU and
+   2731 		 * local/remote hits to the zero page are not interesting.
+==========================================================================================
+[21] mm/huge_memory.c:3126  函数 __split_huge_zero_page_pmd  接口 pmd_uffd  来源 read  编码表：在 x86_64 上对某些非 present 项读错
+   3096 static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
+   3097 		unsigned long haddr, pmd_t *pmd)
+   3098 {
+   3099 	struct mm_struct *mm = vma->vm_mm;
+   3100 	pgtable_t pgtable;
+   3101 	pmd_t _pmd, old_pmd;
+   3102 	unsigned long addr;
+   3103 	pte_t *pte;
+   3104 	int i;
+   3105 
+   3106 	/*
+   3107 	 * Leave pmd empty until pte is filled note that it is fine to delay
+   3108 	 * notification until mmu_notifier_invalidate_range_end() as we are
+   3109 	 * replacing a zero pmd write protected page with a zero pte write
+   3110 	 * protected page.
+   3111 	 *
+   3112 	 * See Documentation/mm/mmu_notifier.rst
+   3113 	 */
+   3114 	old_pmd = pmdp_huge_clear_flush(vma, haddr, pmd);
+   3115 
+   3116 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
+   3117 	pmd_populate(mm, &_pmd, pgtable);
+   3118 
+   3119 	pte = pte_offset_map(&_pmd, haddr);
+   3120 	VM_BUG_ON(!pte);
+   3121 	for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+   3122 		pte_t entry;
+   3123 
+   3124 		entry = pfn_pte(zero_pfn(addr), vma->vm_page_prot);
+   3125 		entry = pte_mkspecial(entry);
+>> 3126 		if (pmd_uffd(old_pmd))
+   3127 			entry = pte_mkuffd(entry);
+   3128 
+   3129 		/* Restore PAGE_NONE so an RWP marker keeps trapping */
+   3130 		if (userfaultfd_rwp(vma) && pmd_uffd(old_pmd))
+   3131 			entry = pte_modify(entry, PAGE_NONE);
+   3132 
+   3133 		VM_BUG_ON(!pte_none(ptep_get(pte)));
+   3134 		set_pte_at(mm, addr, pte, entry);
+==========================================================================================
+[22] mm/huge_memory.c:3130  函数 __split_huge_zero_page_pmd  接口 pmd_uffd  来源 read  编码表：在 x86_64 上对某些非 present 项读错
+   3100 	pgtable_t pgtable;
+   3101 	pmd_t _pmd, old_pmd;
+   3102 	unsigned long addr;
+   3103 	pte_t *pte;
+   3104 	int i;
+   3105 
+   3106 	/*
+   3107 	 * Leave pmd empty until pte is filled note that it is fine to delay
+   3108 	 * notification until mmu_notifier_invalidate_range_end() as we are
+   3109 	 * replacing a zero pmd write protected page with a zero pte write
+   3110 	 * protected page.
+   3111 	 *
+   3112 	 * See Documentation/mm/mmu_notifier.rst
+   3113 	 */
+   3114 	old_pmd = pmdp_huge_clear_flush(vma, haddr, pmd);
+   3115 
+   3116 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
+   3117 	pmd_populate(mm, &_pmd, pgtable);
+   3118 
+   3119 	pte = pte_offset_map(&_pmd, haddr);
+   3120 	VM_BUG_ON(!pte);
+   3121 	for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+   3122 		pte_t entry;
+   3123 
+   3124 		entry = pfn_pte(zero_pfn(addr), vma->vm_page_prot);
+   3125 		entry = pte_mkspecial(entry);
+   3126 		if (pmd_uffd(old_pmd))
+   3127 			entry = pte_mkuffd(entry);
+   3128 
+   3129 		/* Restore PAGE_NONE so an RWP marker keeps trapping */
+>> 3130 		if (userfaultfd_rwp(vma) && pmd_uffd(old_pmd))
+   3131 			entry = pte_modify(entry, PAGE_NONE);
+   3132 
+   3133 		VM_BUG_ON(!pte_none(ptep_get(pte)));
+   3134 		set_pte_at(mm, addr, pte, entry);
+   3135 		pte++;
+   3136 	}
+   3137 	pte_unmap(pte - 1);
+   3138 	smp_wmb(); /* make pte visible before pmd */
+==========================================================================================
+[23] mm/huge_memory.c:3291  函数 __split_huge_pmd_locked  接口 pmd_uffd  来源 read  编码表：在 x86_64 上对某些非 present 项读错
+   3261 		 * happens in place). If we overwrite the pmd with the not-huge
+   3262 		 * version pointing to the pte here (which of course we could if
+   3263 		 * all CPUs were bug free), userland could trigger a small page
+   3264 		 * size TLB miss on the small sized TLB while the hugepage TLB
+   3265 		 * entry is still established in the huge TLB. Some CPU doesn't
+   3266 		 * like that. See
+   3267 		 * http://support.amd.com/TechDocs/41322_10h_Rev_Gd.pdf, Erratum
+   3268 		 * 383 on page 105. Intel should be safe but is also warns that
+   3269 		 * it's only safe if the permission and cache attributes of the
+   3270 		 * two entries loaded in the two TLB is identical (which should
+   3271 		 * be the case here). But it is generally safer to never allow
+   3272 		 * small and huge TLB entries for the same virtual address to be
+   3273 		 * loaded simultaneously. So instead of doing "pmd_populate();
+   3274 		 * flush_pmd_tlb_range();" we first mark the current pmd
+   3275 		 * notpresent (atomically because here the pmd_trans_huge must
+   3276 		 * remain set at all times on the pmd until the split is
+   3277 		 * complete for this pmd), then we flush the SMP TLB and finally
+   3278 		 * we write the non-huge version of the pmd entry with
+   3279 		 * pmd_populate.
+   3280 		 */
+   3281 		old_pmd = pmdp_invalidate(vma, haddr, pmd);
+   3282 		page = pmd_page(old_pmd);
+   3283 		folio = page_folio(page);
+   3284 		if (pmd_dirty(old_pmd)) {
+   3285 			dirty = true;
+   3286 			folio_set_dirty(folio);
+   3287 		}
+   3288 		write = pmd_write(old_pmd);
+   3289 		young = pmd_young(old_pmd);
+   3290 		soft_dirty = pmd_soft_dirty(old_pmd);
+>> 3291 		uffd_wp = pmd_uffd(old_pmd);
+   3292 
+   3293 		VM_WARN_ON_FOLIO(!folio_ref_count(folio), folio);
+   3294 		VM_WARN_ON_FOLIO(!folio_test_anon(folio), folio);
+   3295 
+   3296 		/*
+   3297 		 * Without "freeze", we'll simply split the PMD, propagating the
+   3298 		 * PageAnonExclusive() flag for each PTE by setting it for
+   3299 		 * each subpage -- no need to (temporarily) clear.
+==========================================================================================
+[24] include/linux/userfaultfd_k.h:241  函数 userfaultfd_pte_wp  接口 pte_uffd  来源 param  编码表：在 x86_64 上对某些非 present 项读错
+    211 
+    212 static inline bool userfaultfd_wp(struct vm_area_struct *vma)
+    213 {
+    214 	return vma_test_any_mask(vma, VMA_UFFD_WP);
+    215 }
+    216 
+    217 static inline bool userfaultfd_minor(struct vm_area_struct *vma)
+    218 {
+    219 	return vma_test_any_mask(vma, VMA_UFFD_MINOR);
+    220 }
+    221 
+    222 static inline bool userfaultfd_rwp(struct vm_area_struct *vma)
+    223 {
+    224 	/*
+    225 	 * Callers gate PAGE_NONE usage on this; PAGE_NONE is a BUILD_BUG()
+    226 	 * without CONFIG_ARCH_HAS_PTE_PROTNONE, so fold to false.
+    227 	 */
+    228 	if (!IS_ENABLED(CONFIG_ARCH_HAS_PTE_PROTNONE))
+    229 		return false;
+    230 	return vma_test_single_mask(vma, VMA_UFFD_RWP);
+    231 }
+    232 
+    233 static inline bool userfaultfd_protected(struct vm_area_struct *vma)
+    234 {
+    235 	return userfaultfd_wp(vma) || userfaultfd_rwp(vma);
+    236 }
+    237 
+    238 static inline bool userfaultfd_pte_wp(struct vm_area_struct *vma,
+    239 				      pte_t pte)
+    240 {
+>>  241 	return userfaultfd_wp(vma) && pte_uffd(pte);
+    242 }
+    243 
+    244 static inline bool userfaultfd_huge_pmd_wp(struct vm_area_struct *vma,
+    245 					   pmd_t pmd)
+    246 {
+    247 	return userfaultfd_wp(vma) && pmd_uffd(pmd);
+    248 }
+    249 
+==========================================================================================
+[25] include/linux/userfaultfd_k.h:247  函数 userfaultfd_huge_pmd_wp  接口 pmd_uffd  来源 param  编码表：在 x86_64 上对某些非 present 项读错
+    217 static inline bool userfaultfd_minor(struct vm_area_struct *vma)
+    218 {
+    219 	return vma_test_any_mask(vma, VMA_UFFD_MINOR);
+    220 }
+    221 
+    222 static inline bool userfaultfd_rwp(struct vm_area_struct *vma)
+    223 {
+    224 	/*
+    225 	 * Callers gate PAGE_NONE usage on this; PAGE_NONE is a BUILD_BUG()
+    226 	 * without CONFIG_ARCH_HAS_PTE_PROTNONE, so fold to false.
+    227 	 */
+    228 	if (!IS_ENABLED(CONFIG_ARCH_HAS_PTE_PROTNONE))
+    229 		return false;
+    230 	return vma_test_single_mask(vma, VMA_UFFD_RWP);
+    231 }
+    232 
+    233 static inline bool userfaultfd_protected(struct vm_area_struct *vma)
+    234 {
+    235 	return userfaultfd_wp(vma) || userfaultfd_rwp(vma);
+    236 }
+    237 
+    238 static inline bool userfaultfd_pte_wp(struct vm_area_struct *vma,
+    239 				      pte_t pte)
+    240 {
+    241 	return userfaultfd_wp(vma) && pte_uffd(pte);
+    242 }
+    243 
+    244 static inline bool userfaultfd_huge_pmd_wp(struct vm_area_struct *vma,
+    245 					   pmd_t pmd)
+    246 {
+>>  247 	return userfaultfd_wp(vma) && pmd_uffd(pmd);
+    248 }
+    249 
+    250 static inline bool userfaultfd_pte_rwp(struct vm_area_struct *vma,
+    251 				       pte_t pte)
+    252 {
+    253 	return userfaultfd_rwp(vma) && pte_uffd(pte);
+    254 }
+    255 
+==========================================================================================
+[26] include/linux/userfaultfd_k.h:253  函数 userfaultfd_pte_rwp  接口 pte_uffd  来源 param  编码表：在 x86_64 上对某些非 present 项读错
+    223 {
+    224 	/*
+    225 	 * Callers gate PAGE_NONE usage on this; PAGE_NONE is a BUILD_BUG()
+    226 	 * without CONFIG_ARCH_HAS_PTE_PROTNONE, so fold to false.
+    227 	 */
+    228 	if (!IS_ENABLED(CONFIG_ARCH_HAS_PTE_PROTNONE))
+    229 		return false;
+    230 	return vma_test_single_mask(vma, VMA_UFFD_RWP);
+    231 }
+    232 
+    233 static inline bool userfaultfd_protected(struct vm_area_struct *vma)
+    234 {
+    235 	return userfaultfd_wp(vma) || userfaultfd_rwp(vma);
+    236 }
+    237 
+    238 static inline bool userfaultfd_pte_wp(struct vm_area_struct *vma,
+    239 				      pte_t pte)
+    240 {
+    241 	return userfaultfd_wp(vma) && pte_uffd(pte);
+    242 }
+    243 
+    244 static inline bool userfaultfd_huge_pmd_wp(struct vm_area_struct *vma,
+    245 					   pmd_t pmd)
+    246 {
+    247 	return userfaultfd_wp(vma) && pmd_uffd(pmd);
+    248 }
+    249 
+    250 static inline bool userfaultfd_pte_rwp(struct vm_area_struct *vma,
+    251 				       pte_t pte)
+    252 {
+>>  253 	return userfaultfd_rwp(vma) && pte_uffd(pte);
+    254 }
+    255 
+    256 static inline bool userfaultfd_huge_pmd_rwp(struct vm_area_struct *vma,
+    257 					    pmd_t pmd)
+    258 {
+    259 	return userfaultfd_rwp(vma) && pmd_uffd(pmd);
+    260 }
+    261 
+==========================================================================================
+[27] include/linux/userfaultfd_k.h:259  函数 userfaultfd_huge_pmd_rwp  接口 pmd_uffd  来源 param  编码表：在 x86_64 上对某些非 present 项读错
+    229 		return false;
+    230 	return vma_test_single_mask(vma, VMA_UFFD_RWP);
+    231 }
+    232 
+    233 static inline bool userfaultfd_protected(struct vm_area_struct *vma)
+    234 {
+    235 	return userfaultfd_wp(vma) || userfaultfd_rwp(vma);
+    236 }
+    237 
+    238 static inline bool userfaultfd_pte_wp(struct vm_area_struct *vma,
+    239 				      pte_t pte)
+    240 {
+    241 	return userfaultfd_wp(vma) && pte_uffd(pte);
+    242 }
+    243 
+    244 static inline bool userfaultfd_huge_pmd_wp(struct vm_area_struct *vma,
+    245 					   pmd_t pmd)
+    246 {
+    247 	return userfaultfd_wp(vma) && pmd_uffd(pmd);
+    248 }
+    249 
+    250 static inline bool userfaultfd_pte_rwp(struct vm_area_struct *vma,
+    251 				       pte_t pte)
+    252 {
+    253 	return userfaultfd_rwp(vma) && pte_uffd(pte);
+    254 }
+    255 
+    256 static inline bool userfaultfd_huge_pmd_rwp(struct vm_area_struct *vma,
+    257 					    pmd_t pmd)
+    258 {
+>>  259 	return userfaultfd_rwp(vma) && pmd_uffd(pmd);
+    260 }
+    261 
+    262 static inline bool userfaultfd_armed(struct vm_area_struct *vma)
+    263 {
+    264 	return vma_test_any_mask(vma, __VMA_UFFD_FLAGS);
+    265 }
+    266 
+    267 static inline bool vma_has_uffd_without_event_remap(struct vm_area_struct *vma)

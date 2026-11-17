@@ -1,0 +1,48 @@
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -61,6 +61,7 @@
+ 	void *dst = addr;
+ 	size_t done = 0;
+ 	int ret;
++	int error = 0;
+ 
+ 	/*
+ 	 * Before reaching here, it was expected to lock the text_mutex
+@@ -76,6 +77,7 @@
+ 	if (!riscv_patch_in_stop_machine)
+ 		lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
+ 	while (done < len) {
+ 		size_t offset = offset_in_page(dst + done);
+ 		size_t chunk = min_t(size_t, PAGE_SIZE - offset, len - done);
+@@ -87,20 +89,25 @@
+ 		waddr = patch_map(dst + done, FIX_TEXT_POKE0);
+ 		if (!waddr) {
+ 			patch_unmap(FIX_TEXT_POKE0);
+-			return -EFAULT;
++			error = -EFAULT;
++			goto out;
+ 		}
+ 
+ 		ret = copy_to_kernel_nofault(waddr, src + done, chunk);
+ 
+ 		patch_unmap(FIX_TEXT_POKE0);
+ 
+-		if (ret)
+-			return ret;
++		if (ret) {
++			error = ret;
++			goto out;
++		}
+ 
+ 		done += chunk;
+ 	}
+ 
+-	return 0;
++out:
++	preempt_enable();
++	return error;
+ }
+ NOKPROBE_SYMBOL(patch_insn_write);
+ #else

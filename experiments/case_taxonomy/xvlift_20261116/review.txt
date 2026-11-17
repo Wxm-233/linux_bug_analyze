@@ -1,0 +1,989 @@
+==========================================================================================
+[1] mm/rmap.c:1980  函数 folio_unmap_pte_batch  调用辅助接口 folio_pte_batch_flags@2（第 2 个参数，对象 *pvmw->pte）
+    辅助接口内部没守卫地用了 pte_dirty, pte_write, pte_young（只对 present 项有定义的读接口）；编码表：pte_young 在 arm64, riscv, s390 上对定义域外的项出错
+    提升链：folio_pte_batch_flags@2（mm/internal.h，L1）← pte_dirty@mm/internal.h:448；pte_write@mm/internal.h:445；pte_young@mm/internal.h:447
+   1950 static inline unsigned int folio_unmap_pte_batch(struct folio *folio,
+   1951 			struct page_vma_mapped_walk *pvmw,
+   1952 			enum ttu_flags flags, pte_t pte)
+   1953 {
+   1954 	unsigned long end_addr, addr = pvmw->address;
+   1955 	struct vm_area_struct *vma = pvmw->vma;
+   1956 	unsigned int max_nr;
+   1957 
+   1958 	if (flags & TTU_HWPOISON)
+   1959 		return 1;
+   1960 	if (!folio_test_large(folio))
+   1961 		return 1;
+   1962 
+   1963 	/* We may only batch within a single VMA and a single page table. */
+   1964 	end_addr = pmd_addr_end(addr, vma->vm_end);
+   1965 	max_nr = (end_addr - addr) >> PAGE_SHIFT;
+   1966 
+   1967 	/* We only support lazyfree or file folios batching for now ... */
+   1968 	if (folio_test_anon(folio) && folio_test_swapbacked(folio))
+   1969 		return 1;
+   1970 
+   1971 	if (pte_unused(pte))
+   1972 		return 1;
+   1973 
+   1974 	/*
+   1975 	 * If unmap fails, we need to restore the ptes. To avoid accidentally
+   1976 	 * upgrading write permissions for ptes that were not originally
+   1977 	 * writable, and to avoid losing the soft-dirty bit, use the
+   1978 	 * appropriate FPB flags.
+   1979 	 */
+>> 1980 	return folio_pte_batch_flags(folio, vma, pvmw->pte, &pte, max_nr,
+   1981 				     FPB_RESPECT_WRITE | FPB_RESPECT_SOFT_DIRTY);
+   1982 }
+   1983 
+   1984 static bool try_to_unmap_poisoned_hugetlb_one(struct folio *folio,
+   1985 		struct vm_area_struct *vma, unsigned long address, void *arg)
+   1986 {
+   1987 	DEFINE_FOLIO_VMA_WALK(pvmw, folio, vma, address, 0);
+   1988 	const unsigned long hsz = huge_page_size(hstate_vma(vma));
+==========================================================================================
+[2] mm/util.c:1570  函数 folio_pte_batch  调用辅助接口 folio_pte_batch_flags@2（第 2 个参数，对象 *ptep）
+    辅助接口内部没守卫地用了 pte_dirty, pte_write, pte_young（只对 present 项有定义的读接口）；编码表：pte_young 在 arm64, riscv, s390 上对定义域外的项出错
+    提升链：folio_pte_batch_flags@2（mm/internal.h，L1）← pte_dirty@mm/internal.h:448；pte_write@mm/internal.h:445；pte_young@mm/internal.h:447
+   1540 	return mmap_action_finish(vma, action, err, is_compat);
+   1541 }
+   1542 EXPORT_SYMBOL(mmap_action_complete);
+   1543 #endif
+   1544 
+   1545 #ifdef CONFIG_MMU
+   1546 /**
+   1547  * folio_pte_batch - detect a PTE batch for a large folio
+   1548  * @folio: The large folio to detect a PTE batch for.
+   1549  * @ptep: Page table pointer for the first entry.
+   1550  * @pte: Page table entry for the first page.
+   1551  * @max_nr: The maximum number of table entries to consider.
+   1552  *
+   1553  * This is a simplified variant of folio_pte_batch_flags().
+   1554  *
+   1555  * Detect a PTE batch: consecutive (present) PTEs that map consecutive
+   1556  * pages of the same large folio in a single VMA and a single page table.
+   1557  *
+   1558  * All PTEs inside a PTE batch have the same PTE bits set, excluding the PFN,
+   1559  * the accessed bit, writable bit, dirt-bit and soft-dirty bit.
+   1560  *
+   1561  * ptep must map any page of the folio. max_nr must be at least one and
+   1562  * must be limited by the caller so scanning cannot exceed a single VMA and
+   1563  * a single page table.
+   1564  *
+   1565  * Return: the number of table entries in the batch.
+   1566  */
+   1567 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
+   1568 		unsigned int max_nr)
+   1569 {
+>> 1570 	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0);
+   1571 }
+   1572 #endif /* CONFIG_MMU */
+   1573 
+   1574 #if defined(CONFIG_SPARSEMEM) && !defined(CONFIG_SPARSEMEM_VMEMMAP)
+   1575 /**
+   1576  * page_range_contiguous - test whether the page range is contiguous
+   1577  * @page: the start of the page range.
+   1578  * @nr_pages: the number of pages in the range.
+==========================================================================================
+[3] mm/mremap.c:291  函数 move_ptes  调用辅助接口 get_and_clear_ptes@2（第 2 个参数，对象 *old_ptep）
+    辅助接口内部没守卫地用了 pte_dirty, pte_mkdirty, pte_young（只对 present 项有定义的读接口）；编码表：pte_young 在 arm64, riscv, s390 上对定义域外的项出错
+    提升链：get_and_clear_ptes@2（include/linux/pgtable.h，L2）← get_and_clear_full_ptes@include/linux/pgtable.h:913 | get_and_clear_full_ptes@2（include/linux/pgtable.h，L1）← pte_dirty@include/linux/pgtable.h:884；pte_mkdirty@include/linux/pgtable.h:885；pte_young@include/linux/pgtable.h:886
+    261 		spin_lock_nested(new_ptl, SINGLE_DEPTH_NESTING);
+    262 	flush_tlb_batched_pending(vma->vm_mm);
+    263 	lazy_mmu_mode_enable();
+    264 
+    265 	for (; old_addr < old_end; old_ptep += nr_ptes, old_addr += nr_ptes * PAGE_SIZE,
+    266 		new_ptep += nr_ptes, new_addr += nr_ptes * PAGE_SIZE) {
+    267 		VM_WARN_ON_ONCE(!pte_none(ptep_get(new_ptep)));
+    268 
+    269 		nr_ptes = 1;
+    270 		max_nr_ptes = (old_end - old_addr) >> PAGE_SHIFT;
+    271 		old_pte = ptep_get(old_ptep);
+    272 		if (pte_none(old_pte))
+    273 			continue;
+    274 
+    275 		/*
+    276 		 * If we are remapping a valid PTE, make sure
+    277 		 * to flush TLB before we drop the PTL for the
+    278 		 * PTE.
+    279 		 *
+    280 		 * NOTE! Both old and new PTL matter: the old one
+    281 		 * for racing with folio_mkclean(), the new one to
+    282 		 * make sure the physical page stays valid until
+    283 		 * the TLB entry for the old mapping has been
+    284 		 * flushed.
+    285 		 */
+    286 		if (pte_present(old_pte)) {
+    287 			nr_ptes = mremap_folio_pte_batch(vma, old_addr, old_ptep,
+    288 							 old_pte, max_nr_ptes);
+    289 			force_flush = true;
+    290 		}
+>>  291 		pte = get_and_clear_ptes(mm, old_addr, old_ptep, nr_ptes);
+    292 		pte = move_pte(pte, old_addr, new_addr);
+    293 		pte = move_soft_dirty_pte(pte);
+    294 
+    295 		if (need_clear_uffd_wp && pte_is_uffd_wp_marker(pte))
+    296 			pte_clear(mm, new_addr, new_ptep);
+    297 		else {
+    298 			if (need_clear_uffd_wp) {
+    299 				if (pte_present(pte)) {
+==========================================================================================
+[4] mm/vmscan.c:4279  函数 lru_gen_look_around  调用辅助接口 test_and_clear_young_ptes_notify@2（第 2 个参数，对象 *pte）
+    辅助接口内部没守卫地用了 pte_mkold, pte_young（只对 present 项有定义的修改接口）；编码表：pte_mkold 在 arm64, riscv, s390 上对定义域外的项出错
+    提升链：test_and_clear_young_ptes_notify@2（mm/internal.h，L3）← test_and_clear_young_ptes@mm/internal.h:1591 | test_and_clear_young_ptes@2（include/linux/pgtable.h，L2）← ptep_test_and_clear_young@include/linux/pgtable.h:1189 | ptep_test_and_clear_young@2（include/linux/pgtable.h，L1）← pte_mkold@include/linux/pgtable.h:537；pte_young@include/linux/pgtable.h:534
+   4249 /*
+   4250  * This function exploits spatial locality when shrink_folio_list() walks the
+   4251  * rmap. It scans the adjacent PTEs of a young PTE and promotes hot pages. If
+   4252  * the scan was done cacheline efficiently, it adds the PMD entry pointing to
+   4253  * the PTE table to the Bloom filter. This forms a feedback loop between the
+   4254  * eviction and the aging.
+   4255  */
+   4256 bool lru_gen_look_around(struct page_vma_mapped_walk *pvmw, unsigned int nr)
+   4257 {
+   4258 	int i;
+   4259 	bool dirty;
+   4260 	unsigned long start;
+   4261 	unsigned long end;
+   4262 	struct lru_gen_mm_walk *walk;
+   4263 	struct folio *last = NULL;
+   4264 	int young = nr;
+   4265 	pte_t *pte = pvmw->pte;
+   4266 	unsigned long addr = pvmw->address;
+   4267 	struct vm_area_struct *vma = pvmw->vma;
+   4268 	struct folio *folio = pfn_folio(pvmw->pfn);
+   4269 	struct mem_cgroup *memcg;
+   4270 	struct pglist_data *pgdat = folio_pgdat(folio);
+   4271 	struct lruvec *lruvec;
+   4272 	struct lru_gen_mm_state *mm_state;
+   4273 	unsigned long max_seq;
+   4274 	int gen;
+   4275 
+   4276 	lockdep_assert_held(pvmw->ptl);
+   4277 	VM_WARN_ON_ONCE_FOLIO(folio_test_lru(folio), folio);
+   4278 
+>> 4279 	if (!test_and_clear_young_ptes_notify(vma, addr, pte, nr))
+   4280 		return false;
+   4281 
+   4282 	if (spin_is_contended(pvmw->ptl))
+   4283 		return true;
+   4284 
+   4285 	/* exclude special VMAs containing anon pages from COW */
+   4286 	if (vma->vm_flags & VM_SPECIAL)
+   4287 		return true;
+==========================================================================================
+[5] mm/rmap.c:986  函数 folio_referenced_one  调用辅助接口 clear_flush_young_ptes_notify@2（第 2 个参数，对象 *pvmw.pte）
+    辅助接口内部没守卫地用了 pte_mkold, pte_young（只对 present 项有定义的修改接口）；编码表：pte_mkold 在 arm64, riscv, s390 上对定义域外的项出错
+    提升链：clear_flush_young_ptes_notify@2（mm/internal.h，L4）← clear_flush_young_ptes@mm/internal.h:1570 | clear_flush_young_ptes@2（include/linux/pgtable.h，L3）← ptep_clear_flush_young@include/linux/pgtable.h:1152 | ptep_clear_flush_young@2（mm/pgtable-generic.c，L2）← ptep_test_and_clear_young@mm/pgtable-generic.c:89 | ptep_test_and_clear_young@2（include/linux/pgtable.h，L1）← pte_mkold@include/linux/pgtable.h:537；pte_young@include/linux/pgtable.h:534
+    956 		 * Skip the non-shared swapbacked folio mapped solely by
+    957 		 * the exiting or OOM-reaped process. This avoids redundant
+    958 		 * swap-out followed by an immediate unmap.
+    959 		 */
+    960 		if ((!atomic_read(&vma->vm_mm->mm_users) ||
+    961 		    check_stable_address_space(vma->vm_mm)) &&
+    962 		    folio_test_anon(folio) && folio_test_swapbacked(folio) &&
+    963 		    !folio_maybe_mapped_shared(folio)) {
+    964 			pra->referenced = -1;
+    965 			page_vma_mapped_walk_done(&pvmw);
+    966 			return false;
+    967 		}
+    968 
+    969 		if (pvmw.pte && folio_test_large(folio)) {
+    970 			const unsigned long end_addr = pmd_addr_end(address, vma->vm_end);
+    971 			const unsigned int max_nr = (end_addr - address) >> PAGE_SHIFT;
+    972 			pte_t pteval = ptep_get(pvmw.pte);
+    973 
+    974 			nr = folio_pte_batch(folio, pvmw.pte, pteval, max_nr);
+    975 		}
+    976 
+    977 		/*
+    978 		 * When LRU is switching, we don’t know where the surrounding folios
+    979 		 * are. —they could be on active/inactive lists or on MGLRU. So the
+    980 		 * simplest approach is to disable this look-around optimization.
+    981 		 */
+    982 		if (lru_gen_enabled() && !lru_gen_switching() && pvmw.pte) {
+    983 			if (lru_gen_look_around(&pvmw, nr))
+    984 				referenced++;
+    985 		} else if (pvmw.pte) {
+>>  986 			if (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))
+    987 				referenced++;
+    988 		} else if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE)) {
+    989 			if (pmdp_clear_flush_young_notify(vma, address,
+    990 						pvmw.pmd))
+    991 				referenced++;
+    992 		} else {
+    993 			/* unexpected pmd-mapped folio? */
+    994 			WARN_ON_ONCE(1);
+==========================================================================================
+[6] mm/vmscan.c:3679  函数 walk_pmd_range_locked  调用辅助接口 pmdp_test_and_clear_young@2（第 2 个参数，对象 *pmd+i）
+    辅助接口内部没守卫地用了 pmd_mkold, pmd_young（只对 present 项有定义的修改接口）；编码表：pmd_mkold 在 arm64, s390 上对定义域外的项出错
+    提升链：pmdp_test_and_clear_young@2（include/linux/pgtable.h，L1）← pmd_mkold@include/linux/pgtable.h:553；pmd_young@include/linux/pgtable.h:550
+   3649 		return;
+   3650 	}
+   3651 
+   3652 	i = addr == -1 ? 0 : pmd_index(addr) - pmd_index(*first);
+   3653 	if (i && i <= MIN_LRU_BATCH) {
+   3654 		__set_bit(i - 1, bitmap);
+   3655 		return;
+   3656 	}
+   3657 
+   3658 	pmd = pmd_offset(pud, *first);
+   3659 
+   3660 	ptl = pmd_lockptr(args->mm, pmd);
+   3661 	if (!spin_trylock(ptl))
+   3662 		goto done;
+   3663 
+   3664 	lazy_mmu_mode_enable();
+   3665 
+   3666 	do {
+   3667 		unsigned long pfn;
+   3668 		struct folio *folio;
+   3669 
+   3670 		/* don't round down the first address */
+   3671 		addr = i ? (*first & PMD_MASK) + i * PMD_SIZE : *first;
+   3672 
+   3673 		if (!pmd_present(pmd[i]))
+   3674 			goto next;
+   3675 
+   3676 		if (!pmd_trans_huge(pmd[i])) {
+   3677 			if (!walk->force_scan && should_clear_pmd_young() &&
+   3678 			    !mm_has_notifiers(args->mm))
+>> 3679 				pmdp_test_and_clear_young(vma, addr, pmd + i);
+   3680 			goto next;
+   3681 		}
+   3682 
+   3683 		pfn = get_pmd_pfn(pmd[i], vma, addr, pgdat);
+   3684 		if (pfn == -1)
+   3685 			goto next;
+   3686 
+   3687 		folio = get_pfn_folio(pfn, memcg, pgdat);
+==========================================================================================
+[7] mm/vmscan.c:3691  函数 walk_pmd_range_locked  调用辅助接口 pmdp_test_and_clear_young_notify@2（第 2 个参数，对象 *pmd+i）
+    辅助接口内部没守卫地用了 pmd_mkold, pmd_young（只对 present 项有定义的修改接口）；编码表：pmd_mkold 在 arm64, s390 上对定义域外的项出错
+    提升链：pmdp_test_and_clear_young_notify@2（mm/internal.h，L2）← pmdp_test_and_clear_young@mm/internal.h:1601 | pmdp_test_and_clear_young@2（include/linux/pgtable.h，L1）← pmd_mkold@include/linux/pgtable.h:553；pmd_young@include/linux/pgtable.h:550
+   3661 	if (!spin_trylock(ptl))
+   3662 		goto done;
+   3663 
+   3664 	lazy_mmu_mode_enable();
+   3665 
+   3666 	do {
+   3667 		unsigned long pfn;
+   3668 		struct folio *folio;
+   3669 
+   3670 		/* don't round down the first address */
+   3671 		addr = i ? (*first & PMD_MASK) + i * PMD_SIZE : *first;
+   3672 
+   3673 		if (!pmd_present(pmd[i]))
+   3674 			goto next;
+   3675 
+   3676 		if (!pmd_trans_huge(pmd[i])) {
+   3677 			if (!walk->force_scan && should_clear_pmd_young() &&
+   3678 			    !mm_has_notifiers(args->mm))
+   3679 				pmdp_test_and_clear_young(vma, addr, pmd + i);
+   3680 			goto next;
+   3681 		}
+   3682 
+   3683 		pfn = get_pmd_pfn(pmd[i], vma, addr, pgdat);
+   3684 		if (pfn == -1)
+   3685 			goto next;
+   3686 
+   3687 		folio = get_pfn_folio(pfn, memcg, pgdat);
+   3688 		if (!folio)
+   3689 			goto next;
+   3690 
+>> 3691 		if (!pmdp_test_and_clear_young_notify(vma, addr, pmd + i))
+   3692 			goto next;
+   3693 
+   3694 		if (last != folio) {
+   3695 			walk_update_folio(walk, vma, last, gen, dirty);
+   3696 
+   3697 			last = folio;
+   3698 			dirty = false;
+   3699 		}
+==========================================================================================
+[8] mm/memory.c:4767  函数 can_swapin_thp  调用辅助接口 swap_pte_batch@2（第 2 个参数，对象 *ptep）
+    辅助接口内部没守卫地用了 pte_swp_exclusive, pte_swp_soft_dirty（只对交换格式项有定义的读接口）；编码表：pte_swp_exclusive 在 loongarch, arm 上对定义域外的项出错
+    提升链：swap_pte_batch@2（mm/internal.h，L3）← pte_next_swp_offset@mm/internal.h:526 | pte_next_swp_offset@0（mm/internal.h，L2）← pte_move_swp_offset@mm/internal.h:506 | pte_move_swp_offset@0（mm/internal.h，L1）← pte_swp_exclusive@mm/internal.h:488；pte_swp_soft_dirty@mm/internal.h:486
+   4737 		return VM_FAULT_SIGSEGV;
+   4738 
+   4739 	if (softleaf_is_uffd_wp_marker(entry))
+   4740 		return pte_marker_handle_uffd_wp(vmf);
+   4741 
+   4742 	/* This is an unknown pte marker */
+   4743 	return VM_FAULT_SIGBUS;
+   4744 }
+   4745 
+   4746 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   4747 /*
+   4748  * Check if the PTEs within a range are contiguous swap entries.
+   4749  */
+   4750 static bool can_swapin_thp(struct vm_fault *vmf, pte_t *ptep, int nr_pages)
+   4751 {
+   4752 	unsigned long addr;
+   4753 	int idx;
+   4754 	pte_t pte;
+   4755 
+   4756 	addr = ALIGN_DOWN(vmf->address, nr_pages * PAGE_SIZE);
+   4757 	idx = (vmf->address - addr) / PAGE_SIZE;
+   4758 	pte = ptep_get(ptep);
+   4759 
+   4760 	if (!pte_same(pte, pte_move_swp_offset(vmf->orig_pte, -idx)))
+   4761 		return false;
+   4762 	/*
+   4763 	 * swap_read_folio() can't handle the case a large folio is hybridly
+   4764 	 * from different backends. And they are likely corner cases. Similar
+   4765 	 * things might be added once zswap support large folios.
+   4766 	 */
+>> 4767 	if (swap_pte_batch(ptep, nr_pages, pte) != nr_pages)
+   4768 		return false;
+   4769 	return true;
+   4770 }
+   4771 
+   4772 static inline unsigned long thp_swap_suitable_orders(pgoff_t swp_offset,
+   4773 						     unsigned long addr,
+   4774 						     unsigned long orders)
+   4775 {
+==========================================================================================
+[9] mm/memory.c:5070  函数 do_swap_page  调用辅助接口 swap_pte_batch@2（第 2 个参数，对象 *folio_ptep）
+    辅助接口内部没守卫地用了 pte_swp_exclusive, pte_swp_soft_dirty（只对交换格式项有定义的读接口）；编码表：pte_swp_exclusive 在 loongarch, arm 上对定义域外的项出错
+    提升链：swap_pte_batch@2（mm/internal.h，L3）← pte_next_swp_offset@mm/internal.h:526 | pte_next_swp_offset@0（mm/internal.h，L2）← pte_move_swp_offset@mm/internal.h:506 | pte_move_swp_offset@0（mm/internal.h，L1）← pte_swp_exclusive@mm/internal.h:488；pte_swp_soft_dirty@mm/internal.h:486
+   5040 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd, vmf->address,
+   5041 			&vmf->ptl);
+   5042 	if (unlikely(!vmf->pte || !pte_same(ptep_get(vmf->pte), vmf->orig_pte)))
+   5043 		goto out_nomap;
+   5044 
+   5045 	if (unlikely(!folio_test_uptodate(folio))) {
+   5046 		ret = VM_FAULT_SIGBUS;
+   5047 		goto out_nomap;
+   5048 	}
+   5049 
+   5050 	nr_pages = 1;
+   5051 	page_idx = 0;
+   5052 	address = vmf->address;
+   5053 	ptep = vmf->pte;
+   5054 	if (folio_test_large(folio) && folio_test_swapcache(folio)) {
+   5055 		int nr = folio_nr_pages(folio);
+   5056 		unsigned long idx = folio_page_idx(folio, page);
+   5057 		unsigned long folio_start = address - idx * PAGE_SIZE;
+   5058 		unsigned long folio_end = folio_start + nr * PAGE_SIZE;
+   5059 		pte_t *folio_ptep;
+   5060 		pte_t folio_pte;
+   5061 
+   5062 		if (unlikely(folio_start < max(address & PMD_MASK, vma->vm_start)))
+   5063 			goto check_folio;
+   5064 		if (unlikely(folio_end > pmd_addr_end(address, vma->vm_end)))
+   5065 			goto check_folio;
+   5066 
+   5067 		folio_ptep = vmf->pte - idx;
+   5068 		folio_pte = ptep_get(folio_ptep);
+   5069 		if (!pte_same(folio_pte, pte_move_swp_offset(vmf->orig_pte, -idx)) ||
+>> 5070 		    swap_pte_batch(folio_ptep, nr, folio_pte) != nr)
+   5071 			goto check_folio;
+   5072 
+   5073 		page_idx = idx;
+   5074 		address = folio_start;
+   5075 		ptep = folio_ptep;
+   5076 		nr_pages = nr;
+   5077 		entry = folio->swap;
+   5078 		page = &folio->page;
+==========================================================================================
+[10] mm/rmap.c:989  函数 folio_referenced_one  调用辅助接口 pmdp_clear_flush_young_notify@2（第 2 个参数，对象 *pvmw.pmd）
+    辅助接口内部没守卫地用了 pmd_mkold, pmd_young（只对 present 项有定义的修改接口）；编码表：pmd_mkold 在 arm64, s390 上对定义域外的项出错
+    提升链：pmdp_clear_flush_young_notify@2（mm/internal.h，L3）← pmdp_clear_flush_young@mm/internal.h:1581 | pmdp_clear_flush_young@2（mm/pgtable-generic.c，L2）← pmdp_test_and_clear_young@mm/pgtable-generic.c:133 | pmdp_test_and_clear_young@2（include/linux/pgtable.h，L1）← pmd_mkold@include/linux/pgtable.h:553；pmd_young@include/linux/pgtable.h:550
+    959 		 */
+    960 		if ((!atomic_read(&vma->vm_mm->mm_users) ||
+    961 		    check_stable_address_space(vma->vm_mm)) &&
+    962 		    folio_test_anon(folio) && folio_test_swapbacked(folio) &&
+    963 		    !folio_maybe_mapped_shared(folio)) {
+    964 			pra->referenced = -1;
+    965 			page_vma_mapped_walk_done(&pvmw);
+    966 			return false;
+    967 		}
+    968 
+    969 		if (pvmw.pte && folio_test_large(folio)) {
+    970 			const unsigned long end_addr = pmd_addr_end(address, vma->vm_end);
+    971 			const unsigned int max_nr = (end_addr - address) >> PAGE_SHIFT;
+    972 			pte_t pteval = ptep_get(pvmw.pte);
+    973 
+    974 			nr = folio_pte_batch(folio, pvmw.pte, pteval, max_nr);
+    975 		}
+    976 
+    977 		/*
+    978 		 * When LRU is switching, we don’t know where the surrounding folios
+    979 		 * are. —they could be on active/inactive lists or on MGLRU. So the
+    980 		 * simplest approach is to disable this look-around optimization.
+    981 		 */
+    982 		if (lru_gen_enabled() && !lru_gen_switching() && pvmw.pte) {
+    983 			if (lru_gen_look_around(&pvmw, nr))
+    984 				referenced++;
+    985 		} else if (pvmw.pte) {
+    986 			if (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))
+    987 				referenced++;
+    988 		} else if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE)) {
+>>  989 			if (pmdp_clear_flush_young_notify(vma, address,
+    990 						pvmw.pmd))
+    991 				referenced++;
+    992 		} else {
+    993 			/* unexpected pmd-mapped folio? */
+    994 			WARN_ON_ONCE(1);
+    995 		}
+    996 
+    997 		ptes += nr;
+==========================================================================================
+[11] mm/gup.c:696  函数 can_follow_write_pmd  调用辅助接口 pmd_needs_soft_dirty_wp@1（第 1 个参数，对象 pmd）
+    辅助接口内部没守卫地用了 pmd_soft_dirty（只对 present 项有定义的读接口）；编码表：pmd_soft_dirty 在 powerpc, s390 上对定义域外的项出错
+    提升链：pmd_needs_soft_dirty_wp@1（mm/internal.h，L1）← pmd_soft_dirty@mm/internal.h:1422
+    666 		return NULL;
+    667 
+    668 	pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
+    669 	page = pfn_to_page(pfn);
+    670 
+    671 	if (!pud_write(pud) && gup_must_unshare(vma, flags, page))
+    672 		return ERR_PTR(-EMLINK);
+    673 
+    674 	ret = try_grab_folio(page_folio(page), 1, flags);
+    675 	if (ret)
+    676 		page = ERR_PTR(ret);
+    677 	else
+    678 		*page_mask = HPAGE_PUD_NR - 1;
+    679 
+    680 	return page;
+    681 }
+    682 
+    683 /* FOLL_FORCE can write to even unwritable PMDs in COW mappings. */
+    684 static inline bool can_follow_write_pmd(pmd_t pmd, struct page *page,
+    685 					struct vm_area_struct *vma,
+    686 					unsigned int flags)
+    687 {
+    688 	/* If the pmd is writable, we can write to the page. */
+    689 	if (pmd_write(pmd))
+    690 		return true;
+    691 
+    692 	if (!can_follow_write_common(page, vma, flags))
+    693 		return false;
+    694 
+    695 	/* ... and a write-fault isn't required for other reasons. */
+>>  696 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+    697 		return false;
+    698 	return !userfaultfd_huge_pmd_wp(vma, pmd);
+    699 }
+    700 
+    701 static struct page *follow_huge_pmd(struct vm_area_struct *vma,
+    702 				    unsigned long addr, pmd_t *pmd,
+    703 				    unsigned int flags,
+    704 				    unsigned long *page_mask)
+==========================================================================================
+[12] mm/huge_memory.c:2232  函数 can_change_pmd_writable  调用辅助接口 pmd_needs_soft_dirty_wp@1（第 1 个参数，对象 pmd）
+    辅助接口内部没守卫地用了 pmd_soft_dirty（只对 present 项有定义的读接口）；编码表：pmd_soft_dirty 在 powerpc, s390 上对定义域外的项出错
+    提升链：pmd_needs_soft_dirty_wp@1（mm/internal.h，L1）← pmd_soft_dirty@mm/internal.h:1422
+   2202 		}
+   2203 		entry = pmd_mkyoung(orig_pmd);
+   2204 		entry = maybe_pmd_mkwrite(pmd_mkdirty(entry), vma);
+   2205 		if (pmdp_set_access_flags(vma, haddr, vmf->pmd, entry, 1))
+   2206 			update_mmu_cache_pmd(vma, vmf->address, vmf->pmd);
+   2207 		spin_unlock(vmf->ptl);
+   2208 		return 0;
+   2209 	}
+   2210 
+   2211 unlock_fallback:
+   2212 	folio_unlock(folio);
+   2213 	spin_unlock(vmf->ptl);
+   2214 fallback:
+   2215 	__split_huge_pmd(vma, vmf->pmd, vmf->address, false);
+   2216 	return VM_FAULT_FALLBACK;
+   2217 }
+   2218 
+   2219 static inline bool can_change_pmd_writable(struct vm_area_struct *vma,
+   2220 					   unsigned long addr, pmd_t pmd)
+   2221 {
+   2222 	struct page *page;
+   2223 
+   2224 	if (WARN_ON_ONCE(!(vma->vm_flags & VM_WRITE)))
+   2225 		return false;
+   2226 
+   2227 	/* Don't touch entries that are not even readable (NUMA hinting). */
+   2228 	if (pmd_protnone(pmd))
+   2229 		return false;
+   2230 
+   2231 	/* Do we need write faults for softdirty tracking? */
+>> 2232 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+   2233 		return false;
+   2234 
+   2235 	/* Do we need write faults for uffd-wp tracking? */
+   2236 	if (userfaultfd_huge_pmd_wp(vma, pmd))
+   2237 		return false;
+   2238 
+   2239 	if (!(vma->vm_flags & VM_SHARED)) {
+   2240 		/* See can_change_pte_writable(). */
+==========================================================================================
+[13] mm/swapfile.c:2411  函数 pte_same_as_swp  调用辅助接口 pte_swp_clear_flags@0（第 0 个参数，对象 pte）
+    辅助接口内部没守卫地用了 pte_swp_clear_exclusive, pte_swp_clear_soft_dirty, pte_swp_exclusive, pte_swp_soft_dirty（只对交换格式项有定义的修改接口）；编码表：pte_swp_clear_exclusive 在 loongarch, arm 上对定义域外的项出错
+    提升链：pte_swp_clear_flags@0（include/linux/swapops.h，L1）← pte_swp_clear_exclusive@include/linux/swapops.h:74；pte_swp_clear_soft_dirty@include/linux/swapops.h:76；pte_swp_exclusive@include/linux/swapops.h:73；pte_swp_soft_dirty@include/linux/swapops.h:75
+   2381 
+   2382 /*
+   2383  * Return either the total number of swap pages of given type, or the number
+   2384  * of free pages of that type (depending on @free)
+   2385  *
+   2386  * This is needed for software suspend
+   2387  */
+   2388 unsigned int count_swap_pages(int type, int free)
+   2389 {
+   2390 	unsigned int n = 0;
+   2391 
+   2392 	spin_lock(&swap_lock);
+   2393 	if ((unsigned int)type < nr_swapfiles) {
+   2394 		struct swap_info_struct *sis = swap_info[type];
+   2395 
+   2396 		spin_lock(&sis->lock);
+   2397 		if (sis->flags & SWP_WRITEOK) {
+   2398 			n = sis->pages;
+   2399 			if (free)
+   2400 				n -= swap_usage_in_pages(sis);
+   2401 		}
+   2402 		spin_unlock(&sis->lock);
+   2403 	}
+   2404 	spin_unlock(&swap_lock);
+   2405 	return n;
+   2406 }
+   2407 #endif /* CONFIG_HIBERNATION */
+   2408 
+   2409 static inline int pte_same_as_swp(pte_t pte, pte_t swp_pte)
+   2410 {
+>> 2411 	return pte_same(pte_swp_clear_flags(pte), swp_pte);
+   2412 }
+   2413 
+   2414 /*
+   2415  * No need to decide whether this PTE shares the swap entry with others,
+   2416  * just let do_wp_page work it out if a write is requested later - to
+   2417  * force COW, vm_page_prot omits write permission from any private vma.
+   2418  */
+   2419 static int unuse_pte(struct vm_area_struct *vma, pmd_t *pmd,
+==========================================================================================
+[14] mm/madvise.c:358  函数 madvise_folio_pte_batch  调用辅助接口 folio_pte_batch_flags@3（第 3 个参数，对象 *ptentp）
+    辅助接口内部没守卫地用了 pte_mkdirty, pte_mkyoung, pte_pfn（只对 present 项有定义的读接口）；编码表：pte_pfn 在 x86_64, loongarch, arm, mips 上对定义域外的项出错
+    提升链：folio_pte_batch_flags@3（mm/internal.h，L1）← pte_mkdirty@mm/internal.h:462；pte_mkyoung@mm/internal.h:460；pte_pfn@mm/internal.h:422；pte_pfn@mm/internal.h:432
+    328 	get_file(file);
+    329 	offset = (loff_t)(start - vma->vm_start)
+    330 			+ ((loff_t)vma_start_pgoff(vma) << PAGE_SHIFT);
+    331 	mmap_read_unlock(mm);
+    332 	vfs_fadvise(file, offset, end - start, POSIX_FADV_WILLNEED);
+    333 	fput(file);
+    334 	mmap_read_lock(mm);
+    335 	return 0;
+    336 }
+    337 
+    338 static inline bool can_do_file_pageout(struct vm_area_struct *vma)
+    339 {
+    340 	if (!vma->vm_file)
+    341 		return false;
+    342 	/*
+    343 	 * paging out pagecache only for non-anonymous mappings that correspond
+    344 	 * to the files the calling process could (if tried) open for writing;
+    345 	 * otherwise we'd be including shared non-exclusive mappings, which
+    346 	 * opens a side channel.
+    347 	 */
+    348 	return file_owner_or_capable(vma->vm_file) ||
+    349 	       file_permission(vma->vm_file, MAY_WRITE) == 0;
+    350 }
+    351 
+    352 static inline int madvise_folio_pte_batch(unsigned long addr, unsigned long end,
+    353 					  struct folio *folio, pte_t *ptep,
+    354 					  pte_t *ptentp)
+    355 {
+    356 	int max_nr = (end - addr) / PAGE_SIZE;
+    357 
+>>  358 	return folio_pte_batch_flags(folio, NULL, ptep, ptentp, max_nr,
+    359 				     FPB_MERGE_YOUNG_DIRTY);
+    360 }
+    361 
+    362 static int madvise_cold_or_pageout_pte_range(pmd_t *pmd,
+    363 				unsigned long addr, unsigned long end,
+    364 				struct mm_walk *walk)
+    365 {
+    366 	struct madvise_walk_private *private = walk->private;
+==========================================================================================
+[15] mm/util.c:1570  函数 folio_pte_batch  调用辅助接口 folio_pte_batch_flags@3（第 3 个参数，对象 pte）
+    辅助接口内部没守卫地用了 pte_mkdirty, pte_mkyoung, pte_pfn（只对 present 项有定义的读接口）；编码表：pte_pfn 在 x86_64, loongarch, arm, mips 上对定义域外的项出错
+    提升链：folio_pte_batch_flags@3（mm/internal.h，L1）← pte_mkdirty@mm/internal.h:462；pte_mkyoung@mm/internal.h:460；pte_pfn@mm/internal.h:422；pte_pfn@mm/internal.h:432
+   1540 	return mmap_action_finish(vma, action, err, is_compat);
+   1541 }
+   1542 EXPORT_SYMBOL(mmap_action_complete);
+   1543 #endif
+   1544 
+   1545 #ifdef CONFIG_MMU
+   1546 /**
+   1547  * folio_pte_batch - detect a PTE batch for a large folio
+   1548  * @folio: The large folio to detect a PTE batch for.
+   1549  * @ptep: Page table pointer for the first entry.
+   1550  * @pte: Page table entry for the first page.
+   1551  * @max_nr: The maximum number of table entries to consider.
+   1552  *
+   1553  * This is a simplified variant of folio_pte_batch_flags().
+   1554  *
+   1555  * Detect a PTE batch: consecutive (present) PTEs that map consecutive
+   1556  * pages of the same large folio in a single VMA and a single page table.
+   1557  *
+   1558  * All PTEs inside a PTE batch have the same PTE bits set, excluding the PFN,
+   1559  * the accessed bit, writable bit, dirt-bit and soft-dirty bit.
+   1560  *
+   1561  * ptep must map any page of the folio. max_nr must be at least one and
+   1562  * must be limited by the caller so scanning cannot exceed a single VMA and
+   1563  * a single page table.
+   1564  *
+   1565  * Return: the number of table entries in the batch.
+   1566  */
+   1567 unsigned int folio_pte_batch(struct folio *folio, pte_t *ptep, pte_t pte,
+   1568 		unsigned int max_nr)
+   1569 {
+>> 1570 	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr, 0);
+   1571 }
+   1572 #endif /* CONFIG_MMU */
+   1573 
+   1574 #if defined(CONFIG_SPARSEMEM) && !defined(CONFIG_SPARSEMEM_VMEMMAP)
+   1575 /**
+   1576  * page_range_contiguous - test whether the page range is contiguous
+   1577  * @page: the start of the page range.
+   1578  * @nr_pages: the number of pages in the range.
+==========================================================================================
+[16] mm/mprotect.c:51  函数 maybe_change_pte_writable  调用辅助接口 pte_needs_soft_dirty_wp@1（第 1 个参数，对象 pte）
+    辅助接口内部没守卫地用了 pte_soft_dirty（只对 present 项有定义的读接口）；编码表：pte_soft_dirty 在 x86_64, powerpc, s390 上对定义域外的项出错
+    提升链：pte_needs_soft_dirty_wp@1（mm/internal.h，L1）← pte_soft_dirty@mm/internal.h:1427
+     21 #include <linux/syscalls.h>
+     22 #include <linux/swap.h>
+     23 #include <linux/swapops.h>
+     24 #include <linux/mmu_notifier.h>
+     25 #include <linux/migrate.h>
+     26 #include <linux/perf_event.h>
+     27 #include <linux/pkeys.h>
+     28 #include <linux/ksm.h>
+     29 #include <linux/uaccess.h>
+     30 #include <linux/mm_inline.h>
+     31 #include <linux/pgtable.h>
+     32 #include <linux/userfaultfd_k.h>
+     33 #include <uapi/linux/mman.h>
+     34 #include <asm/cacheflush.h>
+     35 #include <asm/mmu_context.h>
+     36 #include <asm/tlbflush.h>
+     37 #include <asm/tlb.h>
+     38 
+     39 #include "internal.h"
+     40 
+     41 static bool maybe_change_pte_writable(struct vm_area_struct *vma, pte_t pte)
+     42 {
+     43 	if (WARN_ON_ONCE(!vma_test(vma, VMA_WRITE_BIT)))
+     44 		return false;
+     45 
+     46 	/* Don't touch entries that are not even readable. */
+     47 	if (pte_protnone(pte))
+     48 		return false;
+     49 
+     50 	/* Do we need write faults for softdirty tracking? */
+>>   51 	if (pte_needs_soft_dirty_wp(vma, pte))
+     52 		return false;
+     53 
+     54 	/* Do we need write faults for uffd-wp tracking? */
+     55 	if (userfaultfd_pte_wp(vma, pte))
+     56 		return false;
+     57 
+     58 	return true;
+     59 }
+==========================================================================================
+[17] mm/memory.c:4389  函数 do_wp_page  调用辅助接口 userfaultfd_pte_wp@1（第 1 个参数，对象 *vmf->pte）
+    辅助接口内部没守卫地用了 pte_uffd（只对 present 项有定义的读接口）；编码表：pte_uffd 在 x86_64 上对定义域外的项出错
+    提升链：userfaultfd_pte_wp@1（include/linux/userfaultfd_k.h，L1）← pte_uffd@include/linux/userfaultfd_k.h:241
+   4359  * This routine handles present pages, when
+   4360  * * users try to write to a shared page (FAULT_FLAG_WRITE)
+   4361  * * GUP wants to take a R/O pin on a possibly shared anonymous page
+   4362  *   (FAULT_FLAG_UNSHARE)
+   4363  *
+   4364  * It is done by copying the page to a new address and decrementing the
+   4365  * shared-page counter for the old page.
+   4366  *
+   4367  * Note that this routine assumes that the protection checks have been
+   4368  * done by the caller (the low-level page fault routine in most cases).
+   4369  * Thus, with FAULT_FLAG_WRITE, we can safely just mark it writable once we've
+   4370  * done any necessary COW.
+   4371  *
+   4372  * In case of FAULT_FLAG_WRITE, we also mark the page dirty at this point even
+   4373  * though the page will change only once the write actually happens. This
+   4374  * avoids a few races, and potentially makes it more efficient.
+   4375  *
+   4376  * We enter with either the VMA lock or the mmap_lock held (see
+   4377  * FAULT_FLAG_VMA_LOCK) and pte both mapped and locked. We return with
+   4378  * the same lock still held, but pte unmapped and unlocked.
+   4379  */
+   4380 static vm_fault_t do_wp_page(struct vm_fault *vmf)
+   4381 	__releases(vmf->ptl)
+   4382 {
+   4383 	const bool unshare = vmf->flags & FAULT_FLAG_UNSHARE;
+   4384 	struct vm_area_struct *vma = vmf->vma;
+   4385 	struct folio *folio = NULL;
+   4386 	pte_t pte;
+   4387 
+   4388 	if (likely(!unshare)) {
+>> 4389 		if (userfaultfd_pte_wp(vma, ptep_get(vmf->pte))) {
+   4390 			if (!userfaultfd_wp_async(vma)) {
+   4391 				pte_unmap_unlock(vmf->pte, vmf->ptl);
+   4392 				return handle_userfault(vmf, VM_UFFD_WP);
+   4393 			}
+   4394 
+   4395 			/*
+   4396 			 * Nothing needed (cache flush, TLB invalidations,
+   4397 			 * etc.) because we're only removing the uffd-wp bit,
+==========================================================================================
+[18] mm/gup.c:698  函数 can_follow_write_pmd  调用辅助接口 userfaultfd_huge_pmd_wp@1（第 1 个参数，对象 pmd）
+    辅助接口内部没守卫地用了 pmd_uffd（只对 present 项有定义的读接口）；编码表：pmd_uffd 在 x86_64 上对定义域外的项出错
+    提升链：userfaultfd_huge_pmd_wp@1（include/linux/userfaultfd_k.h，L1）← pmd_uffd@include/linux/userfaultfd_k.h:247
+    668 	pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
+    669 	page = pfn_to_page(pfn);
+    670 
+    671 	if (!pud_write(pud) && gup_must_unshare(vma, flags, page))
+    672 		return ERR_PTR(-EMLINK);
+    673 
+    674 	ret = try_grab_folio(page_folio(page), 1, flags);
+    675 	if (ret)
+    676 		page = ERR_PTR(ret);
+    677 	else
+    678 		*page_mask = HPAGE_PUD_NR - 1;
+    679 
+    680 	return page;
+    681 }
+    682 
+    683 /* FOLL_FORCE can write to even unwritable PMDs in COW mappings. */
+    684 static inline bool can_follow_write_pmd(pmd_t pmd, struct page *page,
+    685 					struct vm_area_struct *vma,
+    686 					unsigned int flags)
+    687 {
+    688 	/* If the pmd is writable, we can write to the page. */
+    689 	if (pmd_write(pmd))
+    690 		return true;
+    691 
+    692 	if (!can_follow_write_common(page, vma, flags))
+    693 		return false;
+    694 
+    695 	/* ... and a write-fault isn't required for other reasons. */
+    696 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+    697 		return false;
+>>  698 	return !userfaultfd_huge_pmd_wp(vma, pmd);
+    699 }
+    700 
+    701 static struct page *follow_huge_pmd(struct vm_area_struct *vma,
+    702 				    unsigned long addr, pmd_t *pmd,
+    703 				    unsigned int flags,
+    704 				    unsigned long *page_mask)
+    705 {
+    706 	struct mm_struct *mm = vma->vm_mm;
+==========================================================================================
+[19] mm/huge_memory.c:2236  函数 can_change_pmd_writable  调用辅助接口 userfaultfd_huge_pmd_wp@1（第 1 个参数，对象 pmd）
+    辅助接口内部没守卫地用了 pmd_uffd（只对 present 项有定义的读接口）；编码表：pmd_uffd 在 x86_64 上对定义域外的项出错
+    提升链：userfaultfd_huge_pmd_wp@1（include/linux/userfaultfd_k.h，L1）← pmd_uffd@include/linux/userfaultfd_k.h:247
+   2206 			update_mmu_cache_pmd(vma, vmf->address, vmf->pmd);
+   2207 		spin_unlock(vmf->ptl);
+   2208 		return 0;
+   2209 	}
+   2210 
+   2211 unlock_fallback:
+   2212 	folio_unlock(folio);
+   2213 	spin_unlock(vmf->ptl);
+   2214 fallback:
+   2215 	__split_huge_pmd(vma, vmf->pmd, vmf->address, false);
+   2216 	return VM_FAULT_FALLBACK;
+   2217 }
+   2218 
+   2219 static inline bool can_change_pmd_writable(struct vm_area_struct *vma,
+   2220 					   unsigned long addr, pmd_t pmd)
+   2221 {
+   2222 	struct page *page;
+   2223 
+   2224 	if (WARN_ON_ONCE(!(vma->vm_flags & VM_WRITE)))
+   2225 		return false;
+   2226 
+   2227 	/* Don't touch entries that are not even readable (NUMA hinting). */
+   2228 	if (pmd_protnone(pmd))
+   2229 		return false;
+   2230 
+   2231 	/* Do we need write faults for softdirty tracking? */
+   2232 	if (pmd_needs_soft_dirty_wp(vma, pmd))
+   2233 		return false;
+   2234 
+   2235 	/* Do we need write faults for uffd-wp tracking? */
+>> 2236 	if (userfaultfd_huge_pmd_wp(vma, pmd))
+   2237 		return false;
+   2238 
+   2239 	if (!(vma->vm_flags & VM_SHARED)) {
+   2240 		/* See can_change_pte_writable(). */
+   2241 		page = vm_normal_page_pmd(vma, addr, pmd);
+   2242 		return page && PageAnon(page) && PageAnonExclusive(page);
+   2243 	}
+   2244 
+==========================================================================================
+[20] mm/mprotect.c:55  函数 maybe_change_pte_writable  调用辅助接口 userfaultfd_pte_wp@1（第 1 个参数，对象 pte）
+    辅助接口内部没守卫地用了 pte_uffd（只对 present 项有定义的读接口）；编码表：pte_uffd 在 x86_64 上对定义域外的项出错
+    提升链：userfaultfd_pte_wp@1（include/linux/userfaultfd_k.h，L1）← pte_uffd@include/linux/userfaultfd_k.h:241
+     25 #include <linux/migrate.h>
+     26 #include <linux/perf_event.h>
+     27 #include <linux/pkeys.h>
+     28 #include <linux/ksm.h>
+     29 #include <linux/uaccess.h>
+     30 #include <linux/mm_inline.h>
+     31 #include <linux/pgtable.h>
+     32 #include <linux/userfaultfd_k.h>
+     33 #include <uapi/linux/mman.h>
+     34 #include <asm/cacheflush.h>
+     35 #include <asm/mmu_context.h>
+     36 #include <asm/tlbflush.h>
+     37 #include <asm/tlb.h>
+     38 
+     39 #include "internal.h"
+     40 
+     41 static bool maybe_change_pte_writable(struct vm_area_struct *vma, pte_t pte)
+     42 {
+     43 	if (WARN_ON_ONCE(!vma_test(vma, VMA_WRITE_BIT)))
+     44 		return false;
+     45 
+     46 	/* Don't touch entries that are not even readable. */
+     47 	if (pte_protnone(pte))
+     48 		return false;
+     49 
+     50 	/* Do we need write faults for softdirty tracking? */
+     51 	if (pte_needs_soft_dirty_wp(vma, pte))
+     52 		return false;
+     53 
+     54 	/* Do we need write faults for uffd-wp tracking? */
+>>   55 	if (userfaultfd_pte_wp(vma, pte))
+     56 		return false;
+     57 
+     58 	return true;
+     59 }
+     60 
+     61 static bool can_change_private_pte_writable(struct vm_area_struct *vma,
+     62 					    unsigned long addr, pte_t pte)
+     63 {
+==========================================================================================
+[21] mm/memory.c:2498  函数 insert_page_into_pte_locked  调用辅助接口 maybe_mkwrite@0（第 0 个参数，对象 *pte）
+    辅助接口内部没守卫地用了 pte_mkwrite_novma（只对 present 项有定义的修改接口）；编码表：pte_mkwrite_novma 在 x86_64, arm64, riscv, loongarch, powerpc, s390, arm, mips 上对定义域外的项出错
+    提升链：maybe_mkwrite@0（include/linux/mm.h，L2）← pte_mkwrite@include/linux/mm.h:2036 | pte_mkwrite@0（include/linux/pgtable.h，L1）← pte_mkwrite_novma@include/linux/pgtable.h:1034
+   2468 
+   2469 	if (!folio_ref_count(folio))
+   2470 		return -EINVAL;
+   2471 	if (unlikely(is_zero_folio(folio))) {
+   2472 		if (!vm_mixed_zeropage_allowed(vma))
+   2473 			return -EINVAL;
+   2474 		return 0;
+   2475 	}
+   2476 	if (folio_test_anon(folio) || page_has_type(page))
+   2477 		return -EINVAL;
+   2478 	flush_dcache_folio(folio);
+   2479 	return 0;
+   2480 }
+   2481 
+   2482 static int insert_page_into_pte_locked(struct vm_area_struct *vma, pte_t *pte,
+   2483 				unsigned long addr, struct page *page,
+   2484 				pgprot_t prot, bool mkwrite)
+   2485 {
+   2486 	struct folio *folio = page_folio(page);
+   2487 	pte_t pteval = ptep_get(pte);
+   2488 
+   2489 	if (!pte_none(pteval)) {
+   2490 		if (!mkwrite)
+   2491 			return -EBUSY;
+   2492 
+   2493 		/* see insert_pfn(). */
+   2494 		if (pte_pfn(pteval) != page_to_pfn(page)) {
+   2495 			WARN_ON_ONCE(!is_zero_pfn(pte_pfn(pteval)));
+   2496 			return -EFAULT;
+   2497 		}
+>> 2498 		pteval = maybe_mkwrite(pteval, vma);
+   2499 		pteval = pte_mkyoung(pteval);
+   2500 		if (ptep_set_access_flags(vma, addr, pte, pteval, 1))
+   2501 			update_mmu_cache(vma, addr, pte);
+   2502 		return 0;
+   2503 	}
+   2504 
+   2505 	/* Ok, finally just insert the thing.. */
+   2506 	pteval = mk_pte(page, prot);
+==========================================================================================
+[22] mm/mprotect.c:134  函数 prot_commit_flush_ptes  调用辅助接口 pte_mkwrite@0（第 0 个参数，对象 ptent）
+    辅助接口内部没守卫地用了 pte_mkwrite_novma（只对 present 项有定义的修改接口）；编码表：pte_mkwrite_novma 在 x86_64, arm64, riscv, loongarch, powerpc, s390, arm, mips 上对定义域外的项出错
+    提升链：pte_mkwrite@0（include/linux/pgtable.h，L1）← pte_mkwrite_novma@include/linux/pgtable.h:1034
+    104 }
+    105 
+    106 static int mprotect_folio_pte_batch(struct folio *folio, pte_t *ptep,
+    107 				    pte_t pte, int max_nr_ptes, fpb_t flags)
+    108 {
+    109 	/* No underlying folio, so cannot batch */
+    110 	if (!folio)
+    111 		return 1;
+    112 
+    113 	if (!folio_test_large(folio))
+    114 		return 1;
+    115 
+    116 	return folio_pte_batch_flags(folio, NULL, ptep, &pte, max_nr_ptes, flags);
+    117 }
+    118 
+    119 /* Set nr_ptes number of ptes, starting from idx */
+    120 static __always_inline void prot_commit_flush_ptes(struct vm_area_struct *vma,
+    121 		unsigned long addr, pte_t *ptep, pte_t oldpte, pte_t ptent,
+    122 		int nr_ptes, int idx, bool set_write, struct mmu_gather *tlb)
+    123 {
+    124 	/*
+    125 	 * Advance the position in the batch by idx; note that if idx > 0,
+    126 	 * then the nr_ptes passed here is <= batch size - idx.
+    127 	 */
+    128 	addr += idx * PAGE_SIZE;
+    129 	ptep += idx;
+    130 	oldpte = pte_advance_pfn(oldpte, idx);
+    131 	ptent = pte_advance_pfn(ptent, idx);
+    132 
+    133 	if (set_write)
+>>  134 		ptent = pte_mkwrite(ptent, vma);
+    135 
+    136 	modify_prot_commit_ptes(vma, addr, ptep, oldpte, ptent, nr_ptes);
+    137 	if (pte_needs_flush(oldpte, ptent))
+    138 		tlb_flush_pte_range(tlb, addr, nr_ptes * PAGE_SIZE);
+    139 }
+    140 
+    141 /*
+    142  * Get max length of consecutive ptes pointing to PageAnonExclusive() pages or
+==========================================================================================
+[23] mm/huge_memory.c:1224  函数 maybe_pmd_mkwrite  调用辅助接口 pmd_mkwrite@0（第 0 个参数，对象 pmd）
+    辅助接口内部没守卫地用了 pmd_mkwrite_novma（只对 present 项有定义的修改接口）；编码表：pmd_mkwrite_novma 在 x86_64, arm64, riscv, loongarch, powerpc, s390, mips 上对定义域外的项出错
+    提升链：pmd_mkwrite@0（include/linux/pgtable.h，L1）← pmd_mkwrite_novma@include/linux/pgtable.h:1041
+   1194 			} else if (!strcmp(policy, "inherit")) {
+   1195 				bitmap_set(&inherit, start, nr);
+   1196 				bitmap_clear(&madvise, start, nr);
+   1197 				bitmap_clear(&always, start, nr);
+   1198 			} else if (!strcmp(policy, "never")) {
+   1199 				bitmap_clear(&inherit, start, nr);
+   1200 				bitmap_clear(&madvise, start, nr);
+   1201 				bitmap_clear(&always, start, nr);
+   1202 			} else {
+   1203 				pr_err("invalid policy %s in thp_anon boot parameter\n", policy);
+   1204 				goto err;
+   1205 			}
+   1206 		}
+   1207 	}
+   1208 
+   1209 	huge_anon_orders_always = always;
+   1210 	huge_anon_orders_madvise = madvise;
+   1211 	huge_anon_orders_inherit = inherit;
+   1212 	anon_orders_configured = true;
+   1213 	return 1;
+   1214 
+   1215 err:
+   1216 	pr_warn("thp_anon=%s: error parsing string, ignoring setting\n", str);
+   1217 	return 0;
+   1218 }
+   1219 __setup("thp_anon=", setup_thp_anon);
+   1220 
+   1221 pmd_t maybe_pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma)
+   1222 {
+   1223 	if (likely(vma->vm_flags & VM_WRITE))
+>> 1224 		pmd = pmd_mkwrite(pmd, vma);
+   1225 	return pmd;
+   1226 }
+   1227 
+   1228 static inline bool is_transparent_hugepage(const struct folio *folio)
+   1229 {
+   1230 	if (!folio_test_large(folio))
+   1231 		return false;
+   1232 

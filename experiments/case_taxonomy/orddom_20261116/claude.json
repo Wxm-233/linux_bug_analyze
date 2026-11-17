@@ -1,0 +1,182 @@
+[
+ {
+  "k": 1,
+  "loc": "fs/dax.c:2011",
+  "verdict": "不可能",
+  "why": "DAX 的 PMD 阶 xarray 项不会被 xas_split 拆分（只整体删除再插入 PTE 项），d659b715 明确说上限不适用于 DAX；不造普通页缓存 folio。"
+ },
+ {
+  "k": 2,
+  "loc": "fs/dax.c:2132",
+  "verdict": "不可能",
+  "why": "只是比较 order == PMD_ORDER，选择插入方式。"
+ },
+ {
+  "k": 3,
+  "loc": "mm/huge_memory.c:1521",
+  "verdict": "不可能",
+  "why": "匿名大页缺页，不涉及页缓存；只用 PMD_ORDER 查对齐。"
+ },
+ {
+  "k": 4,
+  "loc": "mm/khugepaged.c:1853",
+  "verdict": "不可能",
+  "why": "页缓存里的大 folio 已经存在，这里只回收页表；入口 thp_vma_allowable_order 用 THP_ORDERS_ALL_FILE_DEFAULT 掩码，64K 上 PMD 阶已被滤掉。"
+ },
+ {
+  "k": 5,
+  "loc": "mm/memory.c:5609",
+  "verdict": "不可能",
+  "why": "映射已存在的 PMD 阶 folio，不新造页缓存项；只用于对齐检查和计数。"
+ },
+ {
+  "k": 6,
+  "loc": "mm/swapfile.c:3536",
+  "verdict": "不可能",
+  "why": "交换簇大小（SWAPFILE_CLUSTER=HPAGE_PMD_NR），与页缓存阶数上限无关。"
+ },
+ {
+  "k": 7,
+  "loc": "include/linux/rmap.h:333",
+  "verdict": "不可能",
+  "why": "调试断言，比较 folio 页数。"
+ },
+ {
+  "k": 8,
+  "loc": "include/linux/rmap.h:559",
+  "verdict": "不可能",
+  "why": "计数。"
+ },
+ {
+  "k": 9,
+  "loc": "mm/debug_vm_pgtable.c:1144",
+  "verdict": "不可能",
+  "why": "debug_vm_pgtable 测试代码。"
+ },
+ {
+  "k": 10,
+  "loc": "mm/huge_memory.c:1588",
+  "verdict": "不可能",
+  "why": "DAX/特殊 PMD 插入，只用于计数。"
+ },
+ {
+  "k": 11,
+  "loc": "mm/huge_memory.c:1911",
+  "verdict": "不可能",
+  "why": "fork 复制 PMD，只用于计数。"
+ },
+ {
+  "k": 12,
+  "loc": "mm/huge_memory.c:2439",
+  "verdict": "不可能",
+  "why": "计数。"
+ },
+ {
+  "k": 13,
+  "loc": "mm/huge_memory.c:3144",
+  "verdict": "不可能",
+  "why": "拆 PMD 映射，只用于计数和循环上界。"
+ },
+ {
+  "k": 14,
+  "loc": "mm/huge_memory.c:3932",
+  "verdict": "不可能",
+  "why": "拆分 folio 时按阶数调整统计，只比较。"
+ },
+ {
+  "k": 15,
+  "loc": "mm/khugepaged.c:2244",
+  "verdict": "不可能",
+  "why": "确实造 HPAGE_PMD_ORDER 的页缓存项，但所有入口（khugepaged 扫描、MADV_COLLAPSE）先过 thp_vma_allowable_order → __thp_vma_allowable_orders，文件/shmem 用 THP_ORDERS_ALL_FILE_DEFAULT（huge_memory.c:137），64K 上 PMD 阶被滤掉；非 shmem 还要过 mapping_pmd_folio_support（mapping_max_folio_order >= PMD_ORDER）。守卫在调用者。"
+ },
+ {
+  "k": 16,
+  "loc": "mm/khugepaged.c:2677",
+  "verdict": "不可能",
+  "why": "同 15，扫描阶段；只用于计数和范围。"
+ },
+ {
+  "k": 17,
+  "loc": "mm/migrate_device.c:803",
+  "verdict": "不可能",
+  "why": "device-private 迁移匿名大页，不涉及页缓存。"
+ },
+ {
+  "k": 18,
+  "loc": "mm/page_io.c:399",
+  "verdict": "不可能",
+  "why": "交换零页位图，与页缓存阶数无关。"
+ },
+ {
+  "k": 19,
+  "loc": "mm/rmap.c:1753",
+  "verdict": "不可能",
+  "why": "计数。"
+ },
+ {
+  "k": 20,
+  "loc": "mm/shmem.c:672",
+  "verdict": "不可能",
+  "why": "解析挂载选项，只比较 huge_shmem_orders_inherit；实际分配由 shmem_allowable_huge_orders 用 THP_ORDERS_ALL_FILE_DEFAULT 和 HPAGE_PMD_ORDER > MAX_PAGECACHE_ORDER 过滤（b66b1b71、9fd154ba 的修复）。"
+ },
+ {
+  "k": 21,
+  "loc": "mm/shmem.c:1609",
+  "verdict": "不可能",
+  "why": "统计换出回退事件，只比较。"
+ },
+ {
+  "k": 22,
+  "loc": "mm/shmem.c:1820",
+  "verdict": "不可能",
+  "why": "只查 PMD 阶位是否打开，决定 khugepaged 是否扫描；之后的折叠同 15 被过滤。"
+ },
+ {
+  "k": 23,
+  "loc": "mm/shmem.c:1942",
+  "verdict": "不可能",
+  "why": "分配阶数来自 shmem_allowable_huge_orders 的结果（已按上限过滤）；HPAGE_PMD_NR 只用于统计。"
+ },
+ {
+  "k": 24,
+  "loc": "mm/shmem.c:5377",
+  "verdict": "不可能",
+  "why": "默认 huge_shmem_orders_inherit = BIT(HPAGE_PMD_ORDER)，只是设置掩码，分配时同 20 被过滤。"
+ },
+ {
+  "k": 25,
+  "loc": "mm/swap.h:100",
+  "verdict": "不可能",
+  "why": "交换簇换算。"
+ },
+ {
+  "k": 26,
+  "loc": "mm/swap.h:124",
+  "verdict": "不可能",
+  "why": "交换簇换算。"
+ },
+ {
+  "k": 27,
+  "loc": "mm/swap_state.c:413",
+  "verdict": "不可能",
+  "why": "交换缓存（swap table，非 xarray 页缓存），按簇定位。"
+ },
+ {
+  "k": 28,
+  "loc": "mm/swap_state.c:517",
+  "verdict": "不可能",
+  "why": "同 27。"
+ },
+ {
+  "k": 29,
+  "loc": "mm/swap_table.h:221",
+  "verdict": "不可能",
+  "why": "交换表访问。"
+ },
+ {
+  "k": 30,
+  "loc": "mm/swap_table.h:231",
+  "verdict": "不可能",
+  "why": "交换表访问。"
+ }
+]

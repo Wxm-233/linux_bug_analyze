@@ -1,0 +1,45 @@
+########## 第21条  编号 B464  提交 2840dadf0dde  日期 2024-08-26
+
+【提交说明】
+drivers: perf: Fix smp_processor_id() use in preemptible code
+
+As reported in [1], the use of smp_processor_id() in
+pmu_sbi_device_probe() must be protected by disabling the preemption, so
+simple use get_cpu()/put_cpu() instead.
+
+Fixes: a8625217a054 ("drivers/perf: riscv: Implement SBI PMU snapshot function")
+
+【改动统计】
+ drivers/perf/riscv_pmu_sbi.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 31a17a56eb3b..25b1b699b3e2 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -1373,11 +1373,15 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
+ 
+ 	/* SBI PMU Snapsphot is only available in SBI v2.0 */
+ 	if (sbi_v2_available) {
++		int cpu;
++
+ 		ret = pmu_sbi_snapshot_alloc(pmu);
+ 		if (ret)
+ 			goto out_unregister;
+ 
+-		ret = pmu_sbi_snapshot_setup(pmu, smp_processor_id());
++		cpu = get_cpu();
++
++		ret = pmu_sbi_snapshot_setup(pmu, cpu);
+ 		if (ret) {
+ 			/* Snapshot is an optional feature. Continue if not available */
+ 			pmu_sbi_snapshot_free(pmu);
+@@ -1391,6 +1395,7 @@ static int pmu_sbi_device_probe(struct platform_device *pdev)
+ 			 */
+ 			static_branch_enable(&sbi_pmu_snapshot_available);
+ 		}
++		put_cpu();
+ 	}
+ 
+ 	register_sysctl("kernel", sbi_pmu_sysctl_table);

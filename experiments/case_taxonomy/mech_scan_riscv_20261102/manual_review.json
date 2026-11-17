@@ -1,0 +1,22 @@
+{
+ "note": "First annotator's review (model Claude) of all 17 model flags (manual_review_sample.json holds all flags since each module has at most 10). a = suspected real problem; b = not; c = cannot tell. Checked against the v6.12 code and, where noted, against later history or the end version with git.",
+ "rows": [
+  {"module": "M1", "point": "include/asm-generic/io.h:ioremap", "label": "b", "reason": "RISC-V uses GENERIC_IOREMAP with page-table mapping; the asm-generic default that returns the physical address only applies without MMU support"},
+  {"module": "M1", "point": "include/linux/pgtable.h:ptep_get_lockless", "label": "c", "reason": "arm64 overrides it for contpte; whether NAPOT needs access/dirty aggregation in the lockless read was not checked"},
+  {"module": "M1", "point": "include/linux/pgtable.h:pud_offset_lockless", "label": "b", "reason": "arm64 fixed the same default for runtime folding (36639013b346, 2024-07); but RISC-V's folded pud_offset/p4d_offset return the parent pointer without adding an index, so no stray stack read follows (checked arch/riscv/mm/pgtable.c at the end version)"},
+  {"module": "M1", "point": "kernel/debug/debug_core.c:kgdb_arch_set_breakpoint", "label": "c", "reason": "depends on the RISC-V kgdb break instruction size with compressed instructions; not checked"},
+  {"module": "M5", "point": "arch/riscv/kernel/machine_kexec.c:machine_shutdown", "label": "a", "reason": "the irqs-off call to smp_shutdown_nonboot_cpus that this project already confirmed in QEMU (riscv_kexec_shutdown_verify_20261102); not fixed upstream"},
+  {"module": "M5", "point": "arch/riscv/kernel/stacktrace.c:arch_stack_walk", "label": "c", "reason": "noinstr function calling walk_stackframe (notrace); whether instrumentation can reach it not checked"},
+  {"module": "M5", "point": "arch/riscv/kernel/traps.c:do_trap_load_misaligned", "label": "a", "reason": "user memory access with irqs off in the misaligned trap; fixed later by 453805f0a28f (2025-04, enable IRQs while handling misaligned accesses) in the helper do_trap_misaligned that a refactor (fd94de9f9e7a) introduced, so the name-based later-fix check missed it"},
+  {"module": "M5", "point": "arch/riscv/kernel/traps.c:do_trap_store_misaligned", "label": "a", "reason": "same problem and same later fix as do_trap_load_misaligned"},
+  {"module": "M5", "point": "arch/riscv/kernel/traps.c:do_page_fault", "label": "c", "reason": "noinstr entry calling handle_page_fault without instrumentation_begin/end; RISC-V has no objtool noinstr validation, impact not checked"},
+  {"module": "M5", "point": "arch/riscv/kernel/traps.c:handle_riscv_irq", "label": "c", "reason": "same pattern as do_page_fault"},
+  {"module": "M5", "point": "arch/riscv/kernel/traps_misaligned.c:handle_misaligned_load", "label": "c", "reason": "per-CPU write in preemptible exception context; related to the misaligned-trap fixes but not the same point"},
+  {"module": "M5", "point": "arch/riscv/kvm/vcpu.c:kvm_riscv_vcpu_enter_exit", "label": "c", "reason": "later changed by b5060a4aa33d for kernel-mode vector context, which is a different problem from the noinstr claim"},
+  {"module": "M8", "point": "arch/riscv/net/bpf_jit_comp32.c:emit_bpf_tail_call", "label": "b", "reason": "the RV32 JIT does not support subprogram tail calls, so the arm64 fix does not apply"},
+  {"module": "M8", "point": "arch/riscv/kvm/mmu.c:kvm_age_gfn", "label": "c", "reason": "unaligned memslot with block mappings, related to A247; aging path not checked"},
+  {"module": "M10", "point": "arch/riscv/kernel/probes/uprobes.c:arch_uprobe_abort_xol", "label": "b", "reason": "RISC-V uprobes do not use hardware single-step; the claimed leaked single-step state does not exist"},
+  {"module": "M10", "point": "arch/riscv/kvm/mmu.c:kvm_arch_commit_memory_region", "label": "b", "reason": "the manual-protect skip was added together with RISC-V support for initially-set dirty logging (df60cb2e6702, a feature), so v6.12 was not wrong"},
+  {"module": "M10", "point": "arch/riscv/include/asm/ptrace.h:regs_get_kernel_argument", "label": "c", "reason": "arguments beyond registers; other architectures differ, not checked"}
+ ]
+}

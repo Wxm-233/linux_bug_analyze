@@ -1,0 +1,132 @@
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -123,6 +123,7 @@ config LOONGARCH
+ 	select HAVE_KPROBES
+ 	select HAVE_KPROBES_ON_FTRACE
+ 	select HAVE_KRETPROBES
++	select HAVE_RETHOOK
+ 	select HAVE_MOD_ARCH_SPECIFIC
+ 	select HAVE_NMI
+ 	select HAVE_PCI
+diff --git a/arch/loongarch/include/asm/kprobes.h b/arch/loongarch/include/asm/kprobes.h
+--- a/arch/loongarch/include/asm/kprobes.h
++++ b/arch/loongarch/include/asm/kprobes.h
+@@ -49,9 +49,6 @@ bool kprobe_fault_handler(struct pt_regs *regs, int trapnr);
+ bool kprobe_breakpoint_handler(struct pt_regs *regs);
+ bool kprobe_singlestep_handler(struct pt_regs *regs);
+ 
+-void __kretprobe_trampoline(void);
+-void *trampoline_probe_handler(struct pt_regs *regs);
+-
+ #else /* !CONFIG_KPROBES */
+ 
+ static inline bool kprobe_breakpoint_handler(struct pt_regs *regs) { return false; }
+diff --git a/arch/loongarch/kernel/kprobes.c b/arch/loongarch/kernel/kprobes.c
+--- a/arch/loongarch/kernel/kprobes.c
++++ b/arch/loongarch/kernel/kprobes.c
+@@ -358,27 +358,6 @@ int __init arch_init_kprobes(void)
+ 	return 0;
+ }
+ 
+-/* ASM function that handles the kretprobes must not be probed */
+-NOKPROBE_SYMBOL(__kretprobe_trampoline);
+-
+-/* Called from __kretprobe_trampoline */
+-void __used *trampoline_probe_handler(struct pt_regs *regs)
+-{
+-	return (void *)kretprobe_trampoline_handler(regs, NULL);
+-}
+-NOKPROBE_SYMBOL(trampoline_probe_handler);
+-
+-void arch_prepare_kretprobe(struct kretprobe_instance *ri,
+-			    struct pt_regs *regs)
+-{
+-	ri->ret_addr = (kprobe_opcode_t *)regs->regs[1];
+-	ri->fp = NULL;
+-
+-	/* Replace the return addr with trampoline addr */
+-	regs->regs[1] = (unsigned long)&__kretprobe_trampoline;
+-}
+-NOKPROBE_SYMBOL(arch_prepare_kretprobe);
+-
+ int arch_trampoline_kprobe(struct kprobe *p)
+ {
+ 	return 0;
+diff --git a/arch/loongarch/kernel/rethook.c b/arch/loongarch/kernel/rethook.c
+new file mode 100644
+--- /dev/null
++++ b/arch/loongarch/kernel/rethook.c
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Generic return hook for LoongArch.
++ */
++
++#include <linux/kprobes.h>
++#include <linux/rethook.h>
++#include "rethook.h"
++
++/* This is called from arch_rethook_trampoline() */
++unsigned long __used arch_rethook_trampoline_callback(struct pt_regs *regs)
++{
++	return rethook_trampoline_handler(regs, 0);
++}
++NOKPROBE_SYMBOL(arch_rethook_trampoline_callback);
++
++void arch_rethook_prepare(struct rethook_node *rhn, struct pt_regs *regs, bool mcount)
++{
++	rhn->frame = 0;
++	rhn->ret_addr = regs->regs[1];
++
++	/* replace return addr with trampoline */
++	regs->regs[1] = (unsigned long)arch_rethook_trampoline;
++}
++NOKPROBE_SYMBOL(arch_rethook_prepare);
++
++/* ASM function that handles the rethook must not be probed itself */
++NOKPROBE_SYMBOL(arch_rethook_trampoline);
+diff --git a/arch/loongarch/kernel/rethook.h b/arch/loongarch/kernel/rethook.h
+new file mode 100644
+--- /dev/null
++++ b/arch/loongarch/kernel/rethook.h
+@@ -0,0 +1,8 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __LOONGARCH_RETHOOK_H
++#define __LOONGARCH_RETHOOK_H
++
++unsigned long arch_rethook_trampoline_callback(struct pt_regs *regs);
++void arch_rethook_prepare(struct rethook_node *rhn, struct pt_regs *regs, bool mcount);
++
++#endif
+diff --git a/arch/loongarch/kernel/kprobes_trampoline.S b/arch/loongarch/kernel/rethook_trampoline.S
+similarity index 93%
+rename from arch/loongarch/kernel/kprobes_trampoline.S
+rename to arch/loongarch/kernel/rethook_trampoline.S
+--- a/arch/loongarch/kernel/kprobes_trampoline.S
++++ b/arch/loongarch/kernel/rethook_trampoline.S
+@@ -75,13 +75,13 @@
+ 	csrxchg t0, t1, LOONGARCH_CSR_CRMD
+ 	.endm
+ 
+-SYM_CODE_START(__kretprobe_trampoline)
++SYM_CODE_START(arch_rethook_trampoline)
+ 	addi.d	sp, sp, -PT_SIZE
+ 	save_all_base_regs
+ 
+ 	addi.d	t0, sp, PT_SIZE
+ 	LONG_S	t0, sp, PT_R3
+ 
+ 	move a0, sp /* pt_regs */
+ 
+-	bl trampoline_probe_handler
++	bl arch_rethook_trampoline_callback
+ 
+ 	/* use the result as the return-address */
+ 	move ra, a0
+@@ -90,4 +90,4 @@ SYM_CODE_START(__kretprobe_trampoline)
+ 	addi.d	sp, sp, PT_SIZE
+ 
+ 	jr ra
+-SYM_CODE_END(__kretprobe_trampoline)
++SYM_CODE_END(arch_rethook_trampoline)

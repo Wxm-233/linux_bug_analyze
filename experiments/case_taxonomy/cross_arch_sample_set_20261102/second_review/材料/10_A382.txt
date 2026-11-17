@@ -1,0 +1,36 @@
+########## 第10条  编号 A382  提交 4d2b03699460  日期 2026-04-09
+
+【提交说明】
+riscv: errata: Fix bitwise vs logical AND in MIPS errata patching
+
+The condition checking whether a specific errata needs patching uses
+logical AND (&&) instead of bitwise AND (&). Since logical AND only
+checks that both operands are non-zero, this causes all errata patches
+to be applied whenever any single errata is detected, rather than only
+applying the matching one.
+
+The SiFive errata implementation correctly uses bitwise AND for the same
+check.
+
+Fixes: 0b0ca959d206 ("riscv: errata: Fix the PAUSE Opcode for MIPS P8700")
+Assisted-by: Cursor:claude-4.6-opus-high-thinking
+[pjw@kernel.org: fixed checkpatch warning]
+
+【改动统计】
+ arch/riscv/errata/mips/errata.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/errata/mips/errata.c b/arch/riscv/errata/mips/errata.c
+index e984a8152208..2c3dc2259e93 100644
+--- a/arch/riscv/errata/mips/errata.c
++++ b/arch/riscv/errata/mips/errata.c
+@@ -57,7 +57,7 @@ void mips_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
+ 		}
+ 
+ 		tmp = (1U << alt->patch_id);
+-		if (cpu_req_errata && tmp) {
++		if (cpu_req_errata & tmp) {
+ 			mutex_lock(&text_mutex);
+ 			patch_text_nosync(ALT_OLD_PTR(alt), ALT_ALT_PTR(alt),
+ 					  alt->alt_len);

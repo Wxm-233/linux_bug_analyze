@@ -1,0 +1,1100 @@
+
+##### R025
+=== 81a1dd10b072 R 2023-02-28 +3/-1
+riscv, lib: Fix Zbb strncmp
+
+The Zbb optimized strncmp has two parts; a fast path that does XLEN/8B
+per iteration, and a slow that does one byte per iteration.
+
+The idea is to compare aligned XLEN chunks for most of strings, and do
+the remainder tail in the slow path.
+
+The Zbb strncmp has two issues in the fast path:
+
+Incorrect remainder handling (wrong compare): Assume that the string
+length is 9. On 64b systems, the fast path should do one iteration,
+and one iteration in the slow path. Instead, both were done in the
+fast path, which lead to incorrect results. An example:
+
+  strncmp("/dev/vda", "/dev/", 5);
+
+Correct by changing "bgt" to "bge".
+
+Missing NULL checks in the second string: This could lead to incorrect
+results for:
+
+  strncmp("/dev/vda", "/dev/vda\0", 8);
+
+Correct by adding an additional check.
+
+Fixes: b6fcdb191e36 ("RISC-V: add zbb support to string functions")
+functions: 
+fixes: b6fcdb191e36
+diff --git a/arch/riscv/lib/strncmp.S b/arch/riscv/lib/strncmp.S
+index e09de79e62b9..7ac2f667285a 100644
+--- a/arch/riscv/lib/strncmp.S
++++ b/arch/riscv/lib/strncmp.S
+@@ -79,9 +79,11 @@ strncmp_zbb:
+ 	.p2align 3
+ 1:
+-	bgt	a0, t6, 3f
++	bge	a0, t6, 3f
+ 	REG_L	t0, 0(a0)
+ 	REG_L	t1, 0(a1)
+ 	orc.b	t3, t0
+ 	bne	t3, t5, 2f
++	orc.b	t3, t1
++	bne	t3, t5, 2f
+ 	addi	a0, a0, SZREG
+ 	addi	a1, a1, SZREG
+
+##### R026
+=== bf89b7ee52af R 2023-03-02 +1/-1
+RISC-V: fix taking the text_mutex twice during sifive errata patching
+
+Chris pointed out that some bonehead, *cough* me *cough*, added two
+mutex_locks() to the SiFive errata patching. The second was meant to
+have been a mutex_unlock().
+
+This results in errors such as
+
+Unable to handle kernel NULL pointer dereference at virtual address 0000000000000030
+Oops [#1]
+Modules linked in:
+CPU: 0 PID: 0 Comm: swapper Not tainted
+6.2.0-rc1-starlight-00079-g9493e6f3ce02 #229
+Hardware name: BeagleV Starlight Beta (DT)
+epc : __schedule+0x42/0x500
+ ra : schedule+0x46/0xce
+epc : ffffffff8065957c ra : ffffffff80659a80 sp : ffffffff81203c80
+ gp : ffffffff812d50a0 tp : ffffffff8120db40 t0 : ffffffff81203d68
+ t1 : 0000000000000001 t2 : 4c45203a76637369 s0 : ffffffff81203cf0
+ s1 : ffffffff8120db40 a0 : 0000000000000000 a1 : ffffffff81213958
+ a2 : ffffffff81213958 a3 : 0000000000000000 a4 : 0000000000000000
+ a5 : ffffffff80a1bd00 a6 : 0000000000000000 a7 : 0000000052464e43
+ s2 : ffffffff8120db41 s3 : ffffffff80a1ad00 s4 : 0000000000000000
+ s5 : 0000000000000002 s6 : ffffffff81213938 s7 : 0000000000000000
+ s8 : 0000000000000000 s9 : 0000000000000001 s10: ffffffff812d7204
+ s11: ffffffff80d3c920 t3 : 0000000000000001 t4 : ffffffff812e6dd7
+ t5 : ffffffff812e6dd8 t6 : ffffffff81203bb8
+status: 0000000200000100 badaddr: 0000000000000030 cause: 000000000000000d
+[<ffffffff80659a80>] schedule+0x46/0xce
+[<ffffffff80659dce>] schedule_preempt_disabled+0x16/0x28
+[<ffffffff8065ae0c>] __mutex_lock.constprop.0+0x3fe/0x652
+[<ffffffff8065b138>] __mutex_lock_slowpath+0xe/0x16
+[<ffffffff8065b182>] mutex_lock+0x42/0x4c
+[<ffffffff8000ad94>] sifive_errata_patch_func+0xf6/0x18c
+[<ffffffff80002b92>] _apply_alternatives+0x74/0x76
+[<ffffffff80802ee8>] apply_boot_alternatives+0x3c/0xfa
+[<ffffffff80803cb0>] setup_arch+0x60c/0x640
+[<ffffffff80800926>] start_kernel+0x8e/0x99c
+---[ end trace 0000000000000000 ]---
+
+Fixes: 9493e6f3ce02 ("RISC-V: take text_mutex during alternative patching")
+functions: arch/riscv/errata/sifive/errata.c:sifive_errata_patch_func
+fixes: 9493e6f3ce02
+diff --git a/arch/riscv/errata/sifive/errata.c b/arch/riscv/errata/sifive/errata.c
+index da55cb247e89..31d2ebea4286 100644
+--- a/arch/riscv/errata/sifive/errata.c
++++ b/arch/riscv/errata/sifive/errata.c
+@@ -112,5 +112,5 @@ void __init_or_module sifive_errata_patch_func(struct alt_entry *begin,
+ 			patch_text_nosync(ALT_OLD_PTR(alt), ALT_ALT_PTR(alt),
+ 					  alt->alt_len);
+-			mutex_lock(&text_mutex);
++			mutex_unlock(&text_mutex);
+ 			cpu_apply_errata |= tmp;
+ 		}
+
+##### R027
+=== 76950340cf03 R 2023-03-08 +1/-1
+riscv: Use READ_ONCE_NOCHECK in imprecise unwinding stack mode
+
+When CONFIG_FRAME_POINTER is unset, the stack unwinding function
+walk_stackframe randomly reads the stack and then, when KASAN is enabled,
+it can lead to the following backtrace:
+
+[    0.000000] ==================================================================
+[    0.000000] BUG: KASAN: stack-out-of-bounds in walk_stackframe+0xa6/0x11a
+[    0.000000] Read of size 8 at addr ffffffff81807c40 by task swapper/0
+[    0.000000]
+[    0.000000] CPU: 0 PID: 0 Comm: swapper Not tainted 6.2.0-12919-g24203e6db61f #43
+[    0.000000] Hardware name: riscv-virtio,qemu (DT)
+[    0.000000] Call Trace:
+[    0.000000] [<ffffffff80007ba8>] walk_stackframe+0x0/0x11a
+[    0.000000] [<ffffffff80099ecc>] init_param_lock+0x26/0x2a
+[    0.000000] [<ffffffff80007c4a>] walk_stackframe+0xa2/0x11a
+[    0.000000] [<ffffffff80c49c80>] dump_stack_lvl+0x22/0x36
+[    0.000000] [<ffffffff80c3783e>] print_report+0x198/0x4a8
+[    0.000000] [<ffffffff80099ecc>] init_param_lock+0x26/0x2a
+[    0.000000] [<ffffffff80007c4a>] walk_stackframe+0xa2/0x11a
+[    0.000000] [<ffffffff8015f68a>] kasan_report+0x9a/0xc8
+[    0.000000] [<ffffffff80007c4a>] walk_stackframe+0xa2/0x11a
+[    0.000000] [<ffffffff80007c4a>] walk_stackframe+0xa2/0x11a
+[    0.000000] [<ffffffff8006e99c>] desc_make_final+0x80/0x84
+[    0.000000] [<ffffffff8009a04e>] stack_trace_save+0x88/0xa6
+[    0.000000] [<ffffffff80099fc2>] filter_irq_stacks+0x72/0x76
+[    0.000000] [<ffffffff8006b95e>] devkmsg_read+0x32a/0x32e
+[    0.000000] [<ffffffff8015ec16>] kasan_save_stack+0x28/0x52
+[    0.000000] [<ffffffff8006e998>] desc_make_final+0x7c/0x84
+[    0.000000] [<ffffffff8009a04a>] stack_trace_save+0x84/0xa6
+[    0.000000] [<ffffffff8015ec52>] kasan_set_track+0x12/0x20
+[    0.000000] [<ffffffff8015f22e>] __kasan_slab_alloc+0x58/0x5e
+[    0.000000] [<ffffffff8015e7ea>] __kmem_cache_create+0x21e/0x39a
+[    0.000000] [<ffffffff80e133ac>] create_boot_cache+0x70/0x9c
+[    0.000000] [<ffffffff80e17ab2>] kmem_cache_init+0x6c/0x11e
+[    0.000000] [<ffffffff80e00fd6>] mm_init+0xd8/0xfe
+[    0.000000] [<ffffffff80e011d8>] start_kernel+0x190/0x3ca
+[    0.000000]
+[    0.000000] The buggy address belongs to stack of task swapper/0
+[    0.000000]  and is located at offset 0 in frame:
+[    0.000000]  stack_trace_save+0x0/0xa6
+functions: 
+fixes: 5d8544e2d007
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index f9a5a7c90ff0..64a9c093aef9 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -102,5 +102,5 @@ void notrace walk_stackframe(struct task_struct *task,
+ 		if (__kernel_text_address(pc) && unlikely(!fn(arg, pc)))
+ 			break;
+-		pc = (*ksp++) - 0x4;
++		pc = READ_ONCE_NOCHECK(*ksp++) - 0x4;
+ 	}
+ }
+
+##### R028
+=== 9a801afd3eb9 R 2023-03-13 +4/-2
+riscv: mm: Fix incorrect ASID argument when flushing TLB
+
+Currently, we pass the CONTEXTID instead of the ASID to the TLB flush
+function. We should only take the ASID field to prevent from touching
+the reserved bit field.
+
+Fixes: 3f1e782998cd ("riscv: add ASID-based tlbflushing methods")
+functions: arch/riscv/mm/tlbflush.c:__sbi_tlb_flush_range
+fixes: 3f1e782998cd
+diff --git a/arch/riscv/include/asm/tlbflush.h b/arch/riscv/include/asm/tlbflush.h
+index 801019381dea..a09196f8de68 100644
+--- a/arch/riscv/include/asm/tlbflush.h
++++ b/arch/riscv/include/asm/tlbflush.h
+@@ -13,4 +13,6 @@
+ 
+ #ifdef CONFIG_MMU
++extern unsigned long asid_mask;
++
+ static inline void local_flush_tlb_all(void)
+ {
+diff --git a/arch/riscv/mm/context.c b/arch/riscv/mm/context.c
+index 0f784e3d307b..12e22e7330e7 100644
+--- a/arch/riscv/mm/context.c
++++ b/arch/riscv/mm/context.c
+@@ -23,5 +23,5 @@ DEFINE_STATIC_KEY_FALSE(use_asid_allocator);
+ static unsigned long asid_bits;
+ static unsigned long num_asids;
+-static unsigned long asid_mask;
++unsigned long asid_mask;
+ 
+ static atomic_long_t current_version;
+diff --git a/arch/riscv/mm/tlbflush.c b/arch/riscv/mm/tlbflush.c
+index 37ed760d007c..ef701fa83f36 100644
+--- a/arch/riscv/mm/tlbflush.c
++++ b/arch/riscv/mm/tlbflush.c
+@@ -43,5 +43,5 @@ static void __sbi_tlb_flush_range(struct mm_struct *mm, unsigned long start,
+ 	broadcast = cpumask_any_but(cmask, cpuid) < nr_cpu_ids;
+ 	if (static_branch_unlikely(&use_asid_allocator)) {
+-		unsigned long asid = atomic_long_read(&mm->context.id);
++		unsigned long asid = atomic_long_read(&mm->context.id) & asid_mask;
+ 
+ 		if (broadcast) {
+
+##### R029
+=== 1aa866931b80 R 2023-03-24 +30/-20
+RISC-V: add non-alternative fallback for riscv_has_extension_[un]likely()
+
+The has_fpu() check, which in turn calls riscv_has_extension_likely(),
+relies on alternatives to figure out whether the system has an FPU.
+As a result, it will malfunction on XIP kernels, as they do not support
+the alternatives mechanism.
+
+When alternatives support is not present, fall back to using
+__riscv_isa_extension_available() in riscv_has_extension_[un]likely()
+instead stead, which handily takes the same argument, so that kernels
+that do not support alternatives can accurately report the presence of
+FPU support.
+
+Fixes: 702e64550b12 ("riscv: fpu: switch has_fpu() to riscv_has_extension_likely()")
+functions: 
+fixes: 702e64550b12
+ arch/riscv/include/asm/hwcap.h | 50 ++++++++++++++++++++++++++++++--------------------
+ 1 file changed, 30 insertions(+), 20 deletions(-)
+diff --git a/arch/riscv/include/asm/hwcap.h b/arch/riscv/include/asm/hwcap.h
+index e3021b2590de..6263a0de1c6a 100644
+--- a/arch/riscv/include/asm/hwcap.h
++++ b/arch/riscv/include/asm/hwcap.h
+@@ -58,4 +58,12 @@ struct riscv_isa_ext_data {
+ };
+ 
++unsigned long riscv_isa_extension_base(const unsigned long *isa_bitmap);
++
++#define riscv_isa_extension_mask(ext) BIT_MASK(RISCV_ISA_EXT_##ext)
++
++bool __riscv_isa_extension_available(const unsigned long *isa_bitmap, int bit);
++#define riscv_isa_extension_available(isa_bitmap, ext)	\
++	__riscv_isa_extension_available(isa_bitmap, RISCV_ISA_EXT_##ext)
++
+ static __always_inline bool
+ riscv_has_extension_likely(const unsigned long ext)
+@@ -64,10 +72,15 @@ riscv_has_extension_likely(const unsigned long ext)
+ 			   "ext must be < RISCV_ISA_EXT_MAX");
+ 
+-	asm_volatile_goto(
+-	ALTERNATIVE("j	%l[l_no]", "nop", 0, %[ext], 1)
+-	:
+-	: [ext] "i" (ext)
+-	:
+-	: l_no);
++	if (IS_ENABLED(CONFIG_RISCV_ALTERNATIVE)) {
++		asm_volatile_goto(
++		ALTERNATIVE("j	%l[l_no]", "nop", 0, %[ext], 1)
++		:
++		: [ext] "i" (ext)
++		:
++		: l_no);
++	} else {
++		if (!__riscv_isa_extension_available(NULL, ext))
++			goto l_no;
++	}
+ 
+ 	return true;
+@@ -82,10 +95,15 @@ riscv_has_extension_unlikely(const unsigned long ext)
+ 			   "ext must be < RISCV_ISA_EXT_MAX");
+ 
+-	asm_volatile_goto(
+-	ALTERNATIVE("nop", "j	%l[l_yes]", 0, %[ext], 1)
+-	:
+-	: [ext] "i" (ext)
+-	:
+-	: l_yes);
++	if (IS_ENABLED(CONFIG_RISCV_ALTERNATIVE)) {
++		asm_volatile_goto(
++		ALTERNATIVE("nop", "j	%l[l_yes]", 0, %[ext], 1)
++		:
++		: [ext] "i" (ext)
++		:
++		: l_yes);
++	} else {
++		if (__riscv_isa_extension_available(NULL, ext))
++			goto l_yes;
++	}
+ 
+... (14 more diff lines)
+
+##### R030
+=== 1ee7fc3f4d0a R 2023-03-24 +8/-10
+RISC-V: always select RISCV_ALTERNATIVE for non-xip kernels
+
+When moving switch_to's has_fpu() over to using
+riscv_has_extension_likely() rather than static branches, the FPU code
+gained a dependency on the alternatives framework.
+That dependency has now been removed, as riscv_has_extension_ikely() now
+contains a fallback path, using __riscv_isa_extension_available(), but
+if CONFIG_RISCV_ALTERNATIVE isn't selected when CONFIG_FPU is, has_fpu()
+checks will not benefit from the "fast path" that the alternatives
+framework provides.
+
+We want to ensure that alternatives are available whenever
+riscv_has_extension_[un]likely() is used, rather than silently falling
+back to the slow path, but rather than rely on selecting
+RISCV_ALTERNATIVE in the myriad of locations that may use
+riscv_has_extension_[un]likely(), select it (almost) always instead by
+adding it to the main RISCV config entry.
+xip kernels cannot make use of the alternatives framework, so it is not
+enabled for those configurations, although this is the status quo.
+
+All current sites that select RISCV_ALTERNATIVE are converted to
+dependencies on the option instead. The explicit dependencies on
+!XIP_KERNEL can be dropped, as RISCV_ALTERNATIVE is not user selectable.
+
+Fixes: 702e64550b12 ("riscv: fpu: switch has_fpu() to riscv_has_extension_likely()")
+functions: 
+fixes: 702e64550b12
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index c5e42cc37604..2f6976418d0a 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -127,4 +127,5 @@ config RISCV
+ 	select PCI_DOMAINS_GENERIC if PCI
+ 	select PCI_MSI if PCI
++	select RISCV_ALTERNATIVE if !XIP_KERNEL
+ 	select RISCV_INTC
+ 	select RISCV_TIMER if RISCV_SBI
+@@ -402,7 +403,6 @@ config RISCV_ISA_SVPBMT
+ 	bool "SVPBMT extension support"
+ 	depends on 64BIT && MMU
+-	depends on !XIP_KERNEL
++	depends on RISCV_ALTERNATIVE
+ 	default y
+-	select RISCV_ALTERNATIVE
+ 	help
+ 	   Adds support to dynamically detect the presence of the SVPBMT
+@@ -429,6 +429,6 @@ config RISCV_ISA_ZBB
+ 	bool "Zbb extension support for bit manipulation instructions"
+ 	depends on TOOLCHAIN_HAS_ZBB
+-	depends on !XIP_KERNEL && MMU
+-	select RISCV_ALTERNATIVE
++	depends on MMU
++	depends on RISCV_ALTERNATIVE
+ 	default y
+ 	help
+@@ -444,7 +444,7 @@ config RISCV_ISA_ZBB
+ config RISCV_ISA_ZICBOM
+ 	bool "Zicbom extension support for non-coherent DMA operation"
+-	depends on !XIP_KERNEL && MMU
++	depends on MMU
++	depends on RISCV_ALTERNATIVE
+ 	default y
+-	select RISCV_ALTERNATIVE
+ 	select RISCV_DMA_NONCOHERENT
+ 	help
+diff --git a/arch/riscv/Kconfig.erratas b/arch/riscv/Kconfig.erratas
+index 69621ae6d647..0c8f4652cd82 100644
+--- a/arch/riscv/Kconfig.erratas
++++ b/arch/riscv/Kconfig.erratas
+@@ -3,6 +3,5 @@ menu "CPU errata selection"
+ config ERRATA_SIFIVE
+ 	bool "SiFive errata"
+-	depends on !XIP_KERNEL
+-	select RISCV_ALTERNATIVE
++	depends on RISCV_ALTERNATIVE
+ 	help
+ 	  All SiFive errata Kconfig depend on this Kconfig. Disabling
+@@ -36,6 +35,5 @@ config ERRATA_SIFIVE_CIP_1200
+ config ERRATA_THEAD
+ 	bool "T-HEAD errata"
+-	depends on !XIP_KERNEL
+-	select RISCV_ALTERNATIVE
++	depends on RISCV_ALTERNATIVE
+ 	help
+ 	  All T-HEAD errata Kconfig depend on this Kconfig. Disabling
+
+##### R031
+=== d83806c4c0cc R 2023-03-26 +2/-8
+purgatory: fix disabling debug info
+
+Since 32ef9e5054ec, -Wa,-gdwarf-2 is no longer used in KBUILD_AFLAGS.
+Instead, it includes -g, the appropriate -gdwarf-* flag, and also the
+-Wa versions of both of those if building with Clang and GNU as.  As a
+result, debug info was being generated for the purgatory objects, even
+though the intention was that it not be.
+
+Fixes: 32ef9e5054ec ("Makefile.debug: re-enable debug info for .S files")
+functions: 
+fixes: 32ef9e5054ec
+diff --git a/arch/riscv/purgatory/Makefile b/arch/riscv/purgatory/Makefile
+index d16bf715a586..5730797a6b40 100644
+--- a/arch/riscv/purgatory/Makefile
++++ b/arch/riscv/purgatory/Makefile
+@@ -85,10 +85,5 @@ CFLAGS_REMOVE_ctype.o		+= $(PURGATORY_CFLAGS_REMOVE)
+ CFLAGS_ctype.o			+= $(PURGATORY_CFLAGS)
+ 
+-AFLAGS_REMOVE_entry.o		+= -Wa,-gdwarf-2
+-AFLAGS_REMOVE_memcpy.o		+= -Wa,-gdwarf-2
+-AFLAGS_REMOVE_memset.o		+= -Wa,-gdwarf-2
+-AFLAGS_REMOVE_strcmp.o		+= -Wa,-gdwarf-2
+-AFLAGS_REMOVE_strlen.o		+= -Wa,-gdwarf-2
+-AFLAGS_REMOVE_strncmp.o		+= -Wa,-gdwarf-2
++asflags-remove-y		+= $(foreach x, -g -gdwarf-4 -gdwarf-5, $(x) -Wa,$(x))
+ 
+ $(obj)/purgatory.ro: $(PURGATORY_OBJS) FORCE
+diff --git a/arch/x86/purgatory/Makefile b/arch/x86/purgatory/Makefile
+index 17f09dc26381..82fec66d46d2 100644
+--- a/arch/x86/purgatory/Makefile
++++ b/arch/x86/purgatory/Makefile
+@@ -70,6 +70,5 @@ CFLAGS_REMOVE_string.o		+= $(PURGATORY_CFLAGS_REMOVE)
+ CFLAGS_string.o			+= $(PURGATORY_CFLAGS)
+ 
+-AFLAGS_REMOVE_setup-x86_$(BITS).o	+= -Wa,-gdwarf-2
+-AFLAGS_REMOVE_entry64.o			+= -Wa,-gdwarf-2
++asflags-remove-y		+= $(foreach x, -g -gdwarf-4 -gdwarf-5, $(x) -Wa,$(x))
+ 
+ $(obj)/purgatory.ro: $(PURGATORY_OBJS) FORCE
+
+##### R032
+=== 9c2598d43510 R 2023-04-03 +2/-2
+riscv: entry: Save a0 prior syscall_enter_from_user_mode()
+
+The RISC-V calling convention passes the first argument, and the
+return value in the a0 register. For this reason, the a0 register
+needs some extra care; When handling syscalls, the a0 register is
+saved into regs->orig_a0, so a0 can be properly restored for,
+e.g. interrupted syscalls.
+
+This functionality was broken with the introduction of the generic
+entry patches. Here, a0 was saved into orig_a0 after calling
+syscall_enter_from_user_mode(), which can change regs->a0 for some
+paths, incorrectly restoring a0.
+
+This is resolved, by saving a0 prior doing the
+syscall_enter_from_user_mode() call.
+
+Fixes: f0bddf50586d ("riscv: entry: Convert to generic entry")
+functions: arch/riscv/kernel/traps.c:do_trap_ecall_u
+fixes: f0bddf50586d
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 1f4e37be7eb3..8c258b78c925 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -271,9 +271,9 @@ asmlinkage __visible __trap_section void do_trap_ecall_u(struct pt_regs *regs)
+ 		ulong syscall = regs->a7;
+ 
+-		syscall = syscall_enter_from_user_mode(regs, syscall);
+-
+ 		regs->epc += 4;
+ 		regs->orig_a0 = regs->a0;
+ 
++		syscall = syscall_enter_from_user_mode(regs, syscall);
++
+ 		if (syscall < NR_syscalls)
+ 			syscall_handler(regs, syscall);
+
+##### R033
+=== 8d736482749f R 2023-04-06 +8/-1
+riscv: add icache flush for nommu sigreturn trampoline
+
+In a NOMMU kernel, sigreturn trampolines are generated on the user
+stack by setup_rt_frame. Currently, these trampolines are not instruction
+fenced, thus their visibility to ifetch is not guaranteed.
+
+This patch adds a flush_icache_range in setup_rt_frame to fix this
+problem.
+
+Fixes: 6bd33e1ece52 ("riscv: add nommu support")
+functions: arch/riscv/kernel/signal.c:setup_rt_frame
+fixes: 6bd33e1ece52
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index bfb2afa4135f..dee66c9290cc 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -20,4 +20,5 @@
+ #include <asm/switch_to.h>
+ #include <asm/csr.h>
++#include <asm/cacheflush.h>
+ 
+ extern u32 __user_rt_sigreturn[2];
+@@ -182,4 +183,5 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
+ 	struct rt_sigframe __user *frame;
+ 	long err = 0;
++	unsigned long __maybe_unused addr;
+ 
+ 	frame = get_sigframe(ksig, regs, sizeof(*frame));
+@@ -210,5 +212,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
+ 			 sizeof(frame->sigreturn_code)))
+ 		return -EFAULT;
+-	regs->ra = (unsigned long)&frame->sigreturn_code;
++
++	addr = (unsigned long)&frame->sigreturn_code;
++	/* Make sure the two instructions are pushed to icache. */
++	flush_icache_range(addr, addr + sizeof(frame->sigreturn_code));
++
++	regs->ra = addr;
+ #endif /* CONFIG_MMU */
+ 
+
+##### R034
+=== bb3f89487fd9 R 2023-04-20 +6/-6
+RISC-V: hwprobe: Remove __init on probe_vendor_features()
+
+probe_vendor_features() is now called from smp_callin(), which is not
+__init code and runs during cpu hotplug events. Remove the
+__init_or_module decoration from it and the functions it calls to avoid
+walking into outer space.
+
+Fixes: 62a31d6e38bd ("RISC-V: hwprobe: Support probing of misaligned access performance")
+functions: 
+fixes: 62a31d6e38bd
+diff --git a/arch/riscv/errata/thead/errata.c b/arch/riscv/errata/thead/errata.c
+index 1036b8f933ec..a86c4facc2a6 100644
+--- a/arch/riscv/errata/thead/errata.c
++++ b/arch/riscv/errata/thead/errata.c
+@@ -119,7 +119,7 @@ void __init_or_module thead_errata_patch_func(struct alt_entry *begin, struct al
+ }
+ 
+-void __init_or_module thead_feature_probe_func(unsigned int cpu,
+-					       unsigned long archid,
+-					       unsigned long impid)
++void thead_feature_probe_func(unsigned int cpu,
++			      unsigned long archid,
++			      unsigned long impid)
+ {
+ 	if ((archid == 0) && (impid == 0))
+diff --git a/arch/riscv/include/asm/alternative.h b/arch/riscv/include/asm/alternative.h
+index a8f5cf6694a1..6a41537826a7 100644
+--- a/arch/riscv/include/asm/alternative.h
++++ b/arch/riscv/include/asm/alternative.h
+@@ -31,5 +31,5 @@
+ #define ALT_ALT_PTR(a)			__ALT_PTR(a, alt_offset)
+ 
+-void __init probe_vendor_features(unsigned int cpu);
++void probe_vendor_features(unsigned int cpu);
+ void __init apply_boot_alternatives(void);
+ void __init apply_early_boot_alternatives(void);
+diff --git a/arch/riscv/kernel/alternative.c b/arch/riscv/kernel/alternative.c
+index fc65c9293ac5..6b75788c18e6 100644
+--- a/arch/riscv/kernel/alternative.c
++++ b/arch/riscv/kernel/alternative.c
+@@ -32,5 +32,5 @@ struct cpu_manufacturer_info_t {
+ };
+ 
+-static void __init_or_module riscv_fill_cpu_mfr_info(struct cpu_manufacturer_info_t *cpu_mfr_info)
++static void riscv_fill_cpu_mfr_info(struct cpu_manufacturer_info_t *cpu_mfr_info)
+ {
+ #ifdef CONFIG_RISCV_M_MODE
+@@ -145,5 +145,5 @@ void riscv_alternative_fix_offsets(void *alt_ptr, unsigned int len,
+ 
+ /* Called on each CPU as it starts */
+-void __init_or_module probe_vendor_features(unsigned int cpu)
++void probe_vendor_features(unsigned int cpu)
+ {
+ 	struct cpu_manufacturer_info_t cpu_mfr_info;
+
+##### R035
+=== c2d3c8441e3d R 2023-04-20 +1/-0
+RISC-V: include cpufeature.h in cpufeature.c
+
+Automation complains:
+warning: symbol '__pcpu_scope_misaligned_access_speed' was not declared. Should it be static?
+
+cpufeature.c doesn't actually include the header of the same name, as it
+had not previously used anything from it.
+The per-cpu variable is declared there, so include it to silence the
+complaints.
+
+Fixes: 62a31d6e38bd ("RISC-V: hwprobe: Support probing of misaligned access performance")
+functions: 
+fixes: 62a31d6e38bd
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index 52585e088873..00f9f57a8566 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -15,4 +15,5 @@
+ #include <asm/alternative.h>
+ #include <asm/cacheflush.h>
++#include <asm/cpufeature.h>
+ #include <asm/hwcap.h>
+ #include <asm/patch.h>
+
+##### R036
+=== 6569fc12e442 R 2023-04-25 +2/-3
+riscv: mm: Ensure prot of VM_WRITE and VM_EXEC must be readable
+
+Commit 8aeb7b17f04e ("RISC-V: Make mmap() with PROT_WRITE imply PROT_READ")
+allows riscv to use mmap with PROT_WRITE only, and meanwhile mmap with w+x
+is also permitted. However, when userspace tries to access this page with
+PROT_WRITE|PROT_EXEC, which causes infinite loop at load page fault as
+well as it triggers soft lockup. According to riscv privileged spec,
+"Writable pages must also be marked readable". The fix to drop the
+`PAGE_COPY_READ_EXEC` and then `PAGE_COPY_EXEC` would be just used instead.
+This aligns the other arches (i.e arm64) for protection_map.
+
+Fixes: 8aeb7b17f04e ("RISC-V: Make mmap() with PROT_WRITE imply PROT_READ")
+functions: 
+fixes: 8aeb7b17f04e
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 2258b27173b0..75970ee2bda2 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -166,6 +166,5 @@ extern struct pt_alloc_ops pt_ops __initdata;
+ 
+ #define PAGE_COPY		PAGE_READ
+-#define PAGE_COPY_EXEC		PAGE_EXEC
+-#define PAGE_COPY_READ_EXEC	PAGE_READ_EXEC
++#define PAGE_COPY_EXEC		PAGE_READ_EXEC
+ #define PAGE_SHARED		PAGE_WRITE
+ #define PAGE_SHARED_EXEC	PAGE_WRITE_EXEC
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index c6bb966e4123..0fe75c9713f8 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -294,5 +294,5 @@ static const pgprot_t protection_map[16] = {
+ 	[VM_EXEC | VM_READ]				= PAGE_READ_EXEC,
+ 	[VM_EXEC | VM_WRITE]				= PAGE_COPY_EXEC,
+-	[VM_EXEC | VM_WRITE | VM_READ]			= PAGE_COPY_READ_EXEC,
++	[VM_EXEC | VM_WRITE | VM_READ]			= PAGE_COPY_EXEC,
+ 	[VM_SHARED]					= PAGE_NONE,
+ 	[VM_SHARED | VM_READ]				= PAGE_READ,
+
+##### R037
+=== 08dc10759468 R 2023-04-26 +3/-1
+RISC-V: hwprobe: There can only be one first
+
+Only capture the first cpu_id in order for the comparison
+below to be of any use.
+
+Fixes: ea3de9ce8aa2 ("RISC-V: Add a syscall for HW probing")
+functions: arch/riscv/kernel/sys_riscv.c:hwprobe_arch_id
+fixes: ea3de9ce8aa2
+diff --git a/arch/riscv/kernel/sys_riscv.c b/arch/riscv/kernel/sys_riscv.c
+index 849b4170629d..c569dac7452e 100644
+--- a/arch/riscv/kernel/sys_riscv.c
++++ b/arch/riscv/kernel/sys_riscv.c
+@@ -104,6 +104,8 @@ static void hwprobe_arch_id(struct riscv_hwprobe *pair,
+ 		}
+ 
+-		if (first)
++		if (first) {
+ 			id = cpu_id;
++			first = false;
++		}
+ 
+ 		/*
+
+##### R038
+=== b09313dd2e72 R 2023-04-26 +1/-1
+RISC-V: hwprobe: Explicity check for -1 in vdso init
+
+id_bitsmash is unsigned. We need to explicitly check for -1, rather
+than use > 0.
+
+Fixes: aa5af0aa90ba ("RISC-V: Add hwprobe vDSO function and data")
+functions: arch/riscv/kernel/sys_riscv.c:init_hwprobe_vdso_data
+fixes: aa5af0aa90ba
+diff --git a/arch/riscv/kernel/sys_riscv.c b/arch/riscv/kernel/sys_riscv.c
+index c569dac7452e..5db29683ebee 100644
+--- a/arch/riscv/kernel/sys_riscv.c
++++ b/arch/riscv/kernel/sys_riscv.c
+@@ -283,5 +283,5 @@ static int __init init_hwprobe_vdso_data(void)
+ 	 * vDSO should defer to the kernel for exotic cpu masks.
+ 	 */
+-	avd->homogeneous_cpus = (id_bitsmash > 0);
++	avd->homogeneous_cpus = id_bitsmash != 0 && id_bitsmash != -1;
+ 	return 0;
+ }
+
+##### R039
+=== 41cad8284d5e R 2023-04-27 +13/-14
+RISC-V: Align SBI probe implementation with spec
+
+sbi_probe_extension() is specified with "Returns 0 if the given SBI
+extension ID (EID) is not available, or 1 if it is available unless
+defined as any other non-zero value by the implementation."
+Additionally, sbiret.value is a long. Fix the implementation to
+ensure any nonzero long value is considered a success, rather
+than only positive int values.
+
+Fixes: b9dcd9e41587 ("RISC-V: Add basic support for SBI v0.2")
+functions: arch/riscv/kernel/cpu_ops.c:cpu_set_ops, arch/riscv/kernel/sbi.c:sbi_probe_extension, arch/riscv/kernel/sbi.c:sbi_init, arch/riscv/kvm/main.c:riscv_kvm_init, drivers/cpuidle/cpuidle-riscv-sbi.c:sbi_cpuidle_init, drivers/perf/riscv_pmu_sbi.c:pmu_sbi_devinit
+fixes: b9dcd9e41587
+ arch/riscv/include/asm/sbi.h        |  2 +-
+ arch/riscv/kernel/cpu_ops.c         |  2 +-
+ arch/riscv/kernel/sbi.c             | 17 ++++++++---------
+ arch/riscv/kvm/main.c               |  2 +-
+ drivers/cpuidle/cpuidle-riscv-sbi.c |  2 +-
+ drivers/perf/riscv_pmu_sbi.c        |  2 +-
+ 6 files changed, 13 insertions(+), 14 deletions(-)
+diff --git a/arch/riscv/include/asm/sbi.h b/arch/riscv/include/asm/sbi.h
+index acab4410ef2a..5b4a1bf5f439 100644
+--- a/arch/riscv/include/asm/sbi.h
++++ b/arch/riscv/include/asm/sbi.h
+@@ -296,5 +296,5 @@ int sbi_remote_hfence_vvma_asid(const struct cpumask *cpu_mask,
+ 				unsigned long size,
+ 				unsigned long asid);
+-int sbi_probe_extension(int ext);
++long sbi_probe_extension(int ext);
+ 
+ /* Check if current SBI specification version is 0.1 or not */
+diff --git a/arch/riscv/kernel/cpu_ops.c b/arch/riscv/kernel/cpu_ops.c
+index 8275f237a59d..eb479a88a954 100644
+--- a/arch/riscv/kernel/cpu_ops.c
++++ b/arch/riscv/kernel/cpu_ops.c
+@@ -28,5 +28,5 @@ void __init cpu_set_ops(int cpuid)
+ {
+ #if IS_ENABLED(CONFIG_RISCV_SBI)
+-	if (sbi_probe_extension(SBI_EXT_HSM) > 0) {
++	if (sbi_probe_extension(SBI_EXT_HSM)) {
+ 		if (!cpuid)
+ 			pr_info("SBI HSM extension detected\n");
+diff --git a/arch/riscv/kernel/sbi.c b/arch/riscv/kernel/sbi.c
+index 92b9b759ab3d..c672c8ba9a2a 100644
+--- a/arch/riscv/kernel/sbi.c
++++ b/arch/riscv/kernel/sbi.c
+@@ -525,7 +525,7 @@ static void sbi_srst_power_off(void)
+  * @extid: The extension ID to be probed.
+  *
+- * Return: Extension specific nonzero value f yes, -ENOTSUPP otherwise.
++ * Return: 1 or an extension specific nonzero value if yes, 0 otherwise.
+  */
+-int sbi_probe_extension(int extid)
++long sbi_probe_extension(int extid)
+ {
+ 	struct sbiret ret;
+@@ -534,8 +534,7 @@ int sbi_probe_extension(int extid)
+ 			0, 0, 0, 0, 0);
+ 	if (!ret.error)
+-		if (ret.value)
+-			return ret.value;
++		return ret.value;
+ 
+-	return -ENOTSUPP;
++	return 0;
+ }
+ EXPORT_SYMBOL(sbi_probe_extension);
+@@ -600,5 +599,5 @@ void __init sbi_init(void)
+ 		pr_info("SBI implementation ID=0x%lx Version=0x%lx\n",
+ 			sbi_get_firmware_id(), sbi_get_firmware_version());
+-		if (sbi_probe_extension(SBI_EXT_TIME) > 0) {
++		if (sbi_probe_extension(SBI_EXT_TIME)) {
+ 			__sbi_set_timer = __sbi_set_timer_v02;
+ 			pr_info("SBI TIME extension detected\n");
+@@ -606,5 +605,5 @@ void __init sbi_init(void)
+ 			__sbi_set_timer = __sbi_set_timer_v01;
+ 		}
+-		if (sbi_probe_extension(SBI_EXT_IPI) > 0) {
++		if (sbi_probe_extension(SBI_EXT_IPI)) {
+ 			__sbi_send_ipi	= __sbi_send_ipi_v02;
+... (48 more diff lines)
+
+##### R040
+=== 4db9e253e701 R 2023-04-28 +6/-6
+riscv: Move .rela.dyn to the init sections
+
+The recent introduction of relocatable kernels prepared the move of
+.rela.dyn to the init section, but actually forgot to do so, so do it
+here.
+
+Before this patch: "Freeing unused kernel image (initmem) memory: 2592K"
+After this patch:  "Freeing unused kernel image (initmem) memory: 6288K"
+
+The difference corresponds to the size of the .rela.dyn section:
+"[42] .rela.dyn         RELA             ffffffff8197e798  0127f798
+       000000000039c660  0000000000000018   A      47     0     8"
+
+Fixes: 559d1e45a16d ("riscv: Use --emit-relocs in order to move .rela.dyn in init")
+functions: 
+fixes: 559d1e45a16d
+diff --git a/arch/riscv/kernel/vmlinux.lds.S b/arch/riscv/kernel/vmlinux.lds.S
+index 305877d85e96..f03b5697f8e0 100644
+--- a/arch/riscv/kernel/vmlinux.lds.S
++++ b/arch/riscv/kernel/vmlinux.lds.S
+@@ -105,4 +105,10 @@ SECTIONS
+ 	}
+ 
++	.rela.dyn : ALIGN(8) {
++		__rela_dyn_start = .;
++		*(.rela .rela*)
++		__rela_dyn_end = .;
++	}
++
+ 	__init_data_end = .;
+ 
+@@ -131,10 +137,4 @@ SECTIONS
+ 	}
+ 
+-	.rela.dyn : ALIGN(8) {
+-		__rela_dyn_start = .;
+-		*(.rela .rela*)
+-		__rela_dyn_end = .;
+-	}
+-
+ 	.got : { *(.got*) }
+ 
+
+##### R041
+=== a2a58b5ca124 R 2023-04-29 +6/-8
+RISC-V: fix sifive and thead section mismatches in errata
+
+When CONFIG_MODULES is set, __init_or_module becomes <empty>, but when
+CONFIG_MODULES is not set, __init_or_module becomes __init.
+In the latter case, it causes section mismatch warnings:
+
+WARNING: modpost: vmlinux.o: section mismatch in reference: riscv_fill_cpu_mfr_info (section: .text) -> sifive_errata_patch_func (section: .init.text)
+WARNING: modpost: vmlinux.o: section mismatch in reference: riscv_fill_cpu_mfr_info (section: .text) -> thead_errata_patch_func (section: .init.text)
+
+Fixes: bb3f89487fd9 ("RISC-V: hwprobe: Remove __init on probe_vendor_features()")
+functions: 
+fixes: bb3f89487fd9
+diff --git a/arch/riscv/errata/sifive/errata.c b/arch/riscv/errata/sifive/errata.c
+index 8d8301d7b1ec..3d9a32d791f7 100644
+--- a/arch/riscv/errata/sifive/errata.c
++++ b/arch/riscv/errata/sifive/errata.c
+@@ -83,9 +83,7 @@ static void __init_or_module warn_miss_errata(u32 miss_errata)
+ }
+ 
+-void __init_or_module sifive_errata_patch_func(struct alt_entry *begin,
+-					       struct alt_entry *end,
+-					       unsigned long archid,
+-					       unsigned long impid,
+-					       unsigned int stage)
++void sifive_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
++			      unsigned long archid, unsigned long impid,
++			      unsigned int stage)
+ {
+ 	struct alt_entry *alt;
+diff --git a/arch/riscv/errata/thead/errata.c b/arch/riscv/errata/thead/errata.c
+index a86c4facc2a6..c259dc925ec1 100644
+--- a/arch/riscv/errata/thead/errata.c
++++ b/arch/riscv/errata/thead/errata.c
+@@ -84,7 +84,7 @@ static u32 thead_errata_probe(unsigned int stage,
+ }
+ 
+-void __init_or_module thead_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
+-					      unsigned long archid, unsigned long impid,
+-					      unsigned int stage)
++void thead_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
++			     unsigned long archid, unsigned long impid,
++			     unsigned int stage)
+ {
+ 	struct alt_entry *alt;
+
+##### R042
+=== f9c4bbddece7 R 2023-05-01 +1/-0
+riscv: compat_syscall_table: Fixup compile warning
+
+../arch/riscv/kernel/compat_syscall_table.c:12:41: warning: initialized
+field overwritten [-Woverride-init]
+   12 | #define __SYSCALL(nr, call)      [nr] = (call),
+      |                                         ^
+../include/uapi/asm-generic/unistd.h:567:1: note: in expansion of macro
+'__SYSCALL'
+  567 | __SYSCALL(__NR_semget, sys_semget)
+
+Fixes: 59c10c52f573 ("riscv: compat: syscall: Add compat_sys_call_table implementation")
+functions: 
+fixes: 59c10c52f573
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index a6a03edfd86e..fbdccc21418a 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -10,4 +10,5 @@ CFLAGS_REMOVE_sbi.o	= $(CC_FLAGS_FTRACE)
+ endif
+ CFLAGS_syscall_table.o	+= $(call cc-option,-Wno-override-init,)
++CFLAGS_compat_syscall_table.o += $(call cc-option,-Wno-override-init,)
+ 
+ ifdef CONFIG_KEXEC
+
+##### R043
+=== 3b90b09af5be R 2023-05-04 +3/-6
+riscv: Fix orphan section warnings caused by kernel/pi
+
+kernel/pi gives rise to a lot of new sections that end up orphans: the
+first attempt to fix that tried to enumerate them all in the linker
+script, but kernel test robot with a random config keeps finding more of
+them.
+
+So prefix all those sections with .init.pi instead of only .init in
+order to be able to easily catch them all in the linker script.
+
+Fixes: 26e7aacb83df ("riscv: Allow to downgrade paging mode from the command line")
+functions: 
+fixes: 26e7aacb83df
+diff --git a/arch/riscv/kernel/pi/Makefile b/arch/riscv/kernel/pi/Makefile
+index 5d7cb991f2b8..7b593d44c712 100644
+--- a/arch/riscv/kernel/pi/Makefile
++++ b/arch/riscv/kernel/pi/Makefile
+@@ -23,5 +23,5 @@ KCOV_INSTRUMENT	:= n
+ $(obj)/%.pi.o: OBJCOPYFLAGS := --prefix-symbols=__pi_ \
+ 			       --remove-section=.note.gnu.property \
+-			       --prefix-alloc-sections=.init
++			       --prefix-alloc-sections=.init.pi
+ $(obj)/%.pi.o: $(obj)/%.o FORCE
+ 	$(call if_changed,objcopy)
+diff --git a/arch/riscv/kernel/vmlinux.lds.S b/arch/riscv/kernel/vmlinux.lds.S
+index f03b5697f8e0..e5f9f4677bbf 100644
+--- a/arch/riscv/kernel/vmlinux.lds.S
++++ b/arch/riscv/kernel/vmlinux.lds.S
+@@ -85,9 +85,6 @@ SECTIONS
+ 	INIT_DATA_SECTION(16)
+ 
+-	/* Those sections result from the compilation of kernel/pi/string.c */
+-	.init.pidata : {
+-		*(.init.srodata.cst8*)
+-		*(.init__bug_table*)
+-		*(.init.sdata*)
++	.init.pi : {
++		*(.init.pi*)
+ 	}
+ 
+
+##### R044
+=== 571a2a50a8fc R 2023-05-17 +4/-0
+rethook, fprobe: do not trace rethook related functions
+
+These functions are already marked as NOKPROBE to prevent recursion and
+we have the same reason to blacklist them if rethook is used with fprobe,
+since they are beyond the recursion-free region ftrace can guard.
+
+
+Fixes: f3a112c0c40d ("x86,rethook,kprobes: Replace kretprobe with rethook on x86")
+functions: 
+fixes: f3a112c0c40d
+diff --git a/arch/riscv/kernel/probes/Makefile b/arch/riscv/kernel/probes/Makefile
+index c40139e9ca47..8265ff497977 100644
+--- a/arch/riscv/kernel/probes/Makefile
++++ b/arch/riscv/kernel/probes/Makefile
+@@ -5,2 +5,4 @@ obj-$(CONFIG_KPROBES_ON_FTRACE)	+= ftrace.o
+ obj-$(CONFIG_UPROBES)		+= uprobes.o decode-insn.o simulate-insn.o
+ CFLAGS_REMOVE_simulate-insn.o = $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_rethook.o = $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_rethook_trampoline.o = $(CC_FLAGS_FTRACE)
+diff --git a/arch/s390/kernel/Makefile b/arch/s390/kernel/Makefile
+index 8983837b3565..6b2a051e1f8a 100644
+--- a/arch/s390/kernel/Makefile
++++ b/arch/s390/kernel/Makefile
+@@ -11,4 +11,5 @@ CFLAGS_REMOVE_ftrace.o		= $(CC_FLAGS_FTRACE)
+ # Do not trace early setup code
+ CFLAGS_REMOVE_early.o		= $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_rethook.o		= $(CC_FLAGS_FTRACE)
+ 
+ endif
+diff --git a/arch/x86/kernel/Makefile b/arch/x86/kernel/Makefile
+index dd61752f4c96..4070a01c11b7 100644
+--- a/arch/x86/kernel/Makefile
++++ b/arch/x86/kernel/Makefile
+@@ -18,4 +18,5 @@ CFLAGS_REMOVE_early_printk.o = -pg
+ CFLAGS_REMOVE_head64.o = -pg
+ CFLAGS_REMOVE_sev.o = -pg
++CFLAGS_REMOVE_rethook.o = -pg
+ endif
+ 
+
+##### R045
+=== 33d418da6f47 R 2023-05-19 +1/-1
+riscv: Fix unused variable warning when BUILTIN_DTB is set
+
+commit ef69d2559fe9 ("riscv: Move early dtb mapping into the fixmap
+region") wrongly moved the #ifndef CONFIG_BUILTIN_DTB surrounding the pa
+variable definition in create_fdt_early_page_table(), so move it back to
+its right place to quiet the following warning:
+
+../arch/riscv/mm/init.c: In function ‘create_fdt_early_page_table’:
+../arch/riscv/mm/init.c:925:12: warning: unused variable ‘pa’ [-Wunused-variable]
+  925 |  uintptr_t pa = dtb_pa & ~(PMD_SIZE - 1);
+
+Fixes: ef69d2559fe9 ("riscv: Move early dtb mapping into the fixmap region")
+functions: arch/riscv/mm/init.c:create_fdt_early_page_table
+fixes: ef69d2559fe9
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 747e5b1ef02d..c6bb966e4123 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -923,7 +923,7 @@ static void __init create_fdt_early_page_table(uintptr_t fix_fdt_va,
+ 					       uintptr_t dtb_pa)
+ {
++#ifndef CONFIG_BUILTIN_DTB
+ 	uintptr_t pa = dtb_pa & ~(PMD_SIZE - 1);
+ 
+-#ifndef CONFIG_BUILTIN_DTB
+ 	/* Make sure the fdt fixmap address is always aligned on PMD size */
+ 	BUILD_BUG_ON(FIX_FDT % (PMD_SIZE / PAGE_SIZE));
+
+##### R046
+=== 88ac3bbcf738 R 2023-05-19 +5/-0
+riscv/purgatory: remove PGO flags
+
+If profile-guided optimization is enabled, the purgatory ends up with
+multiple .text sections.  This is not supported by kexec and crashes the
+system.
+
+Fixes: 930457057abe ("kernel/kexec_file.c: split up __kexec_load_puragory")
+functions: 
+fixes: 930457057abe
+diff --git a/arch/riscv/purgatory/Makefile b/arch/riscv/purgatory/Makefile
+index 5730797a6b40..bd2e27f82532 100644
+--- a/arch/riscv/purgatory/Makefile
++++ b/arch/riscv/purgatory/Makefile
+@@ -36,4 +36,9 @@ CFLAGS_string.o := -D__DISABLE_EXPORTS
+ CFLAGS_ctype.o := -D__DISABLE_EXPORTS
+ 
++# When profile-guided optimization is enabled, llvm emits two different
++# overlapping text sections, which is not supported by kexec. Remove profile
++# optimization flags.
++KBUILD_CFLAGS := $(filter-out -fprofile-sample-use=% -fprofile-use=%,$(KBUILD_CFLAGS))
++
+ # When linking purgatory.ro with -r unresolved symbols are not checked,
+ # also link a purgatory.chk binary without -r to check for unresolved symbols.
+
+##### R047
+=== c6399b893043 R 2023-05-22 +0/-1
+riscv: hibernation: Remove duplicate call of suspend_restore_csrs
+
+The suspend_restore_csrs is called in both __hibernate_cpu_resume
+and the `else` of subsequent swsusp_arch_suspend.
+
+Removing the first call makes both suspend_{save,restore}_csrs
+left in swsusp_arch_suspend for clean code.
+
+Fixes: c0317210012e ("RISC-V: Add arch functions to support hibernation/suspend-to-disk")
+functions: 
+fixes: c0317210012e
+diff --git a/arch/riscv/kernel/hibernate-asm.S b/arch/riscv/kernel/hibernate-asm.S
+index 5c76671c7e15..d698dd7df637 100644
+--- a/arch/riscv/kernel/hibernate-asm.S
++++ b/arch/riscv/kernel/hibernate-asm.S
+@@ -29,5 +29,4 @@ ENTRY(__hibernate_cpu_resume)
+ 	REG_L	a0, hibernate_cpu_context
+ 
+-	suspend_restore_csrs
+ 	suspend_restore_regs
+ 
+
+##### R048
+=== 8762606ae22e R 2023-06-01 +1/-1
+riscv/purgatory: Do not use fortified string functions
+
+With the addition of -fstrict-flex-arrays=3, struct sha256_state's
+trailing array is no longer ignored by CONFIG_FORTIFY_SOURCE:
+
+struct sha256_state {
+        u32 state[SHA256_DIGEST_SIZE / 4];
+        u64 count;
+        u8 buf[SHA256_BLOCK_SIZE];
+};
+
+This means that the memcpy() calls with "buf" as a destination in
+sha256.c's code will attempt to perform run-time bounds checking, which
+could lead to calling missing functions, specifically a potential
+WARN_ONCE, which isn't callable from purgatory.
+
+Bisected-by: "Joan Bruguera Micó" <joanbrugueram@gmail.com>
+Fixes: df8fc4e934c1 ("kbuild: Enable -fstrict-flex-arrays=3")
+functions: 
+fixes: df8fc4e934c1
+diff --git a/arch/riscv/purgatory/Makefile b/arch/riscv/purgatory/Makefile
+index 5730797a6b40..8c73360c42bb 100644
+--- a/arch/riscv/purgatory/Makefile
++++ b/arch/riscv/purgatory/Makefile
+@@ -32,5 +32,5 @@ $(obj)/sha256.o: $(srctree)/lib/crypto/sha256.c FORCE
+ 	$(call if_changed_rule,cc_o_c)
+ 
+-CFLAGS_sha256.o := -D__DISABLE_EXPORTS
++CFLAGS_sha256.o := -D__DISABLE_EXPORTS -D__NO_FORTIFY
+ CFLAGS_string.o := -D__DISABLE_EXPORTS
+ CFLAGS_ctype.o := -D__DISABLE_EXPORTS
+
+##### R049
+=== 91afbaafd6b1 R 2023-06-09 +0/-1
+riscv: hibernate: remove WARN_ON in save_processor_state
+
+During hibernation or restoration, freeze_secondary_cpus
+checks num_online_cpus via BUG_ON, and the subsequent
+save_processor_state also does the checking with WARN_ON.
+
+In the case of CONFIG_PM_SLEEP_SMP=n, freeze_secondary_cpus
+is not defined, but the sole possible condition to disable
+CONFIG_PM_SLEEP_SMP is !SMP where num_online_cpus is always 1.
+We also don't have to check it in save_processor_state.
+
+So remove the unnecessary checking in save_processor_state.
+
+Fixes: c0317210012e ("RISC-V: Add arch functions to support hibernation/suspend-to-disk")
+functions: arch/riscv/kernel/hibernate.c:save_processor_state
+fixes: c0317210012e
+diff --git a/arch/riscv/kernel/hibernate.c b/arch/riscv/kernel/hibernate.c
+index 264b2dcdd67e..671b686c0158 100644
+--- a/arch/riscv/kernel/hibernate.c
++++ b/arch/riscv/kernel/hibernate.c
+@@ -81,5 +81,4 @@ int pfn_is_nosave(unsigned long pfn)
+ void notrace save_processor_state(void)
+ {
+-	WARN_ON(num_online_cpus() != 1);
+ }
+ 

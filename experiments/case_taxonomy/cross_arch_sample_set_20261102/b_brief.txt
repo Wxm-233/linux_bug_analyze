@@ -1,0 +1,1291 @@
+===== B401 selftests/bpf: Define SYS_PREFIX for riscv
+SYS_PREFIX was missing for a RISC-V, which made a couple of kprobe
+tests fail.
+Add missing SYS_PREFIX for RISC-V.
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+===== B402 libbpf: Fix syscall access arguments on riscv
+Since commit 08d0ce30e0e4 ("riscv: Implement syscall wrappers"), riscv
+selects ARCH_HAS_SYSCALL_WRAPPER so let's use the generic implementation
+of PT_REGS_SYSCALL_REGS().
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+===== B403 selftests/bpf: Define SYS_NANOSLEEP_KPROBE_NAME for riscv
+Add missing sys_nanosleep name for RISC-V, which is used by some tests
+(e.g. attach_probe).
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+===== B404 drivers: perf: Do not broadcast to other cpus when starting a counter
+This command:
+$ perf record -e cycles:k -e instructions:k -c 10000 -m 64M dd if=/dev/zero of=/dev/null count=1000
+gives rise to this kernel warning:
+[  444.364395] WARNING: CPU: 0 PID: 104 at kernel/smp.c:775 smp_call_function_many_cond+0x42c/0x436
+[  444.364515] Modules linked in:
+[  444.364657] CPU: 0 PID: 104 Comm: perf-exec Not tainted 6.6.0-rc6-00051-g391df82e8ec3-dirty #73
+===== B405 cifs: Fix encryption of cleared, but unset rq_iter data buffers
+Each smb_rqst struct contains two things: an array of kvecs (rq_iov) that
+contains the protocol data for an RPC op and an iterator (rq_iter) that
+contains the data payload of an RPC op.  When an smb_rqst is allocated
+rq_iter is it always cleared, but we don't set it up unless we're going to
+use it.
+The functions that determines the size of the ciphertext buffer that will
+===== B406 tools: Disable __packed attribute compiler warning due to -Werror=attributes
+Noticed on several perf tools cross build test containers:
+This comes from the kernel, where the -Wattributes and -Wpacked isn't
+used, -Wpacked is already disabled, do it for the attributes as well.
+Fixes: a91c987254651443 ("perf tools: Add get_unaligned_leNN()")
+===== B407 tools: Disable __packed attribute compiler warning due to -Werror=attributes
+Noticed on several perf tools cross build test containers:
+This comes from the kernel, where the -Wattributes and -Wpacked isn't
+used, -Wpacked is already disabled, do it for the attributes as well.
+Fixes: a91c987254651443 ("perf tools: Add get_unaligned_leNN()")
+===== B408 drivers: perf: Check find_first_bit() return value
+We must check the return value of find_first_bit() before using the
+return value as an index array since it happens to overflow the array
+and then panic:
+[  107.318430] Kernel BUG [#1]
+[  107.319434] CPU: 3 PID: 1238 Comm: kill Tainted: G            E      6.6.0-rc6ubuntu-defconfig #2
+[  107.319465] Hardware name: riscv-virtio,qemu (DT)
+===== B409 wifi: iwlwifi: fix system commands group ordering
+The commands should be sorted inside the group definition.
+Fix the ordering so we won't get following warning:
+WARN_ON(iwl_cmd_groups_verify_sorted(trans_cfg))
+Fixes: b6e3d1ba4fcf ("wifi: iwlwifi: mvm: implement new firmware API for statistics")
+===== B410 dt-bindings: timer: thead,c900-aclint-mtimer: separate mtime and mtimecmp regs
+The timer registers of aclint don't follow the clint layout and can
+be mapped on any different offset. As sg2042 uses separated timer
+and mswi for its clint, it should follow the aclint spec and have
+separated registers.
+The previous patch introduced a new type of T-HEAD aclint timer which
+has clint timer layout. Although it has the clint timer layout, it
+===== B411 media: chips-media: wave5: Requires GENERIC_ALLOCATOR
+This driver uses the API that is provided by GENERIC_ALLOCATOR API, so
+select it to prevent build errors:
+riscv32-linux-ld: drivers/media/platform/chips-media/wave5/wave5-vpu.o: in function `.L37':
+wave5-vpu.c:(.text+0x468): undefined reference to `of_gen_pool_get'
+riscv32-linux-ld: drivers/media/platform/chips-media/wave5/wave5-vdi.o: in function `.L116':
+wave5-vdi.c:(.text+0xaac): undefined reference to `gen_pool_dma_alloc'
+===== B412 KVM: riscv: selftests: Fix get-reg-list print_reg defaults
+print_reg() will print everything it knows when it encounters
+a register ID it's unfamiliar with in the default cases of its
+decoding switches. Fix several issues with these (until now,
+never tested) paths; missing newlines in printfs, missing
+complement operator in mask, and missing return in order to
+avoid continuing to decode.
+===== B413 dt-bindings: riscv: cpus: Clarify mmu-type interpretation
+The current description implies that only a single address translation
+mode is available to the operating system. However, some implementations
+support multiple address translation modes, and the operating system is
+free to choose between them.
+Per the RISC-V privileged specification, Sv48 implementations must also
+implement Sv39, and likewise Sv57 implies support for Sv48. This means
+===== B414 kdump: defer the insertion of crashkernel resources
+In /proc/iomem, sub-regions should be inserted after their parent,
+otherwise the insertion of parent resource fails.  But after generic
+crashkernel reservation applied, in both RISC-V and ARM64 (LoongArch will
+also use generic reservation later on), crashkernel resources are inserted
+before their parent, which causes the parent disappear in /proc/iomem.  So
+we defer the insertion of crashkernel resources to an early_initcall().
+===== B415 cxl/region: use %pap format to print resource_size_t
+Use "%pap" to print a resource_size_t (phys_addr_t derived type)
+to prevent build warnings on 32-bit arches (seen on i386 and
+riscv-32).
+../drivers/cxl/core/region.c: In function 'alloc_hpa':
+../drivers/cxl/core/region.c:556:25: warning: format '%llx' expects argument of type 'long long unsigned int', but argument 5 has type 'resource_size_
+Fixes: 7984d22f1315 ("cxl/region: Add dev_dbg() detail on failure to allocate HPA space")
+===== B416 RISC-V: selftests: cbo: Ensure asm operands match constraints
+The 'i' constraint expects a constant operand, which fn and its
+constant derivative MK_CBO(fn) are, but passing fn through a function
+as a parameter and using a local variable for MK_CBO(fn) allow the
+compiler to lose sight of that when no optimization is done. Use
+a macro instead of a function and skip the local variable to ensure
+the compiler uses constants, matching the asm constraints.
+===== B417 irqchip/sifive-plic: Enable interrupt if needed before EOI
+RISC-V PLIC cannot "end-of-interrupt" (EOI) disabled interrupts, as
+explained in the description of Interrupt Completion in the PLIC spec:
+"The PLIC signals it has completed executing an interrupt handler by
+writing the interrupt ID it received from the claim to the claim/complete
+register. The PLIC does not check whether the completion ID is the same
+as the last claim ID for that target. If the completion ID does not match
+===== B418 cache: ax45mp_cache: Align end size to cache boundary in ax45mp_dma_cache_wback()
+Align the end size to cache boundary size in ax45mp_dma_cache_wback()
+callback likewise done in ax45mp_dma_cache_inv() callback.
+Additionally return early in case of start == end.
+Fixes: d34599bcd2e4 ("cache: Add L2 cache management for Andes AX45MP RISC-V core")
+===== B419 tty: hvc: Don't enable the RISC-V SBI console by default
+The new SBI console has the same problem as the old one: there's only
+one shared backing hardware and no synchronization, so the two drivers
+end up stepping on each other.  This was the same issue the old SBI-0.1
+console drivers had, but that was disabled by default when SBI-0.1 was.
+So just mark the new driver as nonportable.
+Fixes: 88ead68e764c ("tty: Add SBI debug console support to HVC SBI driver")
+===== B420 Introduce cpu_dcache_is_aliasing() across all architectures
+Introduce a generic way to query whether the data cache is virtually
+aliased on all architectures. Its purpose is to ensure that subsystems
+which are incompatible with virtually aliased data caches (e.g. FS_DAX)
+can reliably query this.
+For data cache aliasing, there are three scenarios dependending on the
+architecture. Here is a breakdown based on my understanding:
+===== B421 irqchip/riscv-intc: Fix low-level interrupt handler setup for AIA
+Use riscv_intc_aia_irq() as the low-level interrupt handler instead of the
+existing riscv_intc_irq() default handler to make demultiplexing work
+correctly.
+Also print "using AIA" in the INTC boot banner when AIA is available.
+Fixes: 3c46fc5b5507 ("irqchip/riscv-intc: Add support for RISC-V AIA")
+===== B422 drivers: perf: added capabilities for legacy PMU
+Added the PERF_PMU_CAP_NO_INTERRUPT flag because the legacy pmu driver
+does not provide sampling capabilities
+Added the PERF_PMU_CAP_NO_EXCLUDE flag because the legacy pmu driver
+does not provide the ability to disable counter incrementation in
+different privilege modes
+Fixes: 9b3e150e310e ("RISC-V: Add a simple platform driver for RISC-V  legacy perf")
+===== B423 drivers: perf: ctr_get_width function for legacy is not defined
+With parameters CONFIG_RISCV_PMU_LEGACY=y and CONFIG_RISCV_PMU_SBI=n
+linux kernel crashes when you try perf record:
+$ perf record ls
+[ 46.749286] Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
+[ 46.750199] Oops [#1]
+[ 46.750342] Modules linked in:
+===== B424 clocksource/drivers/timer-riscv: Clear timer interrupt on timer initialization
+In the RISC-V specification, the stimecmp register doesn't have a default
+value. To prevent the timer interrupt from being triggered during timer
+initialization, clear the timer interrupt by writing stimecmp with a
+maximum value.
+Fixes: 9f7a8ff6391f ("RISC-V: Prefer sstc extension if available")
+===== B425 mm: recover pud_leaf() definitions in nopmd case
+This reverts one change in commit 924bd6a8c967 ("mm/x86: drop two
+unnecessary pud_leaf() definitions").
+One issue with that is it broke nopmd builds for at least both arm64 and
+riscv (CONFIG_PGTABLE_LEVELS=2).  The other issue is it was overlooked that
+it's a common change rather than x86 specific (relevant to the commit
+message of the commit).
+===== B426 irqchip/riscv-intc: Fix use of AIA interrupts 32-63 on riscv32
+riscv_intc_custom_base is initialized to BITS_PER_LONG, so the second
+check passes even though AIA provides 64 interrupts. Adjust the condition to
+only check the custom range for interrupts outside the standard range, and
+adjust the standard range when AIA is available.
+Fixes: 3c46fc5b5507 ("irqchip/riscv-intc: Add support for RISC-V AIA")
+Fixes: 678c607ecf8a ("irqchip/riscv-intc: Fix low-level interrupt handler setup for AIA")
+===== B427 drivers/perf: riscv: Disable PERF_SAMPLE_BRANCH_* while not supported
+RISC-V perf driver does not yet support branch sampling. Although the
+specification is in the works [0], it is best to disable such events
+until support is available, otherwise we will get unexpected results.
+Due to this reason, two riscv bpf testcases get_branch_snapshot and
+perf_branches/perf_branches_hw fail.
+Fixes: f5bfa23f576f ("RISC-V: Add a perf core library for pmu drivers")
+===== B428 wireguard: selftests: set RISCV_ISA_FALLBACK on riscv{32,64}
+This option is needed to continue booting with QEMU. Recent changes that
+made this optional meant that it gets unset in the test harness, and so
+WireGuard CI has been broken. Fix this by simply setting this option.
+Fixes: 496ea826d1e1 ("RISC-V: provide Kconfig & commandline options to control parsing "riscv,isa"")
+===== B429 hexagon: vmlinux.lds.S: handle attributes section
+After the linked LLVM change, the build fails with
+CONFIG_LD_ORPHAN_WARN_LEVEL="error", which happens with allmodconfig:
+Handle the attributes section in a similar manner as arm and riscv by
+adding it after the primary ELF_DETAILS grouping in vmlinux.lds.S, which
+fixes the error.
+Fixes: 113616ec5b64 ("hexagon: select ARCH_WANT_LD_ORPHAN_WARN")
+===== B430 bpf: verifier: reject addr_space_cast insn without arena
+The verifier allows using the addr_space_cast instruction in a program
+that doesn't have an associated arena. This was caught in the form an
+invalid memory access in do_misc_fixups() when while converting
+addr_space_cast to a normal 32-bit mov, env->prog->aux->arena was
+dereferenced to check for BPF_F_NO_USER_CONV flag.
+Reject programs that include the addr_space_cast instruction but don't
+===== B431 RISC-V: selftests: cbo: Ensure asm operands match constraints, take 2
+Commit 0de65288d75f ("RISC-V: selftests: cbo: Ensure asm operands
+match constraints") attempted to ensure MK_CBO() would always
+provide to a compile-time constant when given a constant, but
+cpu_to_le32() isn't necessarily going to do that. Switch to manually
+shifting the bytes, when needed, to finally get this right.
+Fixes: a29e2a48afe3 ("RISC-V: selftests: Add CBO tests")
+===== B432 rust: make mutually exclusive with CFI_CLANG
+On RISC-V and arm64, and presumably x86, if CFI_CLANG is enabled,
+loading a rust module will trigger a kernel panic. Support for
+sanitisers, including kcfi (CFI_CLANG), is in the works, but for now
+they're nightly-only options in rustc. Make RUST depend on !CFI_CLANG
+to prevent configuring a kernel without symmetrical support for kfi.
+[ Matthew Maurer writes [1]:
+===== B433 cache: sifive_ccache: Silence unused variable warning
+With W=1 and CONFIG_RISCV_NONSTANDARD_CACHE_OPS=n, GCC warns:
+drivers/cache/sifive_ccache.c: In function 'sifive_ccache_init':
+drivers/cache/sifive_ccache.c:293:23: warning: variable 'quirks' set but not used [-Wunused-but-set-variable]
+This is expected, since QUIRK_NONSTANDARD_CACHE_OPS is the only quirk
+still handled in this function.
+Fixes: c90847bcbfb6 ("cache: sifive_ccache: Partially convert to a platform driver")
+===== B434 irqchip/riscv-imsic: Fix boot time update effective affinity warning
+Currently, the following warning is observed on the QEMU virt machine:
+genirq: irq_chip APLIC-MSI-d000000.aplic did not update eff. affinity mask of irq 12
+The above warning is because the IMSIC driver does not set the initial
+value of effective affinity in the interrupt descriptor. To address this,
+initialize the effective affinity in imsic_irq_domain_alloc().
+Fixes: 027e125acdba ("irqchip/riscv-imsic: Add device MSI domain support for platform devices")
+===== B435 bpf: verifier: prevent userspace memory access
+With BPF_PROBE_MEM, BPF allows de-referencing an untrusted pointer. To
+thwart invalid memory accesses, the JITs add an exception table entry
+for all such accesses. But in case the src_reg + offset is a userspace
+address, the BPF program might read that memory if the user has
+mapped it.
+Make the verifier add guard instructions around such memory accesses and
+===== B436 LoongArch: Fix callchain parse error with kernel tracepoint events
+In order to fix perf's callchain parse error for LoongArch, we implement
+perf_arch_fetch_caller_regs() which fills several necessary registers
+used for callchain unwinding, including sp, fp, and era. This is similar
+to the following commits.
+commit b3eac0265bf6:
+("arm: perf: Fix callchain parse error with kernel tracepoint events")
+===== B437 riscv: selftests: Add hwprobe binaries to .gitignore
+The cbo and which-cpu hwprobe selftests leave their artifacts in the
+kernel tree and end up being tracked by git. Add the binaries to the
+hwprobe selftest .gitignore so this no longer happens.
+Fixes: a29e2a48afe3 ("RISC-V: selftests: Add CBO tests")
+Fixes: ef7d6abb2cf5 ("RISC-V: selftests: Add which-cpus hwprobe test")
+===== B438 irqchip: riscv-imsic: Fixup riscv_ipi_set_virq_range() conflict
+There was a semantic conflict between 21a8f8a0eb35 ("irqchip: Add RISC-V
+incoming MSI controller early driver") and dc892fb44322 ("riscv: Use
+IPIs for remote cache/TLB flushes by default") due to an API change.
+This manifests as a build failure post-merge.
+Fixes: 0bfbc914d943 ("Merge tag 'riscv-for-linus-6.10-mw1' of git://git.kernel.org/pub/scm/linux/kernel/git/riscv/linux")
+===== B439 irqchip/riscv-imsic: Fixup riscv_ipi_set_virq_range() conflict
+There was a semantic conflict between 21a8f8a0eb35 ("irqchip: Add RISC-V
+incoming MSI controller early driver") and dc892fb44322 ("riscv: Use
+IPIs for remote cache/TLB flushes by default") due to an API change.
+This manifests as a build failure post-merge.
+Fixes: 0bfbc914d943 ("Merge tag 'riscv-for-linus-6.10-mw1' of git://git.kernel.org/pub/scm/linux/kernel/git/riscv/linux")
+===== B440 irqchip/riscv-intc: Prevent memory leak when riscv_intc_init_common() fails
+When riscv_intc_init_common() fails, the firmware node allocated is not
+freed. Add the missing free().
+Fixes: 7023b9d83f03 ("irqchip/riscv-intc: Add ACPI support")
+===== B441 KVM: selftests: Fix RISC-V compilation
+Due to commit 2b7deea3ec7c ("Revert "kvm: selftests: move base
+kvm_util.h declarations to kvm_util_base.h"") kvm selftests now
+requires explicitly including ucall_common.h when needed. The commit
+added the directives everywhere they were needed at the time, but, by
+merge time, new places had been merged for RISC-V. Add those now to
+fix RISC-V's compilation.
+===== B442 Documentation: kernel-parameters: Add RISCV for nohlt
+Since commit bcf11b5e99b2 ("riscv: Enable idle generic idle loop") enable
+idle generic idle loop for RISCV, but the document is not updated
+synchronously, so update RISCV support for nohlt.
+Fixes: bcf11b5e99b2 ("riscv: Enable idle generic idle loop")
+===== B443 drm/amd/display: Disable CONFIG_DRM_AMD_DC_FP for RISC-V with clang
+Commit 77acc6b55ae4 ("riscv: add support for kernel-mode FPU") and
+commit a28e4b672f04 ("drm/amd/display: use ARCH_HAS_KERNEL_FPU_SUPPORT")
+enabled support for CONFIG_DRM_AMD_DC_FP with RISC-V. Unfortunately,
+this exposed -Wframe-larger-than warnings (which become fatal with
+CONFIG_WERROR=y) when building ARCH=riscv allmodconfig with clang:
+Many functions in this file use a large number of parameters, which must
+===== B444 randomize_kstack: Remove non-functional per-arch entropy filtering
+An unintended consequence of commit 9c573cd31343 ("randomize_kstack:
+Improve entropy diffusion") was that the per-architecture entropy size
+filtering reduced how many bits were being added to the mix, rather than
+how many bits were being used during the offsetting. All architectures
+fell back to the existing default of 0x3FF (10 bits), which will consume
+at most 1KiB of stack space. It seems that this is working just fine,
+===== B445 randomize_kstack: Remove non-functional per-arch entropy filtering
+An unintended consequence of commit 9c573cd31343 ("randomize_kstack:
+Improve entropy diffusion") was that the per-architecture entropy size
+filtering reduced how many bits were being added to the mix, rather than
+how many bits were being used during the offsetting. All architectures
+fell back to the existing default of 0x3FF (10 bits), which will consume
+at most 1KiB of stack space. It seems that this is working just fine,
+===== B446 syscalls: fix compat_sys_io_pgetevents_time64 usage
+Using sys_io_pgetevents() as the entry point for compat mode tasks
+works almost correctly, but misses the sign extension for the min_nr
+and nr arguments.
+This was addressed on parisc by switching to
+compat_sys_io_pgetevents_time64() in commit 6431e92fc827 ("parisc:
+io_pgetevents_time64() needs compat syscall in 32-bit compat mode"),
+===== B447 documentation: Fix riscv cmodx example
+ON/OFF in the keys was swapped between the first and second argument of
+the prctl. The prctl key is always PR_RISCV_SET_ICACHE_FLUSH_CTX, and
+the second argument can be PR_RISCV_CTX_SW_FENCEI_ON or
+PR_RISCV_CTX_SW_FENCEI_OFF.
+Fixes: 6a08e4709c58 ("documentation: Document PR_RISCV_SET_ICACHE_FLUSH_CTX prctl")
+===== B448 drivers/perf: riscv: Do not update the event data if uptodate
+In case of an counter overflow, the event data may get corrupted
+if called from an external overflow handler. This happens because
+we can't update the counter without starting it when SBI PMU
+extension is in use. However, the prev_count has been already
+updated at the first pass while the counter value is still the
+old one.
+===== B449 riscv: selftests: Fix vsetivli args for clang
+Clang does not support implicit LMUL in the vset* instruction sequences.
+Introduce an explicit LMUL in the vsetivli instruction.
+Fixes: 9d5328eeb185 ("riscv: selftests: Add signal handling vector tests")
+===== B450 MAINTAINERS: drop riscv list from cache controllers
+When adding the bindings for cache controllers to the MAINTAINERS entry,
+I forgot to drop the riscv mailing list - and so completely unrelated to
+riscv stuff is now being sent there. Drop it.
+Fixes: 4ca47d8bcca0 ("MAINTAINERS: add cache binding directory to cache driver entry")
+===== B451 perf arch events: Fix duplicate RISC-V SBI firmware event name
+Currently, the RISC-V firmware JSON file has duplicate event name
+"FW_SFENCE_VMA_RECEIVED". According to the RISC-V SBI PMU extension[1],
+the event name should be "FW_SFENCE_VMA_ASID_SENT".
+Before this patch:
+$ perf list
+firmware:
+===== B452 KVM: riscv: selftests: Fix compile error
+Fix compile error introduced by commit d27c34a73514 ("KVM: riscv:
+selftests: Add some Zc* extensions to get-reg-list test"). These
+4 lines should be end with ";".
+Fixes: d27c34a73514 ("KVM: riscv: selftests: Add some Zc* extensions to get-reg-list test")
+===== B453 perf: riscv: Fix selecting counters in legacy mode
+It is required to check event type before checking event config.
+Events with the different types can have the same config.
+This check is missed for legacy mode code
+For such perf usage:
+driver will try to force both events to CYCLE counter.
+This commit implements event type check before forcing
+===== B454 uretprobe: change syscall number, again
+Despite multiple attempts to get the syscall number assignment right
+for the newly added uretprobe syscall, we ended up with a bit of a mess:
+There are two ways to make it consistent again: either list it with
+the same syscall number on all architectures, or only list it on x86
+but not in scripts/syscall.tbl and asm-generic/unistd.h.
+Based on the most recent discussion, it seems like we won't need it
+===== B455 binfmt_flat: Fix corruption when not offsetting data start
+Commit 04d82a6d0881 ("binfmt_flat: allow not offsetting data start")
+introduced a RISC-V specific variant of the FLAT format which does
+not allocate any space for the (obsolete) array of shared library
+pointers. However, it did not disable the code which initializes the
+array, resulting in the corruption of sizeof(long) bytes before the DATA
+segment, generally the end of the TEXT segment.
+===== B456 selftests: riscv: Allow mmap test to compile on 32-bit
+Macros needed for 32-bit compilations were hidden behind 64-bit riscv
+ifdefs. Fix the 32-bit compilations by moving macros to allow the
+memory_layout test to run on 32-bit.
+Fixes: 73d05262a2ca ("selftests: riscv: Generalize mm selftests")
+===== B457 irqchip/riscv-aplic: Retrigger MSI interrupt on source configuration
+The section 4.5.2 of the RISC-V AIA specification says that "any write
+to a sourcecfg register of an APLIC might (or might not) cause the
+corresponding interrupt-pending bit to be set to one if the rectified
+input value is high (= 1) under the new source mode."
+When the interrupt type is changed in the sourcecfg register, the APLIC
+device might not set the corresponding pending bit, so the interrupt might
+===== B458 selftests: memfd_secret: don't build memfd_secret test on unsupported arches
+[1] mentions that memfd_secret is only supported on arm64, riscv, x86 and
+x86_64 for now.  It doesn't support other architectures.  I found the
+build error on arm and decided to send the fix as it was creating noise on
+KernelCI:
+memfd_secret.c: In function 'memfd_secret':
+memfd_secret.c:42:24: error: '__NR_memfd_secret' undeclared (first use in this function);
+===== B459 irqchip/sifive-plic: Probe plic driver early for Allwinner D1 platform
+The latest Linux RISC-V no longer boots on the Allwinner D1 platform
+because the sun4i_timer driver fails to get an interrupt from PLIC due to
+the recent conversion of the PLIC to a platform driver. Converting the
+sun4i timer to a platform driver does not work either because the D1 does
+not have a SBI timer available so early boot hangs. See the 'Closes:'
+link for deeper analysis.
+===== B460 cpuidle: riscv-sbi: Use scoped device node handling to fix missing of_node_put
+Two return statements in sbi_cpuidle_dt_init_states() did not drop the
+OF node reference count.  Solve the issue and simplify entire error
+handling with scoped/cleanup.h.
+Fixes: 6abf32f1d9c5 ("cpuidle: Add RISC-V SBI CPU idle driver")
+===== B461 irqchip/riscv-aplic: Fix an IS_ERR() vs NULL bug in probe()
+The devm_platform_ioremap_resource() function doesn't return NULL, it
+returns error pointers.  Fix the error handling to match.
+Fixes: 2333df5ae51e ("irqchip: Add RISC-V advanced PLIC driver for direct-mode")
+===== B462 selftests/bpf: test_loader.c:get_current_arch() should not return 0
+At the moment, when test_loader.c:get_current_arch() can't determine
+the arch, it returns 0. The arch check in run_subtest() looks as
+follows:
+	if ((get_current_arch() & spec->arch_mask) == 0) {
+		test__skip();
+		return;
+===== B463 reset: k210: fix OF node leak in probe() error path
+Driver is leaking OF node reference on memory allocation failure.
+Acquire the OF node reference after memory allocation to fix this and
+keep it simple.
+Fixes: 5a2308da9f60 ("riscv: Add Canaan Kendryte K210 reset controller")
+===== B464 drivers: perf: Fix smp_processor_id() use in preemptible code
+As reported in [1], the use of smp_processor_id() in
+pmu_sbi_device_probe() must be protected by disabling the preemption, so
+simple use get_cpu()/put_cpu() instead.
+Fixes: a8625217a054 ("drivers/perf: riscv: Implement SBI PMU snapshot function")
+===== B465 clk: starfive: jh7110-sys: Add notifier for PLL0 clock
+Add notifier function for PLL0 clock. In the function, the cpu_root clock
+should be operated by saving its current parent and setting a new safe
+parent (osc clock) before setting the PLL0 clock rate. After setting PLL0
+rate, it should be switched back to the original parent clock.
+Fixes: e2c510d6d630 ("riscv: dts: starfive: Add cpu scaling for JH7110 SoC")
+===== B466 riscv: selftests: Remove mmap hint address checks
+The mmap behavior that restricts the addresses returned by mmap caused
+unexpected behavior, so get rid of the test cases that check that
+behavior.
+Fixes: 73d05262a2ca ("selftests: riscv: Generalize mm selftests")
+... (41 more diff lines)
+===== B467 drivers/perf: riscv: Align errno for unsupported perf event
+RISC-V perf driver does not yet support PERF_TYPE_BREAKPOINT. It would
+be more appropriate to return -EOPNOTSUPP or -ENOENT for this type in
+pmu_sbi_event_map. Considering that other implementations return -ENOENT
+for unsupported perf types, let's synchronize this behavior. Due to this
+reason, a riscv bpf testcases perf_skip fail. Meanwhile, align that
+behavior to the rest of proper place.
+===== B468 irqchip/riscv-imsic: Fix output text of base address
+The "per-CPU IDs ... at base ..." info log is outputting a physical
+address, not a PPN.
+Fixes: 027e125acdba ("irqchip/riscv-imsic: Add device MSI domain support for platform devices")
+===== B469 selftests: bpf: Add missing per-arch include path
+The prog_tests programs do not include the per-arch tools include
+path, e.g. tools/arch/riscv/include. Some architectures depend those
+files to build properly.
+Include tools/arch/$(SUBARCH)/include in the selftests bpf build.
+Fixes: 6d74d178fe6e ("tools: Add riscv barrier implementation")
+===== B470 libbpf: Add missing per-arch include path
+libbpf does not include the per-arch tools include path, e.g.
+tools/arch/riscv/include. Some architectures depend those files to
+build properly.
+Include tools/arch/$(SUBARCH)/include in the libbpf build.
+Fixes: 6d74d178fe6e ("tools: Add riscv barrier implementation")
+===== B471 usb: misc: onboard_usb_dev: introduce new config symbol for usb5744 SMBus support
+Introduce new kernel config symbol for Microchip usb5744 SMBus programming
+support. Since usb5744 i2c initialization routine uses i2c SMBus APIs these
+APIs should only be invoked when kernel has I2C support. This new kernel
+config describes the dependency on I2C kernel support and fix the below
+build issues when USB_ONBOARD_DEV=y and CONFIG_I2C=m.
+riscv64-linux-ld: drivers/usb/misc/onboard_usb_dev.o:
+===== B472 net/9p/usbg: Fix build error
+When CONFIG_NET_9P_USBG=y but CONFIG_USB_LIBCOMPOSITE=m and
+CONFIG_CONFIGFS_FS=m, the following build error occurs:
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_free_func':
+	trans_usbg.c:(.text+0x124): undefined reference to `usb_free_all_descriptors'
+	riscv64-unknown-linux-gnu-ld: net/9p/trans_usbg.o: in function `usb9pfs_rx_complete':
+	trans_usbg.c:(.text+0x2d8): undefined reference to `usb_interface_id'
+===== B473 mmc: sdhci-of-dwcmshc: Prevent stale command interrupt handling
+While working with the T-Head 1520 LicheePi4A SoC, certain conditions
+arose that allowed me to reproduce a race issue in the sdhci code.
+To reproduce the bug, you need to enable the sdio1 controller in the
+device tree file
+`arch/riscv/boot/dts/thead/th1520-lichee-module-4a.dtsi` as follows:
+&sdio1 {
+===== B474 irqchip/riscv-intc: Fix SMP=n boot with ACPI
+When CONFIG_SMP is disabled, the static array rintc_acpi_data with size
+NR_CPUS is not sufficient to hold all RINTC structures passed from the
+firmware.
+All RINTC structures are required to configure IMSIC/APLIC/PLIC properly
+irrespective of SMP in the OS. So, allocate dynamic memory based on the
+number of RINTC structures in MADT to fix this issue.
+===== B475 iio: dac: Kconfig: Fix build error for ltc2664
+If REGMAP_SPI is n and LTC2664 is y, the following build error occurs:
+	riscv64-unknown-linux-gnu-ld: drivers/iio/dac/ltc2664.o: in function `ltc2664_probe':
+	ltc2664.c:(.text+0x714): undefined reference to `__devm_regmap_init_spi'
+Select REGMAP_SPI instead of REGMAP for LTC2664 to fix it.
+Fixes: 4cc2fc445d2e ("iio: dac: ltc2664: Add driver for LTC2664 and LTC2672")
+===== B476 perf jevents: fix breakage when do perf stat on system metric
+When do perf stat on sys metric, perf tool output nothing now:
+This command runs on an arm64 machine and the Soc has one DDR hw pmu
+except one armv8_cortex_a55 pmu. Their maps show as follows:
+const struct pmu_events_map pmu_events_map[] = {
+{
+	.arch = "arm64",
+===== B477 perf bpf-prologue: Remove unused file
+Commit 4a73fca22692 ("perf bpf-prologue: Remove unused file") missed
+cleaning up the header file. The code was unnecessary as Commit
+3d6dfae88917 ("perf parse-events: Remove BPF event support") removed
+building bpf-prologue.c.
+Fixes: 4a73fca22692 ("perf bpf-prologue: Remove unused file")
+deleted file mode 100644
+===== B478 pinctrl: k210: Undef K210_PC_DEFAULT
+When the temporary macro K210_PC_DEFAULT is not needed anymore,
+use its name in the #undef statement instead of
+the incorrect "DEFAULT" name.
+Fixes: d4c34d09ab03 ("pinctrl: Add RISC-V Canaan Kendryte K210 FPIOA driver")
+===== B479 irqchip/riscv-aplic: Prevent crash when MSI domain is missing
+If the APLIC driver is probed before the IMSIC driver, the parent MSI
+domain will be missing, which causes a NULL pointer dereference in
+msi_create_device_irq_domain().
+Avoid this by deferring probe until the parent MSI domain is available. Use
+dev_err_probe() to avoid printing an error message when returning
+Fixes: ca8df97fe679 ("irqchip/riscv-aplic: Add support for MSI-mode")
+===== B480 cpuidle: riscv-sbi: fix device node release in early exit of for_each_possible_cpu
+The 'np' device_node is initialized via of_cpu_device_node_get(), which
+requires explicit calls to of_node_put() when it is no longer required
+to avoid leaking the resource.
+Instead of adding the missing calls to of_node_put() in all execution
+paths, use the cleanup attribute for 'np' by means of the __free()
+macro, which automatically calls of_node_put() when the variable goes
+===== B481 of: property: fw_devlink: Do not use interrupt-parent directly
+commit 7f00be96f125 ("of: property: Add device link support for
+interrupt-parent, dmas and -gpio(s)") started adding device links for
+the interrupt-parent property. commit 4104ca776ba3 ("of: property: Add
+fw_devlink support for interrupts") and commit f265f06af194 ("of:
+property: Fix fw_devlink handling of interrupts/interrupts-extended")
+later added full support for parsing the interrupts and
+===== B482 tools: Override makefile ARCH variable if defined, but empty
+There are a number of tools (bpftool, selftests), that require a
+"bootstrap" build. Here, a bootstrap build is a build host variant of
+a target. E.g., assume that you're performing a bpftool cross-build on
+x86 to riscv, a bootstrap build would then be an x86 variant of
+bpftool. The typical way to perform the host build variant, is to pass
+"ARCH=" in a sub-make. However, if a variable has been set with a
+===== B483 riscv: selftests: Fix warnings pointer masking test
+When compiling the pointer masking tests with -Wall this warning
+is present:
+pointer_masking.c: In function ‘test_tagged_addr_abi_sysctl’:
+pointer_masking.c:203:9: warning: ignoring return value of ‘pwrite’
+declared with attribute ‘warn_unused_result’ [-Wunused-result]
+ignoring return value of ‘pwrite’ declared with attribute
+===== B484 drivers/perf: riscv: Return error for default case
+If the upper two bits has an invalid valid (0x1), the event mapping
+is not reliable as it returns an uninitialized variable.
+Return appropriate value for the default case.
+Fixes: f0c9363db2dd ("perf/riscv-sbi: Add platform specific firmware event handling")
+===== B485 PCI/MSI: Handle lack of irqdomain gracefully
+Alexandre observed a warning emitted from pci_msi_setup_msi_irqs() on a
+RISCV platform which does not provide PCI/MSI support:
+RISCV uses hierarchical interrupt domains and correctly does not implement
+the legacy fallback. The warning triggers from the legacy fallback stub.
+That warning is bogus as the PCI/MSI layer knows whether a PCI/MSI parent
+domain is associated with the device or not. There is a check for MSI-X,
+===== B486 mm: hugetlb: independent PMD page table shared count
+The folio refcount may be increased unexpectly through try_get_folio() by
+caller such as split_huge_pages.  In huge_pmd_unshare(), we use refcount
+to check whether a pmd page table is shared.  The check is incorrect if
+the refcount is increased by the above caller, and this can cause the page
+table leaked:
+The issue may be triggered by damon, offline_page, page_idle, etc, which
+===== B487 tools: selftests: riscv: Add pass message for v_initval_nolibc
+Add the pass message after we successfully complete the test.
+Fixes: 5c93c4c72fbc ("selftests: Test RISC-V Vector's first-use handler")
+===== B488 tools: selftests: riscv: Add test count for vstate_prctl
+Add the test count to drop the warning message.
+"Planned tests != run tests (0 != 1)"
+Fixes: 7cf6198ce22d ("selftests: Test RISC-V Vector prctl interface")
+===== B489 iommu/riscv: Fixup compile warning
+When __BITS_PER_LONG == 32, size_t is defined as unsigned int rather
+than unsigned long. Therefore, we should use size_t to avoid
+type-checking errors.
+Fixes: 488ffbf18171 ("iommu/riscv: Paging domain support")
+===== B490 cpufreq: Move endif to the end of Kconfig file
+It is possible to enable few cpufreq drivers, without the framework
+being enabled. This happened due to a bug while moving the entries
+earlier. Fix it.
+Fixes: 7ee1378736f0 ("cpufreq: Move CPPC configs to common Kconfig and add RISC-V")
+===== B491 rseq/selftests: Fix riscv rseq_offset_deref_addv inline asm
+When working on OpenRISC support for restartable sequences I noticed
+and fixed these two issues with the riscv support bits.
+I have compile tested this only for riscv.  However, the same fixes I
+use in the OpenRISC rseq selftests and everything passes with no issues.
+Fixes: 171586a6ab66 ("selftests/rseq: riscv: Template memory ordering and percpu access mode")
+===== B492 ubi: ubi_get_ec_info: Fix compiling error 'cast specifies array type'
+On risc V platform, there is a type conversion for the return value
+(unsigned long type) of __untagged_addr_remote() in function
+untagged_addr(). The compiler will complain when the parameter 'addr'
+is an array type:
+Fix it by converting the input parameter as a pointer.
+Fixes: 01099f635a4c ("ubi: Implement ioctl for detailed erase counters")
+===== B493 Remove stale generated 'genheaders' file
+This bogus stale file was added in commit 101971298be2 ("riscv: add a
+warning when physical memory address overflows").  It's the old location
+for what is now 'security/selinux/genheaders'.
+It looks like it got incorrectly committed back when that file was in
+the old location, and then rebasing kept the bogus file alive.
+Fixes: 101971298be2 ("riscv: add a  warning when physical memory address overflows")
+===== B494 cpuidle: Init cpuidle only for present CPUs
+for_each_possible_cpu() is currently used to initialize cpuidle
+in below cpuidle drivers:
+However, in cpu_dev_register_generic(), for_each_present_cpu()
+is used to register CPU devices which means the CPU devices are
+only registered for present CPUs and not all possible CPUs.
+With nosmp or maxcpus=0, only the boot CPU is present, lead
+===== B495 platform/x86: thinkpad_acpi: Fix NULL pointer dereferences while probing
+Some subdrivers make use of the global reference tpacpi_pdev during
+initialization, which is called from the platform driver's probe.
+However, after the commit 38b9ab80db31 ("platform/x86: thinkpad_acpi:
+Move subdriver initialization to tpacpi_pdriver's probe.") this
+variable is only properly initialized *after* probing and this can
+result in a NULL pointer dereference.
+===== B496 genirq/migration: Use irqd_get_parent_data() in irq_force_complete_move()
+Frank reported, that the common irq_force_complete_move() breaks the out of
+tree build of ia64. The reason is that ia64 uses the migration code, but
+does not have hierarchical interrupt domains enabled.
+This went unnoticed in mainline as both x86 and RISC-V have hierarchical
+domains enabled. Not that it matters for mainline, but it's still
+inconsistent.
+===== B497 Disable SLUB_TINY for build testing
+... and don't error out so hard on missing module descriptions.
+Before commit 6c6c1fc09de3 ("modpost: require a MODULE_DESCRIPTION()")
+we used to warn about missing module descriptions, but only when
+building with extra warnigns (ie 'W=1').
+After that commit the warning became an unconditional hard error.
+And it turns out not all modules have been converted despite the claims
+===== B498 scripts: Do not strip .rela.dyn section
+The .rela.dyn section contains runtime relocations and is only emitted
+for a relocatable kernel.
+riscv uses this section to relocate the kernel at runtime but that section
+is stripped from vmlinux. That prevents kexec to successfully load vmlinux
+since it does not contain the relocations info needed.
+Fixes: 559d1e45a16d ("riscv: Use --emit-relocs in order to move .rela.dyn in init")
+===== B499 selftests: coredump: Fix test failure for slow machines
+The test waits for coredump to finish by busy-waiting for the stack_values
+file to be created. The maximum wait time is 10 seconds.
+This doesn't work for slow machine (qemu-system-riscv64), because coredump
+takes longer.
+Fix it by waiting for the crashing child process to finish first.
+Fixes: 15858da53542 ("selftests: coredump: Add stackdump test")
+===== B500 selftests: coredump: Raise timeout to 2 minutes
+The test's runtime (nearly 20s) is dangerously close to the limit (30s) on
+qemu-system-riscv64:
+$ time ./stackdump_test > /dev/null
+real	0m19.210s
+user	0m0.077s
+sys	0m0.359s
+===== B501 mailbox: mchp-ipc-sbi: Fix COMPILE_TEST build error
+If COMPILE_TEST is y but RISCV_SBI is n, build fails:
+drivers/mailbox/mailbox-mchp-ipc-sbi.c: In function 'mchp_ipc_sbi_chan_send':
+drivers/mailbox/mailbox-mchp-ipc-sbi.c:119:23: error: storage size of 'ret' isn't known
+	struct sbiret ret;
+	              ^~~
+drivers/mailbox/mailbox-mchp-ipc-sbi.c:121:15: error: implicit declaration of function 'sbi_ecall' [-Werror=implicit-function-declaration]
+===== B502 selftests: coredump: Properly initialize pointer
+The buffer pointer "line" is not initialized. This pointer is passed to
+getline().
+It can still work if the stack is zero-initialized, because getline() can
+work with a NULL pointer as buffer.
+But this is obviously broken. This bug shows up while running the test on a
+riscv64 machine.
+===== B503 can: m_can: m_can_class_allocate_dev(): initialize spin lock on device probe
+The spin lock tx_handling_spinlock in struct m_can_classdev is not
+being initialized. This leads the following spinlock bad magic
+complaint from the kernel, eg. when trying to send CAN frames with
+cansend from can-utils:
+| BUG: spinlock bad magic on CPU#0, cansend/95
+|  lock: 0xff60000002ec1010, .magic: 00000000, .owner: <none>/-1, .owner_cpu: 0
+===== B504 iommu: make inclusion of riscv directory conditional
+Nothing in there is active if CONFIG_RISCV_IOMMU is not enabled, so the whole
+directory can depend on that switch as well.
+Fixes: 5c0ebbd3c6c6 ("iommu/riscv: Add RISC-V IOMMU platform device driver")
+===== B505 irqchip/riscv-imsic: Start local sync timer on correct CPU
+When starting the local sync timer to synchronize the state of a remote
+CPU it should be added on the CPU to be synchronized, not the initiating
+CPU. This results in interrupt delivery being delayed until the timer
+eventually runs (due to another mask/unmask/migrate operation) on the
+target CPU.
+Fixes: 0f67911e821c ("irqchip/riscv-imsic: Separate next and previous pointers in IMSIC vector")
+===== B506 iommu: Clear the freelist after iommu_put_pages_list()
+The commit below reworked how iommu_put_pages_list() worked to not do
+list_del() on every entry. This was done expecting all the callers to
+already re-init the list so doing a per-item deletion is not
+efficient.
+It was missed that fq_ring_free_locked() re-uses its list after calling
+iommu_put_pages_list() and so the leftover list reaches free'd struct
+===== B507 scsi: hisi_sas: Fix warning detected by sparse
+LKP reports below warning when building for RISC-V with randconfig
+configuration.
+drivers/scsi/hisi_sas/hisi_sas_v3_hw.c:4554:25: sparse:
+sparse: incorrect type in argument 4 (different base types)
+Type cast to fix this warning.
+Fixes: 4ca7fe99fc84 ("scsi: hisi_sas: Use macro instead of magic number")
+===== B508 dt-bindings: PCI: microchip,pcie-host: Fix DMA coherency property
+PolarFire SoC may be configured in a way that requires non-coherent DMA
+handling. On RISC-V, buses are coherent by default & the dma-noncoherent
+property is required to denote buses or devices that are non-coherent.
+For some reason, instead of adding dma-noncoherent to the binding
+the pointless, NOP, property dma-coherent was. Swap dma-coherent for
+dma-noncoherent.
+===== B509 ACPI: platform_profile: Avoid initializing on non-ACPI platforms
+The platform profile driver is loaded even on platforms that do not have
+ACPI enabled. The initialization of the sysfs entries was recently moved
+from platform_profile_register() to the module init call, and those
+entries need acpi_kobj to be initialized which is not the case when ACPI
+is disabled.
+This results in the following warning:
+===== B510 RISC-V: Documentation: Add enough title underlines to CMODX
+This reports as a warning in linux-next along the lines of
+Fixes: 0e07200b2af6 ("riscv: Documentation: add a description about dynamic ftrace")
+===== B511 raid6: riscv: Fix NULL pointer dereference caused by a missing clobber
+When running the raid6 user-space test program on RISC-V QEMU, there's a
+segmentation fault which seems caused by accessing a NULL pointer,
+which is the pointer variable p/q in raid6_rvv*_gen/xor_syndrome_real(),
+p/q should have been equal to dptr[x], but when I use GDB command to
+see its value, which was 0x10 like below:
+"
+===== B512 ipv6: Move fib6_config_validate() to ip6_route_add().
+syzkaller created an IPv6 route from a malformed packet, which has
+a prefix len > 128, triggering the splat below. [0]
+This is a similar issue fixed by commit 586ceac9acb7 ("ipv6: Restore
+fib6_config validation for SIOCADDRT.").
+The cited commit removed fib6_config validation from some callers
+of ip6_add_route().
+===== B513 fscrypt: Don't use problematic non-inline crypto engines
+Make fscrypt no longer use Crypto API drivers for non-inline crypto
+engines, even when the Crypto API prioritizes them over CPU-based code
+(which unfortunately it often does).  These drivers tend to be really
+problematic, especially for fscrypt's workload.  This commit has no
+effect on inline crypto engines, which are different and do work well.
+Specifically, exclude drivers that have CRYPTO_ALG_KERN_DRIVER_ONLY or
+===== B514 erofs: address D-cache aliasing
+Flush the D-cache before unlocking folios for compressed inodes, as
+they are dirtied during decompression.
+Avoid calling flush_dcache_folio() on every CPU write, since it's more
+like playing whack-a-mole without real benefit.
+It has no impact on x86 and arm64/risc-v: on x86, flush_dcache_folio()
+is a no-op, and on arm64/risc-v, PG_dcache_clean (PG_arch_1) is clear
+===== B515 nbd: fix lockdep deadlock warning
+nbd grabs device lock nbd->config_lock for updating nr_hw_queues, this
+ways cause the following lock dependency:
+===== B516 eventpoll: Replace rwlock with spinlock
+The ready event list of an epoll object is protected by read-write
+semaphore:
+The point of this design is enabling epoll to scale well with large number
+of producers, as multiple producers can hold the read lock at the same
+time.
+Unfortunately, this implementation may cause scheduling priority inversion
+===== B517 raid6: riscv: Clean up unused header file inclusion
+These two C files don't reference things defined in simd.h or types.h
+so remove these redundant #inclusions.
+Fixes: 6093faaf9593 ("raid6: Add RISC-V SIMD syndrome and recovery calculations")
+===== B518 irqchip/riscv-imsic: Don't dereference before NULL pointer check
+smatch warns about a dereference before check:
+drivers/irqchip/irq-riscv-imsic-platform.c:317 imsic_irqdomain_init() warn: variable dereferenced before check 'imsic' (see line 311)    
+Cure it by moving the firmware not assignement after the checks.
+Fixes: 59422904dd98 ("irqchip/riscv-imsic: Convert to msi_create_parent_irq_domain() helper")
+===== B519 rv: Support systems with time64-only syscalls
+Some systems (like 32-bit RISC-V) only have the 64-bit time_t versions
+of syscalls.  So handle the 32-bit time_t version of those being
+undefined.
+Fixes: f74f8bb246cf ("rv: Add rtapp_sleep monitor")
+===== B520 ACPI: RISC-V: Fix FFH_CPPC_CSR error handling
+The cppc_ffh_csr_read() and cppc_ffh_csr_write() returns Linux error
+code in "data->ret.error" so cpc_read_ffh() and cpc_write_ffh() must
+not use sbi_err_map_linux_errno() for FFH_CPPC_CSR.
+Fixes: 30f3ffbee86b ("ACPI: RISC-V: Add CPPC driver")
+===== B521 iommu/riscv: prevent NULL deref in iova_to_phys
+The riscv_iommu_pte_fetch() function returns either NULL for
+unmapped/never-mapped iova, or a valid leaf pte pointer that
+requires no further validation.
+riscv_iommu_iova_to_phys() failed to handle NULL returns.
+Prevent null pointer dereference in
+riscv_iommu_iova_to_phys(), and remove the pte validation.
+===== B522 vdso/datastore: Gate time data behind CONFIG_GENERIC_GETTIMEOFDAY
+When the generic vDSO does not provide time functions, as for example on
+riscv32, then the time data store is not necessary.
+Avoid allocating these time data pages when not used.
+Fixes: df7fcbefa710 ("vdso: Add generic time data storage")
+===== B523 arm64: kexec: initialize kexec_buf struct in load_other_segments()
+Patch series "kexec: Fix invalid field access".
+The kexec_buf structure was previously declared without initialization. 
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures.  This un-initialized field will contain garbage.
+This is also triggering a UBSAN warning when the uninitialized data was
+===== B524 copy_sighand: Handle architectures where sizeof(unsigned long) < sizeof(u64)
+With the introduction of clone3 in commit 7f192e3cd316 ("fork: add
+clone3") the effective bit width of clone_flags on all architectures was
+increased from 32-bit to 64-bit. However, the signature of the copy_*
+helper functions (e.g., copy_sighand) used by copy_process was not
+adapted.
+As such, they truncate the flags on any 32-bit architectures that
+===== B525 rust: cfi: only 64-bit arm and x86 support CFI_CLANG
+The kernel uses the standard rustc targets for non-x86 targets, and out
+of those only 64-bit arm's target has kcfi support enabled. For x86, the
+custom 64-bit target enables kcfi.
+The HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC config option that allows
+CFI_CLANG to be used in combination with RUST does not check whether the
+rustc target supports kcfi. This breaks the build on riscv (and
+===== B526 irqchip/sifive-plic: Avoid interrupt ID 0 handling during suspend/resume
+According to the PLIC specification[1], global interrupt sources are
+assigned small unsigned integer identifiers beginning at the value 1.
+An interrupt ID of 0 is reserved to mean "no interrupt".
+The current plic_irq_resume() and plic_irq_suspend() functions incorrectly
+start the loop from index 0, which accesses the register space for the
+reserved interrupt ID 0.
+===== B527 Fix CC_HAS_ASM_GOTO_OUTPUT on non-x86 architectures
+There's a silly problem with the CC_HAS_ASM_GOTO_OUTPUT test: even with
+a working compiler it will fail on some architectures simply because it
+uses the mnemonic "jmp" for testing the inline asm.
+And as reported by Geert, not all architectures use that mnemonic, so
+the test fails spuriously on such platforms (including arm and riscv,
+but also several other architectures).
+===== B528 clk: COMMON_CLK_RPMI should depend on RISCV
+The RISC-V platform management interface (RPMI) is only available on
+RISC-V platforms.  Hence add a dependency on RISCV, to prevent asking
+the user about this driver when configuring a kernel for a different
+architecture.
+Fixes: 5ba9f520f41a33c9 ("clk: Add clock driver for the RISC-V RPMI clock service group")
+===== B529 tools build: Align warning options with perf
+The feature test programs are built without enabling '-Wall -Werror'
+options. As a result, a feature may appear to be available, but later
+building in perf can fail with stricter checks.
+Make the feature test program use the same warning options as perf.
+Fixes: 1925459b4d92 ("tools build: Fix feature Makefile issues with 'O='")
+===== B530 perf python: split Clang options when invoking Popen
+When passing a list to subprocess.Popen, each element maps to one argv
+token. Current code bundles multiple Clang flags into a single element,
+something like:
+	 'test-hello.c']
+So Clang only sees one long, invalid option instead of separate flags,
+as a result, the script cannot capture any log via PIPE.
+===== B531 kbuild: Use '--strip-unneeded-symbol' for removing module device table symbols
+After commit 5ab23c7923a1 ("modpost: Create modalias for builtin
+modules"), relocatable RISC-V kernels with CONFIG_KASAN=y start failing
+when attempting to strip the module device table symbols:
+The relocation appears to come from .LASANLOC5 in .data.rel.local:
+This section appears to come from GCC for including additional
+information about global variables that may be protected by KASAN.
+===== B532 ACPI: RIMT: Fix unused function warnings when CONFIG_IOMMU_API is disabled
+When CONFIG_IOMMU_API is disabled, some functions defined outside its
+conditional scope become unused, triggering compiler warnings reported
+by the kernel test robot.
+Move these function definitions inside the #ifdef CONFIG_IOMMU_API block
+to prevent unused function warnings when the configuration is disabled.
+Fixes: 8f7729552582 ("ACPI: RISC-V: Add support for RIMT")
+===== B533 of: Skip devicetree kunit tests when RISCV+ACPI doesn't populate root node
+Starting with commit 69a8b62a7aa1 ("riscv: acpi: avoid errors caused by
+probing DT devices when ACPI is used"), riscv images no longer populate
+devicetree if ACPI is enabled. This causes unit tests to fail which require
+the root node to be set.
+Skip those tests for RISCV if the root node is not populated.
+Fixes: 69a8b62a7aa1 ("riscv: acpi: avoid errors caused by probing DT devices when ACPI is used")
+===== B534 drm/tiny: pixpaper: add explicit dependency on MMU
+The DRM_GEM_SHMEM_HELPER helper requires MMU enabled because it uses
+vmf_insert_pfn() in its mmap implementation. On NOMMU configurations
+(e.g. some RISC-V randconfig builds), this symbol is unavailable and
+selecting DRM_GEM_SHMEM_HELPER causes a modpost undefined reference:
+Normally, Kconfig prevents this helper from being selected when
+CONFIG_MMU=n. However, in some randconfig builds (such as those used by
+===== B535 irqchip/riscv-intc: Add missing free() callback in riscv_intc_domain_ops
+The irq_domain_free_irqs() helper requires that the irq_domain_ops->free
+callback is implemented. Otherwise, the kernel reports the warning message
+"NULL pointer, cannot free irq" when irq_dispose_mapping() is invoked to
+release the per-HART local interrupts.
+Set irq_domain_ops->free to irq_domain_free_irqs_top() to cure that.
+Fixes: 832f15f42646 ("RISC-V: Treat IPIs as normal Linux IRQs")
+===== B536 tools: riscv: Fixed misalignment of CSR related definitions
+The file tools/arch/riscv/include/asm/csr.h borrows from
+arch/riscv/include/asm/csr.h, and subsequent modifications
+related to CSR should maintain consistency.
+[pjw@kernel.org: dropped Fixes: lines for patches that weren't broken; removed superfluous blank line]
+===== B537 lib/crypto: riscv/chacha: Avoid s0/fp register
+In chacha_zvkb, avoid using the s0 register, which is the frame pointer,
+by reallocating KEY0 to t5. This makes stack traces available if e.g. a
+crash happens in chacha_zvkb.
+No frame pointer maintenance is otherwise required since this is a leaf
+function.
+Fixes: bb54668837a0 ("crypto: riscv - add vector crypto accelerated ChaCha20")
+===== B538 tee: fix tee_ioctl_object_invoke_arg padding
+The tee_ioctl_object_invoke_arg structure has padding on some
+architectures but not on x86-32 and a few others:
+include/linux/tee.h:474:32: error: padding struct to align 'params' [-Werror=padded]
+I expect that all current users of this are on architectures that do
+have implicit padding here (arm64, arm, x86, riscv), so make the padding
+explicit in order to avoid surprises if this later gets used elsewhere.
+===== B539 soc: renesas: Fix missing dependency on new CONFIG_CACHEMAINT_FOR_DMA
+The Kconfig menu entry was converted to a menuconfig to allow it to be
+hidden for !CONFIG_RISCV. The drivers under this new option were selected
+by some other Kconfig symbols and so an extra select CACHEMAINT_FOR_DMA is
+needed.
+Fixes: 4d1608d0ab33 ("cache: Make top level Kconfig menu a boolean dependent on RISCV")
+===== B540 lib/crypto: riscv: Add poly1305-core.S to .gitignore
+poly1305-core.S is an auto-generated file, so it should be ignored.
+Fixes: bef9c7559869 ("lib/crypto: riscv/poly1305: Import OpenSSL/CRYPTOGAMS implementation")
+new file mode 100644
+===== B541 wifi: rtl8xxxu: fix slab-out-of-bounds in rtl8xxxu_sta_add
+The driver does not set hw->sta_data_size, which causes mac80211 to
+allocate insufficient space for driver private station data in
+__sta_info_alloc(). When rtl8xxxu_sta_add() accesses members of
+struct rtl8xxxu_sta_info through sta->drv_priv, this results in a
+slab-out-of-bounds write.
+KASAN report on RISC-V (VisionFive 2) with RTL8192EU adapter:
+===== B542 dt-bindings: riscv: update ratified version of h, svinval, svnapot, svpbmt
+The descriptions for h, svinval, svnapot, and svpbmt extensions currently
+reference the "20191213 version of the privileged ISA specification".
+While an Unprivileged ISA document exists with that date, there is no
+corresponding ratified Privileged ISA specification.
+These extensions were ratified in the RISC-V Instruction Set Manual,
+Volume II: Privileged Architecture, Version 20211203. Update the
+===== B543 pinctrl: canaan: k230: Fix NULL pointer dereference when parsing devicetree
+When probing the k230 pinctrl driver, the kernel triggers a NULL pointer
+dereference. The crash trace showed:
+[    0.732084] Unable to handle kernel NULL pointer dereference at virtual address 0000000000000068
+[    0.740737] ...
+[    0.776296] epc : k230_pinctrl_probe+0x1be/0x4fc
+In k230_pinctrl_parse_functions(), we attempt to retrieve the device
+===== B544 riscv: clocksource: Fix stimecmp update hazard on RV32
+On RV32, updating the 64-bit stimecmp (or vstimecmp) CSR requires two
+separate 32-bit writes. A race condition exists if the timer triggers
+during these two writes.
+The RISC-V Privileged Specification (e.g., Section 3.2.1 for mtimecmp)
+recommends a specific 3-step sequence to avoid spurious interrupts
+when updating 64-bit comparison registers on 32-bit systems:
+===== B545 scripts/gen-btf.sh: Ensure initial object in gen_btf_o is ELF with correct endianness
+After commit 600605853f87 ("scripts/gen-btf.sh: Fix .btf.o generation
+when compiling for RISCV"), there is an error from llvm-objcopy when
+CONFIG_LTO_CLANG is enabled:
+KBUILD_CFLAGS includes CC_FLAGS_LTO, which makes clang emit an LLVM IR
+object, rather than an ELF one as expected by llvm-objcopy.
+Most areas of the kernel deal with this by filtering out CC_FLAGS_LTO
+===== B546 KVM: riscv: selftests: Fix incorrect rounding in page_align()
+The implementation of `page_align()` in `processor.c` calculates
+alignment incorrectly for values that are already aligned. Specifically,
+`(v + vm->page_size) & ~(vm->page_size - 1)` aligns to the *next* page
+boundary even if `v` is already page-aligned, potentially wasting a page
+of memory.
+Fix the calculation to use standard alignment logic: `(v + vm->page_size
+===== B547 Documentation: riscv: uabi: Clarify ISA spec version for canonical order
+Specify that chapter 27 refers to version 20191213 of the RISC-V ISA
+Unprivileged Architecture. The chapter numbering differs across
+specification versions - for example, in version 20250508, the ISA
+Extension Naming Conventions is chapter 36, not chapter 27.
+Historical versions of the RISC-V specification can be found via Link [1].
+Fixes: f07b2b3f9d47 ("Documentation: riscv: add a section about ISA string ordering in /proc/cpuinfo")
+===== B548 mailbox: Improve RISCV_SBI_MPXY_MBOX guidance
+RISC-V SBI Message Proxy (MPXY) Mailbox support defaults to enabled, but
+the help text states "If unsure say N".
+Recommend enabling this driver, as it is a very critical RISC-V driver
+providing mailbox channels to other drivers such as clock, system MSIs,
+etc.
+Fixes: bf3022a4eb119c6b ("mailbox: Add RISC-V SBI message proxy (MPXY) based mailbox driver")
+===== B549 perf annotate: Fix args leak of map_symbol
+map_symbol__exit() needs calling on an annotate_args.ms, however, rather
+than introduce proper reference count handling to symbol__annotate()
+just switch to passing the map_symbol pointer parameter around, making
+the puts the caller's responsibility.
+Fix a number of cases to ensure the map in a map_symbol has a
+reference count increment and add the then necessary map_symbol_exits.
+===== B550 perf header: Fix memory leaks in process_cpu_domain_info()
+do_read_string() returns a string in allocated memory, for some reason
+there was unused memory allocations and unnecessary strdups.
+Remove these and make the "perf annotate basic tests" leak sanitizer
+clean.
+Fixes: d40c68a49f69c9bd ("perf header: Support CPU DOMAIN relation info")
+===== B551 iommu/riscv: Add IOTINVAL after updating DDT/PDT entries
+Add riscv_iommu_iodir_iotinval() to perform required TLB and context cache
+invalidations after updating DDT or PDT entries, as mandated by the RISC-V
+IOMMU specification (Section 6.3.1 and 6.3.2).
+Fixes: 488ffbf18171 ("iommu/riscv: Paging domain support")
+... (30 more diff lines)
+===== B552 mm: folio_zero_user: open code range computation in folio_zero_user()
+riscv64-gcc-linux-gnu (v8.5) reports a compile time assert in:
+where it decides that pg.start > pg.end in:
+where pg comes from:
+That does not seem like it could be true. Even for pg.start == pg.end,
+we would need folio_test_large() to evaluate to false at compile time:
+	if (!folio_test_large(folio))
+===== B553 iommu/riscv: Skip IRQ count check when using MSI interrupts
+In RISC-V IOMMU platform devices that use MSI interrupts (indicated by the
+presence of 'msi-parent' in the device tree), there are no wired interrupt
+lines, so calling platform_get_irq_count() returns 0 or -ENXIO, causing the
+driver to fail during probe.
+However, MSI interrupts are allocated dynamically via the MSI subsystem and
+do not appear in the device tree 'interrupts' property. Therefore, the
+===== B554 cache: ax45mp: Fix device node reference leak in ax45mp_cache_init()
+In ax45mp_cache_init(), of_find_matching_node() returns a device node
+with an incremented reference count that must be released with
+of_node_put(). The current code fails to call of_node_put() which
+causes a reference leak.
+Use the __free(device_node) attribute to ensure automatic cleanup when
+the variable goes out of scope.
+===== B555 perf regs: Fix abort for "-I" or "--user-regs" options
+Fix an issue where the `perf` tool aborts unexpectedly when running the
+following command:
+```
+perf record -e cycles -I -- true
+```
+The usage of the `-I` or `--user-regs` options without specifying any
+===== B556 iommu/riscv: Stop polling when CQCSR reports an error
+The cmdq wait loop busy-polls the consumer index until it advances
+or the software timeout expires. If the IOMMU has already signaled
+a command queue failure in CQCSR, continuing to poll for progress is
+pointless.
+Make riscv_iommu_queue_wait() also terminate the poll when any of these
+CQCSR error bits are observed.
+===== B557 iommu/riscv: Add missing GENERIC_MSI_IRQ
+The commit below added MSI related calls to the driver that depends on
+GENERIC_MSI_IRQ. It is possible to build RISC-V without this selected.
+This is also necessary to make the driver COMPILE_TEST.
+Fixes: d5f88acdd6ff ("iommu/riscv: Add support for platform msi")
+===== B558 randomize_kstack: Maintain kstack_offset per task
+kstack_offset was previously maintained per-cpu, but this caused a
+couple of issues. So let's instead make it per-task.
+Issue 1: add_random_kstack_offset() and choose_random_kstack_offset()
+expected and required to be called with interrupts and preemption
+disabled so that it could manipulate per-cpu state. But arm64, loongarch
+and risc-v are calling them with interrupts and preemption enabled. I
+===== B559 ACPI: RIMT: Add dependency between iommu and devices
+EPROBE_DEFER ensures IOMMU devices are probed before the devices that
+depend on them. During shutdown, however, the IOMMU may be removed
+first, leading to issues. To avoid this, a device link is added
+which enforces the correct removal order.
+Fixes: 8f7729552582 ("ACPI: RISC-V: Add support for RIMT")
+===== B560 selftests: riscv: Add braces around EXPECT_EQ()
+EXPECT_EQ() expands to multiple lines, breaking up one-line if
+statements. This issue was not present in the patch on the mailing list
+but was instead introduced by the maintainer when attempting to fix up
+checkpatch warnings. Add braces around EXPECT_EQ() to avoid the error
+even though checkpatch suggests them to be removed:
+validate_v_ptrace.c:626:17: error: ‘else’ without a previous ‘if’
+===== B561 drm/imagination: Synchronize interrupts before suspending the GPU
+The runtime PM suspend callback doesn't know whether the IRQ handler is
+in progress on a different CPU core and doesn't wait for it to finish.
+Depending on timing, the IRQ handler could be running while the GPU is
+suspended, leading to kernel crashes when trying to access GPU
+registers. See example signature below.
+In a power off sequence initiated by the runtime PM suspend callback,
+===== B562 irqchip/riscv-aplic: Do not clear ACPI dependencies on probe failure
+aplic_probe() calls acpi_dev_clear_dependencies() unconditionally at the
+end, even when the preceding setup (MSI or direct mode) has failed. This is
+incorrect because if the device failed to probe, it should not be
+considered as active and should not clear dependencies for other devices
+waiting on it.
+Fix this by returning immediately when the setup fails, skipping the ACPI
+===== B563 irqchip/riscv-aplic: Register syscore operations only once
+Since commit 95a8ddde3660 ("irqchip/riscv-aplic: Preserve APLIC
+states across suspend/resume"), when multiple NUMA nodes exist
+and AIA is not configured as "none", aplic_probe() is called
+multiple times. This leads to register_syscore(&aplic_syscore)
+being invoked repeatedly, causing the following Oops:
+Fix this by registering syscore operations only once, using a static
+===== B564 irqchip/riscv-rpmi-sysmsi: Fix mailbox channel leak in rpmi_sysmsi_probe()
+When riscv_acpi_get_gsi_info() fails, the mailbox channel previously
+requested via mbox_request_channel() is not freed. Add the missing
+mbox_free_channel() call to prevent the resource leak.
+Fixes: 4752b0cfbc37 ("irqchip/riscv-rpmi-sysmsi: Add ACPI support")
+===== B565 iommu/riscv: Fix signedness bug
+The function platform_irq_count() returns negative error codes and
+iommu->irqs_count is an unsigned integer, so the check
+(iommu->irqs_count <= 0) is always impossible.
+Make the return value of platform_irq_count() be assigned to ret, check
+for error, and then assign iommu->irqs_count to ret.
+Detected by Smatch:
+===== B566 iommu/riscv: Remove overflows on the invalidation path
+Since RISC-V supports a sign extended page table it should support
+a gather->end of ULONG_MAX, but if this happens it will infinite loop
+because of the overflow.
+Also avoid overflow computing the length by moving the +1 to the other
+side of the <
+Fixes: 488ffbf18171 ("iommu/riscv: Paging domain support")
+===== B567 irqchip/riscv-aplic: Restrict genpd notifier to device tree only
+On ACPI systems, the aplic's pm_domain is set to acpi_general_pm_domain,
+which provides its own power management callbacks (e.g., runtime_suspend
+via acpi_subsys_runtime_suspend).
+aplic_pm_add() unconditionally calls dev_pm_genpd_add_notifier() when
+dev->pm_domain is non‑NULL, leading to a comparison between runtime_suspend
+and genpd_runtime_suspend. This results in the following errors when ACPI
+===== B568 KVM: riscv: selftests: Implement kvm_arch_has_default_irqchip
+kvm_arch_has_default_irqchip is required for irqfd_test and returns
+true if an in-kernel interrupt controller is supported.
+Fixes: a133052666bed ("KVM: selftests: Fix irqfd_test for non-x86 architectures")
+===== B569 PCI: sg2042: Avoid L0s and L1 on Sophgo 2042 PCIe Root Ports
+Since commit f3ac2ff14834 ("PCI/ASPM: Enable all ClockPM and ASPM states
+for devicetree platforms") force enables ASPM on all device tree platforms,
+the SG2042 Root Ports are breaking as they advertise L0s and L1
+capabilities without supporting them.
+Set ASPM quirks to disable the L0s and L1 capabilities for the Root Ports
+so that these broken link states won't be enabled.
+===== B570 riscv: Docs: fix unmatched quote warning
+'make htmldocs' complains about ``prctrl` -- so add a second '`' to
+avoid the warning.
+Documentation/arch/riscv/zicfilp.rst:79: WARNING: Inline literal start-string without end-string. [docutils]
+Fixes: 08ee1559052b ("prctl: cfi: change the branch landing pad prctl()s to be more descriptive")
+===== B571 dt-bindings: timer: Remove sifive,fine-ctr-bits property
+The counter width can be inferred from the compatible string, making the
+explicit "sifive,fine-ctr-bits" property redundant. Remove the property
+to simplify the bindings.
+Fixes: 0f920690a82c ("dt-bindings: timer: Add SiFive CLINT2")
+===== B572 kunit: fix use-after-free in debugfs when using kunit.filter
+When the kernel is booted with a kunit filter (e.g.,
+kunit.filter="speed!=slow"), the kunit executor dynamically allocates
+copies of the filtered test suites using kmalloc/kmemdup.
+During the initial boot execution, kunit_debugfs_create_suite() creates
+debugfs files (such as /sys/kernel/debug/kunit/<suite>/run) and
+permanently stores a pointer to the dynamically allocated suite in the
+===== B573 irqchip/riscv-imsic: Clear interrupt move state during CPU offlining
+Affinity changes of IMSIC interrupts have to be careful to not lose an
+interrupt in the process. Each vector keeps track of an affinity change in
+progress with two pointers in struct imsic_vector.
+imsic_vector::move_prev points to the previous CPU target data and
+imsic_vector::move_next to the designated new CPU target data.
+imsic_vector::move_prev on the new CPU can only be cleared after the
+===== B574 test_kprobes: clear kprobes between test runs
+Running the kprobes sanity tests twice makes all tests fail and
+eventually crashes the kernel.
+[root@martin-riscv-1 ~]# echo 1 > /sys/kernel/debug/kunit/kprobes_test/run
+...
+[root@martin-riscv-1 ~]# echo 1 > /sys/kernel/debug/kunit/kprobes_test/run
+...
+===== B575 iommupt: Fixup build warning by using BIT_ULL() for RISCVPT_NC/IO
+Fix build warning on 32-bit configurations by using BIT_ULL() for
+RISCVPT_NC and RISCVPT_IO.
+Fixes: 6c21eb174c6c ("iommupt: Encode IOMMU_MMIO/IOMMU_CACHE via RISC-V Svpbmt bits")
+===== B576 ALSA: pcm: Don't setup bogus iov_iter for silencing
+At transition to the iov_iter for PCM data transfer, we blindly
+applied the iov_iter setup also for silencing (i.e. data = NULL), and
+it leads to a calculation of bogus iov_iter.  Fortunately this didn't
+cause troubles on most of architectures but it goes wrong on RISC-V
+now, causing a NULL dereference.
+Handle the NULL data case to treat the silencing in interleaved_copy()
+===== B577 ring-buffer: Fix event length with forced 8-byte alignment
+When RB_FORCE_8BYTE_ALIGNMENT is true, rb_calculate_event_length()
+reserves the space of event->array[0] for placing the data length and
+rb_update_event() stores the data length in event->array[0]
+accordingly. As a result the whole event length will add extra 4 bytes
+for sizeof(event.array[0]) unconditionally.
+But ring_buffer_event_length() only subtracts the
+===== B578 scripts/sorttable: Handle RISC-V patchable ftrace entries
+RISC-V uses -fpatchable-function-entry=8,4 when the compressed ISA is
+enabled and -fpatchable-function-entry=4,2 otherwise. In both cases, the
+patchable NOP area starts 8 bytes before the function symbol address.
+The __mcount_loc entries therefore point at the patchable NOP area
+associated with a function, while nm reports the function symbol at the
+entry address used for the function range check.
+===== B579 perf riscv: fix register name strings
+On risc-v, pref probe generates an invalid syntax for a named register in
+a kprobe.
+$ perf probe --debug verbose --add "n_tty_write tty"
+...
+Writing event: p:probe/n_tty_write _text+8922528 tty=%"%a0":x64
+Failed to write event: Invalid argument
+===== B580 ACPI: processor_idle: Mark LPI enter functions as __cpuidle
+When function tracing or Kprobes is enabled, entering an ACPI Low
+Power Idle (LPI) state triggers the following RCU splat:
+The acpi_idle_lpi_enter() function is invoked within the cpuidle
+path after RCU has already been disabled for the current local CPU.
+Consequently, ftrace's function_trace_call() expects RCU to be
+actively watching before recording trace data, emitting a warning
+===== B581 irqchip/irq-riscv-imsic-early: Fix fwnode leak on state setup failure
+imsic_early_acpi_init() allocates a firmware node before setting up the
+IMSIC state. If imsic_setup_state() fails, the function returns without
+freeing the allocated fwnode.
+Free the fwnode and clear the global pointer on this error path, matching
+the cleanup already done when imsic_early_probe() fails.
+[ tglx: Use a common cleanup path instead of copying code around ]
+===== B582 ACPI: RIMT: Only defer the IOMMU configuration in init stage
+The IOMMU configuration will be deferred if the IOMMU driver
+isn't probed by the time. Make this deferral only in the
+initialization stage with driver_deferred_probe_check_state().
+Otherwise the devices depends on IOMMU will be deferred forever
+in case the IOMMU device probe failed or it doesn't appear in
+the ACPI namespace.
+===== B583 clocksource/drivers/timer-sun4i: Advertise a real minimum delta
+sun4i_clkevt_next_event() compensates for the timer stop/start
+synchronization delay by programming evt - TIMER_SYNC_TICKS into the
+hardware interval register. The clockevent device currently advertises
+TIMER_SYNC_TICKS as min_delta_ticks, so the clockevents core is allowed
+to call set_next_event() with evt == TIMER_SYNC_TICKS.
+That programs a zero-tick interval. With oneshot/highres/nohz timer
+===== B584 net/mlx5e: Fix publication race for priv->channel_stats[]
+mlx5e_channel_stats_alloc() publishes a new entry to
+priv->channel_stats[] and then increments priv->stats_nch as a
+publication token, but neither store carries any memory barrier:
+	priv->channel_stats[ix] = kvzalloc_node(...);
+	if (!priv->channel_stats[ix])
+		return -ENOMEM;
+===== B585 clk: spacemit: k3: set hdma clock as critical
+HDMA clock is responsible for the internal TCM access path of X100 RISC-V
+core, so set the clock flag as critical to prevent it from being shut off,
+otherwise the Linux system will hang, for example in the case of a vector
+instruction access generates a page fault.
+Fixes: e371a77255b8 ("clk: spacemit: k3: add the clock tree")
+===== B586 gpu: nova-core: correct RISC-V HALTED field
+This uses the incorrect value, so update it.
+Fixes: bb58d1aee608 ("gpu: nova-core: falcon: Add support to check if RISC-V is active")
+===== B587 gpu: nova-core: wait for RISC-V HALTED on FSP unload
+Currently the code waits for "not active" but this is not the same as
+halted as there are more than two states. Match openrm here and wait for
+halted instead.
+Fixes: c7fea1f70944 ("gpu: nova-core: add non-sec2 unload path")
+[acourbot: s/imply/guarantee.]
+... (28 more diff lines)
+===== B588 perf build: Fix compiler errors with old capstone
+It seems RISCV was added in capstone version 5 (released Jul 2023).
+Unfortunately they are enum constants so cannot check with #ifdef but
+anyway we can define the symbols.  Let's do it using the version
+number to avoid build errors.  It'll fail at runtime though.
+Also note that capstone renamed CS_MODE_RISCVC to CS_MODE_RISCV_C which
+would cause a different build failure on latest versions.  It's reported
+===== B589 selftests/rseq: Fix a building error for riscv arch
+RISC-V rseq selftests include asm/fence.h from tools/arch/riscv,
+but the rseq Makefile only adds tools/include in the CFLAGS, this
+results in the building failure both for native and cross build:
+To fix it, add the matching tools/arch/$(ARCH)/include path in the
+CFLAGS and derive ARCH from SUBARCH for standalone native builds where
+ARCH is not set.
+===== B590 bpf: Reject programs with inlined helpers if JIT is not available
+When an architecture (such as LoongArch, ARM64, and RISC-V) implements
+bpf_jit_inlines_helper_call(), the verifier skips rewriting the helper
+call offset (insn->imm) in bpf_do_misc_fixups(). This is because the
+helper is expected to be inlined by the JIT compiler later. Therefore,
+insn->imm remains as the raw helper enum ID.
+However, if JIT is disabled at runtime (net.core.bpf_jit_enable=0) or
+===== B591 ACPI: RISC-V: Check acpi_get_handle() status in riscv_acpi_add_prt_dep()
+In riscv_acpi_add_prt_dep(), the acpi_get_handle() call can fail which
+would leave link_handle uninitialized.
+Fix it by checking the acpi_get_handle() return status and skip the entry
+if it fails.
+Fixes: 1b173cc4bfcd ("ACPI: RISC-V: Implement function to add implicit dependencies")
+===== B592 ACPI: RISC-V: Fix riscv_acpi_add_prt_dep() loop handling
+The loop in riscv_acpi_add_prt_dep() includes error conditions that are
+handled in a dubious - if not outright wrong - way, by continuining the
+loop (which skips and misses the entry pointer update to point to the next
+entry).
+Rewrite the loop as a for loop (that handles the continuation correctly)
+and wrap the condition and update statements using helper functions to make
+===== B593 ACPI: RISC-V: Fix riscv_acpi_irq_get_dep() loop termination
+In riscv_acpi_add_irq_dep() the main loop condition would currently stop
+the loop if an interrupt descriptor contains an interrupt for which the
+respective GSI handle is NULL, which is not correct because subsequent
+interrupts in the interrupt descriptor might still have a GSI dependency
+that must not be skipped.
+Rework riscv_acpi_add_irq_dep() and the riscv_acpi_irq_get_dep() call chain
+===== B594 drm/imagination: acquire vm_ctx->lock before mapping memory to GPU VM
+The drm gpuvm code doesn't protect find operation against map operation,
+and the driver needs to ensure a map operation shouldn't happen when a
+find operation is in progress.
+In some cases a find operation will be in progress when doing map/unmap
+operations, and the find operation will do a NULL pointer dereference.
+An example of the stack trace of such NULL dereference is shown below:
+===== B595 exec: fix unsigned loop counter wrap in transfer_args_to_stack()
+The stop value is derived from bprm->p >> PAGE_SHIFT. The index variable
+is an unsigned long. If bprm->p drops below PAGE_SIZE and stop becomes
+zero the loop condition index >= stop is always true.
+After the index == 0 iteration the decrement wraps to ULONG_MAX and
+bprm->page[ULONG_MAX] reads sizeof(void *) bytes in front of the array.
+The pointer has wrapped to -1. That garbage pointer is then passed to
+===== B596 selftests/bpf: vmtest.sh: Preserve command quoting when running in the VM
+vmtest.sh captures the trailing command with command="$@", which flattens
+the arguments into a single space-separated string, and then pastes it
+into the generated guest init script:
+That here-doc is unquoted, so the host expands ${command} and the
+flattened text lands in the script verbatim. The guest bash then parses
+those lines as shell source, re-splitting the text on whitespace and
+===== B597 bpf, s390: Clear fetch destination on faulting arena atomic
+Same missing register clear as on riscv64. A RMW atomic on an arena pointer
+is converted to BPF_PROBE_ATOMIC and gets an exception table entry, but
+bpf_jit_probe_atomic_pre() only fills in the arena base and the probe
+offset, leaving probe->reg at the -1 that bpf_jit_probe_init() set, which
+bpf_jit_probe_post() writes into the entry and ex_handler_bpf() then reads
+back as "there is nothing to clear".
+===== B598 mailbox: riscv-sbi-mpxy: validate RPMI notification lengths
+The SBI return value controls how many bytes are copied from shared
+memory into the RPMI notification buffer. It is not validated against
+the negotiated shared-memory size before that copy. The event walker
+also uses a reversed loop condition and can inspect a short event record.
+Validate the complete notification length before copying it, iterate only
+while a full event header remains, and stop when a declared event payload
+===== B599 LoongArch: KVM: Free init resources if kvm_init() fails
+kvm_loongarch_init() calls kvm_loongarch_env_init() to allocate the
+per-CPU kvm_context (vmcs) and kvm_loongarch_ops and to register the
+perf callbacks, and then calls kvm_init(). If kvm_init() fails its
+result is returned directly, but since module_init() does not run the
+module_exit() stuff on failure, so kvm_loongarch_env_exit() is never
+called and those resources are leaked.
+===== B600 LoongArch: BPF: Sign-extend return values
+(1) Description of Problem:
+When testing BPF JIT with the latest compiler toolchains on LoongArch,
+there exist some strange failed test cases, dmesg shows something like
+this:
+(2) Steps to Reproduce:
+(3) Additional Info:
+===== B601 LoongArch: kprobes: Fix handling of fatal unrecoverable recursions
+KPROBE_HIT_SS and KPROBE_REENTER are two types of fatal recursions that
+can not be safely recovered in kprobes.
+KPROBE_HIT_SS means that a kprobe is hit during single-stepping. At
+this point, the architecture-specific single-step context is already
+active. Nested single-stepping would corrupt the state, as the kprobe
+control block (kcb) and hardware registers cannot safely store multiple
+===== B602 bpf, arm64: Clear fetch destination on faulting arena atomic
+Same problem as on x86-64: add_exception_handler() folds "there is no
+destination register to clear" and "this is a store" into one DONT_CLEAR
+value ...
+... which ex_handler_bpf() then reads back as the access direction:
+A RMW carrying BPF_FETCH is both. emit_lse_atomic() reads the old value
+into src_reg for BPF_{ADD,AND,OR,XOR} | BPF_FETCH and BPF_XCHG, and into

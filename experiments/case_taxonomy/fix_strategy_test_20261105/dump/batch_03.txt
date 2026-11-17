@@ -1,0 +1,1246 @@
+
+##### R075
+=== 17f71a2a340f R 2023-09-18 +4/-1
+RISC-V: KVM: Fix riscv_vcpu_get_isa_ext_single() for missing extensions
+
+The riscv_vcpu_get_isa_ext_single() should fail with -ENOENT error
+when corresponding ISA extension is not available on the host.
+
+Fixes: e98b1085be79 ("RISC-V: KVM: Factor-out ONE_REG related code to its own source file")
+functions: arch/riscv/kvm/vcpu_onereg.c:riscv_vcpu_get_isa_ext_single
+fixes: e98b1085be79
+diff --git a/arch/riscv/kvm/vcpu_onereg.c b/arch/riscv/kvm/vcpu_onereg.c
+index e7e833ced91b..b7e0e03c69b1 100644
+--- a/arch/riscv/kvm/vcpu_onereg.c
++++ b/arch/riscv/kvm/vcpu_onereg.c
+@@ -461,6 +461,9 @@ static int riscv_vcpu_get_isa_ext_single(struct kvm_vcpu *vcpu,
+ 		return -ENOENT;
+ 
+-	*reg_val = 0;
+ 	host_isa_ext = kvm_isa_ext_arr[reg_num];
++	if (!__riscv_isa_extension_available(NULL, host_isa_ext))
++		return -ENOENT;
++
++	*reg_val = 0;
+ 	if (__riscv_isa_extension_available(vcpu->arch.isa, host_isa_ext))
+ 		*reg_val = 1; /* Mark the given extension as available */
+
+##### R076
+=== ef4d48368587 R 2023-09-18 +1/-1
+RISC-V: KVM: Fix KVM_GET_REG_LIST API for ISA_EXT registers
+
+The ISA_EXT registers to enabled/disable ISA extensions for VCPU
+are always available when underlying host has the corresponding
+ISA extension. The copy_isa_ext_reg_indices() called by the
+KVM_GET_REG_LIST API does not align with this expectation so
+let's fix it.
+
+Fixes: 031f9efafc08 ("KVM: riscv: Add KVM_GET_REG_LIST API support")
+functions: arch/riscv/kvm/vcpu_onereg.c:copy_isa_ext_reg_indices
+fixes: 031f9efafc08
+diff --git a/arch/riscv/kvm/vcpu_onereg.c b/arch/riscv/kvm/vcpu_onereg.c
+index 1b7e9fa265cb..e7e833ced91b 100644
+--- a/arch/riscv/kvm/vcpu_onereg.c
++++ b/arch/riscv/kvm/vcpu_onereg.c
+@@ -843,5 +843,5 @@ static int copy_isa_ext_reg_indices(const struct kvm_vcpu *vcpu,
+ 
+ 		isa_ext = kvm_isa_ext_arr[i];
+-		if (!__riscv_isa_extension_available(vcpu->arch.isa, isa_ext))
++		if (!__riscv_isa_extension_available(NULL, isa_ext))
+ 			continue;
+ 
+
+##### R077
+=== 1d6cd2146c2b R 2023-09-25 +0/-13
+riscv: kdump: fix crashkernel reserving problem on RISC-V
+
+When testing on risc-v QEMU environment with "crashkernel="
+parameter enabled, a problem occurred with the following
+message:
+
+[    0.000000] crashkernel low memory reserved: 0xf8000000 - 0x100000000 (128 MB)
+[    0.000000] crashkernel reserved: 0x0000000177e00000 - 0x0000000277e00000 (4096 MB)
+[    0.000000] ------------[ cut here ]------------
+[    0.000000] WARNING: CPU: 0 PID: 0 at kernel/resource.c:779 __insert_resource+0x8e/0xd0
+[    0.000000] Modules linked in:
+[    0.000000] CPU: 0 PID: 0 Comm: swapper Not tainted 6.6.0-rc2-next-20230920 #1
+[    0.000000] Hardware name: riscv-virtio,qemu (DT)
+[    0.000000] epc : __insert_resource+0x8e/0xd0
+[    0.000000]  ra : insert_resource+0x28/0x4e
+[    0.000000] epc : ffffffff80017344 ra : ffffffff8001742e sp : ffffffff81203db0
+[    0.000000]  gp : ffffffff812ece98 tp : ffffffff8120dac0 t0 : ff600001f7ff2b00
+[    0.000000]  t1 : 0000000000000000 t2 : 3428203030303030 s0 : ffffffff81203dc0
+[    0.000000]  s1 : ffffffff81211e18 a0 : ffffffff81211e18 a1 : ffffffff81289380
+[    0.000000]  a2 : 0000000277dfffff a3 : 0000000177e00000 a4 : 0000000177e00000
+[    0.000000]  a5 : ffffffff81289380 a6 : 0000000277dfffff a7 : 0000000000000078
+[    0.000000]  s2 : ffffffff81289380 s3 : ffffffff80a0bac8 s4 : ff600001f7ff2880
+[    0.000000]  s5 : 0000000000000280 s6 : 8000000a00006800 s7 : 000000000000007f
+[    0.000000]  s8 : 0000000080017038 s9 : 0000000080038ea0 s10: 0000000000000000
+[    0.000000]  s11: 0000000000000000 t3 : ffffffff80a0bc00 t4 : ffffffff80a0bc00
+[    0.000000]  t5 : ffffffff80a0bbd0 t6 : ffffffff80a0bc00
+[    0.000000] status: 0000000200000100 badaddr: 0000000000000000 cause: 0000000000000003
+[    0.000000] [<ffffffff80017344>] __insert_resource+0x8e/0xd0
+[    0.000000] ---[ end trace 0000000000000000 ]---
+[    0.000000] Failed to add a Crash kernel resource at 177e00000
+
+The crashkernel memory has been allocated successfully, whereas
+it failed to insert into iomem_resource. This is due to the
+unique reserving logic in risc-v arch specific code, i.e.
+crashk_res/crashk_low_res will be added into iomem_resource
+later in init_resources(), which is not aligned with current
+unified reserving logic in reserve_crashkernel_{generic,low}()
+and therefore leads to the failure of crashkernel reservation.
+
+Removing the arch specific code within #ifdef CONFIG_KEXEC_CORE
+in init_resources() to fix above problem.
+functions: arch/riscv/kernel/setup.c:init_resources
+fixes: 31549153088e
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index e600aab116a4..aac853ae4eb7 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -174,17 +174,4 @@ static void __init init_resources(void)
+ 		goto error;
+ 
+-#ifdef CONFIG_KEXEC_CORE
+-	if (crashk_res.start != crashk_res.end) {
+-		ret = add_resource(&iomem_resource, &crashk_res);
+-		if (ret < 0)
+-			goto error;
+-	}
+-	if (crashk_low_res.start != crashk_low_res.end) {
+-		ret = add_resource(&iomem_resource, &crashk_low_res);
+-		if (ret < 0)
+-			goto error;
+-	}
+-#endif
+-
+ #ifdef CONFIG_CRASH_DUMP
+ 	if (elfcorehdr_size > 0) {
+
+##### R078
+=== 7112cd26e606 R 2023-10-04 +9/-4
+riscv, bpf: Track both a0 (RISC-V ABI) and a5 (BPF) return values
+
+The RISC-V BPF uses a5 for BPF return values, which are zero-extended,
+whereas the RISC-V ABI uses a0 which is sign-extended. In other words,
+a5 and a0 can differ, and are used in different context.
+
+The BPF trampoline are used for both BPF programs, and regular kernel
+functions.
+
+Make sure that the RISC-V BPF trampoline saves, and restores both a0
+and a5.
+
+Fixes: 49b5e77ae3e2 ("riscv, bpf: Add bpf trampoline support for RV64")
+functions: arch/riscv/net/bpf_jit_comp64.c:invoke_bpf_prog, arch/riscv/net/bpf_jit_comp64.c:__arch_prepare_bpf_trampoline
+fixes: 49b5e77ae3e2
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index de4c9957d223..8581693e62d3 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -760,6 +760,8 @@ static int invoke_bpf_prog(struct bpf_tramp_link *l, int args_off, int retval_of
+ 		return ret;
+ 
+-	if (save_ret)
+-		emit_sd(RV_REG_FP, -retval_off, regmap[BPF_REG_0], ctx);
++	if (save_ret) {
++		emit_sd(RV_REG_FP, -retval_off, RV_REG_A0, ctx);
++		emit_sd(RV_REG_FP, -(retval_off - 8), regmap[BPF_REG_0], ctx);
++	}
+ 
+ 	/* update branch with beqz */
+@@ -854,5 +856,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	save_ret = flags & (BPF_TRAMP_F_CALL_ORIG | BPF_TRAMP_F_RET_FENTRY_RET);
+ 	if (save_ret) {
+-		stack_size += 8;
++		stack_size += 16; /* Save both A5 (BPF R0) and A0 */
+ 		retval_off = stack_size;
+ 	}
+@@ -958,4 +960,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 			goto out;
+ 		emit_sd(RV_REG_FP, -retval_off, RV_REG_A0, ctx);
++		emit_sd(RV_REG_FP, -(retval_off - 8), regmap[BPF_REG_0], ctx);
+ 		im->ip_after_call = ctx->insns + ctx->ninsns;
+ 		/* 2 nops reserved for auipc+jalr pair */
+@@ -989,6 +992,8 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 		restore_args(nregs, args_off, ctx);
+ 
+-	if (save_ret)
++	if (save_ret) {
+ 		emit_ld(RV_REG_A0, -retval_off, RV_REG_FP, ctx);
++		emit_ld(regmap[BPF_REG_0], -(retval_off - 8), RV_REG_FP, ctx);
++	}
+ 
+ 	emit_ld(RV_REG_S1, -sreg_off, RV_REG_FP, ctx);
+
+##### L079
+=== 71945968d8b1 L 2023-11-08 +5/-5
+LoongArch: Mark __percpu functions as always inline
+
+A recent change to the optimization pipeline in LLVM reveals some
+fragility around the inlining of LoongArch's __percpu functions, which
+manifests as a BUILD_BUG() failure:
+
+  In file included from kernel/sched/build_policy.c:17:
+  In file included from include/linux/sched/cputime.h:5:
+  In file included from include/linux/sched/signal.h:5:
+  In file included from include/linux/rculist.h:11:
+  In file included from include/linux/rcupdate.h:26:
+  In file included from include/linux/irqflags.h:18:
+  arch/loongarch/include/asm/percpu.h:97:3: error: call to '__compiletime_assert_51' declared with 'error' attribute: BUILD_BUG failed
+     97 |                 BUILD_BUG();
+        |                 ^
+  include/linux/build_bug.h:59:21: note: expanded from macro 'BUILD_BUG'
+     59 | #define BUILD_BUG() BUILD_BUG_ON_MSG(1, "BUILD_BUG failed")
+        |                     ^
+  include/linux/build_bug.h:39:37: note: expanded from macro 'BUILD_BUG_ON_MSG'
+     39 | #define BUILD_BUG_ON_MSG(cond, msg) compiletime_assert(!(cond), msg)
+        |                                     ^
+  include/linux/compiler_types.h:425:2: note: expanded from macro 'compiletime_assert'
+    425 |         _compiletime_assert(condition, msg, __compiletime_assert_, __COUNTER__)
+        |         ^
+  include/linux/compiler_types.h:413:2: note: expanded from macro '_compiletime_assert'
+    413 |         __compiletime_assert(condition, msg, prefix, suffix)
+        |         ^
+  include/linux/compiler_types.h:406:4: note: expanded from macro '__compiletime_assert'
+    406 |                         prefix ## suffix();                             \
+        |                         ^
+  <scratch space>:86:1: note: expanded from here
+     86 | __compiletime_assert_51
+        | ^
+  1 error generated.
+
+If these functions are not inlined (which the compiler is free to do
+even with functions marked with the standard 'inline' keyword), the
+BUILD_BUG() in the default case cannot be eliminated since the compiler
+cannot prove it is never used, resulting in a build failure due to the
+error attribute.
+
+functions: 
+fixes: 46859ac8af52
+diff --git a/arch/loongarch/include/asm/percpu.h b/arch/loongarch/include/asm/percpu.h
+index b9f567e66016..ed5da02b1cf6 100644
+--- a/arch/loongarch/include/asm/percpu.h
++++ b/arch/loongarch/include/asm/percpu.h
+@@ -33,5 +33,5 @@ static inline void set_my_cpu_offset(unsigned long off)
+ 
+ #define PERCPU_OP(op, asm_op, c_op)					\
+-static inline unsigned long __percpu_##op(void *ptr,			\
++static __always_inline unsigned long __percpu_##op(void *ptr,		\
+ 			unsigned long val, int size)			\
+ {									\
+@@ -64,5 +64,5 @@ PERCPU_OP(or, or, |)
+ #undef PERCPU_OP
+ 
+-static inline unsigned long __percpu_read(void *ptr, int size)
++static __always_inline unsigned long __percpu_read(void *ptr, int size)
+ {
+ 	unsigned long ret;
+@@ -101,5 +101,5 @@ static inline unsigned long __percpu_read(void *ptr, int size)
+ }
+ 
+-static inline void __percpu_write(void *ptr, unsigned long val, int size)
++static __always_inline void __percpu_write(void *ptr, unsigned long val, int size)
+ {
+ 	switch (size) {
+@@ -133,6 +133,6 @@ static inline void __percpu_write(void *ptr, unsigned long val, int size)
+ }
+ 
+-static inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
+-						int size)
++static __always_inline unsigned long __percpu_xchg(void *ptr, unsigned long val,
++						   int size)
+ {
+ 	switch (size) {
+
+##### L080
+=== 5d47ec2e6f4c L 2023-12-09 +0/-2
+LoongArch: BPF: Don't sign extend function return value
+
+The `cls_redirect` test triggers a kernel panic like:
+
+  # ./test_progs -t cls_redirect
+  Can't find bpf_testmod.ko kernel module: -2
+  WARNING! Selftests relying on bpf_testmod.ko will be skipped.
+  [   30.938489] CPU 3 Unable to handle kernel paging request at virtual address fffffffffd814de0, era == ffff800002009fb8, ra == ffff800002009f9c
+  [   30.939331] Oops[#1]:
+  [   30.939513] CPU: 3 PID: 1260 Comm: test_progs Not tainted 6.7.0-rc2-loong-devel-g2f56bb0d2327 #35 a896aca3f4164f09cc346f89f2e09832e07be5f6
+  [   30.939732] Hardware name: QEMU QEMU Virtual Machine, BIOS unknown 2/2/2022
+  [   30.939901] pc ffff800002009fb8 ra ffff800002009f9c tp 9000000104da4000 sp 9000000104da7ab0
+  [   30.940038] a0 fffffffffd814de0 a1 9000000104da7a68 a2 0000000000000000 a3 9000000104da7c10
+  [   30.940183] a4 9000000104da7c14 a5 0000000000000002 a6 0000000000000021 a7 00005555904d7f90
+  [   30.940321] t0 0000000000000110 t1 0000000000000000 t2 fffffffffd814de0 t3 0004c4b400000000
+  [   30.940456] t4 ffffffffffffffff t5 00000000c3f63600 t6 0000000000000000 t7 0000000000000000
+  [   30.940590] t8 000000000006d803 u0 0000000000000020 s9 9000000104da7b10 s0 900000010504c200
+  [   30.940727] s1 fffffffffd814de0 s2 900000010504c200 s3 9000000104da7c10 s4 9000000104da7ad0
+  [   30.940866] s5 0000000000000000 s6 90000000030e65bc s7 9000000104da7b44 s8 90000000044f6fc0
+  [   30.941015]    ra: ffff800002009f9c bpf_prog_846803e5ae81417f_cls_redirect+0xa0/0x590
+  [   30.941535]   ERA: ffff800002009fb8 bpf_prog_846803e5ae81417f_cls_redirect+0xbc/0x590
+  [   30.941696]  CRMD: 000000b0 (PLV0 -IE -DA +PG DACF=CC DACM=CC -WE)
+  [   30.942224]  PRMD: 00000004 (PPLV0 +PIE -PWE)
+  [   30.942330]  EUEN: 00000003 (+FPE +SXE -ASXE -BTE)
+  [   30.942453]  ECFG: 00071c1c (LIE=2-4,10-12 VS=7)
+  [   30.942612] ESTAT: 00010000 [PIL] (IS= ECode=1 EsubCode=0)
+  [   30.942764]  BADV: fffffffffd814de0
+  [   30.942854]  PRID: 0014c010 (Loongson-64bit, Loongson-3A5000)
+  [   30.942974] Modules linked in:
+  [   30.943078] Process test_progs (pid: 1260, threadinfo=00000000ce303226, task=000000007d10bb76)
+  [   30.943306] Stack : 900000010a064000 90000000044f6fc0 9000000104da7b48 0000000000000000
+  [   30.943495]         0000000000000000 9000000104da7c14 9000000104da7c10 900000010504c200
+  [   30.943626]         0000000000000001 ffff80001b88c000 9000000104da7b70 90000000030e6668
+  [   30.943785]         0000000000000000 9000000104da7b58 ffff80001b88c048 9000000003d05000
+  [   30.943936]         900000000303ac88 0000000000000000 0000000000000000 9000000104da7b70
+  [   30.944091]         0000000000000000 0000000000000001 0000000731eeab00 0000000000000000
+  [   30.944245]         ffff80001b88c000 0000000000000000 0000000000000000 54b99959429f83b8
+  [   30.944402]         ffff80001b88c000 90000000044f6fc0 9000000101d70000 ffff80001b88c000
+  [   30.944538]         000000000000005a 900000010504c200 900000010a064000 900000010a067000
+  [   30.944697]         9000000104da7d88 0000000000000000 9000000003d05000 90000000030e794c
+  [   30.944852]         ...
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 5dc615520c4d
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index d2161c95ceb4..d76281efc5b8 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -912,6 +912,4 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 	/* function return */
+ 	case BPF_JMP | BPF_EXIT:
+-		emit_sext_32(ctx, regmap[BPF_REG_0], true);
+-
+ 		if (i == ctx->prog->len - 1)
+ 			break;
+
+##### L081
+=== 772cbe948fb0 L 2023-12-09 +2/-0
+LoongArch: BPF: Fix sign-extension mov instructions
+
+We can see that "Short form of movsx, dst_reg = (s8,s16,s32)src_reg" in
+include/linux/filter.h, additionally, for BPF_ALU64 the value of the
+destination register is unchanged whereas for BPF_ALU the upper 32 bits
+of the destination register are zeroed, so it should clear the upper 32
+bits for BPF_ALU.
+
+[root@linux fedora]# echo 1 > /proc/sys/net/core/bpf_jit_enable
+[root@linux fedora]# modprobe test_bpf
+
+Before:
+test_bpf: #81 ALU_MOVSX | BPF_B jited:1 ret 2 != 1 (0x2 != 0x1)FAIL (1 times)
+test_bpf: #82 ALU_MOVSX | BPF_H jited:1 ret 2 != 1 (0x2 != 0x1)FAIL (1 times)
+
+After:
+test_bpf: #81 ALU_MOVSX | BPF_B jited:1 6 PASS
+test_bpf: #82 ALU_MOVSX | BPF_H jited:1 6 PASS
+
+By the way, the bpf selftest case "./test_progs -t verifier_movsx" can
+also be fixed with this patch.
+
+Fixes: f48012f16150 ("LoongArch: BPF: Support sign-extension mov instructions")
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: f48012f16150
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index d76281efc5b8..cd002f183648 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -481,8 +481,10 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			move_reg(ctx, t1, src);
+ 			emit_insn(ctx, extwb, dst, t1);
++			emit_zext_32(ctx, dst, is32);
+ 			break;
+ 		case 16:
+ 			move_reg(ctx, t1, src);
+ 			emit_insn(ctx, extwh, dst, t1);
++			emit_zext_32(ctx, dst, is32);
+ 			break;
+ 		case 32:
+
+##### L082
+=== e2f7b3d8b4b3 L 2023-12-09 +2/-2
+LoongArch: BPF: Fix unconditional bswap instructions
+
+We can see that "bswap32: Takes an unsigned 32-bit number in either big-
+or little-endian format and returns the equivalent number with the same
+bit width but opposite endianness" in BPF Instruction Set Specification,
+so it should clear the upper 32 bits in "case 32:" for both BPF_ALU and
+BPF_ALU64.
+
+[root@linux fedora]# echo 1 > /proc/sys/net/core/bpf_jit_enable
+[root@linux fedora]# modprobe test_bpf
+
+Before:
+test_bpf: #313 BSWAP 32: 0x0123456789abcdef -> 0xefcdab89 jited:1 ret 1460850314 != -271733879 (0x5712ce8a != 0xefcdab89)FAIL (1 times)
+test_bpf: #317 BSWAP 32: 0xfedcba9876543210 -> 0x10325476 jited:1 ret -1460850316 != 271733878 (0xa8ed3174 != 0x10325476)FAIL (1 times)
+
+After:
+test_bpf: #313 BSWAP 32: 0x0123456789abcdef -> 0xefcdab89 jited:1 4 PASS
+test_bpf: #317 BSWAP 32: 0xfedcba9876543210 -> 0x10325476 jited:1 4 PASS
+
+Fixes: 4ebf9216e7df ("LoongArch: BPF: Support unconditional bswap instructions")
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 4ebf9216e7df
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index cd002f183648..4fcd6cd6da23 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -775,6 +775,6 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 		case 32:
+ 			emit_insn(ctx, revb2w, dst, dst);
+-			/* zero-extend 32 bits into 64 bits */
+-			emit_zext_32(ctx, dst, is32);
++			/* clear the upper 32 bits */
++			emit_zext_32(ctx, dst, true);
+ 			break;
+ 		case 64:
+
+##### L083
+=== fe5757553bf9 L 2023-12-09 +2/-8
+LoongArch: BPF: Don't sign extend memory load operand
+
+The `cgrp_local_storage` test triggers a kernel panic like:
+
+  # ./test_progs -t cgrp_local_storage
+  Can't find bpf_testmod.ko kernel module: -2
+  WARNING! Selftests relying on bpf_testmod.ko will be skipped.
+  [  550.930632] CPU 1 Unable to handle kernel paging request at virtual address 0000000000000080, era == ffff80000200be34, ra == ffff80000200be00
+  [  550.931781] Oops[#1]:
+  [  550.931966] CPU: 1 PID: 1303 Comm: test_progs Not tainted 6.7.0-rc2-loong-devel-g2f56bb0d2327 #35 a896aca3f4164f09cc346f89f2e09832e07be5f6
+  [  550.932215] Hardware name: QEMU QEMU Virtual Machine, BIOS unknown 2/2/2022
+  [  550.932403] pc ffff80000200be34 ra ffff80000200be00 tp 9000000108350000 sp 9000000108353dc0
+  [  550.932545] a0 0000000000000000 a1 0000000000000517 a2 0000000000000118 a3 00007ffffbb15558
+  [  550.932682] a4 00007ffffbb15620 a5 90000001004e7700 a6 0000000000000021 a7 0000000000000118
+  [  550.932824] t0 ffff80000200bdc0 t1 0000000000000517 t2 0000000000000517 t3 00007ffff1c06ee0
+  [  550.932961] t4 0000555578ae04d0 t5 fffffffffffffff8 t6 0000000000000004 t7 0000000000000020
+  [  550.933097] t8 0000000000000040 u0 00000000000007b8 s9 9000000108353e00 s0 90000001004e7700
+  [  550.933241] s1 9000000004005000 s2 0000000000000001 s3 0000000000000000 s4 0000555555eb2ec8
+  [  550.933379] s5 00007ffffbb15bb8 s6 00007ffff1dafd60 s7 000055555663f610 s8 00007ffff1db0050
+  [  550.933520]    ra: ffff80000200be00 bpf_prog_98f1b9e767be2a84_on_enter+0x40/0x200
+  [  550.933911]   ERA: ffff80000200be34 bpf_prog_98f1b9e767be2a84_on_enter+0x74/0x200
+  [  550.934105]  CRMD: 000000b0 (PLV0 -IE -DA +PG DACF=CC DACM=CC -WE)
+  [  550.934596]  PRMD: 00000004 (PPLV0 +PIE -PWE)
+  [  550.934712]  EUEN: 00000003 (+FPE +SXE -ASXE -BTE)
+  [  550.934836]  ECFG: 00071c1c (LIE=2-4,10-12 VS=7)
+  [  550.934976] ESTAT: 00010000 [PIL] (IS= ECode=1 EsubCode=0)
+  [  550.935097]  BADV: 0000000000000080
+  [  550.935181]  PRID: 0014c010 (Loongson-64bit, Loongson-3A5000)
+  [  550.935291] Modules linked in:
+  [  550.935391] Process test_progs (pid: 1303, threadinfo=000000006c3b1c41, task=0000000061f84a55)
+  [  550.935643] Stack : 00007ffffbb15bb8 0000555555eb2ec8 0000000000000000 0000000000000001
+  [  550.935844]         9000000004005000 ffff80001b864000 00007ffffbb15450 90000000029aa034
+  [  550.935990]         0000000000000000 9000000108353ec0 0000000000000118 d07d9dfb09721a09
+  [  550.936175]         0000000000000001 0000000000000000 9000000108353ec0 0000000000000118
+  [  550.936314]         9000000101d46ad0 900000000290abf0 000055555663f610 0000000000000000
+  [  550.936479]         0000000000000003 9000000108353ec0 00007ffffbb15450 90000000029d7288
+  [  550.936635]         00007ffff1dafd60 000055555663f610 0000000000000000 0000000000000003
+  [  550.936779]         9000000108353ec0 90000000035dd1f0 00007ffff1dafd58 9000000002841c5c
+  [  550.936939]         0000000000000119 0000555555eea5a8 00007ffff1d78780 00007ffffbb153e0
+  [  550.937083]         ffffffffffffffda 00007ffffbb15518 0000000000000040 00007ffffbb15558
+  [  550.937224]         ...
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 5dc615520c4d
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 169ff8b3915e..d2161c95ceb4 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -989,12 +989,6 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			break;
+ 		case BPF_DW:
+-			if (is_signed_imm12(off)) {
+-				emit_insn(ctx, ldd, dst, src, off);
+-			} else if (is_signed_imm14(off)) {
+-				emit_insn(ctx, ldptrd, dst, src, off);
+-			} else {
+-				move_imm(ctx, t1, off, is32);
+-				emit_insn(ctx, ldxd, dst, src, t1);
+-			}
++			move_imm(ctx, t1, off, is32);
++			emit_insn(ctx, ldxd, dst, src, t1);
+ 			break;
+ 		}
+
+##### L084
+=== c968b99f868d L 2023-12-21 +1/-0
+LoongArch: signal.c: add header file to fix build error
+
+loongarch's signal.c uses rseq_signal_deliver() so it should
+pull in the appropriate header to prevent a build error:
+
+../arch/loongarch/kernel/signal.c: In function 'handle_signal':
+../arch/loongarch/kernel/signal.c:1034:9: error: implicit declaration of function 'rseq_signal_deliver' [-Werror=implicit-function-declaration]
+ 1034 |         rseq_signal_deliver(ksig, regs);
+      |         ^~~~~~~~~~~~~~~~~~~
+
+Fixes: b74baf4ad05b ("LoongArch: Add signal handling support")
+functions: 
+fixes: b74baf4ad05b
+diff --git a/arch/loongarch/kernel/signal.c b/arch/loongarch/kernel/signal.c
+index 4a3686d13349..7a555b600171 100644
+--- a/arch/loongarch/kernel/signal.c
++++ b/arch/loongarch/kernel/signal.c
+@@ -16,4 +16,5 @@
+ #include <linux/entry-common.h>
+ #include <linux/irqflags.h>
++#include <linux/rseq.h>
+ #include <linux/sched.h>
+ #include <linux/mm.h>
+
+##### L085
+=== 36a87385e31c L 2024-01-17 +4/-1
+LoongArch: BPF: Prevent out-of-bounds memory access
+
+The test_tag test triggers an unhandled page fault:
+
+  # ./test_tag
+  [  130.640218] CPU 0 Unable to handle kernel paging request at virtual address ffff80001b898004, era == 9000000003137f7c, ra == 9000000003139e70
+  [  130.640501] Oops[#3]:
+  [  130.640553] CPU: 0 PID: 1326 Comm: test_tag Tainted: G      D    O       6.7.0-rc4-loong-devel-gb62ab1a397cf #47 61985c1d94084daa2432f771daa45b56b10d8d2a
+  [  130.640764] Hardware name: QEMU QEMU Virtual Machine, BIOS unknown 2/2/2022
+  [  130.640874] pc 9000000003137f7c ra 9000000003139e70 tp 9000000104cb4000 sp 9000000104cb7a40
+  [  130.641001] a0 ffff80001b894000 a1 ffff80001b897ff8 a2 000000006ba210be a3 0000000000000000
+  [  130.641128] a4 000000006ba210be a5 00000000000000f1 a6 00000000000000b3 a7 0000000000000000
+  [  130.641256] t0 0000000000000000 t1 00000000000007f6 t2 0000000000000000 t3 9000000004091b70
+  [  130.641387] t4 000000006ba210be t5 0000000000000004 t6 fffffffffffffff0 t7 90000000040913e0
+  [  130.641512] t8 0000000000000005 u0 0000000000000dc0 s9 0000000000000009 s0 9000000104cb7ae0
+  [  130.641641] s1 00000000000007f6 s2 0000000000000009 s3 0000000000000095 s4 0000000000000000
+  [  130.641771] s5 ffff80001b894000 s6 ffff80001b897fb0 s7 9000000004090c50 s8 0000000000000000
+  [  130.641900]    ra: 9000000003139e70 build_body+0x1fcc/0x4988
+  [  130.642007]   ERA: 9000000003137f7c build_body+0xd8/0x4988
+  [  130.642112]  CRMD: 000000b0 (PLV0 -IE -DA +PG DACF=CC DACM=CC -WE)
+  [  130.642261]  PRMD: 00000004 (PPLV0 +PIE -PWE)
+  [  130.642353]  EUEN: 00000003 (+FPE +SXE -ASXE -BTE)
+  [  130.642458]  ECFG: 00071c1c (LIE=2-4,10-12 VS=7)
+  [  130.642554] ESTAT: 00010000 [PIL] (IS= ECode=1 EsubCode=0)
+  [  130.642658]  BADV: ffff80001b898004
+  [  130.642719]  PRID: 0014c010 (Loongson-64bit, Loongson-3A5000)
+  [  130.642815] Modules linked in: [last unloaded: bpf_testmod(O)]
+  [  130.642924] Process test_tag (pid: 1326, threadinfo=00000000f7f4015f, task=000000006499f9fd)
+  [  130.643062] Stack : 0000000000000000 9000000003380724 0000000000000000 0000000104cb7be8
+  [  130.643213]         0000000000000000 25af8d9b6e600558 9000000106250ea0 9000000104cb7ae0
+  [  130.643378]         0000000000000000 0000000000000000 9000000104cb7be8 90000000049f6000
+  [  130.643538]         0000000000000090 9000000106250ea0 ffff80001b894000 ffff80001b894000
+  [  130.643685]         00007ffffb917790 900000000313ca94 0000000000000000 0000000000000000
+  [  130.643831]         ffff80001b894000 0000000000000ff7 0000000000000000 9000000100468000
+  [  130.643983]         0000000000000000 0000000000000000 0000000000000040 25af8d9b6e600558
+  [  130.644131]         0000000000000bb7 ffff80001b894048 0000000000000000 0000000000000000
+  [  130.644276]         9000000104cb7be8 90000000049f6000 0000000000000090 9000000104cb7bdc
+  [  130.644423]         ffff80001b894000 0000000000000000 00007ffffb917790 90000000032acfb0
+  [  130.644572]         ...
+  [  130.644629] Call Trace:
+  [  130.644641] [<9000000003137f7c>] build_body+0xd8/0x4988
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: bbfddb904df6
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 2f154c60ee00..e73323d759d0 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -471,5 +471,4 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 	const s16 off = insn->off;
+ 	const s32 imm = insn->imm;
+-	const u64 imm64 = (u64)(insn + 1)->imm << 32 | (u32)insn->imm;
+ 	const bool is32 = BPF_CLASS(insn->code) == BPF_ALU || BPF_CLASS(insn->code) == BPF_JMP32;
+ 
+@@ -929,6 +928,10 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 	/* dst = imm64 */
+ 	case BPF_LD | BPF_IMM | BPF_DW:
++	{
++		const u64 imm64 = (u64)(insn + 1)->imm << 32 | (u32)insn->imm;
++
+ 		move_imm(ctx, dst, imm64, is32);
+ 		return 1;
++	}
+ 
+ 	/* dst = *(size *)(src + off) */
+
+##### L086
+=== 91af17cd7d03 L 2024-01-17 +1/-1
+LoongArch: Fix definition of ftrace_regs_set_instruction_pointer()
+
+The current definition of ftrace_regs_set_instruction_pointer() is not
+correct. Obviously, this function is used to set instruction pointer but
+not return value, so it should call instruction_pointer_set() instead of
+regs_set_return_value().
+
+There is no side effect by now because it is only used for kernel live-
+patching which is not supported, so fix it to avoid failure when testing
+livepatch in the future.
+
+Fixes: 6fbff14a6382 ("LoongArch: ftrace: Abstract DYNAMIC_FTRACE_WITH_ARGS accesses")
+functions: 
+fixes: 6fbff14a6382
+diff --git a/arch/loongarch/include/asm/ftrace.h b/arch/loongarch/include/asm/ftrace.h
+index a11996eb5892..de891c2c83d4 100644
+--- a/arch/loongarch/include/asm/ftrace.h
++++ b/arch/loongarch/include/asm/ftrace.h
+@@ -64,5 +64,5 @@ static __always_inline void
+ ftrace_regs_set_instruction_pointer(struct ftrace_regs *fregs, unsigned long ip)
+ {
+-	regs_set_return_value(&fregs->regs, ip);
++	instruction_pointer_set(&fregs->regs, ip);
+ }
+ 
+
+##### L087
+=== c2396651309e L 2024-01-17 +1/-10
+LoongArch: Fix and simplify fcsr initialization on execve()
+
+There has been a lingering bug in LoongArch Linux systems causing some
+GCC tests to intermittently fail (see Closes link).  I've made a minimal
+reproducer:
+
+    zsh% cat measure.s
+    .align 4
+    .globl _start
+    _start:
+        movfcsr2gr  $a0, $fcsr0
+        bstrpick.w  $a0, $a0, 16, 16
+        beqz        $a0, .ok
+        break       0
+    .ok:
+        li.w        $a7, 93
+        syscall     0
+    zsh% cc mesaure.s -o measure -nostdlib
+    zsh% echo $((1.0/3))
+    0.33333333333333331
+    zsh% while ./measure; do ; done
+
+This while loop should not stop as POSIX is clear that execve must set
+fenv to the default, where FCSR should be zero.  But in fact it will
+just stop after running for a while (normally less than 30 seconds).
+Note that "$((1.0/3))" is needed to reproduce this issue because it
+raises FE_INVALID and makes fcsr0 non-zero.
+
+The problem is we are currently relying on SET_PERSONALITY2() to reset
+current->thread.fpu.fcsr.  But SET_PERSONALITY2() is executed before
+start_thread which calls lose_fpu(0).  We can see if kernel preempt is
+enabled, we may switch to another thread after SET_PERSONALITY2() but
+before lose_fpu(0).  Then bad thing happens: during the thread switch
+the value of the fcsr0 register is stored into current->thread.fpu.fcsr,
+making it dirty again.
+
+The issue can be fixed by setting current->thread.fpu.fcsr after
+lose_fpu(0) because lose_fpu() clears TIF_USEDFPU, then the thread
+switch won't touch current->thread.fpu.fcsr.
+
+The only other architecture setting FCSR in SET_PERSONALITY2() is MIPS.
+functions: arch/loongarch/kernel/elf.c:loongarch_set_personality_fcsr, arch/loongarch/kernel/process.c:start_thread
+fixes: 803b0fc5c3f2
+diff --git a/arch/loongarch/include/asm/elf.h b/arch/loongarch/include/asm/elf.h
+index 9b16a3b8e706..f16bd42456e4 100644
+--- a/arch/loongarch/include/asm/elf.h
++++ b/arch/loongarch/include/asm/elf.h
+@@ -242,6 +242,4 @@ do {									\
+ 	current->thread.vdso = &vdso_info;				\
+ 									\
+-	loongarch_set_personality_fcsr(state);				\
+-									\
+ 	if (personality(current->personality) != PER_LINUX)		\
+ 		set_personality(PER_LINUX);				\
+@@ -260,5 +258,4 @@ do {									\
+ 									\
+ 	current->thread.vdso = &vdso_info;				\
+-	loongarch_set_personality_fcsr(state);				\
+ 									\
+ 	p = personality(current->personality);				\
+@@ -341,5 +338,3 @@ extern int arch_check_elf(void *ehdr, bool has_interpreter, void *interp_ehdr,
+ 			  struct arch_elf_state *state);
+ 
+-extern void loongarch_set_personality_fcsr(struct arch_elf_state *state);
+-
+ #endif /* _ASM_ELF_H */
+diff --git a/arch/loongarch/kernel/elf.c b/arch/loongarch/kernel/elf.c
+index 183e94fc9c69..0fa81ced28dc 100644
+--- a/arch/loongarch/kernel/elf.c
++++ b/arch/loongarch/kernel/elf.c
+@@ -24,7 +24,2 @@ int arch_check_elf(void *_ehdr, bool has_interpreter, void *_interp_ehdr,
+ 	return 0;
+ }
+-
+-void loongarch_set_personality_fcsr(struct arch_elf_state *state)
+-{
+-	current->thread.fpu.fcsr = boot_cpu_data.fpu_csr0;
+-}
+diff --git a/arch/loongarch/kernel/process.c b/arch/loongarch/kernel/process.c
+index 767d94cce0de..f2ff8b5d591e 100644
+--- a/arch/loongarch/kernel/process.c
++++ b/arch/loongarch/kernel/process.c
+@@ -86,4 +86,5 @@ void start_thread(struct pt_regs *regs, unsigned long pc, unsigned long sp)
+ 	lose_fpu(0);
+ 	lose_lbt(0);
++	current->thread.fpu.fcsr = boot_cpu_data.fpu_csr0;
+ 
+ 	clear_thread_flag(TIF_LSX_CTX_LIVE);
+
+##### L088
+=== 48ef9e87b407 L 2024-01-26 +2/-2
+LoongArch: KVM: Add returns to SIMD stubs
+
+The stubs for kvm_own/lsx()/kvm_own_lasx() when CONFIG_CPU_HAS_LSX or
+CONFIG_CPU_HAS_LASX is not defined should have a return value since they
+return an int, so add "return -EINVAL;" to the stubs.
+Fixes the build error:
+
+In file included from ../arch/loongarch/include/asm/kvm_csr.h:12,
+                 from ../arch/loongarch/kvm/interrupt.c:8:
+../arch/loongarch/include/asm/kvm_vcpu.h: In function 'kvm_own_lasx':
+../arch/loongarch/include/asm/kvm_vcpu.h:73:39: error: no return statement in function returning non-void [-Werror=return-type]
+   73 | static inline int kvm_own_lasx(struct kvm_vcpu *vcpu) { }
+
+Fixes: db1ecca22edf ("LoongArch: KVM: Add LSX (128bit SIMD) support")
+Fixes: 118e10cd893d ("LoongArch: KVM: Add LASX (256bit SIMD) support")
+functions: 
+fixes: db1ecca22edf, 118e10cd893d
+diff --git a/arch/loongarch/include/asm/kvm_vcpu.h b/arch/loongarch/include/asm/kvm_vcpu.h
+index e71ceb88f29e..0cb4fdb8a9b5 100644
+--- a/arch/loongarch/include/asm/kvm_vcpu.h
++++ b/arch/loongarch/include/asm/kvm_vcpu.h
+@@ -61,5 +61,5 @@ void kvm_save_lsx(struct loongarch_fpu *fpu);
+ void kvm_restore_lsx(struct loongarch_fpu *fpu);
+ #else
+-static inline int kvm_own_lsx(struct kvm_vcpu *vcpu) { }
++static inline int kvm_own_lsx(struct kvm_vcpu *vcpu) { return -EINVAL; }
+ static inline void kvm_save_lsx(struct loongarch_fpu *fpu) { }
+ static inline void kvm_restore_lsx(struct loongarch_fpu *fpu) { }
+@@ -71,5 +71,5 @@ void kvm_save_lasx(struct loongarch_fpu *fpu);
+ void kvm_restore_lasx(struct loongarch_fpu *fpu);
+ #else
+-static inline int kvm_own_lasx(struct kvm_vcpu *vcpu) { }
++static inline int kvm_own_lasx(struct kvm_vcpu *vcpu) { return -EINVAL; }
+ static inline void kvm_save_lasx(struct loongarch_fpu *fpu) { }
+ static inline void kvm_restore_lasx(struct loongarch_fpu *fpu) { }
+
+##### L089
+=== 5056c596c3d1 L 2024-01-26 +10/-7
+LoongArch/smp: Call rcutree_report_cpu_starting() at tlb_init()
+
+Machines which have more than 8 nodes fail to boot SMP after commit
+a2ccf46333d7b2cf96 ("LoongArch/smp: Call rcutree_report_cpu_starting()
+earlier"). Because such machines use tlb-based per-cpu base address
+rather than dmw-based per-cpu base address, resulting per-cpu variables
+can only be accessed after tlb_init(). But rcutree_report_cpu_starting()
+is now called before tlb_init() and accesses per-cpu variables indeed.
+
+Since the original patch want to avoid the lockdep warning caused by
+page allocation in tlb_init(), we can move rcutree_report_cpu_starting()
+to tlb_init() where after tlb exception configuration but before page
+allocation.
+
+Fixes: a2ccf46333d7b2cf96 ("LoongArch/smp: Call rcutree_report_cpu_starting() earlier")
+functions: arch/loongarch/kernel/smp.c:start_secondary, arch/loongarch/mm/tlb.c:setup_tlb_handler
+fixes: a2ccf46333d7
+diff --git a/arch/loongarch/kernel/smp.c b/arch/loongarch/kernel/smp.c
+index a16e3dbe9f09..2b49d30eb7c0 100644
+--- a/arch/loongarch/kernel/smp.c
++++ b/arch/loongarch/kernel/smp.c
+@@ -510,5 +510,4 @@ asmlinkage void start_secondary(void)
+ 	cpu = raw_smp_processor_id();
+ 	set_my_cpu_offset(per_cpu_offset(cpu));
+-	rcutree_report_cpu_starting(cpu);
+ 
+ 	cpu_probe();
+diff --git a/arch/loongarch/mm/tlb.c b/arch/loongarch/mm/tlb.c
+index 2c0a411f23aa..0b95d32b30c9 100644
+--- a/arch/loongarch/mm/tlb.c
++++ b/arch/loongarch/mm/tlb.c
+@@ -285,10 +285,14 @@ static void setup_tlb_handler(int cpu)
+ 		set_handler(EXCCODE_TLBNX * VECSIZE, handle_tlb_protect, VECSIZE);
+ 		set_handler(EXCCODE_TLBPE * VECSIZE, handle_tlb_protect, VECSIZE);
+-	}
++	} else {
++		int vec_sz __maybe_unused;
++		void *addr __maybe_unused;
++		struct page *page __maybe_unused;
++
++		/* Avoid lockdep warning */
++		rcutree_report_cpu_starting(cpu);
++
+ #ifdef CONFIG_NUMA
+-	else {
+-		void *addr;
+-		struct page *page;
+-		const int vec_sz = sizeof(exception_handlers);
++		vec_sz = sizeof(exception_handlers);
+ 
+ 		if (pcpu_handlers[cpu])
+@@ -306,6 +310,6 @@ static void setup_tlb_handler(int cpu)
+ 		csr_write64(pcpu_handlers[cpu], LOONGARCH_CSR_MERRENTRY);
+ 		csr_write64(pcpu_handlers[cpu] + 80*VECSIZE, LOONGARCH_CSR_TLBRENTRY);
+-	}
+ #endif
++	}
+ }
+ 
+
+##### L090
+=== 639420e9f6cd L 2024-02-06 +3/-0
+LoongArch: Fix earlycon parameter if KASAN enabled
+
+The earlycon parameter is based on fixmap, and fixmap addresses are not
+supposed to be shadowed by KASAN. So return the kasan_early_shadow_page
+in kasan_mem_to_shadow() if the input address is above FIXADDR_START.
+Otherwise earlycon cannot work after kasan_init().
+
+Fixes: 5aa4ac64e6add3e ("LoongArch: Add KASAN (Kernel Address Sanitizer) support")
+functions: arch/loongarch/mm/kasan_init.c:kasan_mem_to_shadow
+fixes: 5aa4ac64e6ad
+diff --git a/arch/loongarch/mm/kasan_init.c b/arch/loongarch/mm/kasan_init.c
+index cc3e81fe0186..c608adc99845 100644
+--- a/arch/loongarch/mm/kasan_init.c
++++ b/arch/loongarch/mm/kasan_init.c
+@@ -45,4 +45,7 @@ void *kasan_mem_to_shadow(const void *addr)
+ 		unsigned long offset = 0;
+ 
++		if (maddr >= FIXADDR_START)
++			return (void *)(kasan_early_shadow_page);
++
+ 		maddr &= XRANGE_SHADOW_MASK;
+ 		switch (xrange) {
+
+##### L091
+=== 179af5751af5 L 2024-02-23 +18/-17
+LoongArch: KVM: Fix input validation of _kvm_get_cpucfg() & kvm_check_cpucfg()
+
+The range check for the CPUCFG ID is wrong (should have been a ||
+instead of &&) and useless in effect, so fix the obvious mistake.
+
+Furthermore, the juggling of the temp return value is unnecessary,
+because it is semantically equivalent and more readable to just
+return at every switch case's end. This is done too to avoid potential
+bugs in the future related to the unwanted complexity.
+
+Also, the return value of _kvm_get_cpucfg is meant to be checked, but
+this was not done, so bad CPUCFG IDs wrongly fall back to the default
+case and 0 is incorrectly returned; check the return value to fix the
+UAPI behavior.
+
+While at it, also remove the redundant range check in kvm_check_cpucfg,
+because out-of-range CPUCFG IDs are already rejected by the -EINVAL
+as returned by _kvm_get_cpucfg().
+
+Fixes: db1ecca22edf ("LoongArch: KVM: Add LSX (128bit SIMD) support")
+Fixes: 118e10cd893d ("LoongArch: KVM: Add LASX (256bit SIMD) support")
+functions: arch/loongarch/kvm/vcpu.c:_kvm_get_cpucfg, arch/loongarch/kvm/vcpu.c:kvm_check_cpucfg
+fixes: db1ecca22edf, 118e10cd893d
+ arch/loongarch/kvm/vcpu.c | 35 ++++++++++++++++++-----------------
+ 1 file changed, 18 insertions(+), 17 deletions(-)
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index 27701991886d..c8452aa5c11a 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -301,7 +301,5 @@ static int _kvm_setcsr(struct kvm_vcpu *vcpu, unsigned int id, u64 val)
+ static int _kvm_get_cpucfg(int id, u64 *v)
+ {
+-	int ret = 0;
+-
+-	if (id < 0 && id >= KVM_MAX_CPUCFG_REGS)
++	if (id < 0 || id >= KVM_MAX_CPUCFG_REGS)
+ 		return -EINVAL;
+ 
+@@ -325,30 +323,33 @@ static int _kvm_get_cpucfg(int id, u64 *v)
+ 			*v |= CPUCFG2_LASX;
+ 
+-		break;
++		return 0;
+ 	default:
+-		ret = -EINVAL;
+-		break;
++		/*
++		 * No restrictions on other valid CPUCFG IDs' values, but
++		 * CPUCFG data is limited to 32 bits as the LoongArch ISA
++		 * manual says (Volume 1, Section 2.2.10.5 "CPUCFG").
++		 */
++		*v = U32_MAX;
++		return 0;
+ 	}
+-	return ret;
+ }
+ 
+ static int kvm_check_cpucfg(int id, u64 val)
+ {
+-	u64 mask;
+-	int ret = 0;
+-
+-	if (id < 0 && id >= KVM_MAX_CPUCFG_REGS)
+-		return -EINVAL;
++	int ret;
++	u64 mask = 0;
+ 
+-	if (_kvm_get_cpucfg(id, &mask))
++	ret = _kvm_get_cpucfg(id, &mask);
++	if (ret)
+ 		return ret;
+ 
++	if (val & ~mask)
++		/* Unsupported features and/or the higher 32 bits should not be set */
++		return -EINVAL;
++
+ 	switch (id) {
+ 	case 2:
+ 		/* CPUCFG2 features checking */
+-		if (val & ~mask)
+-			/* The unsupported features should not be set */
+-			ret = -EINVAL;
+-		else if (!(val & CPUCFG2_LLFTP))
++		if (!(val & CPUCFG2_LLFTP))
+ 			/* The LLFTP must be set, as guest must has a constant timer */
+... (1 more diff lines)
+
+##### L092
+=== 9fa304b9f8ec L 2024-02-23 +2/-2
+LoongArch: Call early_init_fdt_scan_reserved_mem() earlier
+
+The unflatten_and_copy_device_tree() function contains a call to
+memblock_alloc(). This means that memblock is allocating memory before
+any of the reserved memory regions are set aside in the arch_mem_init()
+function which calls early_init_fdt_scan_reserved_mem(). Therefore,
+there is a possibility for memblock to allocate from any of the
+reserved memory regions.
+
+Hence, move the call to early_init_fdt_scan_reserved_mem() to be earlier
+in the init sequence, so that the reserved memory regions are set aside
+before any allocations are done using memblock.
+
+Fixes: 88d4d957edc707e ("LoongArch: Add FDT booting support from efi system table")
+functions: arch/loongarch/kernel/setup.c:platform_init, arch/loongarch/kernel/setup.c:arch_mem_init
+fixes: 88d4d957edc7
+diff --git a/arch/loongarch/kernel/setup.c b/arch/loongarch/kernel/setup.c
+index edf2bba80130..634ef17fd38b 100644
+--- a/arch/loongarch/kernel/setup.c
++++ b/arch/loongarch/kernel/setup.c
+@@ -358,4 +358,6 @@ void __init platform_init(void)
+ 	acpi_boot_table_init();
+ #endif
++
++	early_init_fdt_scan_reserved_mem();
+ 	unflatten_and_copy_device_tree();
+ 
+@@ -391,6 +393,4 @@ static void __init arch_mem_init(char **cmdline_p)
+ 	check_kernel_sections_mem();
+ 
+-	early_init_fdt_scan_reserved_mem();
+-
+ 	/*
+ 	 * In order to reduce the possibility of kernel panic when failed to
+
+##### L093
+=== 697f33424771 L 2024-04-24 +3/-3
+LoongArch: Fix Kconfig item and left code related to CRASH_CORE
+
+In commit 85fcde402db191b5 ("kexec: split crashkernel reservation code
+out from crash_core.c"), crashkernel reservation code is split out from
+crash_core.c, and add CRASH_RESERVE to control it. And also rename each
+ARCH's <asm/crash_core.h> to <asm/crash_reserve.h> accordingly.
+
+But the relevant part in LoongArch is missed. Do it now.
+
+Fixes: 85fcde402db1 ("kexec: split crashkernel reservation code out from crash_core.c")
+functions: 
+fixes: 85fcde402db1
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index a5f300ec6f28..54ad04dacdee 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -596,5 +596,5 @@ config ARCH_SELECTS_CRASH_DUMP
+ 
+ config ARCH_HAS_GENERIC_CRASHKERNEL_RESERVATION
+-	def_bool CRASH_CORE
++	def_bool CRASH_RESERVE
+ 
+ config RELOCATABLE
+diff --git a/arch/loongarch/include/asm/crash_core.h b/arch/loongarch/include/asm/crash_reserve.h
+similarity index 75%
+rename from arch/loongarch/include/asm/crash_core.h
+rename to arch/loongarch/include/asm/crash_reserve.h
+index 218bdbfa527b..a1d9b84b1c7d 100644
+--- a/arch/loongarch/include/asm/crash_core.h
++++ b/arch/loongarch/include/asm/crash_reserve.h
+@@ -1,5 +1,5 @@
+ /* SPDX-License-Identifier: GPL-2.0-only */
+-#ifndef _LOONGARCH_CRASH_CORE_H
+-#define _LOONGARCH_CRASH_CORE_H
++#ifndef _LOONGARCH_CRASH_RESERVE_H
++#define _LOONGARCH_CRASH_RESERVE_H
+ 
+ #define CRASH_ALIGN			SZ_2M
+
+##### L094
+=== 7ab22b5c2af5 L 2024-04-24 +0/-2
+LoongArch: Fix a build error due to __tlb_remove_tlb_entry()
+
+With LLVM=1 and W=1 we get:
+
+  ./include/asm-generic/tlb.h:629:10: error: parameter 'ptep' set
+  but not used [-Werror,-Wunused-but-set-parameter]
+
+We fixed a similar issue via Arnd in the introducing commit, missed the
+LoongArch variant. Turns out, there is no need for LoongArch to have a
+custom variant, so let's just drop it and rely on the asm-generic one.
+
+Fixes: 4d5bf0b6183f ("mm/mmu_gather: add tlb_remove_tlb_entries()")
+functions: 
+fixes: 4d5bf0b6183f
+diff --git a/arch/loongarch/include/asm/tlb.h b/arch/loongarch/include/asm/tlb.h
+index da7a3b5b9374..e071f5e9e858 100644
+--- a/arch/loongarch/include/asm/tlb.h
++++ b/arch/loongarch/include/asm/tlb.h
+@@ -133,6 +133,4 @@ static __always_inline void invtlb_all(u32 op, u32 info, u64 addr)
+ }
+ 
+-#define __tlb_remove_tlb_entry(tlb, ptep, address) do { } while (0)
+-
+ static void tlb_flush(struct mmu_gather *tlb);
+ 
+
+##### L095
+=== d6af2c76399f L 2024-05-14 +1/-2
+LoongArch: Fix callchain parse error with kernel tracepoint events again
+
+With commit d3119bc985fb645 ("LoongArch: Fix callchain parse error with
+kernel tracepoint events"), perf can parse kernel callchain, but not
+complete and sometimes maybe error. The reason is LoongArch's unwinders
+(guess, prologue and orc) don't really need fp (i.e., regs[22]), and
+they use sp (i.e., regs[3]) as the frame address rather than the current
+stack pointer.
+
+Fix that by removing the assignment of regs[22], and instead assign the
+__builtin_frame_address(0) to regs[3].
+
+Without fix:
+
+  Children      Self  Command        Shared Object      Symbol
+  ........  ........  .............  .................  ................
+  33.91%    33.91%    swapper        [kernel.vmlinux]   [k] __schedule
+            |
+            |--33.04%--__schedule
+            |
+             --0.87%--__arch_cpu_idle
+                       __schedule
+
+With this fix:
+
+  Children      Self  Command        Shared Object      Symbol
+  ........  ........  .............  .................  ................
+  31.16%    31.16%    swapper        [kernel.vmlinux]   [k] __schedule
+            |
+            |--20.63%--smpboot_entry
+            |          cpu_startup_entry
+            |          schedule_idle
+            |          __schedule
+            |
+             --10.53%--start_kernel
+                       cpu_startup_entry
+                       schedule_idle
+                       __schedule
+
+Fixes: d3119bc985fb645 ("LoongArch: Fix callchain parse error with kernel tracepoint events")
+functions: 
+fixes: d3119bc985fb
+diff --git a/arch/loongarch/include/asm/perf_event.h b/arch/loongarch/include/asm/perf_event.h
+index 52b638059e40..f948a0676daf 100644
+--- a/arch/loongarch/include/asm/perf_event.h
++++ b/arch/loongarch/include/asm/perf_event.h
+@@ -14,6 +14,5 @@
+ #define perf_arch_fetch_caller_regs(regs, __ip) { \
+ 	(regs)->csr_era = (__ip); \
+-	(regs)->regs[3] = current_stack_pointer; \
+-	(regs)->regs[22] = (unsigned long) __builtin_frame_address(0); \
++	(regs)->regs[3] = (unsigned long) __builtin_frame_address(0); \
+ }
+ 
+
+##### L096
+=== 3de9c42d02a7 L 2024-06-03 +5/-1
+LoongArch: Add all CPUs enabled by fdt to NUMA node 0
+
+NUMA enabled kernel on FDT based machine fails to boot because CPUs
+are all in NUMA_NO_NODE and mm subsystem won't accept that.
+
+Fix by adding them to default NUMA node at FDT parsing phase and move
+numa_add_cpu(0) to a later point.
+
+Fixes: 88d4d957edc7 ("LoongArch: Add FDT booting support from efi system table")
+functions: arch/loongarch/kernel/smp.c:fdt_smp_setup, arch/loongarch/kernel/smp.c:smp_prepare_boot_cpu
+fixes: 88d4d957edc7
+diff --git a/arch/loongarch/include/asm/numa.h b/arch/loongarch/include/asm/numa.h
+index 27f319b49862..b5f9de9f102e 100644
+--- a/arch/loongarch/include/asm/numa.h
++++ b/arch/loongarch/include/asm/numa.h
+@@ -57,4 +57,5 @@ static inline void early_numa_add_cpu(int cpuid, s16 node)	{ }
+ static inline void numa_add_cpu(unsigned int cpu)		{ }
+ static inline void numa_remove_cpu(unsigned int cpu)		{ }
++static inline void set_cpuid_to_node(int cpuid, s16 node)	{ }
+ 
+ static inline int early_cpu_to_node(int cpu)
+diff --git a/arch/loongarch/kernel/smp.c b/arch/loongarch/kernel/smp.c
+index 0dfe2388ef41..1436d2465939 100644
+--- a/arch/loongarch/kernel/smp.c
++++ b/arch/loongarch/kernel/smp.c
+@@ -274,5 +274,4 @@ static void __init fdt_smp_setup(void)
+ 		if (cpuid == loongson_sysconf.boot_cpu_id) {
+ 			cpu = 0;
+-			numa_add_cpu(cpu);
+ 		} else {
+ 			cpu = cpumask_next_zero(-1, cpu_present_mask);
+@@ -284,4 +283,7 @@ static void __init fdt_smp_setup(void)
+ 		__cpu_number_map[cpuid] = cpu;
+ 		__cpu_logical_map[cpu] = cpuid;
++
++		early_numa_add_cpu(cpu, 0);
++		set_cpuid_to_node(cpuid, 0);
+ 	}
+ 
+@@ -469,4 +471,5 @@ void smp_prepare_boot_cpu(void)
+ 	set_cpu_online(0, true);
+ 	set_my_cpu_offset(per_cpu_offset(0));
++	numa_add_cpu(0);
+ 
+ 	rr_node = first_node(node_online_map);
+
+##### L097
+=== 120dd4118e58 L 2024-06-21 +5/-1
+LoongArch: Only allow OBJTOOL & ORC unwinder if toolchain supports -mthin-add-sub
+
+GAS <= 2.41 does not support generating R_LARCH_{32,64}_PCREL for
+"label - ." and it generates R_LARCH_{ADD,SUB}{32,64} pairs instead.
+Objtool cannot handle R_LARCH_{ADD,SUB}{32,64} pair in __jump_table
+(static key implementation) and etc. so it will produce some warnings.
+This is causing the kernel CI systems to complain everywhere.
+
+For GAS we can check if -mthin-add-sub option is available to know if
+R_LARCH_{32,64}_PCREL are supported.
+
+For Clang, we require Clang >= 18 and Clang >= 17 already supports
+R_LARCH_{32,64}_PCREL. But unfortunately Clang has some other issues,
+so we disable objtool for Clang at present.
+
+Note that __jump_table here is not generated by the compiler, so
+-fno-jump-table is completely irrelevant for this issue.
+
+Fixes: cb8a2ef0848c ("LoongArch: Add ORC stack unwinder support")
+functions: 
+fixes: cb8a2ef0848c
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index e38139c576ee..ddc042895d01 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -144,5 +144,5 @@ config LOONGARCH
+ 	select HAVE_MOD_ARCH_SPECIFIC
+ 	select HAVE_NMI
+-	select HAVE_OBJTOOL if AS_HAS_EXPLICIT_RELOCS
++	select HAVE_OBJTOOL if AS_HAS_EXPLICIT_RELOCS && AS_HAS_THIN_ADD_SUB && !CC_IS_CLANG
+ 	select HAVE_PCI
+ 	select HAVE_PERF_EVENTS
+@@ -262,4 +262,7 @@ config AS_HAS_FCSR_CLASS
+ 	def_bool $(as-instr,movfcsr2gr \$t0$(comma)\$fcsr0)
+ 
++config AS_HAS_THIN_ADD_SUB
++	def_bool $(cc-option,-Wa$(comma)-mthin-add-sub)
++
+ config AS_HAS_LSX_EXTENSION
+ 	def_bool $(as-instr,vld \$vr0$(comma)\$a0$(comma)0)
+diff --git a/arch/loongarch/Kconfig.debug b/arch/loongarch/Kconfig.debug
+index 98d60630c3d4..8b2ce5b5d43e 100644
+--- a/arch/loongarch/Kconfig.debug
++++ b/arch/loongarch/Kconfig.debug
+@@ -29,4 +29,5 @@ config UNWINDER_PROLOGUE
+ config UNWINDER_ORC
+ 	bool "ORC unwinder"
++	depends on HAVE_OBJTOOL
+ 	select OBJTOOL
+ 	help
+
+##### L098
+=== 3892b11eac5a L 2024-07-20 +4/-1
+LoongArch: Check TIF_LOAD_WATCH to enable user space watchpoint
+
+Currently, there are some places to set CSR.PRMD.PWE, the first one is
+in hw_breakpoint_thread_switch() to enable user space singlestep via
+checking TIF_SINGLESTEP, the second one is in hw_breakpoint_control() to
+enable user space watchpoint. For the latter case, it should also check
+TIF_LOAD_WATCH to make the logic correct and clear.
+
+Fixes: c8e57ab0995c ("LoongArch: Trigger user-space watchpoints correctly")
+functions: arch/loongarch/kernel/hw_breakpoint.c:hw_breakpoint_control, arch/loongarch/kernel/ptrace.c:ptrace_hbp_set_ctrl
+fixes: c8e57ab0995c
+diff --git a/arch/loongarch/kernel/hw_breakpoint.c b/arch/loongarch/kernel/hw_breakpoint.c
+index 621ad7634df7..a6e4b605bfa8 100644
+--- a/arch/loongarch/kernel/hw_breakpoint.c
++++ b/arch/loongarch/kernel/hw_breakpoint.c
+@@ -222,5 +222,5 @@ static int hw_breakpoint_control(struct perf_event *bp,
+ 		enable = csr_read64(LOONGARCH_CSR_CRMD);
+ 		csr_write64(CSR_CRMD_WE | enable, LOONGARCH_CSR_CRMD);
+-		if (bp->hw.target)
++		if (bp->hw.target && test_tsk_thread_flag(bp->hw.target, TIF_LOAD_WATCH))
+ 			regs->csr_prmd |= CSR_PRMD_PWE;
+ 		break;
+diff --git a/arch/loongarch/kernel/ptrace.c b/arch/loongarch/kernel/ptrace.c
+index 200109de1971..19dc6eff45cc 100644
+--- a/arch/loongarch/kernel/ptrace.c
++++ b/arch/loongarch/kernel/ptrace.c
+@@ -590,4 +590,5 @@ static int ptrace_hbp_set_ctrl(unsigned int note_type,
+ 	struct perf_event_attr attr;
+ 	struct arch_hw_breakpoint_ctrl ctrl;
++	struct thread_info *ti = task_thread_info(tsk);
+ 
+ 	bp = ptrace_hbp_get_initialised_bp(note_type, tsk, idx);
+@@ -614,6 +615,8 @@ static int ptrace_hbp_set_ctrl(unsigned int note_type,
+ 			return err;
+ 		attr.disabled = 0;
++		set_ti_thread_flag(ti, TIF_LOAD_WATCH);
+ 	} else {
+ 		attr.disabled = 1;
++		clear_ti_thread_flag(ti, TIF_LOAD_WATCH);
+ 	}
+ 
+
+##### L099
+=== 998b17d4440b L 2024-07-20 +7/-4
+LoongArch: Make the users of larch_insn_gen_break() constant
+
+LoongArch defines UPROBE_SWBP_INSN as a function call and this breaks
+arch_uprobe_trampoline() which uses it to initialize a static variable.
+
+Add the new "__builtin_constant_p" helper, __emit_break(), and redefine
+the current users of larch_insn_gen_break() to use it.
+
+Fixes: ff474a78cef5 ("uprobe: Add uretprobe syscall to speed up return probe")
+functions: 
+fixes: ff474a78cef5
+diff --git a/arch/loongarch/include/asm/inst.h b/arch/loongarch/include/asm/inst.h
+index c3993fd88aba..944482063f14 100644
+--- a/arch/loongarch/include/asm/inst.h
++++ b/arch/loongarch/include/asm/inst.h
+@@ -533,4 +533,7 @@ static inline void emit_##NAME(union loongarch_instruction *insn,	\
+ DEF_EMIT_REG0I15_FORMAT(break, break_op)
+ 
++/* like emit_break(imm) but returns a constant expression */
++#define __emit_break(imm)	((u32)((imm) | (break_op << 15)))
++
+ #define DEF_EMIT_REG0I26_FORMAT(NAME, OP)				\
+ static inline void emit_##NAME(union loongarch_instruction *insn,	\
+diff --git a/arch/loongarch/include/asm/uprobes.h b/arch/loongarch/include/asm/uprobes.h
+index c8f59983f702..99a0d198927f 100644
+--- a/arch/loongarch/include/asm/uprobes.h
++++ b/arch/loongarch/include/asm/uprobes.h
+@@ -10,8 +10,8 @@ typedef u32 uprobe_opcode_t;
+ #define UPROBE_XOL_SLOT_BYTES	MAX_UINSN_BYTES
+ 
+-#define UPROBE_SWBP_INSN	larch_insn_gen_break(BRK_UPROBE_BP)
++#define UPROBE_SWBP_INSN	__emit_break(BRK_UPROBE_BP)
+ #define UPROBE_SWBP_INSN_SIZE	LOONGARCH_INSN_SIZE
+ 
+-#define UPROBE_XOLBP_INSN	larch_insn_gen_break(BRK_UPROBE_XOLBP)
++#define UPROBE_XOLBP_INSN	__emit_break(BRK_UPROBE_XOLBP)
+ 
+ struct arch_uprobe {
+diff --git a/arch/loongarch/kernel/kprobes.c b/arch/loongarch/kernel/kprobes.c
+index 17b040bd6067..8ba391cfabb0 100644
+--- a/arch/loongarch/kernel/kprobes.c
++++ b/arch/loongarch/kernel/kprobes.c
+@@ -5,6 +5,6 @@
+ #include <asm/break.h>
+ 
+-#define KPROBE_BP_INSN		larch_insn_gen_break(BRK_KPROBE_BP)
+-#define KPROBE_SSTEPBP_INSN	larch_insn_gen_break(BRK_KPROBE_SSTEPBP)
++#define KPROBE_BP_INSN		__emit_break(BRK_KPROBE_BP)
++#define KPROBE_SSTEPBP_INSN	__emit_break(BRK_KPROBE_SSTEPBP)
+ 
+ DEFINE_PER_CPU(struct kprobe *, current_kprobe);

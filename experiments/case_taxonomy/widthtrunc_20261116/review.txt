@@ -1,0 +1,1050 @@
+==========================================================================================
+[1] fs/ext4/dir.c:259  函数 ext4_readdir  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    234 		/* If the dir block has changed since the last call to
+    235 		 * readdir(2), then we might be pointing to an invalid
+    236 		 * dirent right now.  Scan from the start of the block
+    237 		 * to make sure. */
+    238 		if (!inode_eq_iversion(inode, info->cookie)) {
+    239 			for (i = 0;
+    240 			     i <= sb->s_blocksize -
+    241 				  ext4_dir_rec_len(1, has_csum ? NULL : inode) &&
+    242 			     i < offset;) {
+    243 				de = (struct ext4_dir_entry_2 *)
+    244 					(bh->b_data + i);
+    245 				/* It's too expensive to do a full
+    246 				 * dirent test each time round this
+    247 				 * loop, but we do have to test at
+    248 				 * least that it is non-zero.  A
+    249 				 * failure will be detected in the
+    250 				 * dirent test below. */
+    251 				if (ext4_rec_len_from_disk(de->rec_len,
+    252 					sb->s_blocksize) < ext4_dir_rec_len(1,
+    253 									inode))
+    254 					break;
+    255 				i += ext4_rec_len_from_disk(de->rec_len,
+    256 							    sb->s_blocksize);
+    257 			}
+    258 			offset = i;
+>>  259 			ctx->pos = (ctx->pos & ~(sb->s_blocksize - 1))
+    260 				| offset;
+    261 			info->cookie = inode_query_iversion(inode);
+    262 		}
+    263 
+    264 		if (unlikely(offset < sb->s_blocksize &&
+    265 			     offset > sb->s_blocksize -
+==========================================================================================
+[2] fs/hugetlbfs/inode.c:227  函数 hugetlbfs_read_iter  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    202 	if (is_raw_hwpoison_page_in_hugepage(page))
+    203 		return 0;
+    204 	/* Safe to read the remaining bytes in this page. */
+    205 	safe_bytes = PAGE_SIZE - (offset % PAGE_SIZE);
+    206 	page++;
+    207 
+    208 	/* Check each remaining page as long as we are not done yet. */
+    209 	for (; safe_bytes < bytes; safe_bytes += PAGE_SIZE, page++)
+    210 		if (is_raw_hwpoison_page_in_hugepage(page))
+    211 			break;
+    212 
+    213 	return min(safe_bytes, bytes);
+    214 }
+    215 
+    216 /*
+    217  * Support for read() - Find the page attached to f_mapping and copy out the
+    218  * data. This provides functionality similar to filemap_read().
+    219  */
+    220 static ssize_t hugetlbfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
+    221 {
+    222 	struct file *file = iocb->ki_filp;
+    223 	struct hstate *h = hstate_file(file);
+    224 	struct address_space *mapping = file->f_mapping;
+    225 	struct inode *inode = mapping->host;
+    226 	unsigned long index = iocb->ki_pos >> huge_page_shift(h);
+>>  227 	unsigned long offset = iocb->ki_pos & ~huge_page_mask(h);
+    228 	unsigned long end_index;
+    229 	loff_t isize;
+    230 	ssize_t retval = 0;
+    231 
+    232 	while (iov_iter_count(to)) {
+    233 		struct folio *folio;
+==========================================================================================
+[3] fs/hugetlbfs/inode.c:245  函数 hugetlbfs_read_iter  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    220 static ssize_t hugetlbfs_read_iter(struct kiocb *iocb, struct iov_iter *to)
+    221 {
+    222 	struct file *file = iocb->ki_filp;
+    223 	struct hstate *h = hstate_file(file);
+    224 	struct address_space *mapping = file->f_mapping;
+    225 	struct inode *inode = mapping->host;
+    226 	unsigned long index = iocb->ki_pos >> huge_page_shift(h);
+    227 	unsigned long offset = iocb->ki_pos & ~huge_page_mask(h);
+    228 	unsigned long end_index;
+    229 	loff_t isize;
+    230 	ssize_t retval = 0;
+    231 
+    232 	while (iov_iter_count(to)) {
+    233 		struct folio *folio;
+    234 		size_t nr, copied, want;
+    235 
+    236 		/* nr is the maximum number of bytes to copy from this page */
+    237 		nr = huge_page_size(h);
+    238 		isize = i_size_read(inode);
+    239 		if (!isize)
+    240 			break;
+    241 		end_index = (isize - 1) >> huge_page_shift(h);
+    242 		if (index > end_index)
+    243 			break;
+    244 		if (index == end_index) {
+>>  245 			nr = ((isize - 1) & ~huge_page_mask(h)) + 1;
+    246 			if (nr <= offset)
+    247 				break;
+    248 		}
+    249 		nr = nr - offset;
+    250 
+    251 		/* Find the folio */
+==========================================================================================
+[4] fs/hugetlbfs/inode.c:613  函数 hugetlb_vmtruncate  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    588 		(void)hugetlb_unreserve_pages(inode,
+    589 				lstart >> huge_page_shift(h),
+    590 				LONG_MAX, freed);
+    591 }
+    592 
+    593 static void hugetlbfs_evict_inode(struct inode *inode)
+    594 {
+    595 	struct resv_map *resv_map;
+    596 
+    597 	trace_hugetlbfs_evict_inode(inode);
+    598 	remove_inode_hugepages(inode, 0, LLONG_MAX);
+    599 
+    600 	resv_map = HUGETLBFS_I(inode)->resv_map;
+    601 	/* Only regular and link inodes have associated reserve maps */
+    602 	if (resv_map)
+    603 		resv_map_release(&resv_map->refs);
+    604 	clear_inode(inode);
+    605 }
+    606 
+    607 static void hugetlb_vmtruncate(struct inode *inode, loff_t offset)
+    608 {
+    609 	pgoff_t pgoff;
+    610 	struct address_space *mapping = inode->i_mapping;
+    611 	struct hstate *h = hstate_inode(inode);
+    612 
+>>  613 	BUG_ON(offset & ~huge_page_mask(h));
+    614 	pgoff = offset >> PAGE_SHIFT;
+    615 
+    616 	i_size_write(inode, offset);
+    617 	i_mmap_lock_write(mapping);
+    618 	if (mapping_mapped(mapping))
+    619 		hugetlb_vmdelete_list(mapping, pgoff, 0, ZAP_FLAG_DROP_MARKER);
+==========================================================================================
+[5] fs/hugetlbfs/inode.c:636  函数 hugetlbfs_zero_partial_page  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    611 	struct hstate *h = hstate_inode(inode);
+    612 
+    613 	BUG_ON(offset & ~huge_page_mask(h));
+    614 	pgoff = offset >> PAGE_SHIFT;
+    615 
+    616 	i_size_write(inode, offset);
+    617 	i_mmap_lock_write(mapping);
+    618 	if (mapping_mapped(mapping))
+    619 		hugetlb_vmdelete_list(mapping, pgoff, 0, ZAP_FLAG_DROP_MARKER);
+    620 	i_mmap_unlock_write(mapping);
+    621 	remove_inode_hugepages(inode, offset, LLONG_MAX);
+    622 }
+    623 
+    624 static void hugetlbfs_zero_partial_page(struct hstate *h,
+    625 					struct address_space *mapping,
+    626 					loff_t start,
+    627 					loff_t end)
+    628 {
+    629 	pgoff_t idx = start >> huge_page_shift(h);
+    630 	struct folio *folio;
+    631 
+    632 	folio = filemap_lock_hugetlb_folio(h, mapping, idx);
+    633 	if (IS_ERR(folio))
+    634 		return;
+    635 
+>>  636 	start = start & ~huge_page_mask(h);
+    637 	end = end & ~huge_page_mask(h);
+    638 	if (!end)
+    639 		end = huge_page_size(h);
+    640 
+    641 	folio_zero_segment(folio, (size_t)start, (size_t)end);
+    642 
+==========================================================================================
+[6] fs/hugetlbfs/inode.c:637  函数 hugetlbfs_zero_partial_page  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    612 
+    613 	BUG_ON(offset & ~huge_page_mask(h));
+    614 	pgoff = offset >> PAGE_SHIFT;
+    615 
+    616 	i_size_write(inode, offset);
+    617 	i_mmap_lock_write(mapping);
+    618 	if (mapping_mapped(mapping))
+    619 		hugetlb_vmdelete_list(mapping, pgoff, 0, ZAP_FLAG_DROP_MARKER);
+    620 	i_mmap_unlock_write(mapping);
+    621 	remove_inode_hugepages(inode, offset, LLONG_MAX);
+    622 }
+    623 
+    624 static void hugetlbfs_zero_partial_page(struct hstate *h,
+    625 					struct address_space *mapping,
+    626 					loff_t start,
+    627 					loff_t end)
+    628 {
+    629 	pgoff_t idx = start >> huge_page_shift(h);
+    630 	struct folio *folio;
+    631 
+    632 	folio = filemap_lock_hugetlb_folio(h, mapping, idx);
+    633 	if (IS_ERR(folio))
+    634 		return;
+    635 
+    636 	start = start & ~huge_page_mask(h);
+>>  637 	end = end & ~huge_page_mask(h);
+    638 	if (!end)
+    639 		end = huge_page_size(h);
+    640 
+    641 	folio_zero_segment(folio, (size_t)start, (size_t)end);
+    642 
+    643 	folio_unlock(folio);
+==========================================================================================
+[7] fs/hugetlbfs/inode.c:850  函数 hugetlbfs_setattr  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+    825 
+    826 out_nolock:
+    827 	trace_hugetlbfs_fallocate(inode, mode, offset, len, error);
+    828 	return error;
+    829 }
+    830 
+    831 static int hugetlbfs_setattr(struct mnt_idmap *idmap,
+    832 			     struct dentry *dentry, struct iattr *attr)
+    833 {
+    834 	struct inode *inode = d_inode(dentry);
+    835 	struct hstate *h = hstate_inode(inode);
+    836 	int error;
+    837 	unsigned int ia_valid = attr->ia_valid;
+    838 	struct hugetlbfs_inode_info *info = HUGETLBFS_I(inode);
+    839 
+    840 	error = setattr_prepare(idmap, dentry, attr);
+    841 	if (error)
+    842 		return error;
+    843 
+    844 	trace_hugetlbfs_setattr(inode, dentry, attr);
+    845 
+    846 	if (ia_valid & ATTR_SIZE) {
+    847 		loff_t oldsize = inode->i_size;
+    848 		loff_t newsize = attr->ia_size;
+    849 
+>>  850 		if (newsize & ~huge_page_mask(h))
+    851 			return -EINVAL;
+    852 		/* protected by i_rwsem */
+    853 		if ((newsize < oldsize && (info->seals & F_SEAL_SHRINK)) ||
+    854 		    (newsize > oldsize && (info->seals & F_SEAL_GROW)))
+    855 			return -EPERM;
+    856 		hugetlb_vmtruncate(inode, newsize);
+==========================================================================================
+[8] mm/filemap.c:3183  函数 folio_seek_hole_data  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+   3158 	folio_batch_release(&fbatch);
+   3159 	file_accessed(in);
+   3160 
+   3161 	return total_spliced ? total_spliced : error;
+   3162 }
+   3163 EXPORT_SYMBOL(filemap_splice_read);
+   3164 
+   3165 static inline loff_t folio_seek_hole_data(struct xa_state *xas,
+   3166 		struct address_space *mapping, struct folio *folio,
+   3167 		loff_t start, loff_t end, bool seek_data)
+   3168 {
+   3169 	const struct address_space_operations *ops = mapping->a_ops;
+   3170 	size_t offset, bsz = i_blocksize(mapping->host);
+   3171 
+   3172 	if (xa_is_value(folio) || folio_test_uptodate(folio))
+   3173 		return seek_data ? start : end;
+   3174 	if (!ops->is_partially_uptodate)
+   3175 		return seek_data ? end : start;
+   3176 
+   3177 	xas_pause(xas);
+   3178 	rcu_read_unlock();
+   3179 	folio_lock(folio);
+   3180 	if (unlikely(folio->mapping != mapping))
+   3181 		goto unlock;
+   3182 
+>> 3183 	offset = offset_in_folio(folio, start) & ~(bsz - 1);
+   3184 
+   3185 	do {
+   3186 		if (ops->is_partially_uptodate(folio, offset, bsz) ==
+   3187 							seek_data)
+   3188 			break;
+   3189 		start = (start + bsz) & ~((u64)bsz - 1);
+==========================================================================================
+[9] mm/memory-failure.c:1745  函数 unmap_and_kill  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, mips32, riscv32
+   1720 	unlock_page(page);
+   1721 
+   1722 	if (ret && release)
+   1723 		put_page(page);
+   1724 
+   1725 	return ret;
+   1726 }
+   1727 
+   1728 static void unmap_and_kill(struct list_head *to_kill, unsigned long pfn,
+   1729 		struct address_space *mapping, pgoff_t index, int flags)
+   1730 {
+   1731 	struct to_kill *tk;
+   1732 	unsigned long size = 0;
+   1733 
+   1734 	list_for_each_entry(tk, to_kill, nd)
+   1735 		if (tk->size_shift)
+   1736 			size = max(size, 1UL << tk->size_shift);
+   1737 
+   1738 	if (size) {
+   1739 		/*
+   1740 		 * Unmap the largest mapping to avoid breaking up device-dax
+   1741 		 * mappings which are constant size. The actual size of the
+   1742 		 * mapping being torn down is communicated in siginfo, see
+   1743 		 * kill_proc()
+   1744 		 */
+>> 1745 		loff_t start = ((loff_t)index << PAGE_SHIFT) & ~(size - 1);
+   1746 
+   1747 		unmap_mapping_range(mapping, start, size, 0);
+   1748 	}
+   1749 
+   1750 	kill_procs(to_kill, !!(flags & MF_MUST_KILL), pfn, flags);
+   1751 }
+==========================================================================================
+[10] arch/arm/kernel/setup.c:988  函数 get_total_mem  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 return:return
+    32 位组合：arm32, i386, mips32, riscv32
+    963 		if (ret)
+    964 			system_serial = NULL;
+    965 	}
+    966 
+    967 	if (!system_serial)
+    968 		system_serial = kasprintf(GFP_KERNEL, "%08x%08x",
+    969 					  system_serial_high,
+    970 					  system_serial_low);
+    971 
+    972 	return 0;
+    973 }
+    974 late_initcall(init_machine_late);
+    975 
+    976 #ifdef CONFIG_CRASH_RESERVE
+    977 /*
+    978  * The crash region must be aligned to 128MB to avoid
+    979  * zImage relocating below the reserved region.
+    980  */
+    981 #define CRASH_ALIGN	(128 << 20)
+    982 
+    983 static inline unsigned long long get_total_mem(void)
+    984 {
+    985 	unsigned long total;
+    986 
+    987 	total = max_low_pfn - min_low_pfn;
+>>  988 	return total << PAGE_SHIFT;
+    989 }
+    990 
+    991 /**
+    992  * reserve_crashkernel() - reserves memory are for crash kernel
+    993  *
+    994  * This function reserves memory area given in "crashkernel=" kernel command
+==========================================================================================
+[11] arch/parisc/kernel/sys_parisc.c:217  函数 parisc_truncate64  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:ksys_truncate#1
+    32 位组合：arm32, i386, mips32, riscv32
+    192 {
+    193 	/* Make sure the shift for mmap2 is constant (12), no matter what PAGE_SIZE
+    194 	   we have. */
+    195 	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
+    196 			       pgoff >> (PAGE_SHIFT - 12));
+    197 }
+    198 
+    199 asmlinkage unsigned long sys_mmap(unsigned long addr, unsigned long len,
+    200 		unsigned long prot, unsigned long flags, unsigned long fd,
+    201 		unsigned long offset)
+    202 {
+    203 	if (!(offset & ~PAGE_MASK)) {
+    204 		return ksys_mmap_pgoff(addr, len, prot, flags, fd,
+    205 					offset >> PAGE_SHIFT);
+    206 	} else {
+    207 		return -EINVAL;
+    208 	}
+    209 }
+    210 
+    211 /* Fucking broken ABI */
+    212 
+    213 #ifdef CONFIG_64BIT
+    214 asmlinkage long parisc_truncate64(const char __user * path,
+    215 					unsigned int high, unsigned int low)
+    216 {
+>>  217 	return ksys_truncate(path, (long)high << 32 | low);
+    218 }
+    219 
+    220 asmlinkage long parisc_ftruncate64(unsigned int fd,
+    221 					unsigned int high, unsigned int low)
+    222 {
+    223 	return ksys_ftruncate(fd, (long)high << 32 | low, FTRUNCATE_LFS);
+==========================================================================================
+[12] arch/parisc/kernel/sys_parisc.c:223  函数 parisc_ftruncate64  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:ksys_ftruncate#1
+    32 位组合：arm32, i386, mips32, riscv32
+    198 
+    199 asmlinkage unsigned long sys_mmap(unsigned long addr, unsigned long len,
+    200 		unsigned long prot, unsigned long flags, unsigned long fd,
+    201 		unsigned long offset)
+    202 {
+    203 	if (!(offset & ~PAGE_MASK)) {
+    204 		return ksys_mmap_pgoff(addr, len, prot, flags, fd,
+    205 					offset >> PAGE_SHIFT);
+    206 	} else {
+    207 		return -EINVAL;
+    208 	}
+    209 }
+    210 
+    211 /* Fucking broken ABI */
+    212 
+    213 #ifdef CONFIG_64BIT
+    214 asmlinkage long parisc_truncate64(const char __user * path,
+    215 					unsigned int high, unsigned int low)
+    216 {
+    217 	return ksys_truncate(path, (long)high << 32 | low);
+    218 }
+    219 
+    220 asmlinkage long parisc_ftruncate64(unsigned int fd,
+    221 					unsigned int high, unsigned int low)
+    222 {
+>>  223 	return ksys_ftruncate(fd, (long)high << 32 | low, FTRUNCATE_LFS);
+    224 }
+    225 
+    226 /* stubs for the benefit of the syscall_table since truncate64 and truncate 
+    227  * are identical on LP64 */
+    228 asmlinkage long sys_truncate64(const char __user * path, unsigned long length)
+    229 {
+==========================================================================================
+[13] arch/powerpc/mm/mem.c:139  函数 add_pages  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:update_end_of_memory_vars#0
+    32 位组合：arm32, i386, mips32, riscv32
+    114 /*
+    115  * After memory hotplug the variables max_pfn, max_low_pfn and high_memory need
+    116  * updating.
+    117  */
+    118 static void update_end_of_memory_vars(u64 start, u64 size)
+    119 {
+    120 	unsigned long end_pfn = PFN_UP(start + size);
+    121 
+    122 	if (end_pfn > max_pfn) {
+    123 		max_pfn = end_pfn;
+    124 		max_low_pfn = end_pfn;
+    125 		high_memory = (void *)__va(max_pfn * PAGE_SIZE - 1) + 1;
+    126 	}
+    127 }
+    128 
+    129 int __ref add_pages(int nid, unsigned long start_pfn, unsigned long nr_pages,
+    130 		    struct mhp_params *params)
+    131 {
+    132 	int ret;
+    133 
+    134 	ret = __add_pages(nid, start_pfn, nr_pages, params);
+    135 	if (ret)
+    136 		return ret;
+    137 
+    138 	/* update max_pfn, max_low_pfn and high_memory */
+>>  139 	update_end_of_memory_vars(start_pfn << PAGE_SHIFT,
+    140 				  nr_pages << PAGE_SHIFT);
+    141 
+    142 	return ret;
+    143 }
+    144 
+    145 int __ref arch_add_memory(int nid, u64 start, u64 size,
+==========================================================================================
+[14] arch/powerpc/mm/mem.c:140  函数 add_pages  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:update_end_of_memory_vars#1
+    32 位组合：arm32, i386, mips32, riscv32
+    115  * After memory hotplug the variables max_pfn, max_low_pfn and high_memory need
+    116  * updating.
+    117  */
+    118 static void update_end_of_memory_vars(u64 start, u64 size)
+    119 {
+    120 	unsigned long end_pfn = PFN_UP(start + size);
+    121 
+    122 	if (end_pfn > max_pfn) {
+    123 		max_pfn = end_pfn;
+    124 		max_low_pfn = end_pfn;
+    125 		high_memory = (void *)__va(max_pfn * PAGE_SIZE - 1) + 1;
+    126 	}
+    127 }
+    128 
+    129 int __ref add_pages(int nid, unsigned long start_pfn, unsigned long nr_pages,
+    130 		    struct mhp_params *params)
+    131 {
+    132 	int ret;
+    133 
+    134 	ret = __add_pages(nid, start_pfn, nr_pages, params);
+    135 	if (ret)
+    136 		return ret;
+    137 
+    138 	/* update max_pfn, max_low_pfn and high_memory */
+    139 	update_end_of_memory_vars(start_pfn << PAGE_SHIFT,
+>>  140 				  nr_pages << PAGE_SHIFT);
+    141 
+    142 	return ret;
+    143 }
+    144 
+    145 int __ref arch_add_memory(int nid, u64 start, u64 size,
+    146 			  struct mhp_params *params)
+==========================================================================================
+[15] arch/sparc/kernel/smp_64.c:405  函数 spitfire_xcall_helper  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:target
+    32 位组合：arm32, i386, mips32, riscv32
+    380 	if (callin_flag) {
+    381 		ret = 0;
+    382 	} else {
+    383 		printk("Processor %d is stuck.\n", cpu);
+    384 		ret = -ENODEV;
+    385 	}
+    386 	cpu_new_thread = NULL;
+    387 
+    388 	kfree(descr);
+    389 
+    390 	return ret;
+    391 }
+    392 
+    393 static void spitfire_xcall_helper(u64 data0, u64 data1, u64 data2, u64 pstate, unsigned long cpu)
+    394 {
+    395 	u64 result, target;
+    396 	int stuck, tmp;
+    397 
+    398 	if (this_is_starfire) {
+    399 		/* map to real upaid */
+    400 		cpu = (((cpu & 0x3c) << 1) |
+    401 			((cpu & 0x40) >> 4) |
+    402 			(cpu & 0x3));
+    403 	}
+    404 
+>>  405 	target = (cpu << 14) | 0x70;
+    406 again:
+    407 	/* Ok, this is the real Spitfire Errata #54.
+    408 	 * One must read back from a UDB internal register
+    409 	 * after writes to the UDB interrupt dispatch, but
+    410 	 * before the membar Sync for that write.
+    411 	 * So we use the high UDB control register (ASI 0x7f,
+==========================================================================================
+[16] arch/x86/mm/init_64.c:986  函数 add_pages  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:update_end_of_memory_vars#0
+    32 位组合：arm32, i386, mips32, riscv32
+    961 }
+    962 
+    963 int add_pages(int nid, unsigned long start_pfn, unsigned long nr_pages,
+    964 	      struct mhp_params *params)
+    965 {
+    966 	unsigned long end = ((start_pfn + nr_pages) << PAGE_SHIFT) - 1;
+    967 	int ret;
+    968 
+    969 	if (WARN_ON_ONCE(end > DIRECT_MAP_PHYSMEM_END))
+    970 		return -ERANGE;
+    971 
+    972 	ret = __add_pages(nid, start_pfn, nr_pages, params);
+    973 	WARN_ON_ONCE(ret);
+    974 
+    975 	/*
+    976 	 * Special case: add_pages() is called by memremap_pages() for adding device
+    977 	 * private pages. Do not bump up max_pfn in the device private path,
+    978 	 * because max_pfn changes affect dma_addressing_limited().
+    979 	 *
+    980 	 * dma_addressing_limited() returning true when max_pfn is the device's
+    981 	 * addressable memory can force device drivers to use bounce buffers
+    982 	 * and impact their performance negatively:
+    983 	 */
+    984 	if (!params->pgmap)
+    985 		/* update max_pfn, max_low_pfn and high_memory */
+>>  986 		update_end_of_memory_vars(start_pfn << PAGE_SHIFT, nr_pages << PAGE_SHIFT);
+    987 
+    988 	return ret;
+    989 }
+    990 
+    991 int arch_add_memory(int nid, u64 start, u64 size,
+    992 		    struct mhp_params *params)
+==========================================================================================
+[17] fs/ext2/dir.c:292  函数 ext2_readdir  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:ctx->pos
+    32 位组合：arm32, i386, mips32, riscv32
+    267 	bool need_revalidate = !inode_eq_iversion(inode, *(u64 *)file->private_data);
+    268 	bool has_filetype;
+    269 
+    270 	if (pos > inode->i_size - EXT2_DIR_REC_LEN(1))
+    271 		return 0;
+    272 
+    273 	has_filetype =
+    274 		EXT2_HAS_INCOMPAT_FEATURE(sb, EXT2_FEATURE_INCOMPAT_FILETYPE);
+    275 
+    276 	for ( ; n < npages; n++, offset = 0) {
+    277 		ext2_dirent *de;
+    278 		struct folio *folio;
+    279 		char *kaddr = ext2_get_folio(inode, n, 0, &folio);
+    280 		char *limit;
+    281 
+    282 		if (IS_ERR(kaddr)) {
+    283 			ext2_error(sb, __func__,
+    284 				   "bad page in #%llu",
+    285 				   inode->i_ino);
+    286 			ctx->pos += PAGE_SIZE - offset;
+    287 			return PTR_ERR(kaddr);
+    288 		}
+    289 		if (unlikely(need_revalidate)) {
+    290 			if (offset) {
+    291 				offset = ext2_validate_entry(kaddr, offset, chunk_mask);
+>>  292 				ctx->pos = (n<<PAGE_SHIFT) + offset;
+    293 			}
+    294 			*(u64 *)file->private_data = inode_query_iversion(inode);
+    295 			need_revalidate = false;
+    296 		}
+    297 		de = (ext2_dirent *)(kaddr+offset);
+    298 		limit = kaddr + ext2_last_byte(inode, n) - EXT2_DIR_REC_LEN(1);
+==========================================================================================
+[18] fs/ext4/inode.c:2857  函数 ext4_do_writepages  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:mpd->start_pos
+    32 位组合：arm32, i386, mips32, riscv32
+   2832 	 */
+   2833 	if (ext4_should_journal_data(inode)) {
+   2834 		mpd->can_map = 0;
+   2835 		if (wbc->sync_mode == WB_SYNC_ALL)
+   2836 			ext4_fc_commit(sbi->s_journal,
+   2837 				       EXT4_I(inode)->i_datasync_tid);
+   2838 	}
+   2839 	mpd->journalled_more_data = 0;
+   2840 
+   2841 	if (ext4_should_dioread_nolock(inode)) {
+   2842 		int bpf = ext4_journal_blocks_per_folio(inode);
+   2843 		/*
+   2844 		 * We may need to convert up to one extent per block in the
+   2845 		 * folio.
+   2846 		 */
+   2847 		rsv_blocks = ext4_meta_trans_blocks(inode, bpf, bpf, 0);
+   2848 	}
+   2849 
+   2850 	if (wbc->range_start == 0 && wbc->range_end == LLONG_MAX)
+   2851 		range_whole = 1;
+   2852 
+   2853 	if (wbc->range_cyclic) {
+   2854 		writeback_index = mapping->writeback_index;
+   2855 		if (writeback_index)
+   2856 			cycled = 0;
+>> 2857 		mpd->start_pos = writeback_index << PAGE_SHIFT;
+   2858 		mpd->end_pos = LLONG_MAX;
+   2859 	} else {
+   2860 		mpd->start_pos = wbc->range_start;
+   2861 		mpd->end_pos = wbc->range_end;
+   2862 	}
+   2863 
+==========================================================================================
+[19] fs/ext4/inode.c:2996  函数 ext4_do_writepages  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:mpd->end_pos
+    32 位组合：arm32, i386, mips32, riscv32
+   2971 			ext4_put_io_end(mpd->io_submit.io_end);
+   2972 		mpd->io_submit.io_end = NULL;
+   2973 		trace_ext4_da_write_folios_end(inode, mpd->start_pos,
+   2974 				mpd->next_pos, wbc, ret);
+   2975 
+   2976 		if (ret == -ENOSPC && sbi->s_journal) {
+   2977 			/*
+   2978 			 * Commit the transaction which would
+   2979 			 * free blocks released in the transaction
+   2980 			 * and try again
+   2981 			 */
+   2982 			jbd2_journal_force_commit_nested(sbi->s_journal);
+   2983 			ret = 0;
+   2984 			continue;
+   2985 		}
+   2986 		if (ret == -EAGAIN)
+   2987 			ret = 0;
+   2988 		/* Fatal error - ENOMEM, EIO... */
+   2989 		if (ret)
+   2990 			break;
+   2991 	}
+   2992 unplug:
+   2993 	blk_finish_plug(&plug);
+   2994 	if (!ret && !cycled && wbc->nr_to_write > 0) {
+   2995 		cycled = 1;
+>> 2996 		mpd->end_pos = (writeback_index << PAGE_SHIFT) - 1;
+   2997 		mpd->start_pos = 0;
+   2998 		goto retry;
+   2999 	}
+   3000 
+   3001 	/* Update index */
+   3002 	if (wbc->range_cyclic || (range_whole && wbc->nr_to_write > 0))
+==========================================================================================
+[20] fs/f2fs/file.c:3035  函数 f2fs_defragment_range  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:filemap_write_and_wait_range#1
+    32 位组合：arm32, i386, mips32, riscv32
+   3010 	int err;
+   3011 
+   3012 	f2fs_balance_fs(sbi, true);
+   3013 
+   3014 	inode_lock(inode);
+   3015 	pg_start = range->start >> PAGE_SHIFT;
+   3016 	pg_end = min_t(pgoff_t,
+   3017 				(range->start + range->len) >> PAGE_SHIFT,
+   3018 				DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE));
+   3019 
+   3020 	if (is_inode_flag_set(inode, FI_COMPRESS_RELEASED) ||
+   3021 		f2fs_is_atomic_file(inode)) {
+   3022 		err = -EINVAL;
+   3023 		goto unlock_out;
+   3024 	}
+   3025 
+   3026 	/* if in-place-update policy is enabled, don't waste time here */
+   3027 	set_inode_flag(inode, FI_OPU_WRITE);
+   3028 	if (f2fs_should_update_inplace(inode, NULL)) {
+   3029 		err = -EINVAL;
+   3030 		goto out;
+   3031 	}
+   3032 
+   3033 	/* writeback all dirty pages in the range */
+   3034 	err = filemap_write_and_wait_range(inode->i_mapping,
+>> 3035 						pg_start << PAGE_SHIFT,
+   3036 						(pg_end << PAGE_SHIFT) - 1);
+   3037 	if (err)
+   3038 		goto out;
+   3039 
+   3040 	/*
+   3041 	 * lookup mapping info in extent cache, skip defragmenting if physical
+==========================================================================================
+[21] fs/f2fs/file.c:3036  函数 f2fs_defragment_range  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:filemap_write_and_wait_range#2
+    32 位组合：arm32, i386, mips32, riscv32
+   3011 
+   3012 	f2fs_balance_fs(sbi, true);
+   3013 
+   3014 	inode_lock(inode);
+   3015 	pg_start = range->start >> PAGE_SHIFT;
+   3016 	pg_end = min_t(pgoff_t,
+   3017 				(range->start + range->len) >> PAGE_SHIFT,
+   3018 				DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE));
+   3019 
+   3020 	if (is_inode_flag_set(inode, FI_COMPRESS_RELEASED) ||
+   3021 		f2fs_is_atomic_file(inode)) {
+   3022 		err = -EINVAL;
+   3023 		goto unlock_out;
+   3024 	}
+   3025 
+   3026 	/* if in-place-update policy is enabled, don't waste time here */
+   3027 	set_inode_flag(inode, FI_OPU_WRITE);
+   3028 	if (f2fs_should_update_inplace(inode, NULL)) {
+   3029 		err = -EINVAL;
+   3030 		goto out;
+   3031 	}
+   3032 
+   3033 	/* writeback all dirty pages in the range */
+   3034 	err = filemap_write_and_wait_range(inode->i_mapping,
+   3035 						pg_start << PAGE_SHIFT,
+>> 3036 						(pg_end << PAGE_SHIFT) - 1);
+   3037 	if (err)
+   3038 		goto out;
+   3039 
+   3040 	/*
+   3041 	 * lookup mapping info in extent cache, skip defragmenting if physical
+   3042 	 * block addresses are continuous.
+==========================================================================================
+[22] fs/fuse/dax.c:189  函数 fuse_setup_one_mapping  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:offset
+    32 位组合：arm32, i386, mips32, riscv32
+    164 static void __dmap_add_to_free_pool(struct fuse_conn_dax *fcd,
+    165 				struct fuse_dax_mapping *dmap)
+    166 {
+    167 	list_add_tail(&dmap->list, &fcd->free_ranges);
+    168 	fcd->nr_free_ranges++;
+    169 	wake_up(&fcd->range_waitq);
+    170 }
+    171 
+    172 static void dmap_add_to_free_pool(struct fuse_conn_dax *fcd,
+    173 				struct fuse_dax_mapping *dmap)
+    174 {
+    175 	/* Return fuse_dax_mapping to free list */
+    176 	spin_lock(&fcd->lock);
+    177 	__dmap_add_to_free_pool(fcd, dmap);
+    178 	spin_unlock(&fcd->lock);
+    179 }
+    180 
+    181 static int fuse_setup_one_mapping(struct inode *inode, unsigned long start_idx,
+    182 				  struct fuse_dax_mapping *dmap, bool writable,
+    183 				  bool upgrade)
+    184 {
+    185 	struct fuse_mount *fm = get_fuse_mount(inode);
+    186 	struct fuse_conn_dax *fcd = fm->fc->dax;
+    187 	struct fuse_inode *fi = get_fuse_inode(inode);
+    188 	struct fuse_setupmapping_in inarg;
+>>  189 	loff_t offset = start_idx << FUSE_DAX_SHIFT;
+    190 	FUSE_ARGS(args);
+    191 	ssize_t err;
+    192 
+    193 	WARN_ON(fcd->nr_free_ranges < 0);
+    194 
+    195 	/* Ask fuse daemon to setup mapping */
+==========================================================================================
+[23] fs/fuse/dax.c:402  函数 fuse_fill_iomap  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:offset
+    32 位组合：arm32, i386, mips32, riscv32
+    377 	struct fuse_inode *fi = get_fuse_inode(inode);
+    378 
+    379 	/*
+    380 	 * fuse_evict_inode() has already called truncate_inode_pages_final()
+    381 	 * before we arrive here. So we should not have to worry about any
+    382 	 * pages/exception entries still associated with inode.
+    383 	 */
+    384 	inode_reclaim_dmap_range(fc->dax, inode, 0, -1);
+    385 	WARN_ON(fi->dax->nr);
+    386 }
+    387 
+    388 static void fuse_fill_iomap_hole(struct iomap *iomap, loff_t length)
+    389 {
+    390 	iomap->addr = IOMAP_NULL_ADDR;
+    391 	iomap->length = length;
+    392 	iomap->type = IOMAP_HOLE;
+    393 }
+    394 
+    395 static void fuse_fill_iomap(struct inode *inode, loff_t pos, loff_t length,
+    396 			    struct iomap *iomap, struct fuse_dax_mapping *dmap,
+    397 			    unsigned int flags)
+    398 {
+    399 	loff_t offset, len;
+    400 	loff_t i_size = i_size_read(inode);
+    401 
+>>  402 	offset = pos - (dmap->itn.start << FUSE_DAX_SHIFT);
+    403 	len = min(length, dmap->length - offset);
+    404 
+    405 	/* If length is beyond end of file, truncate further */
+    406 	if (pos + len > i_size)
+    407 		len = i_size - pos;
+    408 
+==========================================================================================
+[24] fs/fuse/dax.c:837  函数 dmap_writeback_invalidate  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:start_pos
+    32 位组合：arm32, i386, mips32, riscv32
+    812 
+    813 static vm_fault_t fuse_dax_pfn_mkwrite(struct vm_fault *vmf)
+    814 {
+    815 	return __fuse_dax_fault(vmf, 0, true);
+    816 }
+    817 
+    818 static const struct vm_operations_struct fuse_dax_vm_ops = {
+    819 	.fault		= fuse_dax_fault,
+    820 	.huge_fault	= fuse_dax_huge_fault,
+    821 	.page_mkwrite	= fuse_dax_page_mkwrite,
+    822 	.pfn_mkwrite	= fuse_dax_pfn_mkwrite,
+    823 };
+    824 
+    825 int fuse_dax_mmap(struct file *file, struct vm_area_struct *vma)
+    826 {
+    827 	file_accessed(file);
+    828 	vma->vm_ops = &fuse_dax_vm_ops;
+    829 	vm_flags_set(vma, VM_MIXEDMAP | VM_HUGEPAGE);
+    830 	return 0;
+    831 }
+    832 
+    833 static int dmap_writeback_invalidate(struct inode *inode,
+    834 				     struct fuse_dax_mapping *dmap)
+    835 {
+    836 	int ret;
+>>  837 	loff_t start_pos = dmap->itn.start << FUSE_DAX_SHIFT;
+    838 	loff_t end_pos = (start_pos + FUSE_DAX_SZ - 1);
+    839 
+    840 	ret = filemap_fdatawrite_range(inode->i_mapping, start_pos, end_pos);
+    841 	if (ret) {
+    842 		pr_debug("fuse: filemap_fdatawrite_range() failed. err=%d start_pos=0x%llx, end_pos=0x%llx\n",
+    843 			 ret, start_pos, end_pos);
+==========================================================================================
+[25] fs/fuse/dax.c:931  函数 inode_inline_reclaim_one_dmap  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:dmap_start
+    32 位组合：arm32, i386, mips32, riscv32
+    906 	return NULL;
+    907 }
+    908 
+    909 /*
+    910  * Find first mapping in the tree and free it and return it. Do not add
+    911  * it back to free pool.
+    912  */
+    913 static struct fuse_dax_mapping *
+    914 inode_inline_reclaim_one_dmap(struct fuse_conn_dax *fcd, struct inode *inode,
+    915 			      bool *retry)
+    916 {
+    917 	struct fuse_inode *fi = get_fuse_inode(inode);
+    918 	struct fuse_dax_mapping *dmap;
+    919 	u64 dmap_start, dmap_end;
+    920 	unsigned long start_idx;
+    921 	int ret;
+    922 	struct interval_tree_node *node;
+    923 
+    924 	filemap_invalidate_lock(inode->i_mapping);
+    925 
+    926 	/* Lookup a dmap and corresponding file offset to reclaim. */
+    927 	down_read(&fi->dax->sem);
+    928 	dmap = inode_lookup_first_dmap(inode);
+    929 	if (dmap) {
+    930 		start_idx = dmap->itn.start;
+>>  931 		dmap_start = start_idx << FUSE_DAX_SHIFT;
+    932 		dmap_end = dmap_start + FUSE_DAX_SZ - 1;
+    933 	}
+    934 	up_read(&fi->dax->sem);
+    935 
+    936 	if (!dmap)
+    937 		goto out_mmap_sem;
+==========================================================================================
+[26] fs/fuse/dax.c:1083  函数 lookup_and_reclaim_dmap  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:dmap_start
+    32 位组合：arm32, i386, mips32, riscv32
+   1058 	ret = reclaim_one_dmap_locked(inode, dmap);
+   1059 	if (ret < 0)
+   1060 		return ret;
+   1061 
+   1062 	/* Cleanup dmap entry and add back to free list */
+   1063 	spin_lock(&fcd->lock);
+   1064 	dmap_reinit_add_to_free_pool(fcd, dmap);
+   1065 	spin_unlock(&fcd->lock);
+   1066 	return ret;
+   1067 }
+   1068 
+   1069 /*
+   1070  * Free a range of memory.
+   1071  * Locking:
+   1072  * 1. Take mapping->invalidate_lock to block dax faults.
+   1073  * 2. Take fi->dax->sem to protect interval tree and also to make sure
+   1074  *    read/write can not reuse a dmap which we might be freeing.
+   1075  */
+   1076 static int lookup_and_reclaim_dmap(struct fuse_conn_dax *fcd,
+   1077 				   struct inode *inode,
+   1078 				   unsigned long start_idx,
+   1079 				   unsigned long end_idx)
+   1080 {
+   1081 	int ret;
+   1082 	struct fuse_inode *fi = get_fuse_inode(inode);
+>> 1083 	loff_t dmap_start = start_idx << FUSE_DAX_SHIFT;
+   1084 	loff_t dmap_end = (dmap_start + FUSE_DAX_SZ) - 1;
+   1085 
+   1086 	filemap_invalidate_lock(inode->i_mapping);
+   1087 	ret = fuse_dax_break_layouts(inode, dmap_start, dmap_end);
+   1088 	if (ret) {
+   1089 		pr_debug("virtio_fs: fuse_dax_break_layouts() failed. err=%d\n",
+==========================================================================================
+[27] fs/gfs2/quota.c:752  函数 gfs2_write_buf_to_page  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:blk
+    32 位组合：arm32, i386, mips32, riscv32
+    727 	}
+    728 	qc->qc_change = cpu_to_be64(x);
+    729 
+    730 	spin_unlock(&qd->qd_lockref.lock);
+    731 
+    732 	if (needs_put) {
+    733 		slot_put(qd);
+    734 		qd_put(qd);
+    735 	}
+    736 	if (change < 0) /* Reset quiet flag if we freed some blocks */
+    737 		clear_bit(QDF_QMSG_QUIET, &qd->qd_flags);
+    738 }
+    739 
+    740 static int gfs2_write_buf_to_page(struct gfs2_sbd *sdp, unsigned long index,
+    741 				  unsigned off, void *buf, unsigned bytes)
+    742 {
+    743 	struct gfs2_inode *ip = GFS2_I(sdp->sd_quota_inode);
+    744 	struct inode *inode = &ip->i_inode;
+    745 	struct address_space *mapping = inode->i_mapping;
+    746 	struct folio *folio;
+    747 	struct buffer_head *bh;
+    748 	u64 blk;
+    749 	unsigned bsize = sdp->sd_sb.sb_bsize, bnum = 0, boff = 0;
+    750 	unsigned to_write = bytes, pg_off = off;
+    751 
+>>  752 	blk = index << (PAGE_SHIFT - sdp->sd_sb.sb_bsize_shift);
+    753 	boff = off % bsize;
+    754 
+    755 	folio = filemap_grab_folio(mapping, index);
+    756 	if (IS_ERR(folio))
+    757 		return PTR_ERR(folio);
+    758 	bh = folio_buffers(folio);
+==========================================================================================
+[28] fs/libfs.c:38  函数 simple_getattr  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:stat->blocks
+    32 位组合：arm32, i386, mips32, riscv32
+     13 #include <linux/mount.h>
+     14 #include <linux/vfs.h>
+     15 #include <linux/quotaops.h>
+     16 #include <linux/mutex.h>
+     17 #include <linux/namei.h>
+     18 #include <linux/exportfs.h>
+     19 #include <linux/iversion.h>
+     20 #include <linux/writeback.h>
+     21 #include <linux/fs_context.h>
+     22 #include <linux/pseudo_fs.h>
+     23 #include <linux/fsnotify.h>
+     24 #include <linux/unicode.h>
+     25 #include <linux/fscrypt.h>
+     26 #include <linux/pidfs.h>
+     27 
+     28 #include <linux/uaccess.h>
+     29 
+     30 #include "internal.h"
+     31 
+     32 int simple_getattr(struct mnt_idmap *idmap, const struct path *path,
+     33 		   struct kstat *stat, u32 request_mask,
+     34 		   unsigned int query_flags)
+     35 {
+     36 	struct inode *inode = d_inode(path->dentry);
+     37 	generic_fillattr(&nop_mnt_idmap, request_mask, inode, stat);
+>>   38 	stat->blocks = inode->i_mapping->nrpages << (PAGE_SHIFT - 9);
+     39 	return 0;
+     40 }
+     41 EXPORT_SYMBOL(simple_getattr);
+     42 
+     43 int simple_statfs(struct dentry *dentry, struct kstatfs *buf)
+     44 {
+==========================================================================================
+[29] fs/nilfs2/inode.c:1145  函数 nilfs_fiemap  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:size
+    32 位组合：arm32, i386, mips32, riscv32
+   1120 
+   1121 	blkoff = start >> blkbits;
+   1122 	end_blkoff = (start + len - 1) >> blkbits;
+   1123 
+   1124 	delalloc_blklen = nilfs_find_uncommitted_extent(inode, blkoff,
+   1125 							&delalloc_blkoff);
+   1126 
+   1127 	do {
+   1128 		__u64 blkphy;
+   1129 		unsigned int maxblocks;
+   1130 
+   1131 		if (delalloc_blklen && blkoff == delalloc_blkoff) {
+   1132 			if (size) {
+   1133 				/* End of the current extent */
+   1134 				ret = fiemap_fill_next_extent(
+   1135 					fieinfo, logical, phys, size, flags);
+   1136 				if (ret)
+   1137 					break;
+   1138 			}
+   1139 			if (blkoff > end_blkoff)
+   1140 				break;
+   1141 
+   1142 			flags = FIEMAP_EXTENT_MERGED | FIEMAP_EXTENT_DELALLOC;
+   1143 			logical = blkoff << blkbits;
+   1144 			phys = 0;
+>> 1145 			size = delalloc_blklen << blkbits;
+   1146 
+   1147 			blkoff = delalloc_blkoff + delalloc_blklen;
+   1148 			delalloc_blklen = nilfs_find_uncommitted_extent(
+   1149 				inode, blkoff, &delalloc_blkoff);
+   1150 			continue;
+   1151 		}
+==========================================================================================
+[30] fs/nilfs2/recovery.c:543  函数 nilfs_recover_dsync_blocks  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:pos
+    32 位组合：arm32, i386, mips32, riscv32
+    518 	brelse(bh_org);
+    519 	return 0;
+    520 }
+    521 
+    522 static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
+    523 				      struct super_block *sb,
+    524 				      struct nilfs_root *root,
+    525 				      struct list_head *head,
+    526 				      unsigned long *nr_salvaged_blocks)
+    527 {
+    528 	struct inode *inode;
+    529 	struct nilfs_recovery_block *rb, *n;
+    530 	unsigned int blocksize = nilfs->ns_blocksize;
+    531 	struct folio *folio;
+    532 	loff_t pos;
+    533 	int err = 0, err2 = 0;
+    534 
+    535 	list_for_each_entry_safe(rb, n, head, list) {
+    536 		inode = nilfs_iget(sb, root, rb->ino);
+    537 		if (IS_ERR(inode)) {
+    538 			err = PTR_ERR(inode);
+    539 			inode = NULL;
+    540 			goto failed_inode;
+    541 		}
+    542 
+>>  543 		pos = rb->blkoff << inode->i_blkbits;
+    544 		err = block_write_begin(inode->i_mapping, pos, blocksize,
+    545 					&folio, nilfs_get_block);
+    546 		if (unlikely(err)) {
+    547 			loff_t isize = inode->i_size;
+    548 
+    549 			if (pos + blocksize > isize)

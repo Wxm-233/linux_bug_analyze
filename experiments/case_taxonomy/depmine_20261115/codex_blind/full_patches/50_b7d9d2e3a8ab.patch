@@ -1,0 +1,176 @@
+commit b7d9d2e3a8ab535ff3bc8e9156a917bb8934f856
+Author:     Ryan Roberts <ryan.roberts@arm.com>
+AuthorDate: Mon Mar 23 16:39:16 2026 +0000
+Commit:     Catalin Marinas <catalin.marinas@arm.com>
+CommitDate: Wed Mar 25 18:08:13 2026 +0000
+
+    arm64: mm: __ptep_set_access_flags must hint correct TTL
+    
+    It has been reported that since commit 752a0d1d483e9 ("arm64: mm:
+    Provide level hint for flush_tlb_page()"), the arm64
+    check_hugetlb_options selftest has been locking up while running "Check
+    child hugetlb memory with private mapping, sync error mode and mmap
+    memory".
+    
+    This is due to hugetlb (and THP) helpers casting their PMD/PUD entries
+    to PTE and calling __ptep_set_access_flags(), which issues a
+    __flush_tlb_page(). Now that this is hinted for level 3, in this case,
+    the TLB entry does not get evicted and we end up in a spurious fault
+    loop.
+    
+    Fix this by creating a __ptep_set_access_flags_anysz() function which
+    takes the pgsize of the entry. It can then add the appropriate hint. The
+    "_anysz" approach is the established pattern for problems of this class.
+    
+    Reported-by: Aishwarya TCV <Aishwarya.TCV@arm.com>
+    Fixes: 752a0d1d483e ("arm64: mm: Provide level hint for flush_tlb_page()")
+    Signed-off-by: Ryan Roberts <ryan.roberts@arm.com>
+    Signed-off-by: Catalin Marinas <catalin.marinas@arm.com>
+
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index b1a96a8f2b17..53e39d2182f5 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -1243,28 +1243,37 @@ static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
+ 	return pte;
+ }
+ 
+ static inline pmd_t pmd_modify(pmd_t pmd, pgprot_t newprot)
+ {
+ 	return pte_pmd(pte_modify(pmd_pte(pmd), newprot));
+ }
+ 
+-extern int __ptep_set_access_flags(struct vm_area_struct *vma,
+-				 unsigned long address, pte_t *ptep,
+-				 pte_t entry, int dirty);
++extern int __ptep_set_access_flags_anysz(struct vm_area_struct *vma,
++					 unsigned long address, pte_t *ptep,
++					 pte_t entry, int dirty,
++					 unsigned long pgsize);
++
++static inline int __ptep_set_access_flags(struct vm_area_struct *vma,
++					  unsigned long address, pte_t *ptep,
++					  pte_t entry, int dirty)
++{
++	return __ptep_set_access_flags_anysz(vma, address, ptep, entry, dirty,
++					     PAGE_SIZE);
++}
+ 
+ #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+ #define __HAVE_ARCH_PMDP_SET_ACCESS_FLAGS
+ static inline int pmdp_set_access_flags(struct vm_area_struct *vma,
+ 					unsigned long address, pmd_t *pmdp,
+ 					pmd_t entry, int dirty)
+ {
+-	return __ptep_set_access_flags(vma, address, (pte_t *)pmdp,
+-							pmd_pte(entry), dirty);
++	return __ptep_set_access_flags_anysz(vma, address, (pte_t *)pmdp,
++					     pmd_pte(entry), dirty, PMD_SIZE);
+ }
+ #endif
+ 
+ #ifdef CONFIG_PAGE_TABLE_CHECK
+ static inline bool pte_user_accessible_page(pte_t pte, unsigned long addr)
+ {
+ 	return pte_valid(pte) && (pte_user(pte) || pte_user_exec(pte));
+ }
+diff --git a/arch/arm64/mm/fault.c b/arch/arm64/mm/fault.c
+index f91aa686f142..920a8b244d59 100644
+--- a/arch/arm64/mm/fault.c
++++ b/arch/arm64/mm/fault.c
+@@ -199,22 +199,23 @@ static void show_pte(unsigned long addr)
+  * permission, and only to a more permissive setting.
+  *
+  * It needs to cope with hardware update of the accessed/dirty state by other
+  * agents in the system and can safely skip the __sync_icache_dcache() call as,
+  * like __set_ptes(), the PTE is never changed from no-exec to exec here.
+  *
+  * Returns whether or not the PTE actually changed.
+  */
+-int __ptep_set_access_flags(struct vm_area_struct *vma,
+-			    unsigned long address, pte_t *ptep,
+-			    pte_t entry, int dirty)
++int __ptep_set_access_flags_anysz(struct vm_area_struct *vma,
++				  unsigned long address, pte_t *ptep,
++				  pte_t entry, int dirty, unsigned long pgsize)
+ {
+ 	pteval_t old_pteval, pteval;
+ 	pte_t pte = __ptep_get(ptep);
++	int level;
+ 
+ 	if (pte_same(pte, entry))
+ 		return 0;
+ 
+ 	/* only preserve the access flags and write permission */
+ 	pte_val(entry) &= PTE_RDONLY | PTE_AF | PTE_WRITE | PTE_DIRTY;
+ 
+ 	/*
+@@ -233,18 +234,37 @@ int __ptep_set_access_flags(struct vm_area_struct *vma,
+ 		pteval = cmpxchg_relaxed(&pte_val(*ptep), old_pteval, pteval);
+ 	} while (pteval != old_pteval);
+ 
+ 	/*
+ 	 * Invalidate the local stale read-only entry.  Remote stale entries
+ 	 * may still cause page faults and be invalidated via
+ 	 * flush_tlb_fix_spurious_fault().
+ 	 */
+-	if (dirty)
+-		__flush_tlb_page(vma, address, TLBF_NOBROADCAST);
++	if (dirty) {
++		switch (pgsize) {
++		case PAGE_SIZE:
++			level = 3;
++			break;
++		case PMD_SIZE:
++			level = 2;
++			break;
++#ifndef __PAGETABLE_PMD_FOLDED
++		case PUD_SIZE:
++			level = 1;
++			break;
++#endif
++		default:
++			level = TLBI_TTL_UNKNOWN;
++			WARN_ON(1);
++		}
++
++		__flush_tlb_range(vma, address, address + pgsize, pgsize, level,
++				  TLBF_NOWALKCACHE | TLBF_NOBROADCAST);
++	}
+ 	return 1;
+ }
+ 
+ static bool is_el1_instruction_abort(unsigned long esr)
+ {
+ 	return ESR_ELx_EC(esr) == ESR_ELx_EC_IABT_CUR;
+ }
+ 
+diff --git a/arch/arm64/mm/hugetlbpage.c b/arch/arm64/mm/hugetlbpage.c
+index 0b7ccd0cbb9e..30772a909aea 100644
+--- a/arch/arm64/mm/hugetlbpage.c
++++ b/arch/arm64/mm/hugetlbpage.c
+@@ -422,21 +422,21 @@ int huge_ptep_set_access_flags(struct vm_area_struct *vma,
+ 			       pte_t pte, int dirty)
+ {
+ 	int ncontig;
+ 	size_t pgsize = 0;
+ 	struct mm_struct *mm = vma->vm_mm;
+ 	pte_t orig_pte;
+ 
+ 	VM_WARN_ON(!pte_present(pte));
++	ncontig = num_contig_ptes(huge_page_size(hstate_vma(vma)), &pgsize);
+ 
+ 	if (!pte_cont(pte))
+-		return __ptep_set_access_flags(vma, addr, ptep, pte, dirty);
+-
+-	ncontig = num_contig_ptes(huge_page_size(hstate_vma(vma)), &pgsize);
++		return __ptep_set_access_flags_anysz(vma, addr, ptep, pte,
++						     dirty, pgsize);
+ 
+ 	if (!__cont_access_flags_changed(ptep, pte, ncontig))
+ 		return 0;
+ 
+ 	orig_pte = get_clear_contig_flush(mm, addr, ptep, pgsize, ncontig);
+ 	VM_WARN_ON(!pte_present(orig_pte));
+ 
+ 	/* Make sure we don't lose the dirty or young state */

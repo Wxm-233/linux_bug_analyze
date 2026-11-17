@@ -1,0 +1,18 @@
+{
+ "judge": "Claude, 2026-11-16, read df2908090cda sources",
+ "old_analyzer_on_new_selftests": {"l1": "F1（误滤）", "l2": "F1", "l3": "F1", "l4": "F1（误滤）", "l5": "F1（误滤）", "gsum": "被误当作摘要 (0, val, '0')",
+                                   "note": "同样的 5 条用例在 reachsum（旧分析器）上跑，3 条误滤、1 个误摘要；新分析器全部正确"},
+ "summaries": {
+  "reachsum": 14, "now": 9, "wrong_now": 0,
+  "removed": [
+   {"func": "copy_huge_pmd", "why": "目标：goto out_unlock 统一 return ret，标签处的事实现在取各跳转来源的交集，ret 那条 return 不再算已守卫，摘要消失（原来是错的）"},
+   {"func": "clear_refs_pte_range / damon_young_pmd_entry / damos_va_migrate_pmd_entry / damos_va_stat_pmd_entry",
+    "why": "所有 return 都是 0。原来的“已守卫 return”在标签处（如 damon 的 huge_out:、task_mmu 的 out:），而跳到标签的来源里有 `if (!pmd_present(...)) goto huge_out;`，旧分析器误以为标签处已查 present。现在算出没有已守卫的 return，按修订 1 不成摘要。原摘要虽然逻辑上无害（返回值恒为 0），但推导是错的，去掉正确"}
+  ],
+  "kept": ["can_gather_numa_stats", "can_gather_numa_stats_pmd", "get_pte_pfn", "check_ptes_for_batched_move", "pte_to_hmm_pfn_flags",
+           "apply_range_clear_cb", "existing_page_cb（非 present 返回 0，present 时也只返回 0，无害）", "ksm_next_page_pmd_entry",
+           "madvise_free_pte_range（pmd_trans_huge 分支里 return 0，同样恒返回 0，无害）"]
+ },
+ "candidates": {"reachsum": 61, "now": 61, "released": 0, "newly_filtered": 0,
+                "note": "当前版本的可达候选逐条不变：旧分析器的标签问题没有造成候选上的误滤或漏滤，只影响了摘要的推导"}
+}

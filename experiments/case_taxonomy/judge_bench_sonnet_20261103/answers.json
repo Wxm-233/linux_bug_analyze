@@ -1,0 +1,6428 @@
+[
+ {
+  "variant": "V0",
+  "case": "P_A143",
+  "dir": "V0_P_A143",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64 按pfn逐项递增构造PTE是contiguous位的架构特性，RISC-V NAPOT各项写入相同PTE符合规范；其余流程（非present处理、clear_flush后再写入）两者一致。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A143",
+  "dir": "V1_P_A143",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第248行、253行使用set_ptes，第260行使用set_pte_at；RISC-V没有arm64那种需要区分公共层与私有层PTE接口的contig位封装层",
+     "why": "D1是arm64为contig位新增ptep封装层而改用私有__set_ptes，RISC-V的NAPOT没有这种封装层，理由不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第232-244行按sz计算hugepage_shift、pte_num和pgsize；第246-250行对非present的pte也按pte_num逐项写入",
+     "why": "arm64修复的是不能从swap项取folio来推算大小，RISC-V直接用传入的sz计算，同样处理了非present项。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第259-260行直接用原pte写入每个子项，NAPOT各项PTE内容相同",
+     "why": "arm64要为每个子项递增pfn，而RISC-V的NAPOT编码中各项相同，无需pfn_pte。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第252行 if (!pte_napot(pte)) 对应arm64的pte_cont判断",
+     "why": "对非连续(非NAPOT)的pte只写一项，RISC-V已有等价判断。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第259-260行不需要按子项计算pfn",
+     "why": "pte_pfn用于arm64逐项推进pfn，RISC-V的NAPOT写法不需要。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第260行直接写入pte",
+     "why": "pte_pgprot只是arm64为重建每项pte而提取权限位的辅助函数，RISC-V不需重建，属写法差异。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第252行 pte_napot(pte)",
+     "why": "这是RISC-V对应arm64 pte_cont的特有判断，属于架构命名差异。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第260行 set_pte_at(mm, addr, ptep, pte)",
+     "why": "只是RISC-V写入接口的选择不同，没有缺失处理。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第248行、253行 set_ptes(mm, addr, ptep, pte, 1)",
+     "why": "对应arm64的__set_ptes，仅为写入接口命名差异。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A281",
+  "dir": "V0_P_A281",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "没有提供参照实现，无法对比判断RISC-V函数是否遗漏了其他架构同样应满足的要求。",
+   "lines": [],
+   "why": "材料中明确说明程序没有找到其他架构的对应实现，缺少对比基准，仅凭该函数本身无法确定存在遗漏。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A281",
+  "dir": "V1_P_A281",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A288",
+  "dir": "V0_P_A288",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "module_alloc 分配模块内存后没有调用 kasan_alloc_module_shadow 为其建立 KASAN 影子内存，失败时也没有 vfree 并返回 NULL",
+   "lines": [
+    895,
+    896,
+    897,
+    898
+   ],
+   "why": "arm64 和 x86 都在 __vmalloc_node_range 之后为模块分配 KASAN 影子，RISC-V 同样支持 KASAN，模块区域需要影子内存，但该函数直接返回 vmalloc 结果而没有这一步"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A288",
+  "dir": "V1_P_A288",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "yes",
+     "riscv_handles": "no",
+     "evidence": "riscv module_alloc 第894-899行只调用__vmalloc_node_range，没有kasan_alloc_module_shadow",
+     "why": "RISC-V支持KASAN（generic，vmalloc区域有shadow），模块区若在vmalloc区则需要为模块分配shadow；该函数没有此调用。本材料未显示其他位置处理，但该提交理由（MODULE_PLTS）本身与此无关，只有KASAN shadow这一逻辑适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "no",
+     "evidence": "riscv module_alloc 第895-898行直接返回__vmalloc_node_range的结果，无失败回滚路径",
+     "why": "vfree仅用于shadow分配失败的回滚，若补上D1则同样需要。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895行已直接使用__vmalloc_node_range，范围为MODULES_VADDR~MODULES_END",
+     "why": "该提交只是统一为__vmalloc_node_range，RISC-V已使用；PAGE_ALIGN的size检查只是x86的额外边界保护，vmalloc范围分配本身会因范围不足而失败。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv 第897行flags为0，没有VM_FLUSH_RESET_PERMS",
+     "why": "该标志让vfree时重置直接映射权限；RISC-V模块内存是否通过set_memory_*改变权限、是否需要重置取决于其他代码，材料不足以判断。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv 第895-898行",
+     "why": "kasan_reset_tag针对arm64 tag-based KASAN（MTE/SW_TAGS），RISC-V没有基于指针tag的KASAN模式，不适用。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv 第895-898行，使用固定的MODULES_VADDR/MODULES_END",
+     "why": "该告警源于arm64动态选择模块VA基址可能失败的情形；RISC-V范围固定，仅是诊断信息，不影响正确性。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895行对齐参数为1",
+     "why": "只是对齐常量写法不同，MODULE_ALIGN在arm64/x86是架构特定值，RISC-V用1即可（最小对齐为页）。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895-898行直接return",
+     "why": "NULL仅用于初始化局部变量p，写法差异，无关。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895-896行使用MODULES_VADDR/MODULES_END",
+     "why": "MODULES_LEN仅用于x86预检查，范围分配本身会对过大size失败，无关。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895-896行",
+     "why": "同D3/D9，只是size预检查，无关。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895-896行固定范围",
+     "why": "SZ_128M为arm64的直接跳转范围选择，RISC-V不适用该逻辑。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第895-896行固定范围",
+     "why": "SZ_2G为arm64 PLT范围，与RISC-V固定模块区无关。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv 第897行flags为0",
+     "why": "VM_DEFER_KMEMLEAK用于避免kmemleak对模块内存的误报；RISC-V是否需要取决于kmemleak配置与其他处理，材料不足。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv 第897行flags为0",
+     "why": "同D4。"
+    }
+   ],
+   "score": 2,
+   "problem": "RISC-V的module_alloc未调用kasan_alloc_module_shadow（及失败时vfree），若启用KASAN且模块区位于vmalloc区，模块内存缺少shadow映射，可能导致KASAN访问异常；另外也没有VM_FLUSH_RESET_PERMS等标志，权限重置情况不确定。",
+   "lines": [
+    895,
+    898
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A292",
+  "dir": "V0_P_A292",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "没有找到其他架构的参照实现，无法比较RISC-V函数是否遗漏了参照实现中的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A292",
+  "dir": "V1_P_A292",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A299",
+  "dir": "V0_P_A299",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86检查的是XSAVE可变布局的魔数和xstate_size，属于x86特有；RISC-V按内核固定的riscv_v_vsize拷贝，且不覆盖内核自己的datap指针，没有对应缺失的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A299",
+  "dir": "V1_P_A299",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86第54行的likely只是分支预测提示，由提交1258a8c89604整理xstate校验时引入；RISC-V的__restore_v_state（117-143行）没有对应的魔数校验逻辑",
+     "why": "likely只是优化提示，不涉及正确性，RISC-V没有对应的校验流程，所以这一差异无关"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "trace_x86_fpu_xstate_check_failed是x86专用的tracepoint，RISC-V的__restore_v_state（117-143行）没有xstate魔数校验流程",
+     "why": "这是x86专用的调试跟踪点，RISC-V没有对应的校验失败回退路径，不影响正确性"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "提交b992c660d3b3只是把代码移到fpu/signal.c，并非针对功能的修复；RISC-V第123-136行直接按固定布局恢复",
+     "why": "FP_XSTATE_MAGIC1是x86可变长xstate帧布局的校验标记，RISC-V向量上下文没有对应格式，且该提交只是代码搬移"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第136行按固定长度riscv_v_vsize复制，没有帧末尾魔数",
+     "why": "FP_XSTATE_MAGIC2是x86扩展状态帧的结尾标记，RISC-V帧格式不同，不适用"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "XFEATURE_MASK_FPSSE属于x86的XSAVE特性位，RISC-V第117-143行没有对应概念",
+     "why": "这是x86 XSAVE特有的常量，与RISC-V无关"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第136行用copy_from_user（带访问检查）复制整个向量内容，注释说明是为了防止信息泄漏",
+     "why": "这是RISC-V自己的实现选择，并非缺失；参照中的差异不构成RISC-V的问题"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第140行调用riscv_v_vstate_set_restore(current, regs)，标记向量状态在返回用户态时需要恢复",
+     "why": "这是RISC-V特有的向量状态恢复机制，参照中没有对应处理，不适用"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第125、130、137行使用unlikely，仅是错误路径的分支提示",
+     "why": "只是写法差异，不影响正确性"
+    }
+   ],
+   "score": 1,
+   "problem": "第123-136行直接使用用户态的v_state内容（含vstate中除datap外的字段如vlenb、vl、vtype等）和用户提供的datap地址，没有看到对这些内容做合法性校验。不过current->thread.vstate.datap在第136行是内核自己的缓冲区，不会被覆盖，因为第123行只复制到datap之前的偏移；所以风险有限，证据不足。另外，第136行复制长度是riscv_v_vsize，如果该任务的向量状态缓冲区尚未分配，这里也没有检查。",
+   "lines": [
+    123,
+    136
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A301",
+  "dir": "V0_P_A301",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64和x86的实现与RISC-V在cookie存储、enter/exit调用、跳过分支回填、save_ret保存返回值等通用逻辑上一一对应；差异（如arm64的x19/x20寄存器保存、x86的rsb调用和imm8编码）都只和各自架构的指令集或寄存器约定有关，RISC-V同样没有需要补充的通用要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A301",
+  "dir": "V1_P_A301",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第720行 emit_addi(RV_REG_A1, RV_REG_FP, -run_ctx_off, ctx) 以及第736、761行",
+     "why": "只是arm64指令名不同，RISC-V用emit_addi完成同样的参数准备（&run_ctx、&args），功能等价。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第750-754行 if (ctx->insns) 回填 rv_beq(RV_REG_A0, RV_REG_ZERO, offset>>1)",
+     "why": "arm64用CBZ回填跳过程序的分支；RISC-V用beq回填，同样处理。端序修复是arm64 __le32的sparse问题，与RISC-V无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第733行 emit_mv(RV_REG_S1, RV_REG_A0) 保存启动时间，第759行 emit_mv(RV_REG_A1, RV_REG_S1)",
+     "why": "只是指令封装名不同，RISC-V用emit_mv传参和保存start time到被调用者保存寄存器S1。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第710-715行 cookie处理使用emit_imm和RV_REG_T1",
+     "why": "A64_R只是arm64寄存器宏，写法差异，无语义要求。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第713-714行 else分支 emit_sd(..., RV_REG_ZERO, ctx)",
+     "why": "cookie为0时同样用零寄存器存储，已处理。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第721-730行 调用bpf_trampoline_enter后保留nop，并在第750-754行回填beq A0,zero",
+     "why": "x86的test rax,rax对应RISC-V直接用beq比较A0与零，递归保护返回0时跳过程序。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第720、761行 emit_addi(..., -run_ctx_off, ctx)",
+     "why": "x86对imm8/imm32的编码选择是x86变长指令特有的；RISC-V的emit_addi自行处理立即数范围。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第720行 emit_addi",
+     "why": "同D7，是x86指令编码长度选择，与RISC-V无关。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第720、736、761行 emit_addi",
+     "why": "同D1，只是宏名不同。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第750-754行 rv_beq回填",
+     "why": "同D2，已有等价的条件分支回填。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第733、759行 emit_mv",
+     "why": "同D3，只是宏名不同。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第730行 emit(rv_nop(), ctx)",
+     "why": "RISC-V同样预留nop，之后回填为条件跳转。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第720、736、761行",
+     "why": "只是RISC-V的辅助函数命名，与arm64的A64_ADD_I等价，无问题。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第711、718、739、757行 emit_imm",
+     "why": "RISC-V用emit_imm加载立即数，是写法差异，不涉及缺失处理。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第733、759行 emit_mv",
+     "why": "寄存器间搬移的写法差异，无问题。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A303",
+  "dir": "V0_P_A303",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "材料中没有找到其他架构的参照实现，无法对比出RISC-V遗漏的要求，因此不能判断，只能回答unsure。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A303",
+  "dir": "V1_P_A303",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A305",
+  "dir": "V0_P_A305",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "switch(imm)没有default分支，遇到未知的原子操作码时不报错、不返回错误，静默不生成任何指令（函数返回void，无法让JIT失败）",
+   "lines": [
+    487,
+    552
+   ],
+   "why": "x86的emit_atomic在default分支打印错误并返回-EFAULT（1164-1166），RISC-V应同样拒绝未知操作码，避免静默生成缺失原子操作的错误代码"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A305",
+  "dir": "V1_P_A305",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V emit_atomic(第473行)由调用者按 is64 参数传入位宽，第490行等用 is64 ? ..._d : ..._w 区分",
+     "why": "loongarch只是在函数内用BPF_SIZE取得位宽，写法不同，RISC-V由调用者传入is64，功能等价。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第490-503行使用amoadd/amoand/amoor/amoxor指令",
+     "why": "x86的lock前缀是x86特有编码，RISC-V的AMO指令本身就是原子的。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第506-511行BPF_ADD|BPF_FETCH用rv_amoadd_*(rs, rs, rd)并在32位时zext",
+     "why": "EMIT2只是x86的指令字节编码，RISC-V已处理FETCH语义。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V使用emit(...)(如第490行)",
+     "why": "emit_insn是loongarch的指令发射宏，等价于RISC-V的emit，只是写法不同。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第477-485行把off折算进T1，之后偏移传0",
+     "why": "x86的emit_insn_suffix用于编码ModRM和偏移，RISC-V在函数开头处理偏移。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第509-510、515-516、521-522、527-528、534-535行在!is64时emit_zextw",
+     "why": "32位fetch/xchg需要零扩展，RISC-V已处理；cmpxchg的32位情形见第540-543行，addiw符号扩展T2后与lr.w符号扩展的r0比较一致。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V没有REX前缀概念，位宽由is64选择指令(第490行)",
+     "why": "maybe_emit_mod是x86的REX/ModRM编码，与RISC-V无关。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第477-485行：off非零时按is_12b_int选择emit_addi或emit_imm+emit_add",
+     "why": "都是为了把off折入地址，RISC-V已处理12位范围内外两种情况。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V使用is64参数(第473行)",
+     "why": "BPF_DW只是判断位宽的写法，不同表示方式。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第473行is64参数",
+     "why": "与D1相同，只是取位宽方式不同。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V switch(第487-552行)没有default分支",
+     "why": "x86的default返回-EFAULT处理未知op；RISC-V函数返回void，未知op会不生成代码，但通常由verifier/调用者先过滤，调用点第1870行附近未在材料中，无法确认。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V使用emit()",
+     "why": "EMIT1是x86字节发射宏，与D2同理。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第539行r0 = bpf_to_rv_reg(BPF_REG_0, ctx)",
+     "why": "只是寄存器映射的写法差异。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第490行等emit(...)",
+     "why": "RISC-V自己的指令发射函数，写法不同。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第482行emit_add",
+     "why": "用于大偏移时加基址，写法差异。"
+    }
+   ],
+   "score": 1,
+   "problem": "switch没有default分支，未知atomic op会静默不生成代码（x86返回-EFAULT），且函数返回void；可能由调用者或verifier过滤，材料中无法确认。",
+   "lines": [
+    552
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A306",
+  "dir": "V0_P_A306",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "材料中没有找到其他架构的对应参照实现，无法得出RISC-V遗漏了某项要求；该函数本身按P4D/PUD/PMD对齐和大小逐级选择映射粒度，逻辑完整。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A306",
+  "dir": "V1_P_A306",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A309",
+  "dir": "V0_P_A309",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 函数与 arm64 参照实现逐行相同（清除 active 状态、必要时 EOI、mask、disable），没有缺失的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A309",
+  "dir": "V1_P_A309",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A310",
+  "dir": "V0_P_A310",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "LoongArch多出的部分（syscall重启用的regs[0]=nr+1、预设-ENOSYS、drdtime熵源）要么是该架构特有，要么RISC-V已通过329-332行等价处理，其余流程一致。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A310",
+  "dir": "V1_P_A310",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "traps.c 第327行 add_random_kstack_offset()，第343行 choose_random_kstack_offset(get_random_u16())",
+     "why": "该提交的目的是启用kstack偏移随机化，RISC-V同样适用并已实现，只是熵源用get_random_u16()而不是drdtime，写法不同但功能等价。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "traps.c 第329-332行 syscall>=0 && syscall<NR_syscalls 时调用 syscall_handler(regs, syscall)，否则 a0=-ENOSYS",
+     "why": "该差异只是引入系统调用支持的基础写法，RISC-V通过syscall_handler完成同样的分发，并有边界检查。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "traps.c 第349行 do_trap_error 位于非用户态的else分支",
+     "why": "这是RISC-V特有的错误路径，参照实现没有对应逻辑，与参照提交的理由无关。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "traps.c 第343行 choose_random_kstack_offset(get_random_u16())",
+     "why": "只是随机源不同（get_random_u16与drdtime），属于实现差异，不是缺失。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "traps.c 第347行 irqentry_nmi_enter(regs)，位于非用户态的错误分支",
+     "why": "这是RISC-V错误分支的上下文处理，与参照提交的理由无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "traps.c 第352行 irqentry_nmi_exit(regs, state)，与第347行配对",
+     "why": "与D5配对，是RISC-V特有的错误路径，与参照提交无关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "traps.c 第323行 riscv_v_vstate_discard(regs)",
+     "why": "这是RISC-V向量扩展的处理，LoongArch的这些提交与之无关。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "traps.c 第330行 syscall_handler(regs, syscall)",
+     "why": "只是调用系统调用表的写法不同，与参照中直接调用syscall_fn等价。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "traps.c 第317行 if (user_mode(regs))",
+     "why": "这是RISC-V对来自非用户态的ecall的额外检查，参照没有该分支，与参照提交无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A313",
+  "dir": "V0_P_A313",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 的 OOM 分支（行64-74）与 LoongArch 参照实现逻辑一致：内核态调用 no_context，用户态调用 pagefault_out_of_memory()，没有缺失 RISC-V 同样需要满足的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A313",
+  "dir": "V1_P_A313",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V fault.c 第84行 BUG()；第64-83行已覆盖 VM_FAULT_OOM 和 SIGBUS/HWPOISON；调用点 fault.c:378",
+     "why": "参照 do_out_of_memory 只处理 OOM 一种情况，没有 BUG 是因为函数拆分方式不同，RISC-V 把多种错误合并到一个函数里，末尾的 BUG() 只是兜底。材料中没有提交说明，调用者是否已排除其他 fault 标志无法从材料确认。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V fault.c 第75-82行：VM_FAULT_SIGBUS/HWPOISON 分支在用户态调用 do_trap(regs, SIGBUS, BUS_ADRERR, addr)，内核态走 no_context（第77-79行）",
+     "why": "参照函数只处理 OOM，不涉及 SIGBUS；do_trap 属于 RISC-V 多合一函数中处理 SIGBUS 的部分，是写法/拆分差异，不是缺失处理。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A321",
+  "dir": "V0_P_A321",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（x86 的 default 报错、lock 前缀、LoongArch 的寄存器搬移等）属于各自架构的指令或结构，RISC-V 的 off 处理、32位零扩展和 CMPXCHG 序列已覆盖同样要求，未知 opcode 由 verifier 拦截。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A321",
+  "dir": "V1_P_A321",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv emit_atomic 的 is64 参数(478行)由调用者传入，495-560行按 is64 分支",
+     "why": "BPF_SIZE 只是取操作数宽度的写法差异，RISC-V 通过 is64 参数实现同样功能。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 494-509行用 rv_amo*指令，由 emit(...) 输出",
+     "why": "EMIT1 是 x86 的字节编码宏，lock 前缀在 RISC-V 由 AMO 指令本身提供，属于写法差异。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 511-534行 BPF_*|BPF_FETCH 分支，使用 rv_amo*(rs, rs, rd, 1, 1)",
+     "why": "EMIT2 只是 x86 的操作码编码，BPF_FETCH 在 RISC-V 已实现。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 使用 emit() 和 rv_* 编码函数，如495行",
+     "why": "emit_insn 是 loongarch 的指令发射函数，RISC-V 对应为 emit，属于写法差异。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 482-490行用 emit_addi/emit_imm+emit_add 处理 off，rd=T1",
+     "why": "x86 的 modrm/偏移后缀编码是架构特有；RISC-V 的 AMO 无偏移，已手动计算地址。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 514-515、520-521、526-527、532-533、539-540行对非64位调用 emit_zextw(rs, rs, ctx)",
+     "why": "32位 fetch/xchg 需要零扩展，RISC-V 已用 emit_zextw 处理。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 用 rv_amo*_d/_w 按 is64 选择指令(495行等)",
+     "why": "maybe_emit_mod 是 x86 REX 前缀处理，RISC-V 无此概念。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 482-490行：is_12b_int(off) 时用 emit_addi，否则 emit_imm+emit_add",
+     "why": "loongarch 的 move_imm 对应 RISC-V 的 emit_imm，且 RISC-V 对 off==0 或12位立即数做了处理，只是写法不同。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 的 is64 参数(478行)及 495行等三元表达式",
+     "why": "BPF_DW 只是判断64位的常量，RISC-V 通过调用者传入的 is64 表达。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 478行 is64 参数",
+     "why": "与D1相同，仅是取宽度的写法差异。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "yes",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 492-559行 switch 无 default 分支",
+     "why": "x86 对未知 atomic 操作返回 -EFAULT；RISC-V 此函数无 default，可能在调用者(1923行附近)或 verifier 阶段已拒绝，材料中无法确认。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 使用 emit(...)，如495行",
+     "why": "EMIT1 是 x86 字节发射宏，与 RISC-V 无关。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 544行 r0 = bpf_to_rv_reg(BPF_REG_0, ctx)",
+     "why": "这是 RISC-V 自己的寄存器映射函数，属于写法差异。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 495行 emit(...)",
+     "why": "emit 是 RISC-V 的指令发射函数，对应 x86 的 EMIT 宏，属于写法差异。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 487行 emit_add(RV_REG_T1, RV_REG_T1, rd, ctx)",
+     "why": "emit_add 用于大偏移时计算地址，是 RISC-V 自己的写法。"
+    }
+   ],
+   "score": 1,
+   "problem": "switch 无 default 分支，对未知 atomic 操作码不报错也不生成代码（x86 返回 -EFAULT）；可能由调用者或 verifier 事先拒绝，材料中无法确认。其余差异均为写法不同，RISC-V 已处理 off、32位零扩展及 cmpxchg 等。",
+   "lines": [
+    559
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A327",
+  "dir": "V0_P_A327",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V已有范围检查和text_mutex保护，icache刷新由arch_jump_label_transform_apply统一完成；x86的启动期回退和批量poke机制属x86特有。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A327",
+  "dir": "V1_P_A327",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv jump_label.c 第24-37行直接按type生成JAL或NOP指令",
+     "why": "x86的可变长度(2/5字节)补丁支持与RISC-V无关，RISC-V指令固定4字节且已有自己的指令生成逻辑"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第25-34行手工计算offset并编码RISCV_INSN_JAL，第27行检查范围",
+     "why": "arm64的是该架构的分支指令生成函数，RISC-V用等价的JAL编码替代，属写法差异"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第36行 insn = RISCV_INSN_NOP",
+     "why": "只是各架构生成NOP的方式不同"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "yes",
+     "evidence": "第39-41行在text_mutex下调用patch_insn_write(addr,&insn,sizeof(insn))",
+     "why": "arm64避免stop_machine的理由是IPI与锁序问题；RISC-V用patch_insn_write写入，本函数内无法确认其是否做了fence.i/远程icache刷新，但补丁写入已由RISC-V自己的接口负责，调用者未找到无法进一步确认"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第20-44行函数本身即queue实现，直接打补丁并return true，无批量队列",
+     "why": "x86启动期回退到非批量模式是因为批量依赖text_poke机制；RISC-V没有批处理队列，不需要此回退"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第40行patch_insn_write立即写入",
+     "why": "text_poke_queue是x86批量机制，RISC-V采用立即写入的方式"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第30行RISCV_INSN_JAL",
+     "why": "arm64的BRANCH_NOLINK等价于RISC-V的JAL，仅是架构常量不同"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第40行patch_insn_write无需额外参数",
+     "why": "NULL是text_poke_queue的参数，与RISC-V无关"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第39-41行统一加text_mutex后写入，无分支",
+     "why": "SYSTEM_BOOTING判断服务于x86批量路径，RISC-V无此路径"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第31-34行GENMASK",
+     "why": "仅为RISC-V J型立即数位域编码所需，无关缺陷"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第27行WARN_ON(offset & 1 || offset<-524288 || offset>=524288)",
+     "why": "RISC-V额外的范围检查，属自身防御性代码"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第40行patch_insn_write",
+     "why": "RISC-V的打补丁接口，对应参照的patch/poke函数，只是实现不同"
+    }
+   ],
+   "score": 1,
+   "problem": "未找到本函数的调用者，且无法确认patch_insn_write是否包含必要的icache刷新(fence.i)与跨核可见性处理；另外offset范围检查为±512KiB而非JAL的±1MiB(20位有符号)，较保守但不会出错，存在疑点但证据不足。",
+   "lines": [
+    27,
+    40
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A328",
+  "dir": "V0_P_A328",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的fixmap映射、memblock保留和只读重映射都是该架构自身的机制（RISC-V在setup_bootmem中另行保留DTB），无效DTB时的处理只是策略差异，不是RISC-V必须满足的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A328",
+  "dir": "V1_P_A328",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:237-238 在early_init_dt_scan失败时只pr_err，不死循环；该提交只是改善arm64 cpu_relax死循环处的打印和注释",
+     "why": "该提交针对arm64失败路径的%px打印与注释，与RISC-V无直接关系，RISC-V失败时继续启动并报错"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:230 直接用dtb_early_va调用early_init_dt_scan；RISC-V在mm/init.c中以可写方式建立早期FDT映射，不像arm64先映射RO",
+     "why": "该提交是修复arm64先RO映射导致rng-seed无法修改FDT的问题，RISC-V不是fixmap RO映射流程，理由不适用"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86 UV平台专用的calc_mmioh_map，与parse_dtb无关",
+     "why": "SGI UV3 MMIOH映射是x86特定硬件，无关"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:230 之后；RISC-V在setup_bootmem()中对dtb做memblock_reserve（early_init_fdt_reserve_self等），不在parse_dtb中",
+     "why": "FDT内存保留由别处处理，不在此函数"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:237-238 pr_err(\"No DTB passed to the kernel\")",
+     "why": "该提交是arm64把FDT映射与校验挪到fixmap区域，其错误信息针对arm64映射限制；RISC-V已有自己的失败提示"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "x86 UV专用代码，parse_dtb中无NASID逻辑",
+     "why": "与RISC-V无关"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "parse_dtb无格式化id逻辑",
+     "why": "x86 UV专用写法，无关"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "parse_dtb无MMR读取",
+     "why": "x86 UV硬件寄存器访问，无关"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:230 无fixmap映射",
+     "why": "arm64页属性宏，只服务于fixmap_remap_fdt"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:230",
+     "why": "同D2，RO重映射为arm64特有"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "无关",
+     "why": "仅为x86常量写法"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "无关",
+     "why": "x86 UV枚举"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "无关",
+     "why": "x86 UV寄存器宏"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "无关",
+     "why": "x86 UV寄存器宏"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "setup.c:230 __pa(dtb_early_va)",
+     "why": "RISC-V的dtb_early_va是线性映射/早期映射地址，可用__pa；arm64因fixmap才不能用，这里差异合理"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A336",
+  "dir": "V0_P_A336",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "材料中没有找到其他架构的对应参照实现，无法对比判断RISC-V函数是否缺少参照实现中的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A336",
+  "dir": "V1_P_A336",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A339",
+  "dir": "V0_P_A339",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "材料中没有提供其他架构的参照实现，无法对比。仅从RISC-V函数本身看，它按kvm_riscv_teardown()、kvm_exit()的顺序执行清理，我没有依据判定缺少某项通用要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A339",
+  "dir": "V1_P_A339",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A344",
+  "dir": "V0_P_A344",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "x86参照实现在irqentry_enter/exit之间用instrumentation_begin()/instrumentation_end()包住可插桩的处理代码，RISC-V的do_trap_misaligned在进入entry之后直接调用handler和do_trap_error，没有这对标注。",
+   "lines": [
+    228,
+    229,
+    230
+   ],
+   "why": "irqentry_enter_from_user_mode/irqentry_nmi_enter之后到exit之前的普通C代码需要用instrumentation_begin/end括起来，否则objtool的noinstr检查会告警，且可能在未完成状态切换的上下文中运行被插桩代码；RISC-V在228-230行调用handler和do_trap_error时缺少这对标注。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A344",
+  "dir": "V1_P_A344",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv traps.c 228-230: 处理函数失败时调用 do_trap_error(regs, SIGBUS, BUS_ADRALN, ...)，内核态下由 do_trap_error 走 die",
+     "why": "提交只是把x86 int3处理拆成内核/用户两部分以简化代码，属于代码结构问题，与RISC-V的对齐陷阱无关；RISC-V的错误路径已由do_trap_error负责"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv traps.c 228: misaligned_handler[type].handler(regs) 对用户态和内核态通用",
+     "why": "do_int3是x86断点专用的内核态处理，RISC-V由handler回调承担对应功能"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv traps.c 228: misaligned_handler[type].handler(regs)",
+     "why": "do_int3_user是x86 int3用户态专用处理，与RISC-V对齐陷阱无关，RISC-V用统一handler"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv traps.c 223-235 没有 instrumentation_begin/end；材料未显示handler或do_trap_error内部情况",
+     "why": "x86在noinstr入口代码里用它包裹可插桩代码；RISC-V该函数是否为noinstr以及handler是否需要包裹，材料中无法确定"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv traps.c 223-235 没有 instrumentation_end",
+     "why": "与D4成对，同样无法仅凭材料判断"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv traps.c 220-236 没有类似int3代码修补的逻辑",
+     "why": "poke_int3_handler用于x86的text poking，提交内容是内联bsearch，与RISC-V对齐陷阱处理无关"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv traps.c 220: 普通static函数，由240、245行调用方使用",
+     "why": "DEFINE_IDTENTRY_RAW是x86 IDT入口宏，只是写法不同，RISC-V有自己的入口机制"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv traps.c 229: do_trap_error(regs, SIGBUS, BUS_ADRALN, regs->epc, ...)",
+     "why": "RISC-V特有的错误处理，属于架构差异，不是缺失"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv traps.c 228: misaligned_handler[type].handler(regs)",
+     "why": "按类型分派的回调是RISC-V自己的写法，与x86 int3无对应关系"
+    }
+   ],
+   "score": 1,
+   "problem": "该函数在用户态和内核态下都没有显式的instrumentation_begin/end包裹，handler和do_trap_error是否需要这类标注无法由材料确定，仅有轻微疑点；其余差异多为架构差异。",
+   "lines": [
+    228,
+    229
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A350",
+  "dir": "V0_P_A350",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V的ptdump_show已与arm64参照实现一致，在ptdump_walk前后用get_online_mems()/put_online_mems()（416、418行）保护内存热插拔；x86参照没有这一对调用，但这属于该架构自己的实现差异，并非RISC-V遗漏了要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A350",
+  "dir": "V1_P_A350",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V ptdump.c第417行 ptdump_walk(m, m->private) 已直接调用通用的ptdump_walk，且第416-418行有get_online_mems()/put_online_mems()保护；该函数通过ptdump_info（m->private）传入mm信息，与arm64写法一致",
+     "why": "提交c5cfae12fdd5是为让x86迁移到通用walk_page_range而给x86专有函数ptdump_walk_pgd_level_debugfs增加mm_struct参数并去掉pgd==NULL，该函数是x86特有的，RISC-V没有对应函数，属于写法/接口差异而非缺失处理。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A359",
+  "dir": "V0_P_A359",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "GPA上界检查使用 >=，把恰好到达GPA空间末尾的合法memslot也拒绝了；参照实现用 > （即 base_gfn+npages 可等于上限）",
+   "lines": [
+    186,
+    187
+   ],
+   "why": "base_gfn+npages 是区域末尾的下一个gfn，等于GPA空间大小时区域仍完全落在可寻址范围内，应使用 > 而非 >=。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A359",
+  "dir": "V1_P_A359",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 172-180行：change不是CREATE/MOVE/FLAGS_ONLY时直接return 0；RISC-V没有x86那样需要从old复制到new的arch数据",
+     "why": "WARN_ON_ONCE用于校验x86中arch数据的传递，RISC-V的memslot没有这类数据，不适用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 172-261行没有按memslot分配的arch元数据；mmu.c中只有kvm_riscv_mmu_ioremap/iounmap",
+     "why": "kvm_alloc_memslot_metadata是x86的rmap/lpage_info分配，RISC-V没有对应的数据结构"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 172-261行没有MTE相关处理",
+     "why": "MTE是arm64特有功能，RISC-V没有对应的内存标签语义"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 186-188行有GPA上限检查；RISC-V没有TDX那样的shared-bit别名GPA",
+     "why": "别名GFN是x86 TDX的概念，与RISC-V无关"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 172-261行没有gmem相关处理；本版本中RISC-V未启用guest_memfd",
+     "why": "该检查是arm64启用guest_memfd时加的限制，RISC-V未启用，不适用"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 186-188行：(base_gfn+npages) >= (kvm_riscv_gstage_gpa_size>>PAGE_SHIFT)则返回-EFAULT",
+     "why": "这是防止memslot超出可寻址GPA范围，RISC-V有对应检查"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 172-261行没有page track外部用户的概念",
+     "why": "KVMGT外部page tracker是x86特有的，RISC-V没有"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 186-187行使用kvm_riscv_gstage_gpa_size作上限",
+     "why": "只是获取GPA空间大小的方式不同，检查本身在RISC-V已有"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 172-261行没有gmem处理",
+     "why": "RISC-V未支持guest_memfd，该检查不适用"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 178-180行对不关心的change直接返回0",
+     "why": "-EIO只用于x86中非法的change值，写法差异，无关"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 178-180行",
+     "why": "DELETE在RISC-V直接返回0，只是写法不同"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 178-180行",
+     "why": "与D1相同，是同一个WARN_ON_ONCE的宏用法"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 244行kvm_riscv_mmu_ioremap",
+     "why": "这是RISC-V自己的实现，用于预先映射PFNMAP区域，参照中没有对应物"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 255-256行kvm_riscv_mmu_iounmap",
+     "why": "RISC-V在出错时回滚IO映射，属于自身实现"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 228行max(hva, vma->vm_start)",
+     "why": "只是取VMA交集的写法不同，arm64用min推进hva"
+    }
+   ],
+   "score": 1,
+   "problem": "RISC-V在PFNMAP分支里，ioremap失败用break后在255-256行回滚；但239-242行的dirty-logging错误直接goto out，跳过了回滚，此前已映射的其他VMA区域没有被撤销，可能有残留的IO映射。另外252-253行FLAGS_ONLY直接跳到out，也不会回滚。证据不足，只是疑点。",
+   "lines": [
+    239,
+    241,
+    252,
+    255
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A368",
+  "dir": "V0_P_A368",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "材料中没有提供其他架构的参照实现，无法进行跨架构对比，因此无法判断RISC-V函数是否缺少参照实现中的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A368",
+  "dir": "V1_P_A368",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A379",
+  "dir": "V0_P_A379",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "两者逻辑等价：内核文本用__pa_symbol，其余用vmalloc_to_page并检查page非空，页内偏移也都加上；RISC-V在无STRICT_MODULE_RWX时直接返回addr只是自身配置相关的优化，不是遗漏。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A379",
+  "dir": "V1_P_A379",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "patch.c:47-48 用 core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr) 判断内核镜像文本，并用 __pa_symbol(addr) 转换，再经 phys_to_page；仅在非镜像地址时才用 vmalloc_to_page (50)。",
+     "why": "arm64 提交是为避免对镜像文本地址做 page_to_phys() 触发 CONFIG_DEBUG_VIRTUAL 警告；RISC-V 对镜像文本先用 __pa_symbol 得到页，不是对线性映射错误地址直接转换，等价的 is_image_text 判断已由 core_kernel_text/is_kernel_exittext 实现，只是写法不同。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "patch.c:49 IS_ENABLED(CONFIG_STRICT_MODULE_RWX)，52 return addr",
+     "why": "这是 RISC-V 特有的配置分支：未启用严格模块 RWX 时模块文本本就可写，无需 fixmap；与该 arm64 提交的理由无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "patch.c:47 core_kernel_text(uintaddr)",
+     "why": "只是 is_image_text 的 RISC-V 等价写法，用于识别内核镜像文本，属写法不同。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "patch.c:47 is_kernel_exittext(uintaddr)",
+     "why": "覆盖 exit text 段（core_kernel_text 不含），属 RISC-V 对镜像文本判断的补充，与 arm64 该提交理由无关。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "patch.c:48 page = phys_to_page(__pa_symbol(addr))",
+     "why": "RISC-V 先得到 struct page，后在56行统一用 page_to_phys，仅是代码结构不同，而 __pa_symbol 用于镜像地址是正确的。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A380",
+  "dir": "V0_P_A380",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "unsure",
+   "problem": "",
+   "lines": [],
+   "why": "材料中没有找到其他架构的对应参照实现，无法对比判断RISC-V函数是否缺少某项要求，因此不能下结论。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A380",
+  "dir": "V1_P_A380",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A387",
+  "dir": "V0_P_A387",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "未校验 dbg->control 中的无效/不支持的标志位，直接存入 vcpu->guest_debug，未对未知位返回 -EINVAL",
+   "lines": [
+    536,
+    537
+   ],
+   "why": "arm64 在886-887行用 KVM_GUESTDBG_VALID_MASK 拒绝未知控制位，这是与架构硬件无关的 ioctl 参数校验，RISC-V 也应拒绝不支持的标志"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A387",
+  "dir": "V1_P_A387",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V vcpu.c 536-539 只处理 KVM_GUESTDBG_ENABLE；RISC-V 没有 KVM_GUESTDBG_BLOCKIRQ，也没有 APICv 抑制机制",
+     "why": "这是 x86 APICv/AVIC 与 BLOCKIRQ 的特有问题，RISC-V 不适用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539 没有 singlestep_rip 逻辑",
+     "why": "这是 x86 的 CS.BASE+RIP 线性地址和单步 RIP 比较，与 RISC-V 无关"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539 没有 rflags 相关代码",
+     "why": "TF/RF 标志注入与过滤是 x86 特有机制"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539 没有 INJECT_DB/INJECT_BP 处理",
+     "why": "这是 x86 异常注入的特有逻辑，RISC-V 没有对应的 uapi 标志"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "x86 通过 KVM_SET_GUEST_DEBUG 注入 #DB/#BP，RISC-V 没有这个接口"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "与 D3 配对，是 x86 rflags 特有逻辑"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "DR7 调试寄存器是 x86 特有的"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "更新异常位图是 VMX/SVM 特有的"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "unsure",
+     "riscv_handles": "no",
+     "evidence": "RISC-V 535-542 没有 trace 调用",
+     "why": "只是 tracepoint，缺失不影响正确性"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 538-539 只清除 guest_debug",
+     "why": "HOST_SS_ACTIVE_PENDING 是 arm64 单步状态机标志，RISC-V 没有"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539 没有访问需要 vcpu_load 的状态",
+     "why": "x86 要读写 vCPU 寄存器状态，RISC-V 这里只写 vcpu->guest_debug，且通用 ioctl 路径一般已经 load"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "unsure",
+     "riscv_handles": "no",
+     "evidence": "RISC-V 函数 536-541 没有检查 dbg->control 中的无效位",
+     "why": "arm64 会拒绝无效控制位，RISC-V 静默接受；RISC-V 可能没有 KVM_GUESTDBG_VALID_MASK，影响较小"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "BP_VECTOR 是 x86 异常向量常量，只配合 D5 使用"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "DB_VECTOR 是 x86 异常向量常量，只配合 D5 使用"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 536-539",
+     "why": "EBUSY 只用于 x86 已有待处理异常的情况，RISC-V 没有异常注入"
+    }
+   ],
+   "score": 1,
+   "problem": "RISC-V 没有校验 dbg->control 的无效位，这一点与 arm64 不同，可能会静默接受不支持的标志。该函数也没有处理 KVM_GUESTDBG_USE_HW 等硬件断点，也没有 tracepoint。不过 RISC-V 没有对应的硬件调试状态，所以证据不足。",
+   "lines": [
+    536,
+    537
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A392",
+  "dir": "V0_P_A392",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "只排除了 crashk_res，没有排除 crashk_low_res（低端 crashkernel 保留区），且 nr_ranges 只预留了 1 个额外槽位，不够再多分裂一次。",
+   "lines": [
+    65,
+    78,
+    79,
+    80,
+    81
+   ],
+   "why": "RISC-V 同样通过通用 crashkernel 预留支持 low 区域，arm64 会在 crashk_low_res.end 非零时额外排除它，而 RISC-V 没有，导致该保留区被错误写入 vmcore 的 ELF 头。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A392",
+  "dir": "V1_P_A392",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第81行 crash_prepare_elf64_headers(cmem, true, addr, sz)",
+     "why": "该提交只是删除未使用的image参数并整理格式；IS_ENABLED(CONFIG_X86_64)是x86区分32/64位ELF的写法，RISC-V固定使用64位头（第81行传true），与理由无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第65-72行先统计nr_ranges再kmalloc_flex动态分配cmem，第79行crash_exclude_mem_range排除crashkernel区域",
+     "why": "该提交的理由是取消固定数组上限、改为动态分配缓冲区，RISC-V已经动态分配；elf_header_exclude_ranges是x86特有的排除逻辑，RISC-V用crash_exclude_mem_range代替。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第66行walk_system_ram_res(..., get_nr_ram_ranges_callback)计数，第68行kmalloc_flex分配",
+     "why": "fill_up_crash_elf_data只是x86计数并分配缓冲区的辅助函数，RISC-V在函数内用回调完成同样工作。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第66、74行用walk_system_ram_res遍历系统RAM",
+     "why": "该提交只是memblock迭代器参数精简重构，与功能无关；RISC-V使用另一种遍历方式，不依赖for_each_mem_range。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第68行kmalloc_flex分配、第84行kfree释放",
+     "why": "vfree与x86使用vmalloc类分配相匹配，RISC-V用kmalloc分配并用kfree释放，配对正确。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第81行crash_prepare_elf64_headers(cmem, true, addr, sz)",
+     "why": "CONFIG_X86_64是x86区分位宽的配置项，RISC-V本文件只处理64位，直接传true。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第81行传入true",
+     "why": "IS_ENABLED只是x86为位宽判断的写法，与RISC-V无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A393",
+  "dir": "V0_P_A393",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "控制页只用set_memory_x加上可执行权限，没有清除写权限，页面保持可写可执行（W+X）；x86参照实现用set_memory_rox设为只读可执行。",
+   "lines": [
+    75
+   ],
+   "why": "W^X是架构无关的安全要求，RISC-V拷贝完重定位代码后应把控制页设为只读可执行，而不是RWX。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A393",
+  "dir": "V1_P_A393",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:71-72 用memcpy把riscv_kexec_relocate复制到control_code_buffer",
+     "why": "x86用__memcpy拷贝relocate代码，RISC-V同样在prepare阶段拷贝，只是函数写法不同，属于等价实现。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:63-72 在prepare中完成控制页拷贝；x86的__pa用于页表和物理地址，RISC-V这里不需要",
+     "why": "__pa用于x86的身份映射页表，与RISC-V的控制页拷贝无关；提交的重点（在prepare中拷贝）RISC-V已做到。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv machine_kexec.c:32-79 没有对应检查；RISC-V没有arm64那种cpus_are_stuck_in_kernel机制",
+     "why": "该检查针对arm64CPU无法被带出内核的情形，是arm64特有的，RISC-V不适用。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:61-76 只拷贝重定位代码，不构建身份映射页表",
+     "why": "init_pgtable是x86为切换CR3构建的页表，RISC-V重定位代码不依赖这一步。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:52 保存internal->fdt_addr；无swap_page概念",
+     "why": "x86的swap_page和page_list传递是x86 relocate_kernel的实现细节，与RISC-V无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv machine_kexec.c:32-79 无IDT相关代码",
+     "why": "这是x86 IDT的调试支持，RISC-V没有对应结构，不适用。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:75 set_memory_x((unsigned long) control_code_buffer, 1)",
+     "why": "x86把控制页设为ROX，RISC-V设为可执行（X），目的相近；RISC-V没有设为只读，但没有证据表明这是必需的。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:58,68 返回-EINVAL",
+     "why": "EBUSY对应arm64特有的检查，仅是错误码差异。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:62 使用image->type != KEXEC_TYPE_CRASH",
+     "why": "KEXEC_TYPE_DEFAULT用于x86的swap_page，RISC-V无需此分支。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:52-72 无swap页地址计算",
+     "why": "PAGE_SHIFT用于x86的swap页地址计算，与RISC-V无关。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:44-47 区分file_mode，非文件模式用copy_from_user",
+     "why": "这是RISC-V自有的查找FDT的逻辑，不是参照中缺失的处理。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:49-50 fdt_check_header",
+     "why": "RISC-V特有的FDT校验，参照中无对应内容。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:45,71 memcpy",
+     "why": "只是拷贝函数写法的差异。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:64,66 page_size检查重定位代码是否放得下",
+     "why": "这是RISC-V自有的边界检查，属于额外保护。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv machine_kexec.c:75 set_memory_x",
+     "why": "与D7对应，只是权限接口不同；RISC-V本身已有处理。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "P_A398",
+  "dir": "V0_P_A398",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "GPA范围上界检查使用了`>=`，应像arm64/x86那样允许区域末尾恰好等于GPA空间上限（用`>`），否则会错误拒绝刚好填满GPA空间末尾的合法memslot",
+   "lines": [
+    275,
+    276,
+    277
+   ],
+   "why": "base_gfn+npages是区域末尾的开区间边界，等于GPA空间页数时仍合法，参照实现用`>`（或末页-1 > max_gfn）而RISC-V多拒绝了这一边界情况"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "P_A398",
+  "dir": "V1_P_A398",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 267-269行对非CREATE/MOVE/FLAGS_ONLY的change直接return 0",
+     "why": "x86的WARN_ON_ONCE用于校验arch数据拷贝路径，RISC-V没有arch memslot数据，无对应需求"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V函数262-330行没有分配arch memslot元数据的逻辑",
+     "why": "kvm_alloc_memslot_metadata是x86特有的rmap/lpage_info分配，RISC-V不需要"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 317-323行仅处理VM_PFNMAP",
+     "why": "MTE是arm64特有特性，与RISC-V无对应"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 275-277行只做GPA范围检查",
+     "why": "GFN alias位是x86 TDX共享位概念，RISC-V没有此机制"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 262-330行没有gmem相关检查",
+     "why": "该检查是arm64启用guest_memfd时的限制，RISC-V是否启用guest_memfd材料中无法判断"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 275-276行用kvm_riscv_gstage_gpa_size(kvm->arch.pgd_levels)限制GPA范围",
+     "why": "防止memslot超出可寻址GPA空间，RISC-V已有等价检查"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V 262-330行无page track相关逻辑",
+     "why": "外部page tracker(KVMGT)是x86特有"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 275-276行kvm_riscv_gstage_gpa_size",
+     "why": "arm64用kvm_phys_size限制IPA范围，RISC-V有对应的GPA范围检查"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 262-330行没有gmem检查",
+     "why": "取决于RISC-V是否支持guest_memfd，材料不足"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 317-323行VM_PFNMAP分支仅检查dirty logging",
+     "why": "cacheable PFNMAP限制针对arm64硬件(Stage-2 attribute)能力，RISC-V无对应机制"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 262-330行无protected VM逻辑",
+     "why": "pKVM是arm64特有"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 267-269行已用change过滤，DELETE直接return 0",
+     "why": "DELETE在RISC-V被早退，仅写法不同"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 267-269行",
+     "why": "EIO只用于x86的非法change分支，RISC-V该情形已早退"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 267-269行",
+     "why": "与D1相同，是同一WARN_ON_ONCE的宏使用差异"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 275-276行",
+     "why": "RISC-V自己的GPA范围检查，仅为架构实现差异"
+    }
+   ],
+   "score": 1,
+   "problem": "RISC-V 275行用>=比较，比arm64的>多拒绝一个页边界(恰好占满GPA空间末尾的memslot会被拒绝)，属于疑似off-by-one，但偏保守不致错误；另外是否需要guest_memfd相关检查取决于RISC-V支持情况，证据不足。",
+   "lines": [
+    275,
+    276,
+    277
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_000",
+  "dir": "V0_N_000",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（core_reg_offset_from_id、core_reg_addr 的偏移与寄存器地址检查）只与 arm64 的 kvm_regs 结构布局有关。RISC-V 函数已校验寄存器大小（171-172）和寄存器编号范围（173-174），default 分支也返回 -ENOENT（190-191），并检查了 copy_to_user 的返回值（194-195），所以没有缺失的共通要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_000",
+  "dir": "V1_N_000",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第176-192行的switch直接按reg_num把timer寄存器映射到kvm_vcpu_timer/kvm_guest_timer的内部字段（如第184行t->next_cycles），没有使用用户态kvm_regs结构",
+     "why": "arm64的core_reg_addr是为了把用户态kvm_regs布局映射到内核内部结构；RISC-V的timer寄存器已在switch中逐个映射，不需要这个辅助函数。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第166-168行用掩码得到reg_num，第173-174行检查范围，第176行switch分发",
+     "why": "arm64的core_reg_offset_from_id是把ID换算成32位数组下标，用于混合宽度的kvm_regs；RISC-V的timer寄存器全是u64，第171行强制检查大小，因此换算无必要。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第181行 reg_val = kvm_riscv_current_cycles(gt)",
+     "why": "这是RISC-V特有的timer读取逻辑，arm64的get_core_reg读的是核心寄存器，不属于同类差异，也不是缺失。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_001",
+  "dir": "V0_N_001",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "verdict": "yes",
+   "problem": "RISC-V的perf_callchain_user在进入函数时没有检查perf_guest_state()：若当前处于虚拟化客户机状态，应直接返回，因为不支持guest OS的调用链采集。此时regs并不是宿主机用户态的寄存器，继续回溯会得到错误的调用链，甚至读取无关的内存。",
+   "lines": [
+    58,
+    59,
+    60,
+    61,
+    62
+   ],
+   "why": "arm64和loongarch都在函数开头用perf_guest_state()判断并提前返回，这个要求与架构无关，RISC-V同样适用（KVM RISC-V同样可能产生guest样本），但RISC-V函数在第61行直接使用regs->s0、第62行直接存储regs->epc，没有做该检查。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_001",
+  "dir": "V1_N_001",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V perf_callchain_user 第58-67行没有 guest 检查；提交1c3430516b07只是为 guest 回调增加封装函数，为后续放到 Kconfig 之后以及 static_call 做准备",
+     "why": "该提交只是封装重构，并不是修复。RISC-V 当前没有 perf_guest_state 的 guest 回调路径（材料中没有 RISC-V 的 guest 回调注册），所以这个理由在这里不成立；guest 状态下的行为是否正确，材料无法确认。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "提交52da443ec4d0只是把 arm64 的 callchain 代码拆到单独文件，Makefile 行为 obj-$(CONFIG_PERF_EVENTS) += perf_callchain.o",
+     "why": "compat_user_backtrace 是 AArch32 兼容模式专用的。该提交的理由是文件拆分，与 RISC-V 无关；RISC-V 的 perf_callchain_user（第58-67行）没有 compat 路径。RISC-V 的 32 位兼容用户态（RV32 on RV64）是否存在，材料中没有信息。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第58-67行没有 compat_user_mode 判断；材料没有给出 D3 对应的提交",
+     "why": "compat_user_mode 用来区分 AArch32 与 AArch64，是 arm64 特有的概念。材料没有给出 RISC-V 对应的 compat 支持情况，所以无法判断。"
+    }
+   ],
+   "score": 1,
+   "problem": "RISC-V 的 perf_callchain_user 在用户栈回溯时没有检查 guest 状态（第58-67行），在虚拟化场景下可能把 guest 的寄存器当作用户态来回溯。另外 fp 对齐检查只检查 4 字节（第65行），栈帧是否应按 16 字节对齐也值得确认。以上都缺少证据，仅为疑点。",
+   "lines": [
+    59,
+    65
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_002",
+  "dir": "V0_N_002",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（arm64的MTE标签、x86的USER区/调试寄存器/THREAD_AREA等）都只与各自架构的硬件或功能相关。RISC-V的arch_ptrace对未处理的请求都交给ptrace_request，没有缺失跨架构通用的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_002",
+  "dir": "V1_N_002",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv ptrace.c 第299-303行 default 分支调用 ptrace_request；通用 ptrace_request 处理 PTRACE_GETREGSET/SETREGSET",
+     "why": "x86 的 PTRACE_GETREGS/SETREGS 是 x86 遗留请求，RISC-V 是新架构，只走通用 regset 接口，不需要这些旧请求。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv ptrace.c 第301行 ptrace_request 提供通用 GETREGSET",
+     "why": "同 D1，属于 x86 遗留 ABI。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "do_arch_prctl_64 是 x86 特有的 FS/GS 基址设置，RISC-V 没有对应概念。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "GDT TLS 槽是 x86 段机制，RISC-V 使用 tp 寄存器，不适用。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "同 D4，x86 GDT 特有。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv ptrace.c 第301行 ptrace_request，寄存器经 regset 访问",
+     "why": "PEEKUSR 读取 x86 user 区域的寄存器是 x86 遗留接口，RISC-V 通过 regset 暴露寄存器。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "MTE 标签是 arm64 特有的扩展，RISC-V 没有对应功能。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "x86 调试寄存器 DR0-DR7 是 x86 特有，RISC-V 无对应。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "同 D8。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "put_user 仅用于 x86 的 PEEKUSR 实现，RISC-V 不实现该请求。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv ptrace.c 第301行 ptrace_request 与 regset",
+     "why": "POKEUSR 是 x86 的遗留接口，RISC-V 使用 regset。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "PTRACE_ARCH_PRCTL 为 x86 特有。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv ptrace.c 第301行 ptrace_request 通用 REGSET 请求",
+     "why": "GETFPREGS 是遗留请求，浮点寄存器通过 NT_PRFPREG regset 访问。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "FXSR 是 x86 32 位特有。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv ptrace.c 第301行 ptrace_request",
+     "why": "GETREGS 是遗留请求，新架构使用 GETREGSET。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_003",
+  "dir": "V0_N_003",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "LoongArch多出的preempt_enable_no_resched()与其kprobe_handler中的preempt_disable配对，RISC-V这一版已去掉该配对，状态更新(行240)和restore(行230-231)等其余要求RISC-V都已满足。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_003",
+  "dir": "V1_N_003",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv kprobes.c第230-231行：if (cur->ainsn.api.restore != 0) regs->epc = cur->ainsn.api.restore;",
+     "why": "这只是写法不同：loongarch用instruction_pointer_set(regs, ...)，RISC-V直接写regs->epc，功能完全等价，都是对非分支指令恢复返回地址。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv kprobes.c第228-249行 post_kprobe_handler中没有preempt_enable_no_resched；调用点第49行、第349行由调用者处理。D2的来历提交材料未给出。",
+     "why": "loongarch的preempt_enable_no_resched与其在pre-handler中禁用抢占配对；RISC-V这个函数没有对应的preempt_disable，所以不需要在此处启用抢占，不是缺失。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_004",
+  "dir": "V0_N_004",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的8寄存器参数检查在RISC-V中已由__arch_prepare_bpf_trampoline内部完成并通过ret<0传播（第1036-1038行），x86的临时缓冲区分配在RISC-V的ctx.insns=NULL试运行方式下不需要。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_004",
+  "dir": "V1_N_004",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1033-1036行：ctx.insns=NULL、ctx.ro_insns=NULL，调用__arch_prepare_bpf_trampoline(..., &ctx)",
+     "why": "x86需要临时缓冲区来试运行JIT；RISC-V用ctx.insns为NULL的空跑方式只统计指令数，不需要分配缓冲区。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1033-1036行未分配任何缓冲区",
+     "why": "没有分配缓冲区就不需要释放，该差异是x86实现方式带来的。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "本函数1028-1039行无nregs检查；__arch_prepare_bpf_trampoline的内容材料中未给出",
+     "why": "arm64检查寄存器数量是因为其参数寄存器限制，RISC-V有类似限制（a0-a7）但检查可能在__arch_prepare_bpf_trampoline内部，材料中看不到。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1036行调用__arch_prepare_bpf_trampoline",
+     "why": "只是函数名不同，对应arm64的prepare_trampoline，功能等价。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1038行 ninsns_rvoff(ctx.ninsns)",
+     "why": "只是把指令数转换为字节数的写法不同。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1033-1036行没有内存分配",
+     "why": "ENOMEM只用于x86分配失败的返回，RISC-V没有分配，不相关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "本函数1028-1039行无对应检查",
+     "why": "与D3相同，是否需要拒绝过多参数取决于__arch_prepare_bpf_trampoline内部，材料中看不到。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1033-1036行不使用固定大小缓冲区",
+     "why": "PAGE_SIZE是x86临时缓冲区的大小，RISC-V不使用缓冲区。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1038行 ninsns_rvoff(ctx.ninsns)",
+     "why": "这是RISC-V自己的指令数到字节数的转换，与arm64的ret*AARCH64_INSN_SIZE等价。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_005",
+  "dir": "V0_N_005",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "loongarch 的参照实现与 RISC-V 的 pageattr_pte_entry 逐行一致，没有缺失的要求；x86 的 clear_pte_presence 属于 kmmio 的 present 位清除/恢复逻辑（用 set_pte_atomic、pte_clear 等），是 x86 自身功能，与 RISC-V 这个函数无关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_005",
+  "dir": "V1_N_005",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V pageattr.c:70-77 的 pageattr_pte_entry 只通过 set_pageattr_masks 修改权限位后用 set_pte 写回；x86 的 pte_clear 来自 kmmio.c 的 clear_pte_presence，是 MMIO 跟踪器的逻辑。",
+     "why": "该提交是为 x86 L1TF 漏洞反转地址位，属于 x86 特有的 kmmio 逻辑，与 RISC-V 的 pageattr 权限修改无关，RISC-V 没有对应的 L1TF 问题。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V pageattr.c:74 使用 set_pte(pte, val)；x86 的 set_pte_atomic 用于在 32 位 PAE 下原子写入 64 位 PTE。",
+     "why": "这是 x86 kmmio 中恢复 PTE 的写法差异，且 RISC-V 在 pageattr 函数中没有对应的 clear/restore 流程，属于无关差异。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_006",
+  "dir": "V0_N_006",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64参照实现只做copy_from_user并委托下层处理，RISC-V已有同样的拷贝（806-807行）和更严格的大小检查（800-801行），没有缺失的通用要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_006",
+  "dir": "V1_N_006",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "arm64提交1df08ba0aa95的理由是为guest挂起/恢复导出并导入通用定时器寄存器；RISC-V的kvm_riscv_vcpu_set_reg_isa_ext（vcpu_onereg.c:792-821）只处理ISA扩展寄存器，定时器寄存器在其他子类型中处理，不经过本函数",
+     "why": "arm64的set_timer_reg是定时器寄存器的设置，与RISC-V的ISA扩展寄存器设置功能不同，属于不同函数的对应关系，差异无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vcpu_onereg.c:812-815 通过KVM_REG_RISCV_ISA_MULTI_EN/DIS分支调用riscv_vcpu_set_isa_ext_multi",
+     "why": "这是RISC-V特有的ISA扩展多位寄存器处理，参照中没有对应概念，与参照提交的理由无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vcpu_onereg.c:810-811 KVM_REG_RISCV_ISA_SINGLE分支调用riscv_vcpu_set_isa_ext_single",
+     "why": "这是RISC-V特有的单个ISA扩展寄存器处理，与arm64定时器寄存器的提交无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_007",
+  "dir": "V0_N_007",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64参照实现与RISC-V逻辑一致（校验ELF魔数、计算页数、kcalloc、填充pagelist），区别只是arm64返回错误码而RISC-V选择panic，这是错误处理风格而非遗漏的要求；x86的mp_save_irq是与IO-APIC中断源相关的架构专属逻辑，与此函数无关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_007",
+  "dir": "V1_N_007",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86的mp_save_irq是MP表/IO-APIC的中断源记录函数，与RISC-V vdso.c中的__vdso_init（61-87行）无关",
+     "why": "参照函数是x86特有的IRQ源保存逻辑，只是程序误匹配，与vDSO初始化无关，且该提交只是合并重复代码。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V __vdso_init第61-87行没有mp_irqs结构拷贝的需求",
+     "why": "memcpy保存mpc_intsrc是x86 IO-APIC特有行为，与RISC-V vDSO无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第66-67行对ELF魔数检查失败直接panic(\"vDSO is not a valid ELF object!\\n\")，已有错误报告",
+     "why": "arm64的pr_err只是重构时的错误报告写法，RISC-V用panic表示同样的检查，该提交声明无功能变化。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "APIC_VERBOSE仅用于x86 apic_printk，RISC-V第61-87行无对应逻辑",
+     "why": "x86 APIC调试输出级别宏，与RISC-V无关。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第61行函数返回void，第66-67行用panic处理非法ELF，且调用处arch/riscv/kernel/vdso.c:200、202不检查返回值",
+     "why": "arm64因重构改为返回错误码，RISC-V在__init阶段直接panic，是写法差异。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第77-78行kcalloc失败时panic(\"vDSO kcalloc failed!\\n\")",
+     "why": "内存分配失败已有处理，只是用panic代替返回-ENOMEM，属于写法不同。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "MAX_IRQ_SOURCES只用于x86 mp_irqs数组边界检查，RISC-V第61-87行无此类数组",
+     "why": "与RISC-V vDSO初始化无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_008",
+  "dir": "V0_N_008",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 持有 text_mutex 并用全零（RISC-V 上为非法指令）填充，返回错误码，已达到与 arm64/x86 填充陷阱指令相同的效果，参照实现的差异只是各架构的指令编码不同。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_008",
+  "dir": "V1_N_008",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V bpf_jit_core.c 第242行 patch_text_set_nosync(dst, 0, len)",
+     "why": "IS_ERR_OR_NULL只是x86用来把text_poke_set返回的指针转成int的写法，RISC-V的patch函数直接返回int，不需要。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第242行 patch_text_set_nosync(dst, 0, len) 完成对只读文本区的写入填充",
+     "why": "目的是在bpf_prog_pack中释放程序时用无效内容填充，RISC-V用patch_text_set_nosync实现了同样功能。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第242行 patch_text_set_nosync；第241/243行持有text_mutex",
+     "why": "text_poke_set对应RISC-V的patch_text_set_nosync，功能等价。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "第242行填充值为0",
+     "why": "arm64用BRK类非法指令，x86用0xcc；RISC-V全0在标准指令和压缩指令编码里都是非法指令，因此可行，但材料未给出确认。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第242、245行 直接返回patch函数的ret",
+     "why": "EINVAL只是arm64对布尔返回值的错误码转换，RISC-V直接传递返回值。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第245行 return ret",
+     "why": "与D1相同，仅是返回值转换的写法差异。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第241行 mutex_lock(&text_mutex)",
+     "why": "RISC-V的patch函数要求调用者持有text_mutex，x86/arm64的对应函数内部自己处理了锁。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第243行 mutex_unlock(&text_mutex)",
+     "why": "与加锁配对，写法差异合理。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第242行 patch_text_set_nosync(dst, 0, len)",
+     "why": "这是RISC-V对应的架构专用文本修补接口，不是缺陷。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_009",
+  "dir": "V0_N_009",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的按folio地址范围同步是其自身cache机制所需，RISC-V的fence.i按hart刷新，使用flush_icache_mm已覆盖同等语义，PG_dcache_clean的检查与置位逻辑一致。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_009",
+  "dir": "V1_N_009",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv cacheflush.c 第87、89-91行已按 folio 处理 PG_dcache_clean；第90行 flush_icache_mm(mm,false) 不需要 folio 地址",
+     "why": "RISC-V 的 icache 刷新不按地址范围进行，不需要 folio_address；提交的 per-folio 标志改动 RISC-V 已采用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv cacheflush.c 第90行 flush_icache_mm(mm, false) 刷新整个 mm 的指令缓存，覆盖整个 folio",
+     "why": "不按范围刷新，故无需 folio_size，整个 folio 已被覆盖"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv cacheflush.c 第90行 flush_icache_mm 为 RISC-V 的等价刷新操作",
+     "why": "sync_icache_aliases 是 arm64 针对别名缓存的函数，RISC-V 用 flush_icache_mm 完成同类功能"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv cacheflush.c 第90行 flush_icache_mm(mm, false)",
+     "why": "这是 RISC-V 对应 arm64 sync_icache_aliases 的架构特有写法，不是缺陷"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_010",
+  "dir": "V0_N_010",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的单步关闭、TF标志与SIGTRAP处理、post_xol回调都是arm64/x86自身硬件特性；RISC-V已恢复bad_cause(76行)并正确设置返回IP(78行)。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_010",
+  "dir": "V1_N_010",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv uprobes.c 第72-81行：arch_uprobe_post_xol 只做 bad_cause 恢复和 instruction_pointer_set，返回固定值0；RISC-V 的 arch_uprobe 没有 ops->post_xol 机制",
+     "why": "x86 的 post_xol 钩子用于 RIP 相对寻址等需要修正的指令，且可能失败；RISC-V 单步执行的指令不需要这类后处理，函数也不会失败，所以该理由不适用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第72-81行没有 saved_tf 相关逻辑；x86 第1655、1681行的 send_sigtrap 由 saved_tf（用户自己设置了 TF）决定",
+     "why": "send_sig(SIGTRAP) 用来模拟用户已启用 TF 单步的情况，这是 x86 特有的 EFLAGS.TF 语义，RISC-V 没有对应的机制；该提交本身也只是清理，没有功能改动"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv 第72-81行没有关闭单步的调用；未提供 arch_uprobe_pre_xol 的代码，也没有找到调用者",
+     "why": "arm64 靠硬件单步，在 post_xol 里必须关闭；RISC-V 若使用 ebreak 加 XOL 槽而不是硬件单步，则不需要关闭，但材料里没有 pre_xol 的实现，无法确认"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第72-81行无 post_xol 错误路径，第80行固定返回0",
+     "why": "ERESTART 只用于 x86 的 post_xol 错误处理，RISC-V 没有这个路径，所以只是常量用法的差异"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第72-81行；对应 D2 的 send_sigtrap 逻辑在 RISC-V 中不存在",
+     "why": "SIGTRAP 只用于 x86 的 TF 模拟，与 RISC-V 无关"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第75-76行使用 UPROBE_TRAP_NR 与 bad_cause，保存并恢复 saved_cause",
+     "why": "这只是命名不同：arm64 用 fault_code 与 UPROBE_INV_FAULT_CODE，RISC-V 用 bad_cause 与 UPROBE_TRAP_NR，作用相同"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv 第72-81行没有标志寄存器操作",
+     "why": "X86_EFLAGS_TF 是 x86 专有的单步标志，RISC-V 没有对应物"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_011",
+  "dir": "V0_N_011",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现中的关键要求（先 try_get_task_stack 再遍历、结束后 put_task_stack、跳过调度函数）RISC-V 都已满足：172-175 行完成了栈的获取与释放，174 行的 save_wchan 回调内部会用 in_sched_functions 跳过调度函数。arm64 和 x86 多出的部分只是各自的栈展开接口或计数逻辑，与架构自身实现有关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_011",
+  "dir": "V1_N_011",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 用 walk_stackframe(task, NULL, save_wchan, &pc) 遍历阻塞任务的栈；172-175 行有 try_get_task_stack/put_task_stack",
+     "why": "arm64 的提交是为 RELIABLE_STACKTRACE/LIVEPATCH 重构而统一展开接口，属于 arm64 内部整理；RISC-V 已用自己的 walk_stackframe 加回调完成同样的事，不涉及该理由"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 walk_stackframe 的回调 save_wchan（在 __get_wchan 之前定义）；RISC-V 的 save_wchan 通常包含 in_sched_functions 判断",
+     "why": "wchan 需要跳过调度函数，这在 RISC-V 上同样成立；但 save_wchan 的函数体材料中未给出，只能依据对内核的了解推断，无法在此确认"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 walk_stackframe 内部完成遍历终止判断",
+     "why": "unwind_done 是 x86 unwinder 的具体接口，只是写法不同；RISC-V 由 walk_stackframe 负责遍历"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 walk_stackframe 通过回调 save_wchan 取得返回地址",
+     "why": "x86 unwinder 的取地址接口，RISC-V 通过回调取得 pc，写法不同"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 walk_stackframe",
+     "why": "unwind_next_frame 是 x86 专有的逐帧接口，RISC-V 的 walk_stackframe 内部迭代"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 walk_stackframe(task, NULL, ...) 从任务保存的上下文开始遍历",
+     "why": "unwind_start 是 x86 专有初始化，RISC-V 的 walk_stackframe 自行初始化起点"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "stacktrace.c:174 walk_stackframe(task, NULL, save_wchan, &pc)",
+     "why": "这是 RISC-V 自己的遍历实现，只是与参照的接口不同，不是缺失"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_012",
+  "dir": "V0_N_012",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64直接返回-ENOIOCTLCMD，x86多出的KVM_MEMORY_ENCRYPT_OP分支只与x86机密计算(SEV/TDX)相关；RISC-V的KVM_INTERRUPT处理是其自身功能，未发现RISC-V也应满足却缺失的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_012",
+  "dir": "V1_N_012",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V vcpu.c 第252-269行：函数只处理KVM_INTERRUPT；RISC-V没有TDX或KVM_MEMORY_ENCRYPT_OP这类机密计算的vCPU子ioctl",
+     "why": "该提交是为x86 TDX的子ioctl改成在vcpu->mutex之外处理，RISC-V没有对应的ioctl，理由不适用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V vcpu.c 第256-268行只判断KVM_INTERRUPT，没有内存加密相关ioctl",
+     "why": "KVM_MEMORY_ENCRYPT_OP是x86 TDX/SEV专用，与RISC-V无关"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V vcpu.c 第259-260行：copy_from_user失败时返回-EFAULT",
+     "why": "这是RISC-V自己的KVM_INTERRUPT参数读取，与参照提交的理由无关，且已检查错误"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V vcpu.c 第262-263行：调用kvm_riscv_vcpu_set_interrupt(vcpu, IRQ_VS_EXT)",
+     "why": "这是RISC-V自有的中断注入逻辑，与参照提交无关"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V vcpu.c 第264-265行：调用kvm_riscv_vcpu_unset_interrupt(vcpu, IRQ_VS_EXT)",
+     "why": "这是RISC-V自有的中断清除逻辑，与参照提交无关"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_013",
+  "dir": "V0_N_013",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V通过pte_napot和napot_cont_order确定连续项数量并逐个清除，与arm64按sz清除连续项等价；loongarch的差异只是其自身的invalid_pte_table机制。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_013",
+  "dir": "V1_N_013",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:358、364 直接调用 pte_clear；RISC-V 没有 arm64 那种在公共 ptep API 中透明处理 contig 位的封装层",
+     "why": "该提交是为 arm64 新增 ptep 封装层而区分私有/公共 API，RISC-V 没有这一层，因此理由不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:357-364：用 pte_napot 判断，再用 napot_pte_num(napot_cont_order(pte)) 得到条目数，循环清除全部 PTE",
+     "why": "连续大页需要清除所有条目的理由在 RISC-V 的 NAPOT 上同样成立，且已通过循环清除处理。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:358、364 使用 pte_clear 清除条目",
+     "why": "LoongArch 的空 PTE 值是 invalid_pte_table 而非 0，是该架构特有的，RISC-V 的 pte_clear 已写入 RISC-V 的空值。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:358、364 pte_clear",
+     "why": "LoongArch 需要显式写入特殊的无效值，RISC-V 的 pte_clear 已完成清除，该理由不适用。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:362 napot_cont_order(pte)",
+     "why": "这是 RISC-V NAPOT 特有的写法，并非参照中某个修复所对应的差异。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:362 napot_pte_num",
+     "why": "这是 RISC-V 用于计算连续条目数的写法，等价于 arm64 的 num_contig_ptes。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:358、364",
+     "why": "pte_clear 是 RISC-V 的常规清除接口，只是写法不同。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:357",
+     "why": "pte_napot 用来区分 NAPOT 和普通页，是 RISC-V 自己的判断方式。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv hugetlbpage.c:354 ptep_get",
+     "why": "读取 PTE 以判断 NAPOT，是 RISC-V 自己的需要，与参照中的修复无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_014",
+  "dir": "V0_N_014",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V用64位累加10个32位数不会溢出，最后折叠回加进位，proto/len字节序处理与参照等价，参照多出的部分只是架构特有的实现手段。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_014",
+  "dir": "V1_N_014",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "csum.c 25-41行用64位 unsigned long 累加全部32位字，75-76行用 ror64 折叠",
+     "why": "arm64 的提交只是用 __uint128_t 做性能优化，不涉及正确性；RISC-V 本来就是64位宽累加，不会丢进位。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "csum.c 75-77行 ror64 加法折叠后再调用 csum_fold",
+     "why": "该提交是整理代码、目标文件不变，与正确性无关；RISC-V 用64位加法折叠进位。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "csum.c 40行 uproto = htonl(proto)",
+     "why": "该提交只是加类型标注并把 ntohs 换成移位；RISC-V 用 htonl(proto) 得到伪首部的 proto 字，小端下是 proto<<24，结果正确。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "csum.c 56行 ALTERNATIVE",
+     "why": "这是 RISC-V 特有的 Zbb 运行时选择，参照中没有对应提交，不是需要补的处理。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "csum.c 47-48行 IS_ENABLED",
+     "why": "只是编译期配置判断，写法不同，与参照的差异无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "csum.c 56行 asm_volatile_goto，74行 no_zbb 标号",
+     "why": "这是实现 Zbb 备选路径的跳转机制，RISC-V 特有。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "csum.c 75行 sum += ror64(sum, 32)",
+     "why": "只是把64位和折叠成32位的另一种写法，与 arm64 的 sum += (sum>>32)|(sum<<32) 等价。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_015",
+  "dir": "V0_N_015",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现local_flush_tlb_mm处理的是LoongArch的ASID/TLB上下文（asid_valid、drop_mmu_context）及清除mm_cpumask，属于该架构自身的MMU机制；RISC-V的flush_icache_mm是指令缓存刷新，用icache_stale_mask和SBI/IPI远程fence.i，两者功能不同，没有RISC-V应满足却缺失的对应要求（preempt_disable/enable两者都有）。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_015",
+  "dir": "V1_N_015",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:52-57 使用 icache_stale_mask 与 local_flush_icache_all()，并不涉及 ASID 有效性判断",
+     "why": "loongarch 的 asid_valid 用于 TLB 刷新时判断 mm 在本 CPU 上是否有有效 ASID，而 RISC-V 此函数刷的是指令缓存，语义不同，该理由不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:57 local_flush_icache_all()；没有 ASID 丢弃逻辑",
+     "why": "drop_mmu_context 是 TLB/ASID 管理操作，与 RISC-V 的 icache 刷新函数无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:63",
+     "why": "这是 RISC-V 独有的写法（计算其他 hart 的集合），参照中没有对应的提交理由。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:64",
+     "why": "RISC-V 特有逻辑，参照提交没有涉及。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:63",
+     "why": "RISC-V 特有的辅助调用，与参照无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:53",
+     "why": "RISC-V 特有的 icache stale 标记，与参照无关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:57",
+     "why": "RISC-V 特有的本地 icache 刷新，与参照无关。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:78",
+     "why": "RISC-V 特有的 IPI 远程刷新，与参照无关。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:75",
+     "why": "RISC-V 特有的 SBI 判断，与参照无关。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:76",
+     "why": "RISC-V 特有的 SBI 远程 fence.i，与参照无关。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv cacheflush.c:74，context.c:305 注释说明与此处屏障配对",
+     "why": "RISC-V 特有的内存屏障，用于与 flush_icache_deferred 配对，与参照无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_016",
+  "dir": "V0_N_016",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现的偏移/边界检查在RISC-V中由第783行的size检查及single/multi辅助函数对reg_num的范围检查覆盖，reg_val也已初始化，无缺失要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_016",
+  "dir": "V1_N_016",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第791-799行按子类型调用riscv_vcpu_get_isa_ext_single/multi，没有把kvm_regs结构映射为内核内部表示的需求；第806行直接copy_to_user(reg_val)",
+     "why": "arm64的core_reg_addr是把用户态kvm_regs布局映射到内核内部结构，RISC-V的ISA扩展寄存器是按编号取值，不存在此映射问题。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第778-787行用reg->id提取reg_num和reg_subtype，第783行检查KVM_REG_SIZE",
+     "why": "arm64从ID计算kvm_regs数组偏移是其寄存器布局特有的做法，RISC-V用自己的编号解析，写法不同而已。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第794-798行调用riscv_vcpu_get_isa_ext_multi并对MULTI_DIS取反",
+     "why": "这是RISC-V特有的ISA扩展位图访问逻辑，参照函数中没有对应内容，与参照的修改理由无关。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第791-793行调用riscv_vcpu_get_isa_ext_single",
+     "why": "这是RISC-V特有的单个ISA扩展读取逻辑，与参照提交的理由无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_017",
+  "dir": "V0_N_017",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的部分只是其I-cache维护与上下文同步事件的架构细节；RISC-V的patch_text_nosync已处理指令缓存刷新，且restore与结尾陷阱指令也都已设置。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_017",
+  "dir": "V1_N_017",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "riscv kprobes.c第32-33行使用patch_text_nosync写入单步槽；该槽在kprobe启用前不会被使用，无SMP竞争",
+     "why": "arm64的理由是槽未启用前无竞争，可无需stop_machine直接patch并避免多余的flush_icache_range；RISC-V同样用nosync接口写槽，等价处理。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv第27、32行直接以p->opcode和GET_INSN_LENGTH按原样拷贝指令",
+     "why": "le32_to_cpu是arm64为消除sparse警告而做的字节序转换清理；RISC-V指令按字节拷贝，与此无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv第28、33行使用__BUG_INSN_32作为单步后的断点指令",
+     "why": "BRK64_OPCODE_KPROBES_SS是arm64特有的断点编码，RISC-V用自己的ebreak/BUG指令对应。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv第28行 u32 insn = __BUG_INSN_32;",
+     "why": "只是LoongArch断点指令生成方式的重构，属于写法差异，RISC-V已有对应断点指令。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv第27、30行用GET_INSN_LENGTH(p->opcode)计算长度，处理RVC压缩指令",
+     "why": "LoongArch指令固定4字节；RISC-V有2/4字节变长指令，所以用GET_INSN_LENGTH，这里是正确处理。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv第27、30、33行使用GET_INSN_LENGTH",
+     "why": "这是RISC-V变长指令（RVC）所需的额外处理，参照架构指令定长，无此需求。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv第32-33行patch_text_nosync",
+     "why": "是RISC-V对应arm64 aarch64_insn_patch_text_nosync的接口，只是命名不同。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_018",
+  "dir": "V0_N_018",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64的8寄存器参数检查在RISC-V已由__arch_prepare_bpf_trampoline内部完成，x86的临时缓冲区分配对RISC-V的NULL insns干跑方式无需要。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_018",
+  "dir": "V1_N_018",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1024-1027行：ctx.insns=NULL、ctx.ro_insns=NULL，以空镜像调用__arch_prepare_bpf_trampoline，只计数ninsns",
+     "why": "x86需要临时缓冲区来写入代码，RISC-V采用dry-run方式只统计指令数，无需分配可执行内存。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1025-1026行没有分配缓冲区，故无需释放",
+     "why": "没有分配就没有释放，该差异与D1相同，只是实现方式不同。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "材料中未给出RISC-V的__arch_prepare_bpf_trampoline函数体，无法确认参数个数检查位置",
+     "why": "arm64是为了限制寄存器参数个数，RISC-V是否在内部检查不得而知。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1027行调用__arch_prepare_bpf_trampoline，作用相当于prepare_trampoline",
+     "why": "只是函数名不同，功能对应。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1029行使用ninsns_rvoff(ctx.ninsns)把指令数转换成字节数",
+     "why": "与arm64乘以指令长度等价，只是写法不同。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1024-1026行不分配内存，没有ENOMEM的失败路径",
+     "why": "无需分配，因此无需ENOMEM。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "第1019-1030行没有对参数个数的检查，内部检查未提供",
+     "why": "若RISC-V的内部准备函数已拒绝过多参数，则返回的错误码可通过ret<0传出，此处无法确认。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1024-1027行不使用临时页缓冲区",
+     "why": "PAGE_SIZE仅用于x86的临时缓冲区大小。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第1029行ninsns_rvoff",
+     "why": "这是RISC-V特有的指令数转字节数写法，属于写法不同。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_019",
+  "dir": "V0_N_019",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的cpu_number初始化和cpu_ops->cpu_prepare都是arm64自身机制，RISC-V由SBI HSM在__cpu_up中处理启动，无需对应步骤。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_019",
+  "dir": "V1_N_019",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V smpboot.c 第60-65行：for_each_possible_cpu循环直接set_cpu_present；提交de58ed5e16e6只是引入get_cpu_ops()辅助函数，没有功能变化",
+     "why": "cpu_prepare是arm64的cpu_ops机制（如PSCI/spin-table），RISC-V没有对应的ops抽象，此差异属于arm64特有的实现方式，不是需要移植的修复"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "提交de58ed5e16e6说明get_cpu_ops()只是返回cpu_ops[cpu]的重构辅助函数，没有功能变化；RISC-V第60-65行无ops查询",
+     "why": "这是arm64内部cpu_ops的取用封装，与RISC-V无关，只是写法/架构结构不同"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "提交57c82954e77f针对arm64的CONFIG_THREAD_INFO_IN_TASK下raw_smp_processor_id()的实现；RISC-V第51行直接使用smp_processor_id()，RISC-V的cpu号保存在thread_info（struct thread_info::cpu）中",
+     "why": "per_cpu(cpu_number)是arm64为实现raw_smp_processor_id()而设，RISC-V使用自己的机制，理由不适用"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "x86提交7557da67208f只是把smp_prepare_cpus统一到公共头文件，通过smp_ops转发；RISC-V在smpboot.c第45行直接定义该函数",
+     "why": "这是x86的ops间接调用封装，RISC-V直接实现该函数，属于写法差异"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_020",
+  "dir": "V0_N_020",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86 参照实现多出的部分（e820 内存类型检查、after_bootmem、Xen 相关说明、update_page_count 页面统计、批量循环填充 PTE）都只与 x86 自身的启动内存布局和直接映射统计有关。RISC-V 的 create_pte_mapping 只负责单个 PTE，并且已经做到两者共有的要求：只在 PTE 为空时才写入（461-462 行），不覆盖已有映射。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_020",
+  "dir": "V1_N_020",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv create_pte_mapping 第461-462行只在 pte_none 时写入单个PTE；x86的 set_pte_init(__pte(0)) 是SEV/页拆分相关",
+     "why": "该提交针对x86的 set_{pud,pmd}_safe 拆分大页告警，RISC-V没有对应的 safe 辅助函数和拆分路径，不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第456-463行无e820；提交3bce64f019a8只是函数重命名",
+     "why": "仅为命名重构，无功能变化，且e820是x86特有。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86第489-491行 if(0) pr_info 是调试输出；RISC-V第456-463行无此逻辑",
+     "why": "提交只是变量重命名和注释，调试打印无功能意义。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第461-462行直接赋值；清除非RAM/ACPI区域PTE是x86基于e820的逻辑",
+     "why": "RISC-V该函数是按需建立映射，不遍历整页表并清除空洞。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第461行 pte_none 检查保留已有项；update_page_count 是x86 direct-map 统计(PG_LEVEL_4K)",
+     "why": "Xen/页统计用途不适用于RISC-V；保留已有PTE的行为已有。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第456-463行无e820/未接受内存表逻辑",
+     "why": "这是x86 SNP/TDX kdump的E820_TYPE_ACPI问题，RISC-V此函数不会清除PTE。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第461-462行无按e820清除PTE的逻辑",
+     "why": "E820_TYPE_RAM 仅用于x86清除空洞的判断。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86第491行仅在 if(0) 调试打印中使用PAGE_KERNEL；RISC-V使用传入的prot（第462行）",
+     "why": "写法差异，无关。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第457行用 pte_index(va)，每次只映射一页（第459行BUG_ON）",
+     "why": "x86循环中对齐用，RISC-V单页处理不需要。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第462行用PFN_DOWN(pa)",
+     "why": "只是物理地址转PFN的不同写法。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第456-463行无页统计",
+     "why": "PG_LEVEL_4K 仅用于x86 update_page_count。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第457行按单个va取索引，无循环",
+     "why": "x86 循环遍历整个PTE页，RISC-V每次调用只处理一项，调用者在第559、714行驱动。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第459行 BUG_ON(sz != PAGE_SIZE)",
+     "why": "RISC-V自有的大小断言，不是缺失。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第462行 pfn_pte(PFN_DOWN(pa), prot)",
+     "why": "仅为地址到PFN转换的写法差异。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_021",
+  "dir": "V0_N_021",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的部分（PTE_GP/BTI）只与arm64自身的BTI硬件特性相关；两者对EFI_MEMORY_RO和EFI_MEMORY_XP的处理在语义上一致，RISC-V在第66-74行已分别清除写权限（并置读权限）和执行权限，没有遗漏RISC-V同样需要满足的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_021",
+  "dir": "V1_N_021",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv efi.c第66-70行直接操作_PAGE_WRITE/_PAGE_READ位；第96行经apply_to_page_range类调用set_permissions",
+     "why": "D1的提交理由是强制映射到页粒度以便用apply_to_page_range，这是arm64的MMU映射问题；__pgprot只是写法差异，RISC-V直接用位运算。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第63行使用ptep_get(ptep)",
+     "why": "__ptep_get是为arm64连续位(contig bit)的私有层，RISC-V没有此机制，用ptep_get即可。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第75行set_pte(ptep, pte)",
+     "why": "__set_pte同属arm64 contig位的私有层，RISC-V无此需求。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第66-74行用pte_val/__pte直接修改位",
+     "why": "set_pte_bit只是修改位的辅助函数，RISC-V手动位运算等价。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv efi.c第71-74行仅处理EFI_MEMORY_XP",
+     "why": "system_supports_bti_kernel是arm64 BTI特性检查，提交仅关于cpucap检查优化，与RISC-V无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv efi.c第71-74行",
+     "why": "PTE_GP是arm64 BTI的guarded page位，RISC-V没有对应的BTI概念（UEFI BTI标志仅针对arm64）。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第72行 val = pte_val(pte) & ~_PAGE_EXEC",
+     "why": "arm64用设置PXN表示不可执行，RISC-V通过清除_PAGE_EXEC实现，等价。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第67-68行清除_PAGE_WRITE并设置_PAGE_READ",
+     "why": "PTE_RDONLY对应RISC-V的去写权限，已处理。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第69、73行__pte(val)",
+     "why": "仅是RISC-V位运算所需的构造方式，写法差异。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第67、72行pte_val",
+     "why": "写法差异，用于取PTE原始值做位运算。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第63行ptep_get",
+     "why": "与arm64的__ptep_get对应，仅命名差异。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv efi.c第75行set_pte",
+     "why": "与arm64的__set_pte对应，仅命名差异。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_022",
+  "dir": "V0_N_022",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（arm64的Spectre-v4缓解、loongarch的LSX/LASX/LBT及FPU上下文处理）都是各自架构特有的；RISC-V已通过SR_FS_INITIAL加fstate_restore重置FP状态，向量状态由flush_thread处理。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_022",
+  "dir": "V1_N_022",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:148-155 通过has_fpu()和fstate_restore(current, regs)直接设置FP初始状态；RISC-V没有LSX/LASX/LBT的LIVE标志",
+     "why": "该TIF标志是LoongArch特有的向量/二进制翻译上下文状态标志，RISC-V没有对应机制（vector状态未在此函数中处理，但属另一问题）"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "unsure",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:149 设置SR_FS_INITIAL，154行 fstate_restore(current, regs) 恢复初始FP值",
+     "why": "RISC-V用FS状态位和直接恢复初始值，不使用used_math标志"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:149-154 设置FS为initial并fstate_restore",
+     "why": "LoongArch需要丢弃lazy FPU所有权，RISC-V通过FS位与直接恢复处理"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv process.c:146-180 无LBT相关代码",
+     "why": "LBT是龙芯二进制翻译扩展，RISC-V没有此硬件"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv process.c:146-180",
+     "why": "Spectre-v4(SSBD)缓解是arm64特有的机制，RISC-V不适用此per-task缓解"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "riscv process.c:147-157 没有pt_regs::stackframe相关处理",
+     "why": "该提交针对arm64 frame_record_meta的栈回溯告警；RISC-V栈回溯机制不同，材料不足以判断，没有看到对应结构"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:149 SR_FS_INITIAL",
+     "why": "CSR_EUEN_FPEN是LoongArch的FPU使能位，RISC-V用sstatus.FS"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:147 regs->status = SR_PIE",
+     "why": "PLV是LoongArch特权级字段；RISC-V返回用户态由SPP清零(status整体赋值为SR_PIE)实现"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:147 regs->status = SR_PIE（SPP为0即用户态）",
+     "why": "只是架构特权级表示不同"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv process.c:146-180",
+     "why": "LASX是LoongArch向量扩展的标志，RISC-V无此标志"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv process.c:146-180",
+     "why": "LBT标志是LoongArch特有"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv process.c:146-180",
+     "why": "LSX标志是LoongArch特有"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:154 fstate_restore(current, regs)",
+     "why": "RISC-V自身的FP初始化写法，属实现差异"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:148 if (has_fpu())",
+     "why": "RISC-V的FPU是可选的，需要检测，是RISC-V自身的守卫"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv process.c:172-179 is_compat_task()设置SR_UXL_32/64",
+     "why": "RISC-V设置UXL以支持compat，与参照差异无关"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_023",
+  "dir": "V0_N_023",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 的 __kvm_riscv_vcpu_power_off（466-468 行）与 arm64 的 __kvm_arm_vcpu_power_off 逐行一致：置 STOPPED 状态、发出 KVM_REQ_SLEEP 请求、kick vCPU；x86 的 vmx_preemption_timer_fn 是 VMX 嵌套抢占定时器的专有逻辑，与此无关，因此没有 RISC-V 缺失的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_023",
+  "dir": "V1_N_023",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "x86 nested.c第2224行的container_of只是hrtimer回调中由timer指针取得vcpu_vmx；提交55d2375e58a6仅是代码搬迁。RISC-V vcpu.c第465-469行的函数直接接收vcpu参数，不是定时器回调。",
+     "why": "差异只是函数签名和调用场景不同（hrtimer回调与直接传入vcpu），与搬迁提交无关，RISC-V不需要container_of。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V vcpu.c第465-469行为void函数，不是hrtimer回调，没有返回值。",
+     "why": "HRTIMER_NORESTART只是hrtimer回调的返回值，RISC-V此函数不是定时器回调，与此无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V vcpu.c第466-468行使用KVM_MP_STATE_STOPPED、KVM_REQ_SLEEP并调用kvm_vcpu_kick，与arm64参照__kvm_arm_vcpu_power_off（第756-758行）完全一致。",
+     "why": "KVM_REQ_EVENT是x86嵌套VMX定时器到期时的事件请求，是x86特有的；RISC-V此处的等价做法是KVM_REQ_SLEEP加kick，已具备。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_024",
+  "dir": "V0_N_024",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（BUILD_BUG_ON边界检查、arm64的页表级数与COMPAT检查、小内存机器的overcommit设置、x86的highmem、after_bootmem、hyper初始化、test_wp_bit等）都只与各自架构的硬件或功能相关，RISC-V不需要照搬。RISC-V的mem_init已包含FLATMEM下的mem_map检查（168行）、swiotlb初始化（184行）和memblock_free_all（185行），这些通用要求都已满足。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_024",
+  "dir": "V1_N_024",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行无 COMPAT 相关检查",
+     "why": "该 BUILD_BUG_ON 针对 arm64 的 TASK_SIZE_32 与 DEFAULT_MAP_WINDOW_64 的关系，是 arm64 52位VA 特有的编译期检查，RISC-V 不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行无页表级数检查",
+     "why": "该检查针对 arm64 的 CONFIG_PGTABLE_LEVELS 与 ARM64_HW_PGTABLE_LEVELS 公式，是架构特有的编译期自检，RISC-V 无此公式。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行没有按 PAGE_SIZE 调整 overcommit 的逻辑",
+     "why": "提交只是为移除 num_physpages 做准备并简化代码，arm64 的 overcommit 逻辑针对 16K/64K 页的小内存机器，RISC-V 只有 4K 页，不适用。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V mem_init 第185行 memblock_free_all 之后没有 hypervisor 钩子",
+     "why": "这是 x86 Xen PV 的 PagePinned 延迟初始化问题，RISC-V 没有 Xen PV。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第184行 swiotlb_init(swiotlb, SWIOTLB_VERBOSE)",
+     "why": "x86 的 pci_iommu_alloc 是为 32 位 Xen dom0 swiotlb 统一设置，RISC-V 直接调用 swiotlb_init。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第185行 memblock_free_all；本函数没有 highmem 处理",
+     "why": "该修复针对 x86-32 HighMem 与 DEBUG_PAGEALLOC 的初始化顺序，RISC-V 64 位没有 highmem。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行无 WP 位测试",
+     "why": "test_wp_bit 是 x86 386 CPU 的写保护位测试，与 RISC-V 无关。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行无 BUILD_BUG_ON",
+     "why": "只是 D1/D2 中 BUILD_BUG_ON 的重复统计，其内容是各架构特有的检查。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行未使用 PAGE_SIZE",
+     "why": "PAGE_SIZE 的使用只是 arm64 大页小内存 overcommit 检查和 x86 边界检查的一部分，不构成独立差异。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行",
+     "why": "ARM64_HW_PGTABLE_LEVELS 是 arm64 专用宏，同 D2。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行",
+     "why": "CONFIG_ARM64_VA_BITS 是 arm64 专用配置项，同 D2。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行",
+     "why": "这是 arm64 编译期一致性检查所用的配置，RISC-V 无对应的公式。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行",
+     "why": "DEFAULT_MAP_WINDOW_64 是 arm64 为 52 位 VA 兼容引入的，与 RISC-V 无关。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V mem_init 第165-188行",
+     "why": "FIXADDR_START 用于 x86-32 的 PKMAP/vmalloc 布局检查，与 RISC-V 的 mem_init 无关。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第187行 print_vm_layout()",
+     "why": "这是 RISC-V 额外的打印虚拟内存布局的调试输出，不是缺失处理。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_025",
+  "dir": "V0_N_025",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（nregs限制、validate_code、jit_fill_hole）是arm64自己的约束或加固；x86与RISC-V结构一致，RISC-V已有大小检查、拷贝和icache刷新。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_025",
+  "dir": "V1_N_025",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1093行 size = ro_image_end - ro_image；1106-1109行 WARN_ON(size < ninsns_rvoff(ctx.ninsns)) 返回 -E2BIG",
+     "why": "该提交引入arch_bpf_trampoline_size()用于预先计算大小，RISC-V已在1106行检查trampoline是否放得下；btf_func_model_nregs是arm64的参数寄存器数检查，与大小检查无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1095行 kvmalloc 后没有填充；1111行 bpf_arch_text_copy 复制整个size字节",
+     "why": "arm64用jit_fill_hole把未使用部分填成非法指令，RISC-V复制整块size而未填充，尾部是未初始化的kvmalloc内容，但trampoline内部不会执行到该处，属于加固层面，无法确定是否必要。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1102行 __arch_prepare_bpf_trampoline(im, m, tlinks, func_addr, flags, &ctx)",
+     "why": "该提交只是参数改名，RISC-V已调用自己的生成函数，属于写法差异。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1106-1109行 WARN_ON(size < ninsns_rvoff(ctx.ninsns)) 检查生成代码长度",
+     "why": "validate_code检查arm64指令是否为填充的非法指令，RISC-V没有对应机制，且已有长度检查，不是缺失。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1106行 ninsns_rvoff(ctx.ninsns) 将指令数转换为字节数",
+     "why": "AARCH64_INSN_SIZE用于把指令数换算成字节，RISC-V用ninsns_rvoff做等价换算，只是写法不同。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1107行 ret = -E2BIG；1103-1104行 ret<0 时直接 goto out",
+     "why": "EINVAL只对应arm64的validate_code失败路径，RISC-V没有该路径。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1102行 __arch_prepare_bpf_trampoline 返回值由1103行处理",
+     "why": "ENOTSUPP对应arm64的参数寄存器超过8个的限制，RISC-V的类似限制应在__arch_prepare_bpf_trampoline内部处理，材料中未显示。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1106行 WARN_ON(...)",
+     "why": "这是RISC-V自己的长度检查，参照里没有是实现差异，不是缺失。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 1106行 ninsns_rvoff(ctx.ninsns)",
+     "why": "仅为RISC-V把指令数换成字节的辅助宏，是写法差异。"
+    }
+   ],
+   "score": 1,
+   "problem": "RISC-V 在kvmalloc后没有像arm64那样用jit_fill_hole填充缓冲区，1111行复制整个size字节，尾部未初始化内容会被写入只读镜像；但这只是加固层面的疑点，证据不足。另外arm64中 nregs>8 的检查在 RISC-V 是否位于 __arch_prepare_bpf_trampoline 内无法从材料确认。",
+   "lines": [
+    1095,
+    1102,
+    1111
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_026",
+  "dir": "V0_N_026",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的ops设置和可调用地址范围检查只针对其自身的CALL_OPS与分支距离限制；RISC-V已先校验旧调用指令再修改，无遗漏。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_026",
+  "dir": "V1_N_026",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86第181行的WARN_ON是因为x86不通过ftrace_modify_call修改调用目标（用单独的regs trampoline）；RISC-V ftrace.c第174-186行实现了真实的修改逻辑",
+     "why": "x86的存根式报错与RISC-V无关，RISC-V本函数实际执行修改，不需要此WARN_ON"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第179行make_call_t0和第185行__ftrace_modify_call生成并写入调用指令",
+     "why": "这是arm64的指令生成方式，RISC-V用自己的auipc/jalr生成函数，只是写法不同"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "第174-186行没有ops指针相关操作；参照提交2aa6ac03516d依赖arm64的CALL_OPS",
+     "why": "arm64_rec_get_ops属于arm64的CALL_OPS机制，RISC-V本版本材料中没有对应机制"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第179行make_call_t0使用auipc+jalr（call[2]，第175行），可到达整个范围",
+     "why": "arm64的BL只有±128MB范围需要检查可达性；RISC-V两条指令的调用范围较大，理由基本不适用，但材料没有显示对范围的显式检查"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第180行ftrace_check_current_call校验旧指令，第185行__ftrace_modify_call写入新指令",
+     "why": "RISC-V用自己的校验加写入函数达到相同的比较并替换效果"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "第174-186行无ops设置；材料未显示RISC-V有CALL_OPS",
+     "why": "ftrace_rec_set_ops是arm64 CALL_OPS/direct call的专用逻辑"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第182-183行通过ret返回错误码",
+     "why": "只是错误码常量写法不同，RISC-V从被调函数传递错误"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第185行__ftrace_modify_call(caller, addr, true, false)",
+     "why": "AARCH64_INSN_BRANCH_LINK是arm64指令编码常量，无关"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第174-186行",
+     "why": "NULL只是传给arm64的ftrace_find_callable_addr的参数，写法差异"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第174-186行实现了实际修改",
+     "why": "与D1相同，x86的WARN_ON是不支持该路径的存根"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第185行调用__ftrace_modify_call",
+     "why": "RISC-V自身的实现细节，不是缺失"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第180-183行先校验旧调用，失败则返回",
+     "why": "RISC-V自己的旧指令校验，对应arm64的ftrace_modify_code比较"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第179行make_call_t0(caller, old_addr, call)",
+     "why": "RISC-V自己的指令生成，对应arm64的branch_imm生成"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_027",
+  "dir": "V0_N_027",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86多出的GBPAGES判断、pmd_leaf跳过及early_alloc的panic封装均属其自身特性或实现细节，RISC-V的memblock_alloc已清零，找不到RISC-V同样必须满足却缺失的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_027",
+  "dir": "V1_N_027",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第97-98行用 IS_ALIGNED(vaddr, PUD_SIZE) 和 (next - vaddr) >= PUD_SIZE 判断是否可用PUD大页",
+     "why": "x86需检测GBPAGES CPU特性，RISC-V的PUD叶子映射无需该运行时检测，属写法差异。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "unsure",
+     "evidence": "第99-104行memblock_phys_alloc失败时回退到kasan_populate_pmd；第88行memblock_alloc未检查返回值",
+     "why": "x86的early_alloc在内存不足时panic；RISC-V大页分配有回退，但第88行页表分配未检查，memblock_alloc失败会返回NULL而非panic，不过memblock_alloc本身分配失败时通常会打印警告而非panic。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第99-101行仅在phys_addr非零时才set_pud",
+     "why": "x86需释放set_huge失败的内存；RISC-V分配后直接设置PUD，不存在设置失败需要释放的路径。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第107行kasan_populate_pmd(pudp, vaddr, next)，由被调函数内部遍历PMD",
+     "why": "遍历层级划分不同，RISC-V的PMD遍历在kasan_populate_pmd中，属结构差异。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第107行调用kasan_populate_pmd",
+     "why": "该提交仅是pmd_large到pmd_leaf的重命名，且RISC-V该函数不含此判断，属无关写法。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第107行kasan_populate_pmd(pudp, ...)",
+     "why": "pmd_offset在RISC-V被调用的kasan_populate_pmd中完成，属结构差异。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第87-90行p4d_none时分配并set_p4d",
+     "why": "这是上一层p4d的处理，x86这里处理的是pud层，RISC-V用set_p4d等价；写法不同。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第101行set_pud(pudp, pfn_pud(..., PAGE_KERNEL))",
+     "why": "RISC-V直接用set_pud设置大页，等价于pud_set_huge。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第97-98行对齐和大小判断",
+     "why": "X86_FEATURE_GBPAGES是x86专有特性，RISC-V无对应。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第89、101行PFN_DOWN",
+     "why": "RISC-V构造页表项的写法，与参照无关。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第102行memset(__va(phys_addr), KASAN_SHADOW_INIT, PUD_SIZE)",
+     "why": "RISC-V手动初始化影子内存，写法差异。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第88行memblock_alloc",
+     "why": "对应x86的early_alloc，属分配接口差异。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第99行memblock_phys_alloc",
+     "why": "对应x86的early_alloc，属分配接口差异。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第102行memset",
+     "why": "x86的early_alloc内部处理清零/初始化，RISC-V显式memset，写法差异。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第87行p4d_none(p4dp_get(p4d))",
+     "why": "RISC-V在此函数中处理p4d层，层级划分差异。"
+    }
+   ],
+   "score": 1,
+   "problem": "第88行memblock_alloc的返回值未检查，若分配失败p为NULL会被用于set_p4d，但memblock_alloc失败通常有panic或警告，证据不足；第99-104行大页分配失败有回退。",
+   "lines": [
+    88,
+    89
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_028",
+  "dir": "V0_N_028",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86多出的preemption_timer_expired是VMX嵌套特有状态，KVM_REQ_EVENT在RISC-V中由kick后的中断刷新和timer_pending检查覆盖；arm64也只做kick，RISC-V已具备。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_028",
+  "dir": "V1_N_028",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86第2192行的kvm_make_request(KVM_REQ_EVENT)是nVMX嵌套预emption timer特有逻辑，提交55d2375e58a6只是代码搬移，没有给出新增理由；RISC-V vcpu_timer.c:123 使用kvm_vcpu_kick(vcpu)唤醒vcpu，RISC-V没有KVM_REQ_EVENT这一机制。",
+     "why": "x86的请求位是x86事件注入机制所需，RISC-V定时器中断通过其他途径注入，该差异无对应需求。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "KVM_REQ_EVENT是x86专有请求；RISC-V vcpu_timer.c:122-123 设置t->next_set=false后kick vcpu。",
+     "why": "该宏属于x86特定的请求机制，与RISC-V无关，只是架构实现不同。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vcpu_timer.c:116-120 在当前cycles小于next_cycles时用hrtimer_forward_now重新启动定时器。",
+     "why": "这是RISC-V自身处理提前触发的逻辑，参照函数没有这个需求，属于写法或实现不同。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vcpu_timer.c:118 ktime_set(0, delta_ns)用于构造转发间隔。",
+     "why": "只是RISC-V重启定时器所需的辅助调用，与参照理由无关。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vcpu_timer.c:116 kvm_riscv_current_cycles(gt)读取guest当前周期用于判断是否到期。",
+     "why": "RISC-V特有的时间换算逻辑，参照中没有对应的理由。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vcpu_timer.c:117 kvm_riscv_delta_cycles2ns(t->next_cycles, gt, t)把剩余cycles换算为ns。",
+     "why": "RISC-V特有的换算，与参照提交的理由无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_029",
+  "dir": "V0_N_029",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的SPCR/earlycon和BGRT处理是可选的控制台与启动画面功能，不是RISC-V在该函数中必须满足的正确性要求；ACPI启用/禁用的判断、表初始化和FADT检查两者一致。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_029",
+  "dir": "V1_N_029",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 123-153 无BGRT处理",
+     "why": "arm64启用BGRT解析是平台功能启用，RISC-V是否需要取决于是否支持BGRT，属可选特性，不属于缺陷"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 148行 acpi_table_init()",
+     "why": "x86的acpi_locate_initial_tables是x86自己的表定位逻辑，RISC-V使用通用acpi_table_init，写法不同"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 123-153 无acpi_parse_spcr调用",
+     "why": "SPCR用于通过ACPI设置earlycon，RISC-V可能在别处处理（如setup或其他位置），材料中无法确认"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 148行 acpi_table_init()",
+     "why": "x86的问题是页分配器将ACPI表内存释放导致use-after-free；RISC-V的ACPI表内存保留可能在别处（如early_acpi_table/memblock reserve）处理，材料不足以判断"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 123-153 无BGRT解析",
+     "why": "与D1同一特性启用，可选，不确定RISC-V是否需要"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V acpi.c 123-153 无dmi_check_system",
+     "why": "x86 DMI ACPI quirk表是x86固件机型特定，RISC-V无对应表，属于代码搬移"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V acpi.c 130-133 使用efi.acpi20 == EFI_INVALID_TABLE_ADDR判断",
+     "why": "dt_is_stub是arm64用于决定ACPI与DT选择的判据，RISC-V使用不同的判据，写法不同"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 130-133 直接return，无earlycon分支",
+     "why": "ACPI禁用时通过DT chosen stdout设置SPCR earlycon是arm64特性，RISC-V的earlycon由DT/其他路径处理，需更多材料确认"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 无ACPI_SIG_BGRT",
+     "why": "同D1，BGRT可选特性"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V acpi.c 无CONFIG_ACPI_BGRT",
+     "why": "同D1，BGRT可选特性"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "RISC-V acpi.c 123-153",
+     "why": "IS_ENABLED只是用于BGRT配置检查的宏，随D1而定，本身无独立含义"
+    }
+   ],
+   "score": 1,
+   "problem": "RISC-V的acpi_boot_table_init未调用acpi_parse_spcr（ACPI SPCR earlycon）和BGRT解析，也未在此处显式保留ACPI表内存，可能在别处处理，证据不足",
+   "lines": [
+    148,
+    152
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_030",
+  "dir": "V0_N_030",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 的 reenter_kprobe 与 arm64 的实现逐行一致：对 HIT_SSDONE/HIT_ACTIVE 增加 nmissed 计数并重新单步，对 HIT_SS/REENTER 报错并 BUG()，default 则 WARN_ON 后返回 0。x86 把 KPROBE_HIT_SS 也归入可恢复的重入情形，这属于 x86 单步机制的特性，并非 RISC-V 同样必须满足的要求，因此没有遗漏。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_030",
+  "dir": "V1_N_030",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V kprobes.c第205行使用pr_warn(\"Failed to recover from reentered kprobes.\\n\")，第206行dump_kprobe(p)，第207行BUG()",
+     "why": "x86该提交是为了去掉错误信息中的%p输出，只是消息文本和日志级别的写法不同；RISC-V的消息不含%p，同样有报错、dump和BUG，没有对应的问题。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_031",
+  "dir": "V0_N_031",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64 的 set_irq_regs 保存/恢复在 RISC-V 中由 handle_riscv_irq 内部完成，do_irq 已覆盖该要求；其余差异（如 do_ade 的同步异常处理）与中断路径无关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_031",
+  "dir": "V1_N_031",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "loongarch do_ade第538行是处理地址错误异常的逻辑；RISC-V do_irq（382-391行）是中断入口，不涉及该异常处理",
+     "why": "die_if_kernel属于LoongArch的ADE异常处理，与RISC-V的IRQ入口函数无对应关系，差异无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "loongarch traps.c第539行位于do_ade内；RISC-V do_irq第382-391行只做IRQ分发",
+     "why": "向用户态发送SIGBUS是地址对齐异常的处理，与IRQ入口无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V traps.c第385-388行：on_thread_stack()时call_on_irq_stack(regs, handle_riscv_irq)，否则直接handle_riscv_irq(regs)",
+     "why": "arm64的handler调用与栈切换逻辑在RISC-V中等价实现，handler即handle_riscv_irq。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "yes",
+     "riscv_handles": "unsure",
+     "evidence": "do_irq第382-391行未见set_irq_regs；可能在handle_riscv_irq内处理，但材料未给出该函数",
+     "why": "set_irq_regs用于让get_irq_regs()在中断处理中可用，RISC-V同样需要，但是否在handle_riscv_irq中做了无法从材料确认。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "BUS_ADRERR位于loongarch do_ade第539行",
+     "why": "只是ADE信号码，与IRQ无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "SIGBUS位于loongarch do_ade第539行",
+     "why": "只是ADE信号，与IRQ无关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第385行 IS_ENABLED(CONFIG_IRQ_STACKS)",
+     "why": "RISC-V的IRQ栈是可配置项，编译期判断只是写法差异。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第386、388行 handle_riscv_irq",
+     "why": "只是RISC-V具体的handler名称，对应arm64的handler参数。"
+    }
+   ],
+   "score": 1,
+   "problem": "do_irq中未见set_irq_regs；若handle_riscv_irq内部也没有处理，则get_irq_regs()在中断上下文中可能不正确，但材料无法确认。",
+   "lines": [
+    385,
+    386,
+    388
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_032",
+  "dir": "V0_N_032",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现与RISC-V共有的要求（仅在boot CPU上调用的WARN_ON检查）RISC-V已在第200行实现；arm64多出的pr_info只是日志，x86的GDT/percpu基址切换和pv lock初始化是x86自身特性，因此没有RISC-V遗漏的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_032",
+  "dir": "V1_N_032",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "alternative.c 202-204: _apply_alternatives(__alt_start, __alt_end, RISCV_ALTERNATIVES_BOOT)",
+     "why": "该提交只是把 alt_region 改成 const 并共享，不改变功能，属于写法重构；RISC-V 通过 _apply_alternatives 完成同样的补丁应用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "alternative.c 198-211 中没有 pv lock 相关调用",
+     "why": "该提交是 x86 paravirt 的 virt_spin_lock_key 初始化顺序问题，RISC-V 的这个函数不涉及该机制，与此无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "alternative.c 198-211 没有在补丁过程中打印",
+     "why": "该提交是把打印移出 __apply_alternatives，以避免补丁中途打印不安全；RISC-V 的 _apply_alternatives 调用前后没有打印，不存在这个问题，pr_info 只是日志。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "alternative.c 198-211 无 GDT/percpu 基址切换",
+     "why": "该提交涉及 x86 特有的 GDT 与 GSBASE 切换，RISC-V 没有对应概念。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "alternative.c 206、209 使用 IS_ENABLED(CONFIG_MMU) 和 IS_ENABLED(CONFIG_RISCV_USER_CFI)",
+     "why": "CONFIG_SMP 只用于 x86 的 GDT 切换分支，与 RISC-V 这个函数无关，只是配置宏不同。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "alternative.c 202-204",
+     "why": "这是 RISC-V 对应 arm64 __apply_alternatives 的实现，函数名不同而已。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "alternative.c 206-210 对 vdso_start 和 vdso_cfi_start 调用 apply_vdso_alternatives",
+     "why": "这是 RISC-V 额外为 vDSO 打补丁，参照中没有对应项，不是缺失。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_033",
+  "dir": "V0_N_033",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64多出的ftrace_rec_set_ops(CALL_OPS)和ftrace_find_callable_addr(±128MB分支范围/PLT)是arm64特有的功能与硬件限制，RISC-V用auipc+jalr无需此类处理，RISC-V已做了旧调用校验和修改。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_033",
+  "dir": "V1_N_033",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V ftrace.c 第174-186行：ftrace_modify_call 有完整实现，通过 make_call_t0 / ftrace_check_current_call / __ftrace_modify_call 完成修改",
+     "why": "x86的WARN_ON只是因为x86用独立trampoline（regs保存函数）而不使用modify_call，RISC-V实现了该函数，理由不适用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第179行用 make_call_t0 生成调用指令",
+     "why": "arm64的direct call/CALL_OPS相关指令生成；RISC-V用自己的指令生成函数，写法差异，是否需要对应direct call处理无法从材料判断"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第174-186行无ops指针处理",
+     "why": "arm64_rec_get_ops 是 arm64 CALL_OPS（patchsite前的ops指针）特有机制，RISC-V此处无对应结构"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第179、185行直接使用 old_addr/addr，没有可达性检查",
+     "why": "arm64的BL范围有限需要查找可调用地址（如经PLT/trampoline）；RISC-V使用auipc+jalr（两条指令，call[2]）可覆盖±2GB，多数情况可达，但材料不足以确认"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第185行 __ftrace_modify_call(caller, addr, true, false)",
+     "why": "只是修改代码的写法不同，RISC-V由 __ftrace_modify_call 完成修改"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 第174-186行无 ops 设置",
+     "why": "ftrace_rec_set_ops 属于arm64 CALL_OPS机制，RISC-V没有该机制"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第182-183行直接返回 ftrace_check_current_call 的 ret",
+     "why": "错误码常量写法差异，RISC-V通过返回子函数错误码处理失败"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第179行 make_call_t0",
+     "why": "AARCH64_INSN_BRANCH_LINK 是arm64指令编码常量，与RISC-V无关"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第174-186行无对应调用",
+     "why": "NULL只是传给ftrace_find_callable_addr的参数，写法差异"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第174-186行为真实实现",
+     "why": "与D1相同，x86的WARN_ON是占位不支持的路径，RISC-V不适用"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第185行 __ftrace_modify_call",
+     "why": "RISC-V自身的实现辅助函数，仅为写法不同"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第180-183行 ftrace_check_current_call 并检查ret",
+     "why": "RISC-V在修改前校验当前指令，与arm64 ftrace_modify_code的old校验对应"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第179行 make_call_t0",
+     "why": "RISC-V指令生成辅助函数，写法差异"
+    }
+   ],
+   "score": 1,
+   "problem": "参照arm64对old_addr/addr做可达性检查（ftrace_find_callable_addr）；RISC-V第179、185行未做类似检查，虽然auipc+jalr覆盖范围大，但无法确认是否需要处理；另外direct call相关处理也未见，证据不足。",
+   "lines": [
+    179,
+    185
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_034",
+  "dir": "V0_N_034",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（idle_exits统计与trace、x86的hv timer切换、嵌套事件和mp_state处理）都是统计调试或x86特有功能；RISC-V已有runnable检查、SRCU解锁/加锁和kvm_vcpu_halt，定时器由arch_vcpu_blocking处理。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_034",
+  "dir": "V1_N_034",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200 只有 kvm_arch_vcpu_runnable 判断后 halt，没有嵌套 VM-Enter 或异常重注入的待处理状态",
+     "why": "该WARN针对x86嵌套VM-Enter/异常重注入的状态，RISC-V这里没有对应机制，不适用"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:195-198 在 kvm_vcpu_halt 前后仅做 srcu 解锁/加锁",
+     "why": "x86的问题是 kvm_check_nested_events 在 check_block 中写内存，RISC-V的runnable检查不涉及嵌套事件处理，不适用"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200 无 APIC 相关逻辑",
+     "why": "这是x86 LAPIC/嵌套事件函数返回值的改动，RISC-V无对应"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:195 仅用 kvm_arch_vcpu_runnable",
+     "why": "x86嵌套虚拟化事件检查，RISC-V此处不涉及"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200 无 hypervisor 定时器切换",
+     "why": "x86 VMX抢占定时器只在guest模式运行，RISC-V没有此类硬件定时器切换需求（vstimecmp 由硬件/软件定时器另行处理）"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "同D5，x86 VMX抢占定时器特有"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "同D5，x86 VMX抢占定时器特有"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv vcpu_insn.c:197 kvm_vcpu_halt(vcpu)",
+     "why": "x86区分HALTED与其它mp_state才选择block，RISC-V没有mp_state分支，直接halt即可"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "仅是loongarch的trace点，属于可观测性，不影响正确性"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "EBUSY是x86嵌套事件错误码，无关"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194 函数返回void",
+     "why": "返回码写法不同，无关"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "x86 mp_state状态机，RISC-V不在此处使用"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "x86 mp_state常量，无关"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "INIT_RECEIVED为x86 APIC状态，无关"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv vcpu_insn.c:194-200",
+     "why": "x86 mp_state常量，写法差异"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_035",
+  "dir": "V0_N_035",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "x86参照实现是实模式唤醒代码中基于io_delay端口访问的简单循环延时，只与x86硬件相关；RISC-V的udelay已对超过MAX_UDELAY_US的情况单独处理，没有RISC-V同样需要满足而未做到的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_035",
+  "dir": "V1_N_035",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "x86的udelay位于arch/x86/realmode/rm/wakemain.c，是实模式唤醒代码里的简易循环，io_delay靠I/O端口写入约1us。RISC-V的udelay（delay.c第86-99行）用lpj_fine和riscv_timebase，通过第94、98行的__delay按时间计数器延时，不需要io_delay。",
+     "why": "该提交是把唤醒代码移到C，io_delay是x86实模式特有的写法，与RISC-V无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "delay.c第94行和第98行调用__delay，这是RISC-V自己的延时实现。",
+     "why": "这是RISC-V的实现方式，参照里没有对应概念，不是缺失的处理。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "delay.c第91-92行：n = usecs * riscv_timebase; do_div(n, 1000000)，在usecs超过MAX_UDELAY_US（第90行）时把微秒换算成时间计数器周期。",
+     "why": "do_div只是把微秒换算成时钟周期，参照中没有时钟换算，不构成差异。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "delay.c第90行 unlikely(usecs > MAX_UDELAY_US)，只是分支预测提示，与参照无功能关系。",
+     "why": "纯写法差异，且大值分支另有处理（第91-95行）。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_036",
+  "dir": "V0_N_036",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（LoongArch 的 FP/LSX 状态信号处理、x86 的 shadow stack 恢复）都只与各自架构的硬件或功能相关，RISC-V 已具备 restart_block 重置、sigmask 恢复、altstack 恢复和 badframe 处理。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_036",
+  "dir": "V1_N_036",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第139行调用compat_restore_sigcontext(regs, &frame->uc.uc_mcontext)，等价于参照的restore_sigcontext",
+     "why": "只是函数名不同（compat版本），恢复sigcontext的功能RISC-V已有；该提交只是为LoongArch新增信号处理"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第134行用__copy_from_user读取uc_sigmask，第131行有access_ok",
+     "why": "x86只是用__get_user读取sigmask，写法不同；提交只是代码搬移"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第142行调用compat_restore_altstack(&frame->uc.uc_stack)",
+     "why": "RISC-V使用compat版本，已恢复altstack，仅名称不同"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第139-145行没有影子栈恢复调用；该提交针对x86 x32的CET shadow stack",
+     "why": "该理由是x86 x32影子栈专用；RISC-V compat是rv32，且此版本compat_signal.c中未见对应处理，无法确认是否需要"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第147-156行badframe分支：show_unhandled_signals时pr_info_ratelimited并force_sig(SIGSEGV)",
+     "why": "RISC-V有自己的错误帧报告，等价于x86的signal_fault"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第120行使用COMPAT_SYSCALL_DEFINE0(rt_sigreturn)，syscall_wrapper.h:64定义",
+     "why": "只是compat与非compat的宏写法差异"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第139行compat_restore_sigcontext",
+     "why": "RISC-V特有的compat版本，是写法差异"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第149-154行",
+     "why": "RISC-V自己的调试输出，无关缺陷"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V第152行task_pid_nr(task)",
+     "why": "仅用于日志输出，无关"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_037",
+  "dir": "V0_N_037",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的只是各架构专用的陷阱指令编码（BRK/int3）；RISC-V用全零（非法指令）达到同样效果，并已持有text_mutex，patch_text_set_nosync内部负责映射与icache刷新。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_037",
+  "dir": "V1_N_037",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv bpf_jit_core.c 第254行 patch_text_set_nosync(dst, 0, len) 直接返回 ret",
+     "why": "IS_ERR_OR_NULL只是x86对text_poke_set返回指针的检查，RISC-V的patch函数返回int，无需此检查。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第254行 patch_text_set_nosync 承担了写入非法内容的功能",
+     "why": "aarch64_insn_set是arm64专用的写指令接口，RISC-V用自己的patch接口实现相同目的（使无用部分失效）。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第254行 patch_text_set_nosync",
+     "why": "text_poke_set是x86专用接口，RISC-V有等价的patch函数。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "yes",
+     "riscv_handles": "unsure",
+     "evidence": "第254行填充值为0",
+     "why": "填充非法指令的理由成立；RISC-V全0字节（16位0000）是定义的非法指令，因此可行，但本片段无法进一步确认。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第257行 return ret 传递patch函数的错误码",
+     "why": "EINVAL只是arm64将布尔结果转换为错误码的写法，RISC-V直接返回int错误码。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第254、257行 ret 为int返回值",
+     "why": "与D1相同，是x86指针返回值的检查，与RISC-V无关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第253行 mutex_lock(&text_mutex)",
+     "why": "RISC-V的patch_text需要text_mutex保护，x86的text_poke_set内部或调用者已处理，RISC-V在此显式加锁。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第255行 mutex_unlock(&text_mutex)",
+     "why": "与mutex_lock成对，保证正确释放。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "第254行 patch_text_set_nosync(dst, 0, len)",
+     "why": "这是RISC-V对应的写入接口，实现了使prog pack中未用区域失效的功能。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_038",
+  "dir": "V0_N_038",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V已检查flags(217行)并对未知cap返回-EINVAL(222行)；参照实现多出的部分（protected VM、MTE、quirks、irqchip等加锁和条件）都只与各自架构的功能有关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_038",
+  "dir": "V1_N_038",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-220：RISC-V 只处理 KVM_CAP_RISCV_MP_STATE_RESET，只是写 kvm->arch.mp_state_reset = true，没有检查 created_vcpus，也没有 check-then-set 的竞态",
+     "why": "arm64 加锁是为了避免 created_vcpus 检查与设置标志之间的竞态；RISC-V 没有这种检查，所以该理由不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-220：单个 bool 赋值，没有 check-then-set 逻辑",
+     "why": "mutex_unlock 与 D1 的 mutex_lock 成对出现，理由同样不适用。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 214-224：没有 DISABLE_EXITS 类 cap",
+     "why": "这是 x86 的 SMT RSB 漏洞缓解，与 RISC-V 无关。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222：没有 NX huge page 相关 cap",
+     "why": "capable(CAP_SYS_BOOT) 用于 x86 的 NX huge page 缓解，RISC-V 没有这个功能。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222：没有 APIC 总线频率 cap",
+     "why": "check_mul_overflow 用于 x86 的 APIC bus cycles，与 RISC-V 无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "SMT RSB 警告只与 x86 有关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222：没有 split irqchip cap",
+     "why": "这是 x86 split irqchip 的检查，在 RISC-V 上无对应功能。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222：没有 eager split chunk size cap",
+     "why": "这是 arm64 stage-2 eager page split 的功能，RISC-V 没有。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "APICv inhibit 是 x86 特有的机制。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "disable exits 是 x86 特有的功能。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "x86 特有的 helper，与 RISC-V 无关。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "APICv 是 x86 专有概念。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "CAP_SYS_BOOT 只用于 x86 NX huge page 的权限检查。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "EEXIST 用于 x86 irqchip 已存在的情形，RISC-V 无此路径。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vm.c 216-222",
+     "why": "ENXIO 属于 x86 其他 cap 的错误返回，与 RISC-V 无关。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_039",
+  "dir": "V0_N_039",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V函数已在mp_state_lock保护下检查停止状态并调用__kvm_riscv_vcpu_power_off，与arm64参照的加锁掉电流程一致；x86参照实现只涉及Hyper-V根TDP跟踪，属于x86自身功能，与RISC-V无关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_039",
+  "dir": "V1_N_039",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "arch/riscv/kvm/vcpu_sbi_hsm.c 第59行 spin_lock(&vcpu->arch.mp_state_lock)，第66行 __kvm_riscv_vcpu_power_off(vcpu)，第69行 spin_unlock",
+     "why": "arm64引入mp_state_lock是为了避免vcpu->mutex与kvm->lock的锁序反转并串行化mp_state写入；RISC-V在持锁状态下调用带下划线的内部版本，是等价的处理，只是函数名因架构不同而不同。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86提交3d4421f8f26c只是把Hyper-V的hv_track_root_tdp()取消内联并导出，用于封装kvm_x86_ops，提交说明为 no functional change；INVALID_PAGE属于x86 Hyper-V TDP跟踪逻辑，与 kvm_sbi_hsm_vcpu_stop（第56-72行）无关",
+     "why": "该差异与x86 Hyper-V根页表跟踪有关，与RISC-V的HSM停止逻辑无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第66行 __kvm_riscv_vcpu_power_off(vcpu)",
+     "why": "这只是架构命名不同，与arm64的__kvm_arm_vcpu_power_off对应，属于写法差异，不是缺陷。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "第61-64行在持有mp_state_lock时调用kvm_riscv_vcpu_stopped()，已停止则返回SBI_ERR_FAILURE",
+     "why": "这是SBI HSM规范要求的状态检查，且在锁内完成，不存在检查与修改之间的竞争；参照实现中没有这一步只是因为语义不同。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_040",
+  "dir": "V0_N_040",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的清除/恢复 present 位与保存旧值只属于 kmmio 自身的逻辑；TLB 刷新由 RISC-V 的调用者 __set_memory 通过 flush_tlb_kernel_range 完成，这个函数本身没有缺失的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_040",
+  "dir": "V1_N_040",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "参照提交针对的是x86的L1TF漏洞（非present PTE的地址位需要反转）。RISC-V的pageattr_pte_entry（第70-77行）只是通过set_pageattr_masks修改PTE权限位，并不清除PTE。",
+     "why": "L1TF是x86特有的问题，RISC-V此函数也不做pte_clear，理由不适用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "x86的set_pte_atomic用于在32位PAE下原子地写入64位PTE。RISC-V第74行使用set_pte，该函数仅写入单个字长的PTE。",
+     "why": "set_pte_atomic是为x86 PAE设计的，与这里的RISC-V代码无关，也没有对应的恢复逻辑。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第71行用ptep_get读取PTE，这只是读取方式不同，参照直接解引用*pte。",
+     "why": "只是写法不同，不涉及行为差异。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第73行调用set_pageattr_masks修改权限位，用于change_page_attr，是不同的功能。",
+     "why": "两个函数的用途不同（kmmio是切换present位，pageattr是修改权限掩码），不是同一问题的差异。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V第74行set_pte写回修改后的PTE，参照里对应的是set_pte_atomic和pte_clear。",
+     "why": "只是写回方式的写法差异，不涉及额外的处理需求。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_041",
+  "dir": "V0_N_041",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（arm64 的 irq 编码解码与 VGIC 范围检查、x86 的 kvm_set_irq 与 status 回写）均与各自架构的中断控制器有关；RISC-V 已做 irqchip_in_kernel 检查，并将具体校验交给 AIA 注入函数。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_041",
+  "dir": "V1_N_041",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 直接调用kvm_riscv_aia_inject_irq(kvm, irql->irq, irql->level)，没有按vcpu编号寻址的需求",
+     "why": "该调用是arm64内部接口把vcpu_id改成vcpu指针的重构，RISC-V的irq编码不含vcpu_id，不需要查找vcpu。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 使用kvm_riscv_aia_inject_irq；vm.c:62-63 已检查irqchip_in_kernel",
+     "why": "该提交只是把x86的IRQ函数从x86.c搬到irq.c，与RISC-V无关；RISC-V用AIA注入。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 kvm_riscv_aia_inject_irq",
+     "why": "vgic注入是arm64专有的中断控制器，RISC-V对应的是AIA注入。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 kvm_riscv_aia_inject_irq",
+     "why": "这是GICv5的userspace PPI限制，RISC-V没有GICv5和PPI概念。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "unsure",
+     "riscv_handles": "no",
+     "evidence": "vm.c:61-66 没有trace调用",
+     "why": "trace只是调试辅助，不影响正确性，材料中没有说明引入理由。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:62-65 只支持内核内irqchip，经AIA注入",
+     "why": "CPU类型的用户态中断线是ARM的VGIC之前的机制，RISC-V没有对应的用户态irqchip路径。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65",
+     "why": "vgic_is_v5是ARM GIC版本判断，与RISC-V无关。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65",
+     "why": "GICv5 IntID构造只属于ARM。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65",
+     "why": "GICv5 SPI IntID构造只属于ARM。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:62-63 返回-ENXIO；vm.c:65 错误由AIA函数返回",
+     "why": "EINVAL只是arm64对非法类型和范围的返回，写法差异，RISC-V的参数检查在AIA注入函数内。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65",
+     "why": "FIQ是ARM专有的中断线。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 irql->irq直接传入",
+     "why": "这是ARM的irq字段编码，RISC-V直接使用irq号。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 irql->irq直接传入",
+     "why": "这是ARM的irq字段编码，与RISC-V无关。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65",
+     "why": "这是ARM的irq类型编码，RISC-V没有此编码。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "vm.c:65 kvm_riscv_aia_inject_irq(kvm, irql->irq, irql->level)",
+     "why": "这是RISC-V自己的AIA注入实现，属于架构差异。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_042",
+  "dir": "V0_N_042",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现多出的部分（arm64的vgic/timer初始化、x86的TSC补偿与兼容性检查）都属于各架构自身的硬件或功能，抢占禁用的要求在RISC-V的调用路径下也不构成缺陷。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_042",
+  "dir": "V1_N_042",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第44-50行：csr_write(CSR_HEDELEG/HIDELEG/HCOUNTEREN/HVIP)",
+     "why": "arm64的cpu_hyp_init用于初始化hyp上下文，该提交只是重命名跟踪状态，RISC-V没有hyp上下文，对应的初始化由第44-50行的CSR写入完成。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "这是x86特有的TSC/Hyper-V时钟源稳定性判断，RISC-V的time CSR由硬件保证，不是同一类问题。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "x86 S4挂起期间TSC回退的补偿逻辑，RISC-V没有对应的TSC偏移调整机制，理由不适用。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "只是用kvm_make_request替代set_bit的可读性改动，且属于x86的时钟更新逻辑，无关。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "unsure",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第52行：kvm_riscv_aia_enable()",
+     "why": "arm64的理由是无条件使能vgic/timer中断；RISC-V中的中断使能由AIA完成，是无条件调用。timer方面无法从材料确认。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "提交只是重命名shared_msrs，且user-return MSR是x86特有机制，RISC-V没有对应概念。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "unsure",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第52行：kvm_riscv_aia_enable()",
+     "why": "arm64理由是无条件使能vgic维护中断；RISC-V的AIA使能在第52行无条件调用，大体对应。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第40行kvm_riscv_nacl_enable()及第44-50行CSR写入",
+     "why": "x86通过vendor ops使能虚拟化，RISC-V直接在本函数内完成，只是结构不同。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "unsure",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "x86检查各CPU的兼容性；RISC-V在本函数无此检查，是否需要需看其他位置（如init中的检查），材料不足。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "x86时钟更新请求常量，与TSC相关，无关。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "",
+     "why": "x86 masterclock更新请求常量，与TSC相关，无关。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第37行：函数无参数传递需求",
+     "why": "NULL只是cpu_hyp_init的调用参数，写法差异。"
+    },
+    {
+     "id": "D13",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第44-50行",
+     "why": "RISC-V特有的H扩展CSR设置，参照中无对应。"
+    },
+    {
+     "id": "D14",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第52行",
+     "why": "RISC-V特有的AIA使能。"
+    },
+    {
+     "id": "D15",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv main.c 第40-42行",
+     "why": "RISC-V特有的NACL（嵌套加速）使能，含错误返回。"
+    }
+   ],
+   "score": 1,
+   "problem": "第52行kvm_riscv_aia_enable()无返回值检查，且第40行NACL使能成功后若后续步骤失败没有回滚；另外本函数未做跨CPU兼容性检查（类似x86的check_processor_compatibility），是否在别处处理无法确认。证据不足，仅为疑点。",
+   "lines": [
+    40,
+    52
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_043",
+  "dir": "V0_N_043",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "LoongArch 的参照实现与 RISC-V 的 pageattr_pud_entry 逐行相同；x86 的 alloc_pmd_page 是为 CPA 分配 PMD 页，功能不同，不构成 RISC-V 这个函数遗漏的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_043",
+  "dir": "V1_N_043",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv pageattr.c:44-53 的 pageattr_pud_entry 只修改已有的 PUD 叶子项（pud_leaf 判断，set_pud），88行仅作为 pagewalk 的 .pud_entry 回调",
+     "why": "x86 这行是 populate PUD 页表、建立 1G 映射的逻辑；RISC-V 此函数只修改现有叶子项属性，不负责建立映射，差异无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv pageattr.c:47-50 只在 pud_leaf(val) 时改写已有项，没有分配 PMD 页的路径",
+     "why": "D2 的提交是 kmemcheck 移除 NOTRACK 标志的清理，与 RISC-V 无关；本函数也不分配页。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "riscv pageattr.c:44-53 无内存分配调用",
+     "why": "GFP_KERNEL 只是 x86 分配页时的分配标志，RISC-V 此函数不分配内存，不适用。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_044",
+  "dir": "V0_N_044",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现是x86的初始化清零加架构特定init，RISC-V的deinit已释放perf event并清零使用位图、溢出位图、固件事件和快照区，没有发现RISC-V应满足而未做到的共性要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_044",
+  "dir": "V1_N_044",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "参照提交5d766508fd15只是增加kvm_pmu_call()宏来简化kvm_pmu_ops的静态调用；RISC-V的vcpu_pmu.c:827-845没有kvm_pmu_ops静态调用机制",
+     "why": "这只是可读性封装，属于写法差异，与RISC-V的deinit逻辑无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vcpu_pmu.c:841-842 对pmc_in_use和pmc_overflown做bitmap_zero；参照x86 kvm_pmu_init只有memset，且没有给出相关提交",
+     "why": "材料中没有给出该差异的引入理由，它是RISC-V自身清理位图的实现，不是缺陷。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vcpu_pmu.c:835-840 用for_each_set_bit遍历pmc_in_use并释放perf event",
+     "why": "这是RISC-V释放已使用计数器的逻辑，参照函数是初始化，不具可比性，无引入理由。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vcpu_pmu.c:844 调用kvm_pmu_clear_snapshot_area(vcpu)",
+     "why": "这是RISC-V SBI PMU快照区特有的清理，x86没有对应概念，没有给出相关理由。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "vcpu_pmu.c:838 调用kvm_pmu_release_perf_event(pmc)",
+     "why": "这是RISC-V deinit中释放perf event的步骤，参照的init函数不需要，没有引入理由。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_045",
+  "dir": "V0_N_045",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "arm64 和 x86 的 pgtable_cache_init 只是为 pgd 创建对齐的 slab 缓存（arm64 的 PGD_SIZE 小于页大小时的自然对齐要求、52 位物理地址要求，x86 的 PAE 共享内核 pmd），这些都是各自架构的页表硬件特性。RISC-V 的 pgd 占一整页，不需要 slab 缓存，所以没有遗漏同样应满足的要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_045",
+  "dir": "V1_N_045",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V init.c 1496-1500 的 pgtable_cache_init 只调用 preallocate_pgd_pages_range，没有 pgd_cache。",
+     "why": "arm64/x86 的 pgd_cache 是因 PGD_SIZE 小于 PAGE_SIZE 而需要的；RISC-V 的 pgd 一般占满一页，不需要专用 slab，也不存在 EFI 早期分配 pgd 时 cache 为 NULL 的问题。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 1496-1500 无相关代码。",
+     "why": "该 BUILD_BUG_ON 针对 arm64 52 位物理地址时 TTBR 的对齐要求，RISC-V 的 satp 没有这个约束。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 函数 1496-1500。",
+     "why": "pgdir_is_page_size 是 arm64 为多级页表（含 5 级）引入的辅助函数，是 arm64 特有的写法；RISC-V 的 pgd 始终是整页。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 无 kmem_cache_create 调用，1496-1500。",
+     "why": "NULL 只是 kmem_cache_create 的构造函数参数，属于写法差异。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1496-1500。",
+     "why": "PGD_SIZE 只用于创建 pgd_cache，RISC-V 不创建，所以无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1496-1500。",
+     "why": "SLAB_PANIC 是 kmem_cache_create 的参数，RISC-V 没有这个调用，所以无关。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1496-1500。",
+     "why": "与 D2 相同，是同一个 BUILD_BUG_ON 的宏使用，针对 arm64 的 52 位物理地址。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1496-1500。",
+     "why": "PGD_ALIGN 是 x86 PAE 下 32 字节 pgd 的对齐，RISC-V 没有对应的情形。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 1496-1500。",
+     "why": "SHARED_KERNEL_PMD 是 x86 PAE/Xen 相关的概念，与 RISC-V 无关。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第1498行 IS_ENABLED(CONFIG_MODULES)。",
+     "why": "这是 RISC-V 自己的写法，只在启用模块时预分配模块区域，不是参照的缺失。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "RISC-V 第1497、1499行 preallocate_pgd_pages_range。",
+     "why": "这是 RISC-V 额外做的 vmalloc/modules 区域 pgd 预分配，参照中没有对应处理，不影响正确性。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_046",
+  "dir": "V0_N_046",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "与arm64相比只多出sdei_mask_local_cpu()，属于ARM特有的SDEI固件功能；x86的差异同样是APIC/NMI等架构特有机制，RISC-V没有遗漏通用要求。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_046",
+  "dir": "V1_N_046",
+  "answered": true,
+  "flag": true,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "yes",
+     "riscv_handles": "no",
+     "evidence": "smp.c:251 `if (num_online_cpus() > 1)`；264、267 行同样使用 num_online_cpus()",
+     "why": "arm64 的修复针对：panic 的 CPU 自己还未被计入在线（启动中），num_online_cpus()>1 会漏发 STOP。RISC-V 的 panic 路径同样可能发生在 CPU 启动过程中、本 CPU 尚未 set_online 时，此时只有另一个 CPU 在线（num_online_cpus()==1），第 251 行条件为假，不会发 STOP IPI。第 264、267 行的等待与告警判断同样有此问题。应改用 num_online_cpus() 减去本 CPU 是否在线的逻辑（即 num_other_online_cpus 语义）。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V 无 SDEI；smp.c:248-270 无对应调用",
+     "why": "SDEI 是 Arm 固件接口，RISC-V 不存在该机制，该差异与 RISC-V 无关。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "smp.c:259 `send_ipi_mask(&mask, IPI_CPU_STOP)`",
+     "why": "只是 IPI 发送接口命名不同，RISC-V 用 send_ipi_mask 实现同样功能。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "smp.c:259-269 自行发送 STOP IPI 并等待 1 秒；machine_kexec.c 调用 smp_send_stop",
+     "why": "x86 的 stop_other_cpus(wait) 是 x86 smp_ops 的实现方式；RISC-V 采用 arm64 风格的实现，kexec 路径靠 smp_send_stop 停止其他 CPU，属于不同写法。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "yes",
+     "riscv_handles": "no",
+     "evidence": "smp.c:251、264、267 使用 num_online_cpus()",
+     "why": "这正是 D1 描述的缺陷来源：RISC-V 用的是包含本 CPU 的总数，而不是其他在线 CPU 数。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "smp.c:259 send_ipi_mask",
+     "why": "仅是 RISC-V 自己的 IPI 发送函数名，与 arm64 的 smp_cross_call 等价。"
+    }
+   ],
+   "score": 2,
+   "problem": "smp_send_stop 使用 num_online_cpus() > 1 判断是否需要停止其他 CPU；若 panic 发生在某 CPU 启动过程中、本 CPU 尚未标记在线，则只有一个其他在线 CPU 时不会发送 STOP IPI，其他核继续运行（与 arm64 d0bab0c39e32 修复的问题相同）。应改为统计“除本 CPU 外的在线 CPU 数”。",
+   "lines": [
+    251,
+    264,
+    267
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_047",
+  "dir": "V0_N_047",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V的vvar_fault与arm64的实现逐行一致，已有time namespace处理和默认SIGBUS。x86多出的检查（vdso_image为空、sym_offset为零、pvclock/hvclock页、timens预取页）要么依赖x86自己的vdso布局，要么与x86的半虚拟化时钟硬件相关，要么只是优化，RISC-V不需要。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_047",
+  "dir": "V1_N_047",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv vdso.c:155 `return vmf_insert_pfn(vma, vmf->address, pfn);` 已直接返回vm_fault_t",
+     "why": "该提交是让vmf_insert_pfn直接返回vm_fault_t，RISC-V已是这种写法；`__pa`本身是x86 pvclock专用。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "yes",
+     "riscv_handles": "yes",
+     "evidence": "riscv vdso.c:127 find_timens_vvar_page(vma)；132-135行处理timens_page；138-148行处理VVAR_TIMENS_PAGE_OFFSET",
+     "why": "timens页故障处理在RISC-V已实现，只是用sym_to_pfn代替__pa_symbol。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:135、148 使用 sym_to_pfn(vdso_data)",
+     "why": "hv_get_tsc_pfn是x86 Hyper-V时钟源专用，RISC-V没有Hyper-V TSC页映射。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:126-156 无pvclock页映射",
+     "why": "pgprot_decrypted用于x86内存加密下的pvclock页，RISC-V无此场景。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:126-156 无pvclock页",
+     "why": "pvti是x86半虚拟化时钟结构，与RISC-V无关。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "yes",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:132-133 timens下仅返回timens页，未预故障真实vvar页",
+     "why": "这只是性能优化（预故障），缺少不影响正确性；unlikely只是写法。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:126-156 无pvclock/hvclock分支",
+     "why": "vclock_was_used只服务于x86的PVCLOCK/HVCLOCK页。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:155 使用vmf_insert_pfn",
+     "why": "vmf_insert_pfn_prot仅为pvclock页需要自定义页保护。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "riscv vdso.c:130-153 用vmf->pgoff直接switch，13x行sym_to_pfn",
+     "why": "PAGE_SHIFT用于x86符号偏移换算，RISC-V用页偏移枚举，无需此换算。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:126-156",
+     "why": "HVCLOCK是x86 Hyper-V时钟模式，与RISC-V无关。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:126-156",
+     "why": "PVCLOCK是x86 pvclock模式，与RISC-V无关。"
+    },
+    {
+     "id": "D12",
+     "reason_applies": "yes",
+     "riscv_handles": "no",
+     "evidence": "riscv vdso.c:132-135 无预故障，故无需错误检查",
+     "why": "VM_FAULT_ERROR仅用于x86预故障的错误检查，RISC-V没有预故障，属可选优化。"
+    }
+   ],
+   "score": 1,
+   "problem": "仅缺少x86的timens页预故障优化（性能层面），RISC-V的功能与arm64一致，无正确性问题。",
+   "lines": [
+    133
+   ]
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_048",
+  "dir": "V0_N_048",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "参照实现的差异只是各自架构的调用编码方式（arm64固定长度地址加载、x86相对call偏移）；RISC-V的lui/jalr已保证指令数与addr无关，且绝对跳转无需范围检查。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_048",
+  "dir": "V1_N_048",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "unsure",
+     "evidence": "RISC-V bpf_jit_comp32.c:762-763 用 lui/jalr 完成间接调用；32位文件中没有 trampoline 相关代码",
+     "why": "A64_BLR 只是 arm64 的调用指令；该提交是 trampoline 支持，RISC-V 32位的调用指令对应 rv_jalr，写法不同而已。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:746-747,762-763 用 lui+jalr 加载并跳转到绝对地址，指令数不随 addr 变化",
+     "why": "emit_addr_mov_i64 是 arm64 加载64位地址的辅助函数，RISC-V32 用 lui/jalr 实现等价功能。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "bpf_jit_comp32.c:762-763 为绝对地址调用；提交428d5df1fa4f 针对 x86 尾调用直接跳转的补丁",
+     "why": "emit_patch 生成 x86 相对 call/jmp，该提交是 x86 尾调用直接跳转优化，与 RISC-V32 的 emit_call 无关。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:763 rv_jalr(RV_REG_RA, RV_REG_T1, lower)",
+     "why": "A64_BLR 与 rv_jalr 是各自架构的调用指令，等价。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:762-763 使用 RV_REG_T1 作为临时寄存器",
+     "why": "TMP_REG_1 是 arm64 的临时寄存器，RISC-V 用 T1，只是命名不同。"
+    },
+    {
+     "id": "D6",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:752,770 使用 hi(r5)、hi(r0)",
+     "why": "RISC-V32 需要用寄存器对表示64位 BPF 寄存器，hi 取高半部分，属32位特有写法。"
+    },
+    {
+     "id": "D7",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:751,769 使用 lo(r5)、lo(r0)",
+     "why": "lo 取低半部分，同 D6，是32位寄存器对的写法。"
+    },
+    {
+     "id": "D8",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:750,755,766,769-771 rv_addi 用于调整栈指针、备份/恢复 TCC、设置返回值",
+     "why": "RISC-V 指令发射写法，与参照无对应关系。"
+    },
+    {
+     "id": "D9",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:763 rv_jalr",
+     "why": "RISC-V 的调用指令，对应 arm64 的 BLR，写法不同。"
+    },
+    {
+     "id": "D10",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:762 rv_lui(RV_REG_T1, upper)，upper 在746行计算并补偿 lower 的符号扩展",
+     "why": "lui 与 jalr 配对构造绝对地址，是 RISC-V 特有写法。"
+    },
+    {
+     "id": "D11",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "bpf_jit_comp32.c:751-752 rv_sw 将 R5 压栈",
+     "why": "32位调用约定下 R5 需要经栈传递，是 RISC-V32 自身的处理。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ },
+ {
+  "variant": "V0",
+  "case": "N_049",
+  "dir": "V0_N_049",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "verdict": "no",
+   "problem": "",
+   "lines": [],
+   "why": "RISC-V 函数已在第87-89行用 raw_spin_lock_irqsave 保护共享状态读取，并有边界检查和 array_index_nospec；参照实现多出的引用计数（vgic_put_irq）和 vcpu 空指针检查只与各自架构的对象生命周期/AVIC 机制相关。"
+  }
+ },
+ {
+  "variant": "V1",
+  "case": "N_049",
+  "dir": "V1_N_049",
+  "answered": true,
+  "flag": false,
+  "answer": {
+   "items": [
+    {
+     "id": "D1",
+     "reason_applies": "no",
+     "riscv_handles": "no",
+     "evidence": "aplic_read_target (aia_aplic.c:78-92) 只读取 irqd->target，不维护任何 per-vCPU IRTE 链表",
+     "why": "x86 的 list_del 用于删除 IRTE 与 vCPU 的关联链接，RISC-V 此函数没有这类数据结构，差异无关。"
+    },
+    {
+     "id": "D2",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "aia_aplic.c:87-89 使用 raw_spin_lock_irqsave(&irqd->lock)/raw_spin_unlock_irqrestore；to_svm 是 SVM 专用的取结构体宏",
+     "why": "to_svm 属于 SVM 特有，不适用；RISC-V 已使用 raw spinlock，与 PREEMPT_RT 下避免睡眠锁的理由一致。"
+    },
+    {
+     "id": "D3",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "aia_aplic.c:83-85 直接用 aplic->irqs[] 数组按 irq 索引，并检查 !irq 和 nr_irqs <= irq",
+     "why": "vgic_get_vcpu_irq 解决 vGIC 私有中断与全局中断的查找歧义；APLIC 只有全局中断数组，没有 per-vCPU 私有中断，不适用。"
+    },
+    {
+     "id": "D4",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "aia_aplic.c:85 通过静态数组 aplic->irqs 取得 irqd，没有动态分配或引用计数",
+     "why": "vgic_put_irq 为 LPI 的动态生命周期引入引用计数；APLIC 的 irq 结构静态分配，不需要引用计数。"
+    },
+    {
+     "id": "D5",
+     "reason_applies": "no",
+     "riscv_handles": "yes",
+     "evidence": "aia_aplic.c:83-85 先做边界检查，再用 array_index_nospec(irq, aplic->nr_irqs) 索引",
+     "why": "这是 RISC-V 额外加入的 Spectre v1 防护，对客户机可控索引做了边界钳制，不是缺失，属于更严格的处理。"
+    }
+   ],
+   "score": 0,
+   "problem": "",
+   "lines": []
+  }
+ }
+]

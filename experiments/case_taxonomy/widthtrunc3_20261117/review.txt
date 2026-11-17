@@ -1,0 +1,1400 @@
+==========================================================================================
+[1] fs/jfs/namei.c:1225  函数 jfs_rename  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:ino
+    32 位组合：arm32, i386, riscv32, mips32
+   1200 			/* free block resources */
+   1201 			if ((new_size = commitZeroLink(tid, new_ip)) < 0) {
+   1202 				txAbort(tid, 1);	/* Marks FS Dirty */
+   1203 				rc = new_size;
+   1204 				goto out_tx;
+   1205 			}
+   1206 			tblk = tid_to_tblock(tid);
+   1207 			tblk->xflag |= COMMIT_DELETE;
+   1208 			tblk->u.ip = new_ip;
+   1209 		} else {
+   1210 			inode_set_ctime_current(new_ip);
+   1211 			mark_inode_dirty(new_ip);
+   1212 		}
+   1213 	} else {
+   1214 		/*
+   1215 		 * Add new directory entry
+   1216 		 */
+   1217 		rc = dtSearch(new_dir, &new_dname, &ino, &btstack,
+   1218 			      JFS_CREATE);
+   1219 		if (rc) {
+   1220 			jfs_err("jfs_rename didn't expect dtSearch to fail w/rc = %d",
+   1221 				rc);
+   1222 			goto out_tx;
+   1223 		}
+   1224 
+>> 1225 		ino = old_ip->i_ino;
+   1226 		rc = dtInsert(tid, new_dir, &new_dname, &ino, &btstack);
+   1227 		if (rc) {
+   1228 			if (rc == -EIO)
+   1229 				jfs_err("jfs_rename: dtInsert returned -EIO");
+   1230 			goto out_tx;
+   1231 		}
+==========================================================================================
+[2] fs/ubifs/tnc.c:3536  函数 dbg_check_inode_size  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:data_key_init#2
+    32 位组合：arm32, i386, riscv32, mips32
+   3511 /**
+   3512  * dbg_check_inode_size - check if inode size is correct.
+   3513  * @c: UBIFS file-system description object
+   3514  * @inode: inode to check
+   3515  * @size: inode size
+   3516  *
+   3517  * This function makes sure that the inode size (@size) is correct and it does
+   3518  * not have any pages beyond @size. Returns zero if the inode is OK, %-EINVAL
+   3519  * if it has a data page beyond @size, and other negative error code in case of
+   3520  * other errors.
+   3521  */
+   3522 int dbg_check_inode_size(struct ubifs_info *c, const struct inode *inode,
+   3523 			 loff_t size)
+   3524 {
+   3525 	int err, n;
+   3526 	union ubifs_key from_key, to_key, *key;
+   3527 	struct ubifs_znode *znode;
+   3528 	unsigned int block;
+   3529 
+   3530 	if (!S_ISREG(inode->i_mode))
+   3531 		return 0;
+   3532 	if (!dbg_is_chk_gen(c))
+   3533 		return 0;
+   3534 
+   3535 	block = (size + UBIFS_BLOCK_SIZE - 1) >> UBIFS_BLOCK_SHIFT;
+>> 3536 	data_key_init(c, &from_key, inode->i_ino, block);
+   3537 	highest_data_key(c, &to_key, inode->i_ino);
+   3538 
+   3539 	mutex_lock(&c->tnc_mutex);
+   3540 	err = ubifs_lookup_level0(c, &from_key, &znode, &n);
+   3541 	if (err < 0)
+   3542 		goto out_unlock;
+==========================================================================================
+[3] fs/iomap/direct-io.c:832  函数 __iomap_dio_rw  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:iov_iter_revert#1
+    32 位组合：arm32, i386, riscv32, mips32
+    807 		ret = sb_init_dio_done_wq(inode->i_sb);
+    808 		if (ret < 0)
+    809 			goto out_free_dio;
+    810 	}
+    811 
+    812 	inode_dio_begin(inode);
+    813 
+    814 	blk_start_plug(&plug);
+    815 	while ((ret = iomap_iter(&iomi, ops)) > 0) {
+    816 		iomi.status = iomap_dio_iter(&iomi, dio);
+    817 
+    818 		/*
+    819 		 * We can only poll for single bio I/Os.
+    820 		 */
+    821 		iocb->ki_flags &= ~IOCB_HIPRI;
+    822 	}
+    823 
+    824 	blk_finish_plug(&plug);
+    825 
+    826 	/*
+    827 	 * We only report that we've read data up to i_size.
+    828 	 * Revert iter to a state corresponding to that as some callers (such
+    829 	 * as the splice code) rely on it.
+    830 	 */
+    831 	if (iov_iter_rw(iter) == READ && iomi.pos >= dio->i_size)
+>>  832 		iov_iter_revert(iter, iomi.pos - dio->i_size);
+    833 
+    834 	if (ret == -EFAULT && dio->size && (dio_flags & IOMAP_DIO_PARTIAL)) {
+    835 		if (!(iocb->ki_flags & IOCB_NOWAIT))
+    836 			wait_for_completion = true;
+    837 		ret = 0;
+    838 	}
+==========================================================================================
+[4] arch/powerpc/kernel/time.c:978  函数 div128_by_32  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:y
+    32 位组合：arm32, i386, riscv32, mips32
+    953 }
+    954 
+    955 /*
+    956  * Divide a 128-bit dividend by a 32-bit divisor, leaving a 128 bit
+    957  * result.
+    958  */
+    959 static __init void div128_by_32(u64 dividend_high, u64 dividend_low,
+    960 				unsigned int divisor, struct div_result *dr)
+    961 {
+    962 	unsigned long a, b, c, d;
+    963 	unsigned long w, x, y, z;
+    964 	u64 ra, rb, rc;
+    965 
+    966 	a = dividend_high >> 32;
+    967 	b = dividend_high & 0xffffffff;
+    968 	c = dividend_low >> 32;
+    969 	d = dividend_low & 0xffffffff;
+    970 
+    971 	w = a / divisor;
+    972 	ra = ((u64)(a - (w * divisor)) << 32) + b;
+    973 
+    974 	rb = ((u64)do_div(ra, divisor) << 32) + c;
+    975 	x = ra;
+    976 
+    977 	rc = ((u64)do_div(rb, divisor) << 32) + d;
+>>  978 	y = rb;
+    979 
+    980 	do_div(rc, divisor);
+    981 	z = rc;
+    982 
+    983 	dr->result_high = ((u64)w << 32) + x;
+    984 	dr->result_low  = ((u64)y << 32) + z;
+==========================================================================================
+[5] fs/btrfs/lru_cache.c:51  函数 btrfs_lru_cache_lookup  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:mtree_load#1
+    32 位组合：arm32, i386, riscv32, mips32
+     26 	struct btrfs_lru_cache_entry *entry;
+     27 
+     28 	list_for_each_entry(entry, head, list) {
+     29 		if (entry->key == key && entry->gen == gen)
+     30 			return entry;
+     31 	}
+     32 
+     33 	return NULL;
+     34 }
+     35 
+     36 /*
+     37  * Lookup for an entry in the cache.
+     38  *
+     39  * @cache:      The cache.
+     40  * @key:        The key of the entry we are looking for.
+     41  * @gen:        Generation associated to the key.
+     42  *
+     43  * Returns the entry associated with the key or NULL if none found.
+     44  */
+     45 struct btrfs_lru_cache_entry *btrfs_lru_cache_lookup(struct btrfs_lru_cache *cache,
+     46 						     u64 key, u64 gen)
+     47 {
+     48 	struct list_head *head;
+     49 	struct btrfs_lru_cache_entry *entry;
+     50 
+>>   51 	head = mtree_load(&cache->entries, key);
+     52 	if (!head)
+     53 		return NULL;
+     54 
+     55 	entry = match_entry(head, key, gen);
+     56 	if (entry)
+     57 		list_move_tail(&entry->lru_list, &cache->lru_list);
+==========================================================================================
+[6] fs/iomap/direct-io.c:120  函数 iomap_dio_complete  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:ret
+    32 位组合：arm32, i386, riscv32, mips32
+     95 	case 0:
+     96 	case -EAGAIN:
+     97 	case -ENOTBLK:
+     98 		/* don't send fsnotify for success or magic retry codes */
+     99 		return false;
+    100 	default:
+    101 		return true;
+    102 	}
+    103 }
+    104 
+    105 ssize_t iomap_dio_complete(struct iomap_dio *dio)
+    106 {
+    107 	const struct iomap_dio_ops *dops = dio->dops;
+    108 	struct kiocb *iocb = dio->iocb;
+    109 	loff_t offset = iocb->ki_pos;
+    110 	ssize_t ret = dio->error;
+    111 
+    112 	if (dops && dops->end_io)
+    113 		ret = dops->end_io(iocb, dio->size, ret, dio->flags);
+    114 	if (should_report_dio_fserror(dio->error))
+    115 		fserror_report_io(file_inode(iocb->ki_filp),
+    116 				  iomap_dio_err_type(dio), offset, dio->size,
+    117 				  dio->error, GFP_NOFS);
+    118 
+    119 	if (likely(!ret)) {
+>>  120 		ret = dio->size;
+    121 		/* check for short read */
+    122 		if (offset + ret > dio->i_size &&
+    123 		    !(dio->flags & IOMAP_DIO_WRITE))
+    124 			ret = dio->i_size - offset;
+    125 	}
+    126 
+==========================================================================================
+[7] fs/isofs/inode.c:1025  函数 isofs_get_blocks  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:b_off
+    32 位组合：arm32, i386, riscv32, mips32
+   1000 {
+   1001 	struct super_block *sb = dentry->d_sb;
+   1002 	u64 id = huge_encode_dev(sb->s_bdev->bd_dev);
+   1003 
+   1004 	buf->f_type = ISOFS_SUPER_MAGIC;
+   1005 	buf->f_bsize = sb->s_blocksize;
+   1006 	buf->f_blocks = (ISOFS_SB(sb)->s_nzones
+   1007 		<< (ISOFS_SB(sb)->s_log_zone_size - sb->s_blocksize_bits));
+   1008 	buf->f_bfree = 0;
+   1009 	buf->f_bavail = 0;
+   1010 	buf->f_files = ISOFS_SB(sb)->s_ninodes;
+   1011 	buf->f_ffree = 0;
+   1012 	buf->f_fsid = u64_to_fsid(id);
+   1013 	buf->f_namelen = NAME_MAX;
+   1014 	return 0;
+   1015 }
+   1016 
+   1017 /*
+   1018  * Get a set of blocks; filling in buffer_heads if already allocated
+   1019  * or getblk() if they are not.  Returns the number of blocks inserted
+   1020  * (-ve == error.)
+   1021  */
+   1022 int isofs_get_blocks(struct inode *inode, sector_t iblock,
+   1023 		     struct buffer_head **bh, unsigned long nblocks)
+   1024 {
+>> 1025 	unsigned long b_off = iblock;
+   1026 	unsigned offset, sect_size;
+   1027 	unsigned int firstext;
+   1028 	unsigned long nextblk, nextoff;
+   1029 	int section, rv, error;
+   1030 	struct iso_inode_info *ei = ISOFS_I(inode);
+   1031 
+==========================================================================================
+[8] fs/btrfs/send.c:5436  函数 send_hole  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memset#2
+    32 位组合：arm32, i386, riscv32, mips32
+   5411 
+   5412 	/*
+   5413 	 * Don't go beyond the inode's i_size due to prealloc extents that start
+   5414 	 * after the i_size.
+   5415 	 */
+   5416 	end = min_t(u64, end, sctx->cur_inode_size);
+   5417 
+   5418 	if (sctx->flags & BTRFS_SEND_FLAG_NO_FILE_DATA)
+   5419 		return send_update_extent(sctx, offset, end - offset);
+   5420 
+   5421 	p = get_cur_inode_path(sctx);
+   5422 	if (IS_ERR(p))
+   5423 		return PTR_ERR(p);
+   5424 
+   5425 	while (offset < end) {
+   5426 		u64 len = min(end - offset, read_size);
+   5427 
+   5428 		ret = begin_cmd(sctx, BTRFS_SEND_C_WRITE);
+   5429 		if (ret < 0)
+   5430 			break;
+   5431 		TLV_PUT_PATH(sctx, BTRFS_SEND_A_PATH, p);
+   5432 		TLV_PUT_U64(sctx, BTRFS_SEND_A_FILE_OFFSET, offset);
+   5433 		ret = put_data_header(sctx, len);
+   5434 		if (ret < 0)
+   5435 			break;
+>> 5436 		memset(sctx->send_buf + sctx->send_size, 0, len);
+   5437 		sctx->send_size += len;
+   5438 		ret = send_cmd(sctx);
+   5439 		if (ret < 0)
+   5440 			break;
+   5441 		offset += len;
+   5442 	}
+==========================================================================================
+[9] fs/btrfs/free-space-cache.c:1455  函数 __btrfs_write_out_cache  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:btrfs_dirty_folio#3
+    32 位组合：arm32, i386, riscv32, mips32
+   1430 	 */
+   1431 	ret = write_pinned_extent_entries(trans, block_group, io_ctl, &entries);
+   1432 	if (ret)
+   1433 		goto out_nospc_locked;
+   1434 
+   1435 	/*
+   1436 	 * At last, we write out all the bitmaps and keep cache_writeout_mutex
+   1437 	 * locked while doing it because a concurrent trim can be manipulating
+   1438 	 * or freeing the bitmap.
+   1439 	 */
+   1440 	ret = write_bitmap_entries(io_ctl, &bitmap_list);
+   1441 	spin_unlock(&ctl->tree_lock);
+   1442 	mutex_unlock(&ctl->cache_writeout_mutex);
+   1443 	if (ret)
+   1444 		goto out_nospc;
+   1445 
+   1446 	/* Zero out the rest of the pages just to make sure */
+   1447 	io_ctl_zero_remaining_pages(io_ctl);
+   1448 
+   1449 	/* Everything is written out, now we dirty the pages in the file. */
+   1450 	i_size = i_size_read(inode);
+   1451 	for (int i = 0; i < round_up(i_size, PAGE_SIZE) / PAGE_SIZE; i++) {
+   1452 		u64 dirty_start = i * PAGE_SIZE;
+   1453 		u64 dirty_len = min_t(u64, dirty_start + PAGE_SIZE, i_size) - dirty_start;
+   1454 
+>> 1455 		ret = btrfs_dirty_folio(BTRFS_I(inode), page_folio(io_ctl->pages[i]),
+   1456 					dirty_start, dirty_len, &cached_state, false);
+   1457 		if (ret < 0)
+   1458 			goto out_nospc;
+   1459 	}
+   1460 
+   1461 	if (block_group->flags & BTRFS_BLOCK_GROUP_DATA)
+==========================================================================================
+[10] fs/udf/namei.c:171  函数 udf_expand_dir_adinicb  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memcpy#2
+    32 位组合：arm32, i386, riscv32, mips32
+    146 		alloctype = ICBTAG_FLAG_AD_SHORT;
+    147 	else
+    148 		alloctype = ICBTAG_FLAG_AD_LONG;
+    149 
+    150 	if (!inode->i_size) {
+    151 		iinfo->i_alloc_type = alloctype;
+    152 		mark_inode_dirty(inode);
+    153 		return 0;
+    154 	}
+    155 
+    156 	/* alloc block, and copy data to it */
+    157 	*block = udf_new_block(inode->i_sb, inode,
+    158 			       iinfo->i_location.partitionReferenceNum,
+    159 			       iinfo->i_location.logicalBlockNum, &ret);
+    160 	if (!(*block))
+    161 		return ret;
+    162 	newblock = udf_get_pblock(inode->i_sb, *block,
+    163 				  iinfo->i_location.partitionReferenceNum,
+    164 				0);
+    165 	if (newblock == 0xffffffff)
+    166 		return -EFSCORRUPTED;
+    167 	dbh = sb_getblk(inode->i_sb, newblock);
+    168 	if (!dbh)
+    169 		return -ENOMEM;
+    170 	lock_buffer(dbh);
+>>  171 	memcpy(dbh->b_data, iinfo->i_data, inode->i_size);
+    172 	memset(dbh->b_data + inode->i_size, 0,
+    173 	       inode->i_sb->s_blocksize - inode->i_size);
+    174 	set_buffer_uptodate(dbh);
+    175 	unlock_buffer(dbh);
+    176 
+    177 	/* Drop inline data, add block instead */
+==========================================================================================
+[11] fs/jfs/jfs_imap.c:1377  函数 diAlloc  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:inum
+    32 位组合：arm32, i386, riscv32, mips32
+   1352 	 * the same iag containing the parent disk inode:
+   1353 	 * try to allocate the new disk inode close to the parent disk
+   1354 	 * inode, using parent disk inode number + 1 as the allocation
+   1355 	 * hint.  (we use a left-to-right policy to attempt to avoid
+   1356 	 * moving backward on the disk.)  compute the hint within the
+   1357 	 * file system and the iag.
+   1358 	 */
+   1359 
+   1360 	/* get the ag number of this iag */
+   1361 	agno = BLKTOAG(JFS_IP(pip)->agstart, JFS_SBI(pip->i_sb));
+   1362 	dn_numag = JFS_SBI(pip->i_sb)->bmap->db_numag;
+   1363 	if (agno < 0 || agno > dn_numag || agno >= MAXAG)
+   1364 		return -EIO;
+   1365 
+   1366 	if (atomic_read(&JFS_SBI(pip->i_sb)->bmap->db_active[agno])) {
+   1367 		/*
+   1368 		 * There is an open file actively growing.  We want to
+   1369 		 * allocate new inodes from a different ag to avoid
+   1370 		 * fragmentation problems.
+   1371 		 */
+   1372 		agno = dbNextAG(JFS_SBI(pip->i_sb)->ipbmap);
+   1373 		AG_LOCK(imap, agno);
+   1374 		goto tryag;
+   1375 	}
+   1376 
+>> 1377 	inum = pip->i_ino + 1;
+   1378 	ino = inum & (INOSPERIAG - 1);
+   1379 
+   1380 	/* back off the hint if it is outside of the iag */
+   1381 	if (ino == 0)
+   1382 		inum = pip->i_ino;
+   1383 
+==========================================================================================
+[12] fs/btrfs/inode.c:6886  函数 btrfs_create_new_inode  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:xa_release#1
+    32 位组合：arm32, i386, riscv32, mips32
+   6861 		ret = btrfs_orphan_add(trans, BTRFS_I(inode));
+   6862 		if (unlikely(ret)) {
+   6863 			btrfs_abort_transaction(trans, ret);
+   6864 			goto discard;
+   6865 		}
+   6866 	} else {
+   6867 		ret = btrfs_add_link(trans, BTRFS_I(dir), BTRFS_I(inode), name,
+   6868 				     false, BTRFS_I(inode)->dir_index);
+   6869 		if (unlikely(ret)) {
+   6870 			btrfs_abort_transaction(trans, ret);
+   6871 			goto discard;
+   6872 		}
+   6873 	}
+   6874 
+   6875 	return 0;
+   6876 
+   6877 discard:
+   6878 	/*
+   6879 	 * discard_new_inode() calls iput(), but the caller owns the reference
+   6880 	 * to the inode.
+   6881 	 */
+   6882 	ihold(inode);
+   6883 	discard_new_inode(inode);
+   6884 out:
+   6885 	if (xa_reserved)
+>> 6886 		xa_release(&root->inodes, objectid);
+   6887 
+   6888 	btrfs_free_path(path);
+   6889 	return ret;
+   6890 }
+   6891 
+   6892 /*
+==========================================================================================
+[13] fs/jbd2/journal.c:1719  函数 journal_reset  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:journal->j_first
+    32 位组合：arm32, i386, riscv32, mips32
+   1694 
+   1695 	return journal;
+   1696 }
+   1697 
+   1698 /*
+   1699  * Given a journal_t structure, initialise the various fields for
+   1700  * startup of a new journaling session.  We use this both when creating
+   1701  * a journal, and after recovering an old journal to reset it for
+   1702  * subsequent use.
+   1703  */
+   1704 
+   1705 static int journal_reset(journal_t *journal)
+   1706 {
+   1707 	journal_superblock_t *sb = journal->j_superblock;
+   1708 	unsigned long long first, last;
+   1709 
+   1710 	first = be32_to_cpu(sb->s_first);
+   1711 	last = be32_to_cpu(sb->s_maxlen);
+   1712 	if (first + JBD2_MIN_JOURNAL_BLOCKS > last + 1) {
+   1713 		printk(KERN_ERR "JBD2: Journal too short (blocks %llu-%llu).\n",
+   1714 		       first, last);
+   1715 		journal_fail_superblock(journal);
+   1716 		return -EINVAL;
+   1717 	}
+   1718 
+>> 1719 	journal->j_first = first;
+   1720 	journal->j_last = last;
+   1721 
+   1722 	if (journal->j_head != 0 && journal->j_flags & JBD2_CYCLE_RECORD) {
+   1723 		/*
+   1724 		 * Disable the cycled recording mode if the journal head block
+   1725 		 * number is not correct.
+==========================================================================================
+[14] kernel/time/timekeeping.c:771  函数 tk_update_ktime_data  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:tk->ktime_sec
+    32 位组合：arm32, i386, riscv32, mips32
+    746  */
+    747 static inline void tk_update_ktime_data(struct timekeeper *tk)
+    748 {
+    749 	u64 seconds;
+    750 	u32 nsec;
+    751 
+    752 	/*
+    753 	 * The xtime based monotonic readout is:
+    754 	 *	nsec = (xtime_sec + wtm_sec) * 1e9 + wtm_nsec + now();
+    755 	 * The ktime based monotonic readout is:
+    756 	 *	nsec = base_mono + now();
+    757 	 * ==> base_mono = (xtime_sec + wtm_sec) * 1e9 + wtm_nsec
+    758 	 */
+    759 	seconds = (u64)(tk->xtime_sec + tk->wall_to_monotonic.tv_sec);
+    760 	nsec = (u32) tk->wall_to_monotonic.tv_nsec;
+    761 	tk->tkr_mono.base = ns_to_ktime(seconds * NSEC_PER_SEC + nsec);
+    762 
+    763 	/*
+    764 	 * The sum of the nanoseconds portions of xtime and
+    765 	 * wall_to_monotonic can be greater/equal one second. Take
+    766 	 * this into account before updating tk->ktime_sec.
+    767 	 */
+    768 	nsec += (u32)(tk->tkr_mono.xtime_nsec >> tk->tkr_mono.shift);
+    769 	if (nsec >= NSEC_PER_SEC)
+    770 		seconds++;
+>>  771 	tk->ktime_sec = seconds;
+    772 
+    773 	/* Update the monotonic raw base */
+    774 	tk->tkr_raw.base = ns_to_ktime(tk->raw_sec * NSEC_PER_SEC);
+    775 }
+    776 
+    777 static inline void tk_update_ns_to_cyc(struct timekeeper *tks, struct timekeeper *tkc)
+==========================================================================================
+[15] fs/qnx4/dir.c:32  函数 qnx4_readdir  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:qnx4_block_map#1
+    32 位组合：arm32, i386, riscv32, mips32
+      7  * Using parts of the xiafs filesystem.
+      8  *
+      9  * History :
+     10  *
+     11  * 28-05-1998 by Richard Frowijn : first release.
+     12  * 20-06-1998 by Frank Denis : Linux 2.1.99+ & dcache support.
+     13  */
+     14 
+     15 #include <linux/buffer_head.h>
+     16 #include <linux/filelock.h>
+     17 #include "qnx4.h"
+     18 
+     19 static int qnx4_readdir(struct file *file, struct dir_context *ctx)
+     20 {
+     21 	struct inode *inode = file_inode(file);
+     22 	unsigned int offset;
+     23 	struct buffer_head *bh;
+     24 	unsigned long blknum;
+     25 	int ix, ino;
+     26 	int size;
+     27 
+     28 	QNX4DEBUG((KERN_INFO "qnx4_readdir:i_size = %ld\n", (long) inode->i_size));
+     29 	QNX4DEBUG((KERN_INFO "pos                 = %ld\n", (long) ctx->pos));
+     30 
+     31 	while (ctx->pos < inode->i_size) {
+>>   32 		blknum = qnx4_block_map(inode, ctx->pos >> QNX4_BLOCK_SIZE_BITS);
+     33 		bh = sb_bread(inode->i_sb, blknum);
+     34 		if (bh == NULL) {
+     35 			printk(KERN_ERR "qnx4_readdir: bread failed (%ld)\n", blknum);
+     36 			return 0;
+     37 		}
+     38 		ix = (ctx->pos >> QNX4_DIR_ENTRY_SIZE_BITS) % QNX4_INODES_PER_BLOCK;
+==========================================================================================
+[16] fs/xfs/xfs_filestream.c:373  函数 xfs_filestream_deassociate  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:xfs_mru_cache_delete#1
+    32 位组合：arm32, i386, riscv32, mips32
+    348 		ino = I_INO(pip);
+    349 		error = xfs_filestream_lookup_association(ap, args, ino,
+    350 				longest);
+    351 		xfs_irele(pip);
+    352 		if (error)
+    353 			return error;
+    354 		if (*longest >= args->maxlen)
+    355 			goto out_select;
+    356 		if (ap->tp->t_flags & XFS_TRANS_LOWMODE)
+    357 			goto out_select;
+    358 	}
+    359 
+    360 	error = xfs_filestream_create_association(ap, args, ino, longest);
+    361 	if (error)
+    362 		return error;
+    363 
+    364 out_select:
+    365 	ap->blkno = xfs_agbno_to_fsb(args->pag, 0);
+    366 	return 0;
+    367 }
+    368 
+    369 void
+    370 xfs_filestream_deassociate(
+    371 	struct xfs_inode	*ip)
+    372 {
+>>  373 	xfs_mru_cache_delete(ip->i_mount->m_filestream, I_INO(ip));
+    374 }
+    375 
+    376 int
+    377 xfs_filestream_mount(
+    378 	xfs_mount_t	*mp)
+    379 {
+==========================================================================================
+[17] fs/xfs/xfs_filestream.c:215  函数 xfs_filestream_lookup_association  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:xfs_mru_cache_lookup#1
+    32 位组合：arm32, i386, riscv32, mips32
+    190 	return dir ? XFS_I(dir) : NULL;
+    191 }
+    192 
+    193 /*
+    194  * Lookup the mru cache for an existing association. If one exists and we can
+    195  * use it, return with an active perag reference indicating that the allocation
+    196  * will proceed with that association.
+    197  *
+    198  * If we have no association, or we cannot use the current one and have to
+    199  * destroy it, return with longest = 0 to tell the caller to create a new
+    200  * association.
+    201  */
+    202 static int
+    203 xfs_filestream_lookup_association(
+    204 	struct xfs_bmalloca	*ap,
+    205 	struct xfs_alloc_arg	*args,
+    206 	xfs_ino_t		pino,
+    207 	xfs_extlen_t		*longest)
+    208 {
+    209 	struct xfs_mount	*mp = args->mp;
+    210 	struct xfs_perag	*pag;
+    211 	struct xfs_mru_cache_elem *mru;
+    212 	int			error = 0;
+    213 
+    214 	*longest = 0;
+>>  215 	mru = xfs_mru_cache_lookup(mp->m_filestream, pino);
+    216 	if (!mru)
+    217 		return 0;
+    218 	/*
+    219 	 * Grab the pag and take an extra active reference for the caller whilst
+    220 	 * the mru item cannot go away. This means we'll pin the perag with
+    221 	 * the reference we get here even if the filestreams association is torn
+==========================================================================================
+[18] fs/exfat/namei.c:771  函数 exfat_lookup  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:exfat_d_version_set#1
+    32 位组合：arm32, i386, riscv32, mips32
+    746 		goto out;
+    747 
+    748 	alias = d_find_alias(inode);
+    749 
+    750 	/*
+    751 	 * Checking "alias->d_parent == dentry->d_parent" to make sure
+    752 	 * FS is not corrupted (especially double linked dir).
+    753 	 */
+    754 	if (alias && alias->d_parent == dentry->d_parent) {
+    755 		/*
+    756 		 * This inode has a hashed alias dentry with different
+    757 		 * name. This means, the user did ->lookup() by an
+    758 		 * another name (longname vs 8.3 alias of it) in past.
+    759 		 *
+    760 		 * Switch to new one for reason of locality if possible.
+    761 		 */
+    762 		d_move(alias, dentry);
+    763 		iput(inode);
+    764 		mutex_unlock(&EXFAT_SB(sb)->s_lock);
+    765 		return alias;
+    766 	}
+    767 	dput(alias);
+    768 out:
+    769 	mutex_unlock(&EXFAT_SB(sb)->s_lock);
+    770 	if (!inode)
+>>  771 		exfat_d_version_set(dentry, inode_query_iversion(dir));
+    772 
+    773 	return d_splice_alias(inode, dentry);
+    774 }
+    775 
+    776 /* remove an entry, BUT don't truncate */
+    777 static int exfat_unlink(struct inode *dir, struct dentry *dentry)
+==========================================================================================
+[19] fs/nfsd/vfs.c:754  函数 nfsd_copy_file_range  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:vfs_copy_file_range#4
+    32 位组合：arm32, i386, riscv32, mips32
+    729 			commit_reset_write_verifier(nn, rqstp, status);
+    730 			ret = nfserrno(status);
+    731 		}
+    732 	}
+    733 out_err:
+    734 	return ret;
+    735 }
+    736 
+    737 ssize_t nfsd_copy_file_range(struct file *src, u64 src_pos, struct file *dst,
+    738 			     u64 dst_pos, u64 count)
+    739 {
+    740 	ssize_t ret;
+    741 
+    742 	/*
+    743 	 * Limit copy to 4MB to prevent indefinitely blocking an nfsd
+    744 	 * thread and client rpc slot.  The choice of 4MB is somewhat
+    745 	 * arbitrary.  We might instead base this on r/wsize, or make it
+    746 	 * tunable, or use a time instead of a byte limit, or implement
+    747 	 * asynchronous copy.  In theory a client could also recognize a
+    748 	 * limit like this and pipeline multiple COPY requests.
+    749 	 */
+    750 	count = min_t(u64, count, 1 << 22);
+    751 	ret = vfs_copy_file_range(src, src_pos, dst, dst_pos, count, 0);
+    752 
+    753 	if (ret == -EOPNOTSUPP || ret == -EXDEV)
+>>  754 		ret = vfs_copy_file_range(src, src_pos, dst, dst_pos, count,
+    755 					  COPY_FILE_SPLICE);
+    756 	return ret;
+    757 }
+    758 
+    759 __be32 nfsd4_vfs_fallocate(struct svc_rqst *rqstp, struct svc_fh *fhp,
+    760 			   struct file *file, loff_t offset, loff_t len,
+==========================================================================================
+[20] fs/smb/client/file.c:3480  函数 cifs_swap_activate  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:blocks
+    32 位组合：arm32, i386, riscv32, mips32
+   3455 		sio->iocb.ki_complete(&sio->iocb, ret);
+   3456 }
+   3457 
+   3458 static const struct swap_ops cifs_swap_ops = {
+   3459 	.flags			= SWAP_OPS_F_REQUIRE_NOFS,
+   3460 	.submit_write		= cifs_swap_submit_write,
+   3461 	.submit_read		= cifs_swap_submit_read,
+   3462 	.can_merge		= swap_fs_can_merge,
+   3463 };
+   3464 
+   3465 static int cifs_swap_activate(struct swap_info_struct *sis,
+   3466 			      struct file *swap_file, sector_t *span)
+   3467 {
+   3468 	struct cifsFileInfo *cfile = swap_file->private_data;
+   3469 	struct inode *inode = swap_file->f_mapping->host;
+   3470 	unsigned long blocks;
+   3471 	long long isize;
+   3472 
+   3473 	cifs_dbg(FYI, "swap activate\n");
+   3474 
+   3475 	if (swap_file->f_mapping->a_ops != &cifs_addr_ops)
+   3476 		/* Cannot support swap */
+   3477 		return -EINVAL;
+   3478 
+   3479 	spin_lock(&inode->i_lock);
+>> 3480 	blocks = inode->i_blocks;
+   3481 	isize = inode->i_size;
+   3482 	spin_unlock(&inode->i_lock);
+   3483 	if (blocks*512 < isize) {
+   3484 		pr_warn("swap activate: swapfile has holes\n");
+   3485 		return -EINVAL;
+   3486 	}
+==========================================================================================
+[21] fs/f2fs/inode.c:1049  函数 f2fs_post_evict_inode  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:invalidate_mapping_pages#1
+    32 位组合：arm32, i386, riscv32, mips32
+   1024 	struct f2fs_inode_info *fi = F2FS_I(inode);
+   1025 	nid_t xnid = fi->i_xattr_nid;
+   1026 	unsigned int record_bits = 0;
+   1027 
+   1028 	dquot_drop(inode);
+   1029 
+   1030 	stat_dec_inline_xattr(inode);
+   1031 	stat_dec_inline_dir(inode);
+   1032 	stat_dec_inline_inode(inode);
+   1033 	stat_dec_compr_inode(inode);
+   1034 	stat_sub_compr_blocks(inode,
+   1035 			atomic_read(&fi->i_compr_blocks));
+   1036 
+   1037 	if (likely(!f2fs_cp_error(sbi) &&
+   1038 				!is_sbi_flag_set(sbi, SBI_CP_DISABLED)))
+   1039 		f2fs_bug_on(sbi, is_inode_flag_set(inode, FI_DIRTY_INODE));
+   1040 
+   1041 	/*
+   1042 	 * anyway, it needs to remove the inode from sbi->inode_list[DIRTY_META]
+   1043 	 * list to avoid UAF in f2fs_sync_inode_meta() during checkpoint.
+   1044 	 */
+   1045 	f2fs_inode_synced(inode);
+   1046 
+   1047 	/* for the case f2fs_new_inode() was failed, .i_ino is zero, skip it */
+   1048 	if (inode->i_ino)
+>> 1049 		invalidate_mapping_pages(NODE_MAPPING(sbi), inode->i_ino,
+   1050 							inode->i_ino);
+   1051 	if (xnid)
+   1052 		invalidate_mapping_pages(NODE_MAPPING(sbi), xnid, xnid);
+   1053 
+   1054 	if (!inode->i_nlink)
+   1055 		goto skip_record;
+==========================================================================================
+[22] fs/ext4/extents.c:4704  函数 ext4_alloc_file_blocks  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:ext4_convert_unwritten_extents#3
+    32 位组合：arm32, i386, riscv32, mips32
+   4679 
+   4680 		/*
+   4681 		 * allow a full retry cycle for any remaining allocations
+   4682 		 */
+   4683 		retries = 0;
+   4684 
+   4685 		if (alloc_zero &&
+   4686 		    (map.m_flags & (EXT4_MAP_MAPPED | EXT4_MAP_UNWRITTEN))) {
+   4687 			ext4_lblk_t converted;
+   4688 
+   4689 			WARN_ON_ONCE(map.m_lblk + map.m_len >
+   4690 				EXT4_B_TO_LBLK(inode, new_size ?: old_size));
+   4691 
+   4692 			ret = ext4_issue_zeroout(inode, map.m_lblk, map.m_pblk,
+   4693 						 map.m_len);
+   4694 			if (unlikely(ret))
+   4695 				break;
+   4696 
+   4697 			handle = ext4_journal_start(inode, EXT4_HT_MAP_BLOCKS,
+   4698 						    credits);
+   4699 			if (IS_ERR(handle)) {
+   4700 				ret = PTR_ERR(handle);
+   4701 				break;
+   4702 			}
+   4703 
+>> 4704 			ret = ext4_convert_unwritten_extents(handle,
+   4705 					inode, (loff_t)map.m_lblk << blkbits,
+   4706 					(loff_t)map.m_len << blkbits,
+   4707 					&converted);
+   4708 			if (ret)
+   4709 				map.m_len = converted;
+   4710 
+==========================================================================================
+[23] lib/vsprintf.c:128  函数 simple_strtoul  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 return:return
+    32 位组合：arm32, i386, riscv32, mips32
+    103 /**
+    104  * simple_strtoull - convert a string to an unsigned long long
+    105  * @cp: The start of the string
+    106  * @endp: A pointer to the end of the parsed string will be placed here
+    107  * @base: The number base to use
+    108  *
+    109  * This function has caveats. Please use kstrtoull instead.
+    110  */
+    111 noinline
+    112 unsigned long long simple_strtoull(const char *cp, char **endp, unsigned int base)
+    113 {
+    114 	return simple_strntoull(cp, endp, base, INT_MAX);
+    115 }
+    116 EXPORT_SYMBOL(simple_strtoull);
+    117 
+    118 /**
+    119  * simple_strtoul - convert a string to an unsigned long
+    120  * @cp: The start of the string
+    121  * @endp: A pointer to the end of the parsed string will be placed here
+    122  * @base: The number base to use
+    123  *
+    124  * This function has caveats. Please use kstrtoul instead.
+    125  */
+    126 unsigned long simple_strtoul(const char *cp, char **endp, unsigned int base)
+    127 {
+>>  128 	return simple_strtoull(cp, endp, base);
+    129 }
+    130 EXPORT_SYMBOL(simple_strtoul);
+    131 
+    132 /**
+    133  * simple_strtol - convert a string to a signed long
+    134  * @cp: The start of the string
+==========================================================================================
+[24] fs/ceph/file.c:1265  函数 __ceph_sync_read  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:ret
+    32 位组合：arm32, i386, riscv32, mips32
+   1240 		while (left > 0) {
+   1241 			size_t plen, copied;
+   1242 
+   1243 			plen = min_t(size_t, left, PAGE_SIZE - page_off);
+   1244 			SetPageUptodate(pages[idx]);
+   1245 			copied = copy_page_to_iter(pages[idx++],
+   1246 						   page_off, plen, to);
+   1247 			off += copied;
+   1248 			left -= copied;
+   1249 			page_off = 0;
+   1250 			if (copied < plen) {
+   1251 				ret = -EFAULT;
+   1252 				break;
+   1253 			}
+   1254 		}
+   1255 
+   1256 		ceph_osdc_put_request(req);
+   1257 
+   1258 		if (off >= i_size || !more)
+   1259 			break;
+   1260 	}
+   1261 
+   1262 	if (ret > 0) {
+   1263 		if (off >= i_size) {
+   1264 			*retry_op = CHECK_EOF;
+>> 1265 			ret = i_size - *ki_pos;
+   1266 			*ki_pos = i_size;
+   1267 		} else {
+   1268 			ret = off - *ki_pos;
+   1269 			*ki_pos = off;
+   1270 		}
+   1271 
+==========================================================================================
+[25] fs/ubifs/journal.c:1945  函数 ubifs_jnl_delete_xattr  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:ino_key_init#2
+    32 位组合：arm32, i386, riscv32, mips32
+   1920 	if (err)
+   1921 		goto out_ro;
+   1922 
+   1923 	/* Remove the extended attribute entry from TNC */
+   1924 	err = ubifs_tnc_remove_nm(c, &xent_key, nm);
+   1925 	if (err)
+   1926 		goto out_ro;
+   1927 	err = ubifs_add_dirt(c, lnum, xlen);
+   1928 	if (err)
+   1929 		goto out_ro;
+   1930 
+   1931 	/*
+   1932 	 * Remove all nodes belonging to the extended attribute inode from TNC.
+   1933 	 * Well, there actually must be only one node - the inode itself.
+   1934 	 */
+   1935 	lowest_ino_key(c, &key1, inode->i_ino);
+   1936 	highest_ino_key(c, &key2, inode->i_ino);
+   1937 	err = ubifs_tnc_remove_range(c, &key1, &key2);
+   1938 	if (err)
+   1939 		goto out_ro;
+   1940 	err = ubifs_add_dirt(c, lnum, UBIFS_INO_NODE_SZ);
+   1941 	if (err)
+   1942 		goto out_ro;
+   1943 
+   1944 	/* And update TNC with the new host inode position */
+>> 1945 	ino_key_init(c, &key1, host->i_ino);
+   1946 	err = ubifs_tnc_add(c, &key1, lnum, xent_offs + len - hlen, hlen, hash);
+   1947 	if (err)
+   1948 		goto out_ro;
+   1949 
+   1950 	finish_reservation(c);
+   1951 	spin_lock(&host_ui->ui_lock);
+==========================================================================================
+[26] fs/f2fs/inline.c:243  函数 f2fs_convert_inline_inode  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:f2fs_get_inode_folio#1
+    32 位组合：arm32, i386, riscv32, mips32
+    218 
+    219 int f2fs_convert_inline_inode(struct inode *inode)
+    220 {
+    221 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
+    222 	struct dnode_of_data dn;
+    223 	struct f2fs_lock_context lc;
+    224 	struct folio *ifolio, *folio;
+    225 	int err = 0;
+    226 
+    227 	if (f2fs_hw_is_readonly(sbi) || f2fs_readonly(sbi->sb))
+    228 		return -EROFS;
+    229 
+    230 	if (!f2fs_has_inline_data(inode))
+    231 		return 0;
+    232 
+    233 	err = f2fs_dquot_initialize(inode);
+    234 	if (err)
+    235 		return err;
+    236 
+    237 	folio = f2fs_grab_cache_folio(inode->i_mapping, 0, false);
+    238 	if (IS_ERR(folio))
+    239 		return PTR_ERR(folio);
+    240 
+    241 	f2fs_lock_op(sbi, &lc);
+    242 
+>>  243 	ifolio = f2fs_get_inode_folio(sbi, inode->i_ino);
+    244 	if (IS_ERR(ifolio)) {
+    245 		err = PTR_ERR(ifolio);
+    246 		goto out;
+    247 	}
+    248 
+    249 	set_new_dnode(&dn, inode, ifolio, ifolio, 0);
+==========================================================================================
+[27] kernel/bpf/trampoline.c:1321  函数 __update_prog_stats  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:u64_stats_add#1
+    32 位组合：arm32, i386, riscv32, mips32
+   1296 		bpf_prog_inc_misses_counter(prog);
+   1297 		if (prog->aux->recursion_detected)
+   1298 			prog->aux->recursion_detected(prog);
+   1299 		return 0;
+   1300 	}
+   1301 	return bpf_prog_start_time();
+   1302 }
+   1303 
+   1304 static void notrace __update_prog_stats(struct bpf_prog *prog, u64 start)
+   1305 {
+   1306 	struct bpf_prog_stats *stats;
+   1307 	unsigned long flags;
+   1308 	u64 duration;
+   1309 
+   1310 	/*
+   1311 	 * static_key could be enabled in __bpf_prog_enter* and disabled in
+   1312 	 * __bpf_prog_exit*. And vice versa. Check that 'start' is valid.
+   1313 	 */
+   1314 	if (start <= NO_START_TIME)
+   1315 		return;
+   1316 
+   1317 	duration = sched_clock() - start;
+   1318 	stats = this_cpu_ptr(prog->stats);
+   1319 	flags = u64_stats_update_begin_irqsave(&stats->syncp);
+   1320 	u64_stats_inc(&stats->cnt);
+>> 1321 	u64_stats_add(&stats->nsecs, duration);
+   1322 	u64_stats_update_end_irqrestore(&stats->syncp, flags);
+   1323 }
+   1324 
+   1325 static __always_inline void notrace update_prog_stats(struct bpf_prog *prog,
+   1326 						      u64 start)
+   1327 {
+==========================================================================================
+[28] fs/vboxsf/super.c:260  函数 vboxsf_free_inode  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:idr_remove#1
+    32 位组合：arm32, i386, riscv32, mips32
+    235 
+    236 	mutex_init(&sf_i->handle_list_mutex);
+    237 	inode_init_once(&sf_i->vfs_inode);
+    238 }
+    239 
+    240 static struct inode *vboxsf_alloc_inode(struct super_block *sb)
+    241 {
+    242 	struct vboxsf_inode *sf_i;
+    243 
+    244 	sf_i = alloc_inode_sb(sb, vboxsf_inode_cachep, GFP_NOFS);
+    245 	if (!sf_i)
+    246 		return NULL;
+    247 
+    248 	sf_i->force_restat = 0;
+    249 	INIT_LIST_HEAD(&sf_i->handle_list);
+    250 
+    251 	return &sf_i->vfs_inode;
+    252 }
+    253 
+    254 static void vboxsf_free_inode(struct inode *inode)
+    255 {
+    256 	struct vboxsf_sbi *sbi = VBOXSF_SBI(inode->i_sb);
+    257 	unsigned long flags;
+    258 
+    259 	spin_lock_irqsave(&sbi->ino_idr_lock, flags);
+>>  260 	idr_remove(&sbi->ino_idr, inode->i_ino);
+    261 	spin_unlock_irqrestore(&sbi->ino_idr_lock, flags);
+    262 	kmem_cache_free(vboxsf_inode_cachep, VBOXSF_I(inode));
+    263 }
+    264 
+    265 static void vboxsf_put_super(struct super_block *sb)
+    266 {
+==========================================================================================
+[29] kernel/fail_function.c:125  函数 fei_retval_set  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:adjust_error_retval#1
+    32 位组合：arm32, i386, riscv32, mips32
+    100 		if (attr == _attr)
+    101 			return true;
+    102 	}
+    103 
+    104 	return false;
+    105 }
+    106 
+    107 static int fei_retval_set(void *data, u64 val)
+    108 {
+    109 	struct fei_attr *attr = data;
+    110 	unsigned long retv = (unsigned long)val;
+    111 	int err = 0;
+    112 
+    113 	mutex_lock(&fei_lock);
+    114 	/*
+    115 	 * Since this operation can be done after retval file is removed,
+    116 	 * It is safer to check the attr is still valid before accessing
+    117 	 * its member.
+    118 	 */
+    119 	if (!fei_attr_is_valid(attr)) {
+    120 		err = -ENOENT;
+    121 		goto out;
+    122 	}
+    123 
+    124 	if (attr->kp.addr) {
+>>  125 		if (adjust_error_retval((unsigned long)attr->kp.addr,
+    126 					val) != retv)
+    127 			err = -EINVAL;
+    128 	}
+    129 	if (!err)
+    130 		attr->retval = val;
+    131 out:
+==========================================================================================
+[30] fs/ext4/xattr.c:2288  函数 ext4_xattr_ibody_set  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:ext4_xattr_inode_free_quota#2
+    32 位组合：arm32, i386, riscv32, mips32
+   2263 	int error;
+   2264 
+   2265 	if (!EXT4_INODE_HAS_XATTR_SPACE(inode))
+   2266 		return -ENOSPC;
+   2267 
+   2268 	/* If we need EA inode, prepare it before locking the buffer */
+   2269 	if (i->value && i->in_inode) {
+   2270 		WARN_ON_ONCE(!i->value_len);
+   2271 
+   2272 		ea_inode = ext4_xattr_inode_lookup_create(handle, inode,
+   2273 					i->value, i->value_len);
+   2274 		if (IS_ERR(ea_inode))
+   2275 			return PTR_ERR(ea_inode);
+   2276 	}
+   2277 	error = ext4_xattr_set_entry(i, s, handle, inode, ea_inode,
+   2278 				     false /* is_block */);
+   2279 	if (error) {
+   2280 		if (ea_inode) {
+   2281 			int error2;
+   2282 
+   2283 			error2 = ext4_xattr_inode_dec_ref(handle, ea_inode);
+   2284 			if (error2)
+   2285 				ext4_warning_inode(ea_inode, "dec ref error=%d",
+   2286 						   error2);
+   2287 
+>> 2288 			ext4_xattr_inode_free_quota(inode, ea_inode,
+   2289 						    i_size_read(ea_inode));
+   2290 			ext4_put_ea_inode(ea_inode);
+   2291 		}
+   2292 		return error;
+   2293 	}
+   2294 	header = IHDR(inode, ext4_raw_inode(&is->iloc));
+==========================================================================================
+[31] fs/f2fs/inline.c:624  函数 f2fs_try_convert_inline_dir  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:f2fs_get_inode_folio#1
+    32 位组合：arm32, i386, riscv32, mips32
+    599 {
+    600 	if (!F2FS_I(dir)->i_dir_level)
+    601 		return f2fs_move_inline_dirents(dir, ifolio, inline_dentry);
+    602 	else
+    603 		return f2fs_move_rehashed_dirents(dir, ifolio, inline_dentry);
+    604 }
+    605 
+    606 int f2fs_try_convert_inline_dir(struct inode *dir, struct dentry *dentry)
+    607 {
+    608 	struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
+    609 	struct folio *ifolio;
+    610 	struct f2fs_filename fname;
+    611 	struct f2fs_lock_context lc;
+    612 	void *inline_dentry = NULL;
+    613 	int err = 0;
+    614 
+    615 	if (!f2fs_has_inline_dentry(dir))
+    616 		return 0;
+    617 
+    618 	f2fs_lock_op(sbi, &lc);
+    619 
+    620 	err = f2fs_setup_filename(dir, &dentry->d_name, 0, &fname);
+    621 	if (err)
+    622 		goto out;
+    623 
+>>  624 	ifolio = f2fs_get_inode_folio(sbi, dir->i_ino);
+    625 	if (IS_ERR(ifolio)) {
+    626 		err = PTR_ERR(ifolio);
+    627 		goto out_fname;
+    628 	}
+    629 
+    630 	if (f2fs_has_enough_room(dir, ifolio, &fname)) {
+==========================================================================================
+[32] fs/quota/quota_v1.c:140  函数 v1_check_quota_file  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:blocks
+    32 位组合：arm32, i386, riscv32, mips32
+    115 /* Magics of new quota format */
+    116 #define V2_INITQMAGICS {\
+    117 	0xd9c01f11,     /* USRQUOTA */\
+    118 	0xd9c01927      /* GRPQUOTA */\
+    119 }
+    120 
+    121 /* Header of new quota format */
+    122 struct v2_disk_dqheader {
+    123 	__le32 dqh_magic;        /* Magic number identifying file */
+    124 	__le32 dqh_version;      /* File version */
+    125 };
+    126 
+    127 static int v1_check_quota_file(struct super_block *sb, int type)
+    128 {
+    129 	struct inode *inode = sb_dqopt(sb)->files[type];
+    130 	ulong blocks;
+    131 	size_t off;
+    132 	struct v2_disk_dqheader dqhead;
+    133 	ssize_t size;
+    134 	loff_t isize;
+    135 	static const uint quota_magics[] = V2_INITQMAGICS;
+    136 
+    137 	isize = i_size_read(inode);
+    138 	if (!isize)
+    139 		return 0;
+>>  140 	blocks = isize >> BLOCK_SIZE_BITS;
+    141 	off = isize & (BLOCK_SIZE - 1);
+    142 	if ((blocks % sizeof(struct v1_disk_dqblk) * BLOCK_SIZE + off) %
+    143 	    sizeof(struct v1_disk_dqblk))
+    144 		return 0;
+    145 	/* Doublecheck whether we didn't get file with new format - with old
+    146 	 * quotactl() this could happen */
+==========================================================================================
+[33] arch/x86/kernel/setup.c:389  函数 reserve_initrd  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_phys_free#0
+    32 位组合：arm32, i386, riscv32, mips32
+    364 {
+    365 	/* Assume only end is not page aligned */
+    366 	u64 ramdisk_image = get_ramdisk_image();
+    367 	u64 ramdisk_size  = get_ramdisk_size();
+    368 	u64 ramdisk_end   = PAGE_ALIGN(ramdisk_image + ramdisk_size);
+    369 
+    370 	if (!boot_params.hdr.type_of_loader ||
+    371 	    !ramdisk_image || !ramdisk_size)
+    372 		return;		/* No initrd provided by bootloader */
+    373 
+    374 	initrd_start = 0;
+    375 
+    376 	printk(KERN_INFO "RAMDISK: [mem %#010llx-%#010llx]\n", ramdisk_image,
+    377 			ramdisk_end - 1);
+    378 
+    379 	if (pfn_range_is_mapped(PFN_DOWN(ramdisk_image),
+    380 				PFN_DOWN(ramdisk_end))) {
+    381 		/* All are mapped, easy case */
+    382 		initrd_start = ramdisk_image + PAGE_OFFSET;
+    383 		initrd_end = initrd_start + ramdisk_size;
+    384 		return;
+    385 	}
+    386 
+    387 	relocate_initrd();
+    388 
+>>  389 	memblock_phys_free(ramdisk_image, ramdisk_end - ramdisk_image);
+    390 }
+    391 
+    392 #else
+    393 static void __init early_reserve_initrd(void)
+    394 {
+    395 }
+==========================================================================================
+[34] fs/ntfs/wof.c:644  函数 ntfs_wof_decompress_chunk  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memcpy_to_folio#1
+    32 位组合：arm32, i386, riscv32, mips32
+    619 	loff_t chunk_end = chunk_file_offset + decomp_size;
+    620 	loff_t copy_start, copy_end;
+    621 	int err;
+    622 
+    623 	mutex_lock(ws->lock);
+    624 	err = ntfs_wof_workspace_prepare(ws);
+    625 	if (err)
+    626 		goto out_unlock;
+    627 
+    628 	err = ntfs_wof_try_direct(ws, mapping, folio, chunk_file_offset,
+    629 				  chunk_end, chunk_mem, chunk_size,
+    630 				  decomp_size);
+    631 	if (err != -EAGAIN)
+    632 		goto out_unlock;
+    633 
+    634 	err = ntfs_wof_decode(ws, chunk_mem, chunk_size, ws->output,
+    635 			      decomp_size);
+    636 	if (err) {
+    637 		ntfs_error(vol->sb, "Decompression failed: %d", err);
+    638 		err = -EINVAL;
+    639 		goto out_unlock;
+    640 	}
+    641 
+    642 	copy_start = max_t(loff_t, folio_start, chunk_file_offset);
+    643 	copy_end = min_t(loff_t, folio_end, chunk_file_offset + decomp_size);
+>>  644 	memcpy_to_folio(folio, copy_start - folio_start,
+    645 			ws->output + copy_start - chunk_file_offset,
+    646 			copy_end - copy_start);
+    647 out_unlock:
+    648 	mutex_unlock(ws->lock);
+    649 	return err;
+    650 }
+==========================================================================================
+[35] fs/f2fs/inline.c:123  函数 f2fs_read_inline_data  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:f2fs_get_inode_folio#1
+    32 位组合：arm32, i386, riscv32, mips32
+     98 		folio_mark_uptodate(folio);
+     99 }
+    100 
+    101 void f2fs_truncate_inline_inode(struct inode *inode, struct folio *ifolio,
+    102 		u64 from)
+    103 {
+    104 	void *addr;
+    105 
+    106 	if (from >= MAX_INLINE_DATA(inode))
+    107 		return;
+    108 
+    109 	addr = inline_data_addr(inode, ifolio);
+    110 
+    111 	f2fs_folio_wait_writeback(ifolio, NODE, true, true);
+    112 	memset(addr + from, 0, MAX_INLINE_DATA(inode) - from);
+    113 	folio_mark_dirty(ifolio);
+    114 
+    115 	if (from == 0)
+    116 		clear_inode_flag(inode, FI_DATA_EXIST);
+    117 }
+    118 
+    119 int f2fs_read_inline_data(struct inode *inode, struct folio *folio)
+    120 {
+    121 	struct folio *ifolio;
+    122 
+>>  123 	ifolio = f2fs_get_inode_folio(F2FS_I_SB(inode), inode->i_ino);
+    124 	if (IS_ERR(ifolio)) {
+    125 		folio_unlock(folio);
+    126 		return PTR_ERR(ifolio);
+    127 	}
+    128 
+    129 	if (!f2fs_has_inline_data(inode)) {
+==========================================================================================
+[36] arch/powerpc/kernel/legacy_serial.c:201  函数 add_legacy_soc_port  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:add_legacy_port#3
+    32 位组合：arm32, i386, riscv32, mips32
+    176 
+    177 	/* if reg-offset don't try to use it */
+    178 	if (of_property_present(np, "reg-offset"))
+    179 		return -1;
+    180 
+    181 	/* if rtas uses this device, don't try to use it as well */
+    182 	if (of_property_read_bool(np, "used-by-rtas"))
+    183 		return -1;
+    184 
+    185 	/* Get the address */
+    186 	addrp = of_get_address(soc_dev, 0, NULL, NULL);
+    187 	if (addrp == NULL)
+    188 		return -1;
+    189 
+    190 	addr = of_translate_address(soc_dev, addrp);
+    191 	if (addr == OF_BAD_ADDR)
+    192 		return -1;
+    193 
+    194 	/* Add port, irq will be dealt with later. We passed a translated
+    195 	 * IO port value. It will be fixed up later along with the irq
+    196 	 */
+    197 	if (of_node_is_type(tsi, "tsi-bridge"))
+    198 		return add_legacy_port(np, -1, UPIO_TSI, addr, addr,
+    199 				       0, legacy_port_flags, 0);
+    200 	else
+>>  201 		return add_legacy_port(np, -1, UPIO_MEM, addr, addr,
+    202 				       0, legacy_port_flags, 0);
+    203 }
+    204 
+    205 static int __init add_legacy_isa_port(struct device_node *np,
+    206 				      struct device_node *isa_brg)
+    207 {
+==========================================================================================
+[37] fs/hpfs/inode.c:217  函数 hpfs_write_inode_nolock  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:hpfs_map_fnode#1
+    32 位组合：arm32, i386, riscv32, mips32
+    192 	}
+    193 	if (!i->i_nlink) {
+    194 		return;
+    195 	}
+    196 	parent = iget_locked(i->i_sb, hpfs_inode->i_parent_dir);
+    197 	if (parent) {
+    198 		hpfs_inode->i_dirty = 0;
+    199 		if (inode_state_read_once(parent) & I_NEW) {
+    200 			hpfs_init_inode(parent);
+    201 			hpfs_read_inode(parent);
+    202 			unlock_new_inode(parent);
+    203 		}
+    204 		hpfs_write_inode_nolock(i);
+    205 		iput(parent);
+    206 	}
+    207 }
+    208 
+    209 void hpfs_write_inode_nolock(struct inode *i)
+    210 {
+    211 	struct hpfs_inode_info *hpfs_inode = hpfs_i(i);
+    212 	struct buffer_head *bh;
+    213 	struct fnode *fnode;
+    214 	struct quad_buffer_head qbh;
+    215 	struct hpfs_dirent *de;
+    216 	if (i->i_ino == hpfs_sb(i->i_sb)->sb_root) return;
+>>  217 	if (!(fnode = hpfs_map_fnode(i->i_sb, i->i_ino, &bh))) return;
+    218 	if (i->i_ino != hpfs_sb(i->i_sb)->sb_root && i->i_nlink) {
+    219 		if (!(de = map_fnode_dirent(i->i_sb, i->i_ino, fnode, &qbh))) {
+    220 			brelse(bh);
+    221 			return;
+    222 		}
+    223 	} else de = NULL;
+==========================================================================================
+[38] fs/nfs/nfs42proc.c:511  函数 _nfs42_proc_copy  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:status
+    32 位组合：arm32, i386, riscv32, mips32
+    486 		goto out;
+    487 
+    488 	if (args->sync &&
+    489 		nfs_write_verifier_cmp(&res->write_res.verifier.verifier,
+    490 				    &res->commit_res.verf->verifier)) {
+    491 		status = -EAGAIN;
+    492 		goto out;
+    493 	}
+    494 
+    495 	if (!res->synchronous) {
+    496 		status = handle_async_copy(res, dst_server, src_server, src,
+    497 				dst, &args->src_stateid, restart);
+    498 		if (status)
+    499 			goto out;
+    500 	}
+    501 
+    502 	if ((!res->synchronous || !args->sync) &&
+    503 			res->write_res.verifier.committed != NFS_FILE_SYNC) {
+    504 		status = process_copy_commit(dst, pos_dst, res);
+    505 		if (status)
+    506 			goto out;
+    507 	}
+    508 
+    509 	nfs42_copy_dest_done(dst, pos_dst, res->write_res.count, oldsize_dst);
+    510 	nfs_invalidate_atime(src_inode);
+>>  511 	status = res->write_res.count;
+    512 out:
+    513 	if (args->sync)
+    514 		kfree(res->commit_res.verf);
+    515 	return status;
+    516 }
+    517 
+==========================================================================================
+[39] fs/ext4/ialloc.c:270  函数 ext4_free_inode  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:ino
+    32 位组合：arm32, i386, riscv32, mips32
+    245 	unsigned long bit;
+    246 	struct ext4_group_desc *gdp;
+    247 	struct ext4_super_block *es;
+    248 	struct ext4_sb_info *sbi;
+    249 	int fatal = 0, err, count, cleared;
+    250 	struct ext4_group_info *grp;
+    251 
+    252 	if (!sb) {
+    253 		printk(KERN_ERR "EXT4-fs: %s:%d: inode on "
+    254 		       "nonexistent device\n", __func__, __LINE__);
+    255 		return;
+    256 	}
+    257 	if (icount_read_once(inode) > 1) {
+    258 		ext4_msg(sb, KERN_ERR, "%s:%d: inode #%llu: count=%d",
+    259 			 __func__, __LINE__, inode->i_ino,
+    260 			 icount_read_once(inode));
+    261 		return;
+    262 	}
+    263 	if (inode->i_nlink) {
+    264 		ext4_msg(sb, KERN_ERR, "%s:%d: inode #%llu: nlink=%d\n",
+    265 			 __func__, __LINE__, inode->i_ino, inode->i_nlink);
+    266 		return;
+    267 	}
+    268 	sbi = EXT4_SB(sb);
+    269 
+>>  270 	ino = inode->i_ino;
+    271 	ext4_debug("freeing inode %lu\n", ino);
+    272 	trace_ext4_free_inode(inode);
+    273 
+    274 	dquot_initialize(inode);
+    275 	dquot_free_inode(inode);
+    276 
+==========================================================================================
+[40] fs/nfs/nfs42proc.c:434  函数 _nfs42_proc_copy  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:count
+    32 位组合：arm32, i386, riscv32, mips32
+    409 	nfs_update_delegated_mtime(inode);
+    410 }
+    411 
+    412 static ssize_t _nfs42_proc_copy(struct file *src,
+    413 				struct nfs_lock_context *src_lock,
+    414 				struct file *dst,
+    415 				struct nfs_lock_context *dst_lock,
+    416 				struct nfs42_copy_args *args,
+    417 				struct nfs42_copy_res *res,
+    418 				struct nl4_server *nss,
+    419 				nfs4_stateid *cnr_stateid,
+    420 				bool *restart)
+    421 {
+    422 	struct rpc_message msg = {
+    423 		.rpc_proc = &nfs4_procedures[NFSPROC4_CLNT_COPY],
+    424 		.rpc_argp = args,
+    425 		.rpc_resp = res,
+    426 	};
+    427 	struct inode *dst_inode = file_inode(dst);
+    428 	struct inode *src_inode = file_inode(src);
+    429 	struct nfs_server *dst_server = NFS_SERVER(dst_inode);
+    430 	struct nfs_server *src_server = NFS_SERVER(src_inode);
+    431 	loff_t pos_src = args->src_pos;
+    432 	loff_t pos_dst = args->dst_pos;
+    433 	loff_t oldsize_dst;
+>>  434 	size_t count = args->count;
+    435 	ssize_t status;
+    436 
+    437 	if (nss) {
+    438 		args->cp_src = nss;
+    439 		nfs4_stateid_copy(&args->src_stateid, cnr_stateid);
+    440 	} else {

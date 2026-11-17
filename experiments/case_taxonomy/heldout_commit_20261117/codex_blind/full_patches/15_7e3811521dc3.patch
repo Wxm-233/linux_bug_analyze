@@ -1,0 +1,38 @@
+commit 7e3811521dc3934e2ecae8458676fc4a1f62bf9f
+Author:     Alexandre Ghiti <alexghiti@rivosinc.com>
+AuthorDate: Tue Jul 25 15:22:46 2023 +0200
+Commit:     Palmer Dabbelt <palmer@rivosinc.com>
+CommitDate: Thu Aug 10 08:54:29 2023 -0700
+
+    riscv: Implement flush_cache_vmap()
+    
+    The RISC-V kernel needs a sfence.vma after a page table modification: we
+    used to rely on the vmalloc fault handling to emit an sfence.vma, but
+    commit 7d3332be011e ("riscv: mm: Pre-allocate PGD entries for
+    vmalloc/modules area") got rid of this path for 64-bit kernels, so now we
+    need to explicitly emit a sfence.vma in flush_cache_vmap().
+    
+    Note that we don't need to implement flush_cache_vunmap() as the generic
+    code should emit a flush tlb after unmapping a vmalloc region.
+    
+    Fixes: 7d3332be011e ("riscv: mm: Pre-allocate PGD entries for vmalloc/modules area")
+    Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+    Link: https://lore.kernel.org/r/20230725132246.817726-1-alexghiti@rivosinc.com
+    Cc: stable@vger.kernel.org
+    Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+index 8091b8bf4883..b93ffddf8a61 100644
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -37,6 +37,10 @@ static inline void flush_dcache_page(struct page *page)
+ #define flush_icache_user_page(vma, pg, addr, len) \
+ 	flush_icache_mm(vma->vm_mm, 0)
+ 
++#ifdef CONFIG_64BIT
++#define flush_cache_vmap(start, end)	flush_tlb_kernel_range(start, end)
++#endif
++
+ #ifndef CONFIG_SMP
+ 
+ #define flush_icache_all() local_flush_icache_all()

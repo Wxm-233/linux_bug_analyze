@@ -1,0 +1,12 @@
+{
+ "log_date": "2026-11-05",
+ "section": "## 11月5日 后续：补丁检查第2版——P1/P2误报从27条降到3条；模型审查加代码事实与依据要求后不成立的问题从10个降到0个，并带出一个上游已有的RISC-V疑点\n\n按上一轮缺口收紧（patch_rules_v2_20261105/，判据6ccc2860…；在同样版本上调参，非独立评估）。P1第2版：陷入入口开中断前算已固定；“在线CPU少于2”分支算已固定；要求调用链上有可睡眠的正面证据（睡眠调用或断言持有互斥锁）才报告；深度4。P2第2版：只在两个变体共用的文件调用时报告。L2：程序按固定规则附代码事实（被改函数直接调用的函数实现、宏展开一层、另一变体同名函数、被改函数的调用点），报告问题或否定标记必须引用材料中的代码，否则写判断不了。结果：开发样例P1（K1）、P2（K3）仍全部按预期；终点版本P1 13→3条（均不成立：本核刷新前后另有全核刷新或其他CPU已下线），P2 14→0条；代价是P2不再报告bpf_arch_text_invalidate。L2（9次调用）按“真问题/与参照一致/不成立”核对：P第4步8个问题中真5、与参照一致3、不成立0（L1事后重排为4/1/3）；P第8步6个中真3、与参照一致3、不成立0（L1为2/2/7）；U第3步0个。K4、K3各3/3；K1 0/6，但只有1次否定，5次写判断不了（关键事实__set_fixmap只刷本核TLB在第三层调用，未收进材料）。新疑点：RISC-V patch_map只在CONFIG_STRICT_MODULE_RWX时对vmalloc地址做fixmap映射，否则直接写被set_memory_rox设为只读的BPF pack；2c9e5d4a0082去掉BPF_JIT对MODULES的依赖后arm64以b1480ed230ac改用CONFIG_EXECMEM修复，RISC-V终点版本仍为旧写法，MODULES=n时BPF JIT应全部失败（M8，按代码推断，未运行验证，只记录）。模型迁移结果中text_poke锁断言和整块kzalloc再次确认。统计：模型调用9，构建0，新确认缺陷0，新疑点1。证据linux_bug_analyze/experiments/case_taxonomy/patch_rules_v2_20261105/。",
+ "plan_replacements": [
+  [
+   "新疑点RISC-V KVM fence.i请求处理可迁移，只记录。",
+   "新疑点RISC-V KVM fence.i请求处理可迁移，只记录。补丁检查第2版（patch_rules_v2_20261105/，调参非独立）：P1/P2终点版本误报27→3条，开发样例仍通过；模型审查加程序代码事实与依据要求后不成立问题10→0，K1由错误否定变为判断不了（需把“只刷本核”的代码作为事实附上）；带出新疑点RISC-V patch_map在STRICT_MODULE_RWX关闭时直接写只读BPF pack（arm64已以b1480ed230ac修复，RISC-V未跟进），待QEMU以MODULES=n验证。"
+  ]
+ ],
+ "plan_row": "| 2026-11-05 | 补丁场景的检查：第2版 | P1/P2误报27→3条；模型审查不成立10→0，K3、K4 3/3，K1判断不了；新疑点RISC-V patch_map（arm64已修）；linux_bug_analyze/experiments/case_taxonomy/patch_rules_v2_20261105/ | P1附“只刷本核”事实；QEMU验证patch_map疑点；历史回放样本 |",
+ "order_paragraph": ""
+}

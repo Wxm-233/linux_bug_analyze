@@ -1,0 +1,969 @@
+==========================================================================================
+[1] fs/proc/task_mmu.c:1129  函数 smaps_pmd_entry  接口 pmd_young(*pmd)  来源 *pmd
+   1098 {
+   1099 	struct mem_size_stats *mss = walk->private;
+   1100 	struct vm_area_struct *vma = walk->vma;
+   1101 	bool locked = !!(vma->vm_flags & VM_LOCKED);
+   1102 	struct page *page = NULL;
+   1103 	bool present = false;
+   1104 	struct folio *folio;
+   1105 
+   1106 	if (pmd_none(*pmd))
+   1107 		return;
+   1108 	if (pmd_present(*pmd)) {
+   1109 		page = vm_normal_page_pmd(vma, addr, *pmd);
+   1110 		present = true;
+   1111 	} else if (unlikely(thp_migration_supported())) {
+   1112 		const softleaf_t entry = softleaf_from_pmd(*pmd);
+   1113 
+   1114 		if (softleaf_has_pfn(entry))
+   1115 			page = softleaf_to_page(entry);
+   1116 	}
+   1117 	if (IS_ERR_OR_NULL(page))
+   1118 		return;
+   1119 	folio = page_folio(page);
+   1120 	if (folio_test_anon(folio))
+   1121 		mss->anonymous_thp += HPAGE_PMD_SIZE;
+   1122 	else if (folio_test_swapbacked(folio))
+   1123 		mss->shmem_thp += HPAGE_PMD_SIZE;
+   1124 	else if (folio_is_zone_device(folio))
+   1125 		/* pass */;
+   1126 	else
+   1127 		mss->file_thp += HPAGE_PMD_SIZE;
+   1128 
+>> 1129 	smaps_account(mss, page, true, pmd_young(*pmd), pmd_dirty(*pmd),
+   1130 		      locked, present);
+   1131 }
+==========================================================================================
+[2] fs/proc/task_mmu.c:1129  函数 smaps_pmd_entry  接口 pmd_dirty(*pmd)  来源 *pmd
+   1098 {
+   1099 	struct mem_size_stats *mss = walk->private;
+   1100 	struct vm_area_struct *vma = walk->vma;
+   1101 	bool locked = !!(vma->vm_flags & VM_LOCKED);
+   1102 	struct page *page = NULL;
+   1103 	bool present = false;
+   1104 	struct folio *folio;
+   1105 
+   1106 	if (pmd_none(*pmd))
+   1107 		return;
+   1108 	if (pmd_present(*pmd)) {
+   1109 		page = vm_normal_page_pmd(vma, addr, *pmd);
+   1110 		present = true;
+   1111 	} else if (unlikely(thp_migration_supported())) {
+   1112 		const softleaf_t entry = softleaf_from_pmd(*pmd);
+   1113 
+   1114 		if (softleaf_has_pfn(entry))
+   1115 			page = softleaf_to_page(entry);
+   1116 	}
+   1117 	if (IS_ERR_OR_NULL(page))
+   1118 		return;
+   1119 	folio = page_folio(page);
+   1120 	if (folio_test_anon(folio))
+   1121 		mss->anonymous_thp += HPAGE_PMD_SIZE;
+   1122 	else if (folio_test_swapbacked(folio))
+   1123 		mss->shmem_thp += HPAGE_PMD_SIZE;
+   1124 	else if (folio_is_zone_device(folio))
+   1125 		/* pass */;
+   1126 	else
+   1127 		mss->file_thp += HPAGE_PMD_SIZE;
+   1128 
+>> 1129 	smaps_account(mss, page, true, pmd_young(*pmd), pmd_dirty(*pmd),
+   1130 		      locked, present);
+   1131 }
+==========================================================================================
+[3] fs/proc/task_mmu.c:3440  函数 gather_pte_stats  接口 pmd_dirty(*pmd)  来源 *pmd
+   3426 {
+   3427 	struct numa_maps *md = walk->private;
+   3428 	struct vm_area_struct *vma = walk->vma;
+   3429 	spinlock_t *ptl;
+   3430 	pte_t *orig_pte;
+   3431 	pte_t *pte;
+   3432 
+   3433 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   3434 	ptl = pmd_trans_huge_lock(pmd, vma);
+   3435 	if (ptl) {
+   3436 		struct page *page;
+   3437 
+   3438 		page = can_gather_numa_stats_pmd(*pmd, vma, addr);
+   3439 		if (page)
+>> 3440 			gather_stats(page, md, pmd_dirty(*pmd),
+   3441 				     HPAGE_PMD_SIZE/PAGE_SIZE);
+   3442 		spin_unlock(ptl);
+   3443 		return 0;
+   3444 	}
+   3445 #endif
+   3446 	orig_pte = pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+   3447 	if (!pte) {
+   3448 		walk->action = ACTION_AGAIN;
+==========================================================================================
+[4] fs/proc/task_mmu.c:3456  函数 gather_pte_stats  接口 pte_dirty(ptent)  来源 *pte
+   3426 {
+   3427 	struct numa_maps *md = walk->private;
+   3428 	struct vm_area_struct *vma = walk->vma;
+   3429 	spinlock_t *ptl;
+   3430 	pte_t *orig_pte;
+   3431 	pte_t *pte;
+   3432 
+   3433 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   3434 	ptl = pmd_trans_huge_lock(pmd, vma);
+   3435 	if (ptl) {
+   3436 		struct page *page;
+   3437 
+   3438 		page = can_gather_numa_stats_pmd(*pmd, vma, addr);
+   3439 		if (page)
+   3440 			gather_stats(page, md, pmd_dirty(*pmd),
+   3441 				     HPAGE_PMD_SIZE/PAGE_SIZE);
+   3442 		spin_unlock(ptl);
+   3443 		return 0;
+   3444 	}
+   3445 #endif
+   3446 	orig_pte = pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+   3447 	if (!pte) {
+   3448 		walk->action = ACTION_AGAIN;
+   3449 		return 0;
+   3450 	}
+   3451 	do {
+   3452 		pte_t ptent = ptep_get(pte);
+   3453 		struct page *page = can_gather_numa_stats(ptent, vma, addr);
+   3454 		if (!page)
+   3455 			continue;
+>> 3456 		gather_stats(page, md, pte_dirty(ptent), 1);
+   3457 
+   3458 	} while (pte++, addr += PAGE_SIZE, addr != end);
+   3459 	pte_unmap_unlock(orig_pte, ptl);
+   3460 	cond_resched();
+   3461 	return 0;
+   3462 }
+==========================================================================================
+[5] include/linux/mm.h:3864  函数 pte_lockptr  接口 pmd_page(*pmd)  来源 *pmd
+   3863 {
+>> 3864 	return ptlock_ptr(page_ptdesc(pmd_page(*pmd)));
+   3865 }
+==========================================================================================
+[6] include/linux/pgtable.h:534  函数 ptep_test_and_clear_young  接口 pte_young(pte)  来源 *ptep
+    530 {
+    531 	pte_t pte = ptep_get(ptep);
+    532 	bool young = true;
+    533 
+>>  534 	if (!pte_young(pte))
+    535 		young = false;
+    536 	else
+    537 		set_pte_at(vma->vm_mm, address, ptep, pte_mkold(pte));
+    538 	return young;
+    539 }
+==========================================================================================
+[7] include/linux/pgtable.h:550  函数 pmdp_test_and_clear_young  接口 pmd_young(pmd)  来源 *pmdp
+    546 {
+    547 	pmd_t pmd = *pmdp;
+    548 	bool young = true;
+    549 
+>>  550 	if (!pmd_young(pmd))
+    551 		young = false;
+    552 	else
+    553 		set_pmd_at(vma->vm_mm, address, pmdp, pmd_mkold(pmd));
+    554 	return young;
+    555 }
+==========================================================================================
+[8] include/linux/pgtable.h:884  函数 get_and_clear_full_ptes  接口 pte_dirty(tmp_pte)  来源 *ptep
+    876 {
+    877 	pte_t pte, tmp_pte;
+    878 
+    879 	pte = ptep_get_and_clear_full(mm, addr, ptep, full);
+    880 	while (--nr) {
+    881 		ptep++;
+    882 		addr += PAGE_SIZE;
+    883 		tmp_pte = ptep_get_and_clear_full(mm, addr, ptep, full);
+>>  884 		if (pte_dirty(tmp_pte))
+    885 			pte = pte_mkdirty(pte);
+    886 		if (pte_young(tmp_pte))
+    887 			pte = pte_mkyoung(pte);
+    888 	}
+    889 	return pte;
+    890 }
+==========================================================================================
+[9] include/linux/pgtable.h:886  函数 get_and_clear_full_ptes  接口 pte_young(tmp_pte)  来源 *ptep
+    876 {
+    877 	pte_t pte, tmp_pte;
+    878 
+    879 	pte = ptep_get_and_clear_full(mm, addr, ptep, full);
+    880 	while (--nr) {
+    881 		ptep++;
+    882 		addr += PAGE_SIZE;
+    883 		tmp_pte = ptep_get_and_clear_full(mm, addr, ptep, full);
+    884 		if (pte_dirty(tmp_pte))
+    885 			pte = pte_mkdirty(pte);
+>>  886 		if (pte_young(tmp_pte))
+    887 			pte = pte_mkyoung(pte);
+    888 	}
+    889 	return pte;
+    890 }
+==========================================================================================
+[10] include/linux/pgtable.h:1679  函数 modify_prot_start_ptes  接口 pte_dirty(tmp_pte)  来源 *ptep
+   1671 {
+   1672 	pte_t pte, tmp_pte;
+   1673 
+   1674 	pte = ptep_modify_prot_start(vma, addr, ptep);
+   1675 	while (--nr) {
+   1676 		ptep++;
+   1677 		addr += PAGE_SIZE;
+   1678 		tmp_pte = ptep_modify_prot_start(vma, addr, ptep);
+>> 1679 		if (pte_dirty(tmp_pte))
+   1680 			pte = pte_mkdirty(pte);
+   1681 		if (pte_young(tmp_pte))
+   1682 			pte = pte_mkyoung(pte);
+   1683 	}
+   1684 	return pte;
+   1685 }
+==========================================================================================
+[11] include/linux/pgtable.h:1681  函数 modify_prot_start_ptes  接口 pte_young(tmp_pte)  来源 *ptep
+   1671 {
+   1672 	pte_t pte, tmp_pte;
+   1673 
+   1674 	pte = ptep_modify_prot_start(vma, addr, ptep);
+   1675 	while (--nr) {
+   1676 		ptep++;
+   1677 		addr += PAGE_SIZE;
+   1678 		tmp_pte = ptep_modify_prot_start(vma, addr, ptep);
+   1679 		if (pte_dirty(tmp_pte))
+   1680 			pte = pte_mkdirty(pte);
+>> 1681 		if (pte_young(tmp_pte))
+   1682 			pte = pte_mkyoung(pte);
+   1683 	}
+   1684 	return pte;
+   1685 }
+==========================================================================================
+[12] kernel/bpf/arena.c:185  函数 apply_range_set_cb  接口 pte_page(old)  来源 *pte
+    159 {
+    160 	struct apply_range_data *d = data;
+    161 	struct page *page;
+    162 	pte_t pteval;
+    163 
+    164 	if (!data)
+    165 		return 0;
+    166 
+    167 	page = d->pages[d->i];
+    168 	/* paranoia, similar to vmap_pages_pte_range() */
+    169 	if (WARN_ON_ONCE(!pfn_valid(page_to_pfn(page))))
+    170 		return -EINVAL;
+    171 
+    172 	pteval = mk_pte(page, PAGE_KERNEL);
+    173 #ifdef ptep_try_set
+    174 	/*
+    175 	 * Kernel-fault recovery may have installed the scratch page here, and
+    176 	 * some architectures (arm64) prohibit valid->valid PTE transitions.
+    177 	 * Install atomically into a none slot. If scratch is present, clear it
+    178 	 * and flush_tlb_before_set() (break-before-make) before retrying.
+    179 	 */
+    180 	while (!ptep_try_set(pte, pteval)) {
+    181 		pte_t old = ptep_get(pte);
+    182 
+    183 		if (pte_none(old))
+    184 			continue;
+>>  185 		if (WARN_ON_ONCE(pte_page(old) != d->arena->scratch_page))
+    186 			return -EBUSY;
+    187 		ptep_get_and_clear(&init_mm, addr, pte);
+    188 		flush_tlb_before_set(addr);
+    189 	}
+    190 #else
+    191 	/*
+    192 	 * Without ptep_try_set() there is no atomic installer, but such arches
+    193 	 * also do not wire up bpf_arena_handle_page_fault(), so no scratch page
+==========================================================================================
+[13] mm/damon/vaddr.c:301  函数 damon_hugetlb_mkold  接口 pte_pfn(entry)  来源 *pte
+    298 {
+    299 	bool referenced = false;
+    300 	pte_t entry = huge_ptep_get(mm, addr, pte);
+>>  301 	struct folio *folio = pfn_folio(pte_pfn(entry));
+    302 	unsigned long psize = huge_page_size(hstate_vma(vma));
+    303 
+    304 	folio_get(folio);
+    305 
+    306 	if (pte_young(entry)) {
+    307 		referenced = true;
+    308 		entry = pte_mkold(entry);
+    309 		set_huge_pte_at(mm, addr, pte, entry, psize);
+==========================================================================================
+[14] mm/damon/vaddr.c:306  函数 damon_hugetlb_mkold  接口 pte_young(entry)  来源 *pte
+    298 {
+    299 	bool referenced = false;
+    300 	pte_t entry = huge_ptep_get(mm, addr, pte);
+    301 	struct folio *folio = pfn_folio(pte_pfn(entry));
+    302 	unsigned long psize = huge_page_size(hstate_vma(vma));
+    303 
+    304 	folio_get(folio);
+    305 
+>>  306 	if (pte_young(entry)) {
+    307 		referenced = true;
+    308 		entry = pte_mkold(entry);
+    309 		set_huge_pte_at(mm, addr, pte, entry, psize);
+    310 	}
+    311 
+    312 	if (mmu_notifier_clear_young(mm, addr,
+    313 				     addr + huge_page_size(hstate_vma(vma))))
+    314 		referenced = true;
+==========================================================================================
+[15] mm/damon/vaddr.c:530  函数 damos_va_filter_young_match  接口 pte_young(ptep_get(ptep))  来源 *ptep
+    526 {
+    527 	bool young = false;
+    528 
+    529 	if (ptep)
+>>  530 		young = pte_young(ptep_get(ptep));
+    531 	else if (pmdp)
+    532 		young = pmd_young(pmdp_get(pmdp));
+    533 
+    534 	young = young || !folio_test_idle(folio) ||
+    535 		mmu_notifier_test_young(vma->vm_mm, addr);
+    536 
+    537 	if (young && ptep)
+    538 		damon_ptep_mkold(ptep, vma, addr);
+==========================================================================================
+[16] mm/damon/vaddr.c:532  函数 damos_va_filter_young_match  接口 pmd_young(pmdp_get(pmdp))  来源 *pmdp
+    526 {
+    527 	bool young = false;
+    528 
+    529 	if (ptep)
+    530 		young = pte_young(ptep_get(ptep));
+    531 	else if (pmdp)
+>>  532 		young = pmd_young(pmdp_get(pmdp));
+    533 
+    534 	young = young || !folio_test_idle(folio) ||
+    535 		mmu_notifier_test_young(vma->vm_mm, addr);
+    536 
+    537 	if (young && ptep)
+    538 		damon_ptep_mkold(ptep, vma, addr);
+    539 	else if (young && pmdp)
+    540 		damon_pmdp_mkold(pmdp, vma, addr);
+==========================================================================================
+[17] mm/debug_vm_pgtable.c:143  函数 pte_advanced_tests  接口 pte_write(pte)  来源 *args->ptep
+    115 {
+    116 	struct page *page;
+    117 	pte_t pte;
+    118 
+    119 	/*
+    120 	 * Architectures optimize set_pte_at by avoiding TLB flush.
+    121 	 * This requires set_pte_at to be not used to update an
+    122 	 * existing pte entry. Clear pte before we do set_pte_at
+    123 	 *
+    124 	 * flush_dcache_page() is called after set_pte_at() to clear
+    125 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    126 	 * when it's released and page allocation check will fail when
+    127 	 * the page is allocated again. For architectures other than ARM64,
+    128 	 * the unexpected overhead of cache flushing is acceptable.
+    129 	 */
+    130 	page = (args->pte_pfn != ULONG_MAX) ? pfn_to_page(args->pte_pfn) : NULL;
+    131 	if (!page)
+    132 		return;
+    133 
+    134 	pr_debug("Validating PTE advanced\n");
+    135 	if (WARN_ON(!args->ptep))
+    136 		return;
+    137 
+    138 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    139 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    140 	flush_dcache_page(page);
+    141 	ptep_set_wrprotect(args->mm, args->vaddr, args->ptep);
+    142 	pte = ptep_get(args->ptep);
+>>  143 	WARN_ON(pte_write(pte));
+    144 	ptep_get_and_clear(args->mm, args->vaddr, args->ptep);
+    145 	pte = ptep_get(args->ptep);
+    146 	WARN_ON(!pte_none(pte));
+    147 
+    148 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    149 	pte = pte_wrprotect(pte);
+    150 	pte = pte_mkclean(pte);
+    151 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+==========================================================================================
+[18] mm/debug_vm_pgtable.c:157  函数 pte_advanced_tests  接口 pte_write(pte)  来源 *args->ptep
+    115 {
+    116 	struct page *page;
+    117 	pte_t pte;
+    118 
+    119 	/*
+    120 	 * Architectures optimize set_pte_at by avoiding TLB flush.
+    121 	 * This requires set_pte_at to be not used to update an
+    122 	 * existing pte entry. Clear pte before we do set_pte_at
+    123 	 *
+    124 	 * flush_dcache_page() is called after set_pte_at() to clear
+    125 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    126 	 * when it's released and page allocation check will fail when
+    127 	 * the page is allocated again. For architectures other than ARM64,
+    128 	 * the unexpected overhead of cache flushing is acceptable.
+    129 	 */
+    130 	page = (args->pte_pfn != ULONG_MAX) ? pfn_to_page(args->pte_pfn) : NULL;
+    131 	if (!page)
+    132 		return;
+    133 
+    134 	pr_debug("Validating PTE advanced\n");
+    135 	if (WARN_ON(!args->ptep))
+    136 		return;
+    137 
+    138 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    139 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    140 	flush_dcache_page(page);
+    141 	ptep_set_wrprotect(args->mm, args->vaddr, args->ptep);
+    142 	pte = ptep_get(args->ptep);
+    143 	WARN_ON(pte_write(pte));
+    144 	ptep_get_and_clear(args->mm, args->vaddr, args->ptep);
+    145 	pte = ptep_get(args->ptep);
+    146 	WARN_ON(!pte_none(pte));
+    147 
+    148 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    149 	pte = pte_wrprotect(pte);
+    150 	pte = pte_mkclean(pte);
+    151 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    152 	flush_dcache_page(page);
+    153 	pte = pte_mkwrite(pte, args->vma);
+    154 	pte = pte_mkdirty(pte);
+    155 	ptep_set_access_flags(args->vma, args->vaddr, args->ptep, pte, 1);
+    156 	pte = ptep_get(args->ptep);
+>>  157 	WARN_ON(!(pte_write(pte) && pte_dirty(pte)));
+    158 	ptep_get_and_clear_full(args->mm, args->vaddr, args->ptep, 1);
+    159 	pte = ptep_get(args->ptep);
+    160 	WARN_ON(!pte_none(pte));
+    161 
+    162 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    163 	pte = pte_mkyoung(pte);
+    164 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    165 	flush_dcache_page(page);
+==========================================================================================
+[19] mm/debug_vm_pgtable.c:157  函数 pte_advanced_tests  接口 pte_dirty(pte)  来源 *args->ptep
+    115 {
+    116 	struct page *page;
+    117 	pte_t pte;
+    118 
+    119 	/*
+    120 	 * Architectures optimize set_pte_at by avoiding TLB flush.
+    121 	 * This requires set_pte_at to be not used to update an
+    122 	 * existing pte entry. Clear pte before we do set_pte_at
+    123 	 *
+    124 	 * flush_dcache_page() is called after set_pte_at() to clear
+    125 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    126 	 * when it's released and page allocation check will fail when
+    127 	 * the page is allocated again. For architectures other than ARM64,
+    128 	 * the unexpected overhead of cache flushing is acceptable.
+    129 	 */
+    130 	page = (args->pte_pfn != ULONG_MAX) ? pfn_to_page(args->pte_pfn) : NULL;
+    131 	if (!page)
+    132 		return;
+    133 
+    134 	pr_debug("Validating PTE advanced\n");
+    135 	if (WARN_ON(!args->ptep))
+    136 		return;
+    137 
+    138 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    139 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    140 	flush_dcache_page(page);
+    141 	ptep_set_wrprotect(args->mm, args->vaddr, args->ptep);
+    142 	pte = ptep_get(args->ptep);
+    143 	WARN_ON(pte_write(pte));
+    144 	ptep_get_and_clear(args->mm, args->vaddr, args->ptep);
+    145 	pte = ptep_get(args->ptep);
+    146 	WARN_ON(!pte_none(pte));
+    147 
+    148 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    149 	pte = pte_wrprotect(pte);
+    150 	pte = pte_mkclean(pte);
+    151 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    152 	flush_dcache_page(page);
+    153 	pte = pte_mkwrite(pte, args->vma);
+    154 	pte = pte_mkdirty(pte);
+    155 	ptep_set_access_flags(args->vma, args->vaddr, args->ptep, pte, 1);
+    156 	pte = ptep_get(args->ptep);
+>>  157 	WARN_ON(!(pte_write(pte) && pte_dirty(pte)));
+    158 	ptep_get_and_clear_full(args->mm, args->vaddr, args->ptep, 1);
+    159 	pte = ptep_get(args->ptep);
+    160 	WARN_ON(!pte_none(pte));
+    161 
+    162 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    163 	pte = pte_mkyoung(pte);
+    164 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    165 	flush_dcache_page(page);
+==========================================================================================
+[20] mm/debug_vm_pgtable.c:168  函数 pte_advanced_tests  接口 pte_young(pte)  来源 *args->ptep
+    123 	 *
+    124 	 * flush_dcache_page() is called after set_pte_at() to clear
+    125 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    126 	 * when it's released and page allocation check will fail when
+    127 	 * the page is allocated again. For architectures other than ARM64,
+    128 	 * the unexpected overhead of cache flushing is acceptable.
+    129 	 */
+    130 	page = (args->pte_pfn != ULONG_MAX) ? pfn_to_page(args->pte_pfn) : NULL;
+    131 	if (!page)
+    132 		return;
+    133 
+    134 	pr_debug("Validating PTE advanced\n");
+    135 	if (WARN_ON(!args->ptep))
+    136 		return;
+    137 
+    138 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    139 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    140 	flush_dcache_page(page);
+    141 	ptep_set_wrprotect(args->mm, args->vaddr, args->ptep);
+    142 	pte = ptep_get(args->ptep);
+    143 	WARN_ON(pte_write(pte));
+    144 	ptep_get_and_clear(args->mm, args->vaddr, args->ptep);
+    145 	pte = ptep_get(args->ptep);
+    146 	WARN_ON(!pte_none(pte));
+    147 
+    148 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    149 	pte = pte_wrprotect(pte);
+    150 	pte = pte_mkclean(pte);
+    151 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    152 	flush_dcache_page(page);
+    153 	pte = pte_mkwrite(pte, args->vma);
+    154 	pte = pte_mkdirty(pte);
+    155 	ptep_set_access_flags(args->vma, args->vaddr, args->ptep, pte, 1);
+    156 	pte = ptep_get(args->ptep);
+    157 	WARN_ON(!(pte_write(pte) && pte_dirty(pte)));
+    158 	ptep_get_and_clear_full(args->mm, args->vaddr, args->ptep, 1);
+    159 	pte = ptep_get(args->ptep);
+    160 	WARN_ON(!pte_none(pte));
+    161 
+    162 	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    163 	pte = pte_mkyoung(pte);
+    164 	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+    165 	flush_dcache_page(page);
+    166 	ptep_test_and_clear_young(args->vma, args->vaddr, args->ptep);
+    167 	pte = ptep_get(args->ptep);
+>>  168 	WARN_ON(pte_young(pte));
+    169 
+    170 	ptep_get_and_clear_full(args->mm, args->vaddr, args->ptep, 1);
+    171 }
+==========================================================================================
+[21] mm/debug_vm_pgtable.c:250  函数 pmd_advanced_tests  接口 pmd_write(pmd)  来源 *args->pmdp
+    220 {
+    221 	struct page *page;
+    222 	pmd_t pmd;
+    223 	unsigned long vaddr = args->vaddr;
+    224 
+    225 	if (!has_transparent_hugepage())
+    226 		return;
+    227 
+    228 	page = (args->pmd_pfn != ULONG_MAX) ? pfn_to_page(args->pmd_pfn) : NULL;
+    229 	if (!page)
+    230 		return;
+    231 
+    232 	/*
+    233 	 * flush_dcache_page() is called after set_pmd_at() to clear
+    234 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    235 	 * when it's released and page allocation check will fail when
+    236 	 * the page is allocated again. For architectures other than ARM64,
+    237 	 * the unexpected overhead of cache flushing is acceptable.
+    238 	 */
+    239 	pr_debug("Validating PMD advanced\n");
+    240 	/* Align the address wrt HPAGE_PMD_SIZE */
+    241 	vaddr &= HPAGE_PMD_MASK;
+    242 
+    243 	pgtable_trans_huge_deposit(args->mm, args->pmdp, args->start_ptep);
+    244 
+    245 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    246 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    247 	flush_dcache_page(page);
+    248 	pmdp_set_wrprotect(args->mm, vaddr, args->pmdp);
+    249 	pmd = pmdp_get(args->pmdp);
+>>  250 	WARN_ON(pmd_write(pmd));
+    251 	pmdp_huge_get_and_clear(args->mm, vaddr, args->pmdp);
+    252 	pmd = pmdp_get(args->pmdp);
+    253 	WARN_ON(!pmd_none(pmd));
+    254 
+    255 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    256 	pmd = pmd_wrprotect(pmd);
+    257 	pmd = pmd_mkclean(pmd);
+    258 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+==========================================================================================
+[22] mm/debug_vm_pgtable.c:264  函数 pmd_advanced_tests  接口 pmd_write(pmd)  来源 *args->pmdp
+    220 {
+    221 	struct page *page;
+    222 	pmd_t pmd;
+    223 	unsigned long vaddr = args->vaddr;
+    224 
+    225 	if (!has_transparent_hugepage())
+    226 		return;
+    227 
+    228 	page = (args->pmd_pfn != ULONG_MAX) ? pfn_to_page(args->pmd_pfn) : NULL;
+    229 	if (!page)
+    230 		return;
+    231 
+    232 	/*
+    233 	 * flush_dcache_page() is called after set_pmd_at() to clear
+    234 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    235 	 * when it's released and page allocation check will fail when
+    236 	 * the page is allocated again. For architectures other than ARM64,
+    237 	 * the unexpected overhead of cache flushing is acceptable.
+    238 	 */
+    239 	pr_debug("Validating PMD advanced\n");
+    240 	/* Align the address wrt HPAGE_PMD_SIZE */
+    241 	vaddr &= HPAGE_PMD_MASK;
+    242 
+    243 	pgtable_trans_huge_deposit(args->mm, args->pmdp, args->start_ptep);
+    244 
+    245 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    246 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    247 	flush_dcache_page(page);
+    248 	pmdp_set_wrprotect(args->mm, vaddr, args->pmdp);
+    249 	pmd = pmdp_get(args->pmdp);
+    250 	WARN_ON(pmd_write(pmd));
+    251 	pmdp_huge_get_and_clear(args->mm, vaddr, args->pmdp);
+    252 	pmd = pmdp_get(args->pmdp);
+    253 	WARN_ON(!pmd_none(pmd));
+    254 
+    255 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    256 	pmd = pmd_wrprotect(pmd);
+    257 	pmd = pmd_mkclean(pmd);
+    258 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    259 	flush_dcache_page(page);
+    260 	pmd = pmd_mkwrite(pmd, args->vma);
+    261 	pmd = pmd_mkdirty(pmd);
+    262 	pmdp_set_access_flags(args->vma, vaddr, args->pmdp, pmd, 1);
+    263 	pmd = pmdp_get(args->pmdp);
+>>  264 	WARN_ON(!(pmd_write(pmd) && pmd_dirty(pmd)));
+    265 	pmdp_huge_get_and_clear_full(args->vma, vaddr, args->pmdp, 1);
+    266 	pmd = pmdp_get(args->pmdp);
+    267 	WARN_ON(!pmd_none(pmd));
+    268 
+    269 	pmd = pmd_mkhuge(pfn_pmd(args->pmd_pfn, args->page_prot));
+    270 	pmd = pmd_mkyoung(pmd);
+    271 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    272 	flush_dcache_page(page);
+==========================================================================================
+[23] mm/debug_vm_pgtable.c:264  函数 pmd_advanced_tests  接口 pmd_dirty(pmd)  来源 *args->pmdp
+    220 {
+    221 	struct page *page;
+    222 	pmd_t pmd;
+    223 	unsigned long vaddr = args->vaddr;
+    224 
+    225 	if (!has_transparent_hugepage())
+    226 		return;
+    227 
+    228 	page = (args->pmd_pfn != ULONG_MAX) ? pfn_to_page(args->pmd_pfn) : NULL;
+    229 	if (!page)
+    230 		return;
+    231 
+    232 	/*
+    233 	 * flush_dcache_page() is called after set_pmd_at() to clear
+    234 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    235 	 * when it's released and page allocation check will fail when
+    236 	 * the page is allocated again. For architectures other than ARM64,
+    237 	 * the unexpected overhead of cache flushing is acceptable.
+    238 	 */
+    239 	pr_debug("Validating PMD advanced\n");
+    240 	/* Align the address wrt HPAGE_PMD_SIZE */
+    241 	vaddr &= HPAGE_PMD_MASK;
+    242 
+    243 	pgtable_trans_huge_deposit(args->mm, args->pmdp, args->start_ptep);
+    244 
+    245 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    246 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    247 	flush_dcache_page(page);
+    248 	pmdp_set_wrprotect(args->mm, vaddr, args->pmdp);
+    249 	pmd = pmdp_get(args->pmdp);
+    250 	WARN_ON(pmd_write(pmd));
+    251 	pmdp_huge_get_and_clear(args->mm, vaddr, args->pmdp);
+    252 	pmd = pmdp_get(args->pmdp);
+    253 	WARN_ON(!pmd_none(pmd));
+    254 
+    255 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    256 	pmd = pmd_wrprotect(pmd);
+    257 	pmd = pmd_mkclean(pmd);
+    258 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    259 	flush_dcache_page(page);
+    260 	pmd = pmd_mkwrite(pmd, args->vma);
+    261 	pmd = pmd_mkdirty(pmd);
+    262 	pmdp_set_access_flags(args->vma, vaddr, args->pmdp, pmd, 1);
+    263 	pmd = pmdp_get(args->pmdp);
+>>  264 	WARN_ON(!(pmd_write(pmd) && pmd_dirty(pmd)));
+    265 	pmdp_huge_get_and_clear_full(args->vma, vaddr, args->pmdp, 1);
+    266 	pmd = pmdp_get(args->pmdp);
+    267 	WARN_ON(!pmd_none(pmd));
+    268 
+    269 	pmd = pmd_mkhuge(pfn_pmd(args->pmd_pfn, args->page_prot));
+    270 	pmd = pmd_mkyoung(pmd);
+    271 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    272 	flush_dcache_page(page);
+==========================================================================================
+[24] mm/debug_vm_pgtable.c:275  函数 pmd_advanced_tests  接口 pmd_young(pmd)  来源 *args->pmdp
+    230 		return;
+    231 
+    232 	/*
+    233 	 * flush_dcache_page() is called after set_pmd_at() to clear
+    234 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    235 	 * when it's released and page allocation check will fail when
+    236 	 * the page is allocated again. For architectures other than ARM64,
+    237 	 * the unexpected overhead of cache flushing is acceptable.
+    238 	 */
+    239 	pr_debug("Validating PMD advanced\n");
+    240 	/* Align the address wrt HPAGE_PMD_SIZE */
+    241 	vaddr &= HPAGE_PMD_MASK;
+    242 
+    243 	pgtable_trans_huge_deposit(args->mm, args->pmdp, args->start_ptep);
+    244 
+    245 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    246 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    247 	flush_dcache_page(page);
+    248 	pmdp_set_wrprotect(args->mm, vaddr, args->pmdp);
+    249 	pmd = pmdp_get(args->pmdp);
+    250 	WARN_ON(pmd_write(pmd));
+    251 	pmdp_huge_get_and_clear(args->mm, vaddr, args->pmdp);
+    252 	pmd = pmdp_get(args->pmdp);
+    253 	WARN_ON(!pmd_none(pmd));
+    254 
+    255 	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    256 	pmd = pmd_wrprotect(pmd);
+    257 	pmd = pmd_mkclean(pmd);
+    258 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    259 	flush_dcache_page(page);
+    260 	pmd = pmd_mkwrite(pmd, args->vma);
+    261 	pmd = pmd_mkdirty(pmd);
+    262 	pmdp_set_access_flags(args->vma, vaddr, args->pmdp, pmd, 1);
+    263 	pmd = pmdp_get(args->pmdp);
+    264 	WARN_ON(!(pmd_write(pmd) && pmd_dirty(pmd)));
+    265 	pmdp_huge_get_and_clear_full(args->vma, vaddr, args->pmdp, 1);
+    266 	pmd = pmdp_get(args->pmdp);
+    267 	WARN_ON(!pmd_none(pmd));
+    268 
+    269 	pmd = pmd_mkhuge(pfn_pmd(args->pmd_pfn, args->page_prot));
+    270 	pmd = pmd_mkyoung(pmd);
+    271 	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+    272 	flush_dcache_page(page);
+    273 	pmdp_test_and_clear_young(args->vma, vaddr, args->pmdp);
+    274 	pmd = pmdp_get(args->pmdp);
+>>  275 	WARN_ON(pmd_young(pmd));
+    276 
+    277 	/*  Clear the pte entries  */
+    278 	pmdp_huge_get_and_clear(args->mm, vaddr, args->pmdp);
+    279 	pgtable_trans_huge_withdraw(args->mm, args->pmdp);
+    280 }
+==========================================================================================
+[25] mm/debug_vm_pgtable.c:370  函数 pud_advanced_tests  接口 pud_write(pud)  来源 *args->pudp
+    342 {
+    343 	struct page *page;
+    344 	unsigned long vaddr = args->vaddr;
+    345 	pud_t pud;
+    346 
+    347 	if (!has_transparent_pud_hugepage())
+    348 		return;
+    349 
+    350 	page = (args->pud_pfn != ULONG_MAX) ? pfn_to_page(args->pud_pfn) : NULL;
+    351 	if (!page)
+    352 		return;
+    353 
+    354 	/*
+    355 	 * flush_dcache_page() is called after set_pud_at() to clear
+    356 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    357 	 * when it's released and page allocation check will fail when
+    358 	 * the page is allocated again. For architectures other than ARM64,
+    359 	 * the unexpected overhead of cache flushing is acceptable.
+    360 	 */
+    361 	pr_debug("Validating PUD advanced\n");
+    362 	/* Align the address wrt HPAGE_PUD_SIZE */
+    363 	vaddr &= HPAGE_PUD_MASK;
+    364 
+    365 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    366 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    367 	flush_dcache_page(page);
+    368 	pudp_set_wrprotect(args->mm, vaddr, args->pudp);
+    369 	pud = pudp_get(args->pudp);
+>>  370 	WARN_ON(pud_write(pud));
+    371 
+    372 #ifndef __PAGETABLE_PMD_FOLDED
+    373 	pudp_huge_get_and_clear(args->mm, vaddr, args->pudp);
+    374 	pud = pudp_get(args->pudp);
+    375 	WARN_ON(!pud_none(pud));
+    376 #endif /* __PAGETABLE_PMD_FOLDED */
+    377 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    378 	pud = pud_wrprotect(pud);
+==========================================================================================
+[26] mm/debug_vm_pgtable.c:386  函数 pud_advanced_tests  接口 pud_write(pud)  来源 *args->pudp
+    342 {
+    343 	struct page *page;
+    344 	unsigned long vaddr = args->vaddr;
+    345 	pud_t pud;
+    346 
+    347 	if (!has_transparent_pud_hugepage())
+    348 		return;
+    349 
+    350 	page = (args->pud_pfn != ULONG_MAX) ? pfn_to_page(args->pud_pfn) : NULL;
+    351 	if (!page)
+    352 		return;
+    353 
+    354 	/*
+    355 	 * flush_dcache_page() is called after set_pud_at() to clear
+    356 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    357 	 * when it's released and page allocation check will fail when
+    358 	 * the page is allocated again. For architectures other than ARM64,
+    359 	 * the unexpected overhead of cache flushing is acceptable.
+    360 	 */
+    361 	pr_debug("Validating PUD advanced\n");
+    362 	/* Align the address wrt HPAGE_PUD_SIZE */
+    363 	vaddr &= HPAGE_PUD_MASK;
+    364 
+    365 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    366 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    367 	flush_dcache_page(page);
+    368 	pudp_set_wrprotect(args->mm, vaddr, args->pudp);
+    369 	pud = pudp_get(args->pudp);
+    370 	WARN_ON(pud_write(pud));
+    371 
+    372 #ifndef __PAGETABLE_PMD_FOLDED
+    373 	pudp_huge_get_and_clear(args->mm, vaddr, args->pudp);
+    374 	pud = pudp_get(args->pudp);
+    375 	WARN_ON(!pud_none(pud));
+    376 #endif /* __PAGETABLE_PMD_FOLDED */
+    377 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    378 	pud = pud_wrprotect(pud);
+    379 	pud = pud_mkclean(pud);
+    380 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    381 	flush_dcache_page(page);
+    382 	pud = pud_mkwrite(pud);
+    383 	pud = pud_mkdirty(pud);
+    384 	pudp_set_access_flags(args->vma, vaddr, args->pudp, pud, 1);
+    385 	pud = pudp_get(args->pudp);
+>>  386 	WARN_ON(!(pud_write(pud) && pud_dirty(pud)));
+    387 
+    388 #ifndef __PAGETABLE_PMD_FOLDED
+    389 	pudp_huge_get_and_clear_full(args->vma, vaddr, args->pudp, 1);
+    390 	pud = pudp_get(args->pudp);
+    391 	WARN_ON(!pud_none(pud));
+    392 #endif /* __PAGETABLE_PMD_FOLDED */
+    393 
+    394 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+==========================================================================================
+[27] mm/debug_vm_pgtable.c:386  函数 pud_advanced_tests  接口 pud_dirty(pud)  来源 *args->pudp
+    342 {
+    343 	struct page *page;
+    344 	unsigned long vaddr = args->vaddr;
+    345 	pud_t pud;
+    346 
+    347 	if (!has_transparent_pud_hugepage())
+    348 		return;
+    349 
+    350 	page = (args->pud_pfn != ULONG_MAX) ? pfn_to_page(args->pud_pfn) : NULL;
+    351 	if (!page)
+    352 		return;
+    353 
+    354 	/*
+    355 	 * flush_dcache_page() is called after set_pud_at() to clear
+    356 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    357 	 * when it's released and page allocation check will fail when
+    358 	 * the page is allocated again. For architectures other than ARM64,
+    359 	 * the unexpected overhead of cache flushing is acceptable.
+    360 	 */
+    361 	pr_debug("Validating PUD advanced\n");
+    362 	/* Align the address wrt HPAGE_PUD_SIZE */
+    363 	vaddr &= HPAGE_PUD_MASK;
+    364 
+    365 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    366 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    367 	flush_dcache_page(page);
+    368 	pudp_set_wrprotect(args->mm, vaddr, args->pudp);
+    369 	pud = pudp_get(args->pudp);
+    370 	WARN_ON(pud_write(pud));
+    371 
+    372 #ifndef __PAGETABLE_PMD_FOLDED
+    373 	pudp_huge_get_and_clear(args->mm, vaddr, args->pudp);
+    374 	pud = pudp_get(args->pudp);
+    375 	WARN_ON(!pud_none(pud));
+    376 #endif /* __PAGETABLE_PMD_FOLDED */
+    377 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    378 	pud = pud_wrprotect(pud);
+    379 	pud = pud_mkclean(pud);
+    380 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    381 	flush_dcache_page(page);
+    382 	pud = pud_mkwrite(pud);
+    383 	pud = pud_mkdirty(pud);
+    384 	pudp_set_access_flags(args->vma, vaddr, args->pudp, pud, 1);
+    385 	pud = pudp_get(args->pudp);
+>>  386 	WARN_ON(!(pud_write(pud) && pud_dirty(pud)));
+    387 
+    388 #ifndef __PAGETABLE_PMD_FOLDED
+    389 	pudp_huge_get_and_clear_full(args->vma, vaddr, args->pudp, 1);
+    390 	pud = pudp_get(args->pudp);
+    391 	WARN_ON(!pud_none(pud));
+    392 #endif /* __PAGETABLE_PMD_FOLDED */
+    393 
+    394 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+==========================================================================================
+[28] mm/debug_vm_pgtable.c:400  函数 pud_advanced_tests  接口 pud_young(pud)  来源 *args->pudp
+    355 	 * flush_dcache_page() is called after set_pud_at() to clear
+    356 	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+    357 	 * when it's released and page allocation check will fail when
+    358 	 * the page is allocated again. For architectures other than ARM64,
+    359 	 * the unexpected overhead of cache flushing is acceptable.
+    360 	 */
+    361 	pr_debug("Validating PUD advanced\n");
+    362 	/* Align the address wrt HPAGE_PUD_SIZE */
+    363 	vaddr &= HPAGE_PUD_MASK;
+    364 
+    365 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    366 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    367 	flush_dcache_page(page);
+    368 	pudp_set_wrprotect(args->mm, vaddr, args->pudp);
+    369 	pud = pudp_get(args->pudp);
+    370 	WARN_ON(pud_write(pud));
+    371 
+    372 #ifndef __PAGETABLE_PMD_FOLDED
+    373 	pudp_huge_get_and_clear(args->mm, vaddr, args->pudp);
+    374 	pud = pudp_get(args->pudp);
+    375 	WARN_ON(!pud_none(pud));
+    376 #endif /* __PAGETABLE_PMD_FOLDED */
+    377 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    378 	pud = pud_wrprotect(pud);
+    379 	pud = pud_mkclean(pud);
+    380 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    381 	flush_dcache_page(page);
+    382 	pud = pud_mkwrite(pud);
+    383 	pud = pud_mkdirty(pud);
+    384 	pudp_set_access_flags(args->vma, vaddr, args->pudp, pud, 1);
+    385 	pud = pudp_get(args->pudp);
+    386 	WARN_ON(!(pud_write(pud) && pud_dirty(pud)));
+    387 
+    388 #ifndef __PAGETABLE_PMD_FOLDED
+    389 	pudp_huge_get_and_clear_full(args->vma, vaddr, args->pudp, 1);
+    390 	pud = pudp_get(args->pudp);
+    391 	WARN_ON(!pud_none(pud));
+    392 #endif /* __PAGETABLE_PMD_FOLDED */
+    393 
+    394 	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    395 	pud = pud_mkyoung(pud);
+    396 	set_pud_at(args->mm, vaddr, args->pudp, pud);
+    397 	flush_dcache_page(page);
+    398 	pudp_test_and_clear_young(args->vma, vaddr, args->pudp);
+    399 	pud = pudp_get(args->pudp);
+>>  400 	WARN_ON(pud_young(pud));
+    401 
+    402 	pudp_huge_get_and_clear(args->mm, vaddr, args->pudp);
+    403 }
+==========================================================================================
+[29] mm/gup.c:656  函数 follow_huge_pud  接口 pud_pfn(pud)  来源 *pudp
+    652 {
+    653 	struct mm_struct *mm = vma->vm_mm;
+    654 	struct page *page;
+    655 	pud_t pud = *pudp;
+>>  656 	unsigned long pfn = pud_pfn(pud);
+    657 	int ret;
+    658 
+    659 	assert_spin_locked(pud_lockptr(mm, pudp));
+    660 
+    661 	if (!pud_present(pud))
+    662 		return NULL;
+    663 
+    664 	if ((flags & FOLL_WRITE) &&
+==========================================================================================
+[30] mm/gup.c:713  函数 follow_huge_pmd  接口 pmd_page(pmdval)  来源 *pmd
+    705 {
+    706 	struct mm_struct *mm = vma->vm_mm;
+    707 	pmd_t pmdval = *pmd;
+    708 	struct page *page;
+    709 	int ret;
+    710 
+    711 	assert_spin_locked(pmd_lockptr(mm, pmd));
+    712 
+>>  713 	page = pmd_page(pmdval);
+    714 	if ((flags & FOLL_WRITE) &&
+    715 	    !can_follow_write_pmd(pmdval, page, vma, flags))
+    716 		return NULL;
+    717 
+    718 	/* Avoid dumping huge zero page */
+    719 	if ((flags & FOLL_DUMP) && is_huge_zero_pmd(pmdval))
+    720 		return ERR_PTR(-EFAULT);
+    721 

@@ -1,0 +1,1161 @@
+==========================================================================================
+[1] mm/page_owner.c:102  函数 early_page_owner_param  接口 kstrtobool  K2 缺 check result of kstrtobool（契约比例 0.972，36 个调用点）
+     72 	bool nid_filter_enabled;
+     73 };
+     74 
+     75 static bool page_owner_enabled __initdata;
+     76 DEFINE_STATIC_KEY_FALSE(page_owner_inited);
+     77 
+     78 static depot_stack_handle_t dummy_handle;
+     79 static depot_stack_handle_t failure_handle;
+     80 static depot_stack_handle_t early_handle;
+     81 
+     82 static void init_early_allocated_pages(void);
+     83 
+     84 static inline void set_current_in_page_owner(void)
+     85 {
+     86 	/*
+     87 	 * Avoid recursion.
+     88 	 *
+     89 	 * We might need to allocate more memory from page_owner code, so make
+     90 	 * sure to signal it in order to avoid recursion.
+     91 	 */
+     92 	current->in_page_owner = 1;
+     93 }
+     94 
+     95 static inline void unset_current_in_page_owner(void)
+     96 {
+     97 	current->in_page_owner = 0;
+     98 }
+     99 
+    100 static int __init early_page_owner_param(char *buf)
+    101 {
+>>  102 	int ret = kstrtobool(buf, &page_owner_enabled);
+    103 
+    104 	if (page_owner_enabled)
+    105 		stack_depot_request_early_init();
+    106 
+    107 	return ret;
+    108 }
+==========================================================================================
+[2] mm/madvise.c:1080  函数 guard_install_pud_entry  接口 pudp_get  K2 缺 check result of pudp_get（契约比例 0.964，28 个调用点）
+   1050 	fput(f);
+   1051 	mmap_read_lock(mm);
+   1052 	return error;
+   1053 }
+   1054 
+   1055 static bool is_valid_guard_vma(struct vm_area_struct *vma, bool allow_locked)
+   1056 {
+   1057 	vm_flags_t disallowed = VM_SPECIAL | VM_HUGETLB;
+   1058 
+   1059 	/*
+   1060 	 * A user could lock after setting a guard range but that's fine, as
+   1061 	 * they'd not be able to fault in. The issue arises when we try to zap
+   1062 	 * existing locked VMAs. We don't want to do that.
+   1063 	 */
+   1064 	if (!allow_locked)
+   1065 		disallowed |= VM_LOCKED;
+   1066 
+   1067 	return !(vma->vm_flags & disallowed);
+   1068 }
+   1069 
+   1070 static bool is_guard_pte_marker(pte_t ptent)
+   1071 {
+   1072 	const softleaf_t entry = softleaf_from_pte(ptent);
+   1073 
+   1074 	return softleaf_is_guard_marker(entry);
+   1075 }
+   1076 
+   1077 static int guard_install_pud_entry(pud_t *pud, unsigned long addr,
+   1078 				   unsigned long next, struct mm_walk *walk)
+   1079 {
+>> 1080 	pud_t pudval = pudp_get(pud);
+   1081 
+   1082 	/* If huge return >0 so we abort the operation + zap. */
+   1083 	return pud_trans_huge(pudval);
+   1084 }
+   1085 
+   1086 static int guard_install_pmd_entry(pmd_t *pmd, unsigned long addr,
+==========================================================================================
+[3] include/linux/memcontrol.h:1277  函数 folio_lruvec_lock_irqsave  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+   1247 }
+   1248 
+   1249 static inline void mem_cgroup_put(struct mem_cgroup *memcg)
+   1250 {
+   1251 }
+   1252 
+   1253 static inline struct lruvec *folio_lruvec_lock(struct folio *folio)
+   1254 {
+   1255 	struct pglist_data *pgdat = folio_pgdat(folio);
+   1256 
+   1257 	rcu_read_lock();
+   1258 	spin_lock(&pgdat->__lruvec.lru_lock);
+   1259 	return &pgdat->__lruvec;
+   1260 }
+   1261 
+   1262 static inline struct lruvec *folio_lruvec_lock_irq(struct folio *folio)
+   1263 {
+   1264 	struct pglist_data *pgdat = folio_pgdat(folio);
+   1265 
+   1266 	rcu_read_lock();
+   1267 	spin_lock_irq(&pgdat->__lruvec.lru_lock);
+   1268 	return &pgdat->__lruvec;
+   1269 }
+   1270 
+   1271 static inline struct lruvec *folio_lruvec_lock_irqsave(struct folio *folio,
+   1272 		unsigned long *flagsp)
+   1273 {
+   1274 	struct pglist_data *pgdat = folio_pgdat(folio);
+   1275 
+   1276 	rcu_read_lock();
+>> 1277 	spin_lock_irqsave(&pgdat->__lruvec.lru_lock, *flagsp);
+   1278 	return &pgdat->__lruvec;
+   1279 }
+   1280 
+   1281 static inline struct mem_cgroup *
+   1282 mem_cgroup_iter(struct mem_cgroup *root,
+   1283 		struct mem_cgroup *prev,
+==========================================================================================
+[4] include/linux/memory_hotplug.h:242  函数 pgdat_resize_lock  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    212 
+    213 static inline bool movable_node_is_enabled(void)
+    214 {
+    215 	return false;
+    216 }
+    217 
+    218 static inline bool mhp_supports_memmap_on_memory(void)
+    219 {
+    220 	return false;
+    221 }
+    222 
+    223 static inline void pgdat_kswapd_lock(pg_data_t *pgdat) {}
+    224 static inline void pgdat_kswapd_unlock(pg_data_t *pgdat) {}
+    225 static inline void pgdat_kswapd_lock_init(pg_data_t *pgdat) {}
+    226 #endif /* ! CONFIG_MEMORY_HOTPLUG */
+    227 
+    228 /*
+    229  * Keep this declaration outside CONFIG_MEMORY_HOTPLUG as some
+    230  * platforms might override and use arch_get_mappable_range()
+    231  * for internal non memory hotplug purposes.
+    232  */
+    233 struct range arch_get_mappable_range(void);
+    234 
+    235 #if defined(CONFIG_MEMORY_HOTPLUG) || defined(CONFIG_DEFERRED_STRUCT_PAGE_INIT)
+    236 /*
+    237  * pgdat resizing functions
+    238  */
+    239 static inline
+    240 void pgdat_resize_lock(struct pglist_data *pgdat, unsigned long *flags)
+    241 {
+>>  242 	spin_lock_irqsave(&pgdat->node_size_lock, *flags);
+    243 }
+    244 static inline
+    245 void pgdat_resize_unlock(struct pglist_data *pgdat, unsigned long *flags)
+    246 {
+    247 	spin_unlock_irqrestore(&pgdat->node_size_lock, *flags);
+    248 }
+==========================================================================================
+[5] include/linux/serial_core.h:613  函数 __uart_port_lock_irqsave  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    583 	resource_size_t		mapbase;		/* for ioremap */
+    584 	resource_size_t		mapsize;
+    585 	struct device		*dev;			/* serial port physical parent device */
+    586 	struct serial_port_device *port_dev;		/* serial core port device */
+    587 
+    588 	unsigned long		sysrq;			/* sysrq timeout */
+    589 	u8			sysrq_ch;		/* char for sysrq */
+    590 	unsigned char		has_sysrq;
+    591 	unsigned char		sysrq_seq;		/* index in sysrq_toggle_seq */
+    592 
+    593 	unsigned char		hub6;			/* this should be in the 8250 driver */
+    594 	unsigned char		suspended;
+    595 	unsigned char		console_reinit;
+    596 	const char		*name;			/* port name */
+    597 	struct attribute_group	*attr_group;		/* port specific attributes */
+    598 	const struct attribute_group **tty_groups;	/* all attributes (serial core use only) */
+    599 	struct serial_rs485     rs485;
+    600 	struct serial_rs485	rs485_supported;	/* Supported mask for serial_rs485 */
+    601 	struct gpio_desc	*rs485_term_gpio;	/* enable RS485 bus termination */
+    602 	struct gpio_desc	*rs485_rx_during_tx_gpio; /* Output GPIO that sets the state of RS485 RX during TX */
+    603 	struct serial_iso7816   iso7816;
+    604 	void			*private_data;		/* generic platform data pointer */
+    605 };
+    606 
+    607 /*
+    608  * Only for console->device_lock()/_unlock() callbacks and internal
+    609  * port lock wrapper synchronization.
+    610  */
+    611 static inline void __uart_port_lock_irqsave(struct uart_port *up, unsigned long *flags)
+    612 {
+>>  613 	spin_lock_irqsave(&up->lock, *flags);
+    614 }
+    615 
+    616 /*
+    617  * Only for console->device_lock()/_unlock() callbacks and internal
+    618  * port lock wrapper synchronization.
+    619  */
+==========================================================================================
+[6] include/linux/serial_core.h:723  函数 uart_port_lock_irqsave  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    693 	nbcon_device_release(up->cons);
+    694 }
+    695 
+    696 /**
+    697  * uart_port_lock - Lock the UART port
+    698  * @up:		Pointer to UART port structure
+    699  */
+    700 static inline void uart_port_lock(struct uart_port *up)
+    701 {
+    702 	spin_lock(&up->lock);
+    703 	__uart_port_nbcon_acquire(up);
+    704 }
+    705 
+    706 /**
+    707  * uart_port_lock_irq - Lock the UART port and disable interrupts
+    708  * @up:		Pointer to UART port structure
+    709  */
+    710 static inline void uart_port_lock_irq(struct uart_port *up)
+    711 {
+    712 	spin_lock_irq(&up->lock);
+    713 	__uart_port_nbcon_acquire(up);
+    714 }
+    715 
+    716 /**
+    717  * uart_port_lock_irqsave - Lock the UART port, save and disable interrupts
+    718  * @up:		Pointer to UART port structure
+    719  * @flags:	Pointer to interrupt flags storage
+    720  */
+    721 static inline void uart_port_lock_irqsave(struct uart_port *up, unsigned long *flags)
+    722 {
+>>  723 	spin_lock_irqsave(&up->lock, *flags);
+    724 	__uart_port_nbcon_acquire(up);
+    725 }
+    726 
+    727 /**
+    728  * uart_port_trylock - Try to lock the UART port
+    729  * @up:		Pointer to UART port structure
+==========================================================================================
+[7] kernel/dma/debug.c:260  函数 get_hash_bucket  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    230 		}							\
+    231 		if (!show_all_errors && show_num_errors > 0)		\
+    232 			show_num_errors -= 1;				\
+    233 	} while (0);
+    234 
+    235 /*
+    236  * Hash related functions
+    237  *
+    238  * Every DMA-API request is saved into a struct dma_debug_entry. To
+    239  * have quick access to these structs they are stored into a hash.
+    240  */
+    241 static int hash_fn(struct dma_debug_entry *entry)
+    242 {
+    243 	/*
+    244 	 * Hash function is based on the dma address.
+    245 	 * We use bits 20-27 here as the index into the hash
+    246 	 */
+    247 	return (entry->dev_addr >> HASH_FN_SHIFT) & HASH_FN_MASK;
+    248 }
+    249 
+    250 /*
+    251  * Request exclusive access to a hash bucket for a given dma_debug_entry.
+    252  */
+    253 static struct hash_bucket *get_hash_bucket(struct dma_debug_entry *entry,
+    254 					   unsigned long *flags)
+    255 	__acquires(&dma_entry_hash[idx].lock)
+    256 {
+    257 	int idx = hash_fn(entry);
+    258 	unsigned long __flags;
+    259 
+>>  260 	spin_lock_irqsave(&dma_entry_hash[idx].lock, __flags);
+    261 	*flags = __flags;
+    262 	return &dma_entry_hash[idx];
+    263 }
+    264 
+    265 /*
+    266  * Give up exclusive access to the hash bucket
+==========================================================================================
+[8] kernel/locking/locktorture.c:290  函数 torture_spin_lock_write_lock_irq  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    260 		pr_alert("%s: delay = %lu jiffies.\n", __func__, jiffies - j);
+    261 	}
+    262 	if (!(torture_random(trsp) % (cxt.nrealwriters_stress * 200 * shortdelay_us)))
+    263 		udelay(shortdelay_us);
+    264 	if (!(torture_random(trsp) % (cxt.nrealwriters_stress * 20000)))
+    265 		torture_preempt_schedule();  /* Allow test to be preempted. */
+    266 }
+    267 
+    268 static void torture_spin_lock_write_unlock(int tid __maybe_unused)
+    269 __releases(torture_spinlock)
+    270 {
+    271 	spin_unlock(&torture_spinlock);
+    272 }
+    273 
+    274 static struct lock_torture_ops spin_lock_ops = {
+    275 	.writelock	= torture_spin_lock_write_lock,
+    276 	.write_delay	= torture_spin_lock_write_delay,
+    277 	.task_boost     = torture_rt_boost,
+    278 	.writeunlock	= torture_spin_lock_write_unlock,
+    279 	.readlock       = NULL,
+    280 	.read_delay     = NULL,
+    281 	.readunlock     = NULL,
+    282 	.name		= "spin_lock"
+    283 };
+    284 
+    285 static int torture_spin_lock_write_lock_irq(int tid __maybe_unused)
+    286 __acquires(torture_spinlock)
+    287 {
+    288 	unsigned long flags;
+    289 
+>>  290 	spin_lock_irqsave(&torture_spinlock, flags);
+    291 	cxt.cur_ops->flags = flags;
+    292 	return 0;
+    293 }
+    294 
+    295 static void torture_lock_spin_write_unlock_irq(int tid __maybe_unused)
+    296 __releases(torture_spinlock)
+==========================================================================================
+[9] kernel/time/clocksource.c:161  函数 clocksource_watchdog_lock  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    131  * Maximum time between two remote readouts for NUMA=n. On NUMA enabled systems
+    132  * the timeout is calculated from the numa distance.
+    133  */
+    134 #define WATCHDOG_DEFAULT_TIMEOUT_NS	(50U * NSEC_PER_USEC)
+    135 
+    136 /*
+    137  * Remote timeout NUMA distance multiplier. The local distance is 10. The
+    138  * default remote distance is 20. ACPI tables provide more accurate numbers
+    139  * which are guaranteed to be greater than the local distance.
+    140  *
+    141  * This results in a 5us base value, which is equivalent to the above !NUMA
+    142  * default.
+    143  */
+    144 #define WATCHDOG_NUMA_MULTIPLIER_NS	((u64)(WATCHDOG_DEFAULT_TIMEOUT_NS / LOCAL_DISTANCE))
+    145 
+    146 /* Limit the NUMA timeout in case the distance values are insanely big */
+    147 #define WATCHDOG_NUMA_MAX_TIMEOUT_NS	((u64)(500U * NSEC_PER_USEC))
+    148 
+    149 /* Shift values to calculate the approximate $N ppm of a given delta. */
+    150 #define SHIFT_500PPM			11
+    151 #define SHIFT_4000PPM			8
+    152 
+    153 /* Number of attempts to read the watchdog */
+    154 #define WATCHDOG_FREQ_RETRIES		3
+    155 
+    156 /* Five reads local and remote for inter CPU skew detection */
+    157 #define WATCHDOG_REMOTE_MAX_SEQ		10
+    158 
+    159 static inline void clocksource_watchdog_lock(unsigned long *flags)
+    160 {
+>>  161 	spin_lock_irqsave(&watchdog_lock, *flags);
+    162 }
+    163 
+    164 static inline void clocksource_watchdog_unlock(unsigned long *flags)
+    165 {
+    166 	spin_unlock_irqrestore(&watchdog_lock, *flags);
+    167 }
+==========================================================================================
+[10] mm/compaction.c:518  函数 compact_lock_irqsave  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    488 {
+    489 }
+    490 
+    491 static bool test_and_set_skip(struct compact_control *cc, struct page *page)
+    492 {
+    493 	return false;
+    494 }
+    495 #endif /* CONFIG_COMPACTION */
+    496 
+    497 /*
+    498  * Compaction requires the taking of some coarse locks that are potentially
+    499  * very heavily contended. For async compaction, trylock and record if the
+    500  * lock is contended. The lock will still be acquired but compaction will
+    501  * abort when the current block is finished regardless of success rate.
+    502  * Sync compaction acquires the lock.
+    503  *
+    504  * Always returns true which makes it easier to track lock state in callers.
+    505  */
+    506 static bool compact_lock_irqsave(spinlock_t *lock, unsigned long *flags,
+    507 						struct compact_control *cc)
+    508 	__acquires(lock)
+    509 {
+    510 	/* Track if the lock is contended in async mode */
+    511 	if (cc->mode == MIGRATE_ASYNC && !cc->contended) {
+    512 		if (spin_trylock_irqsave(lock, *flags))
+    513 			return true;
+    514 
+    515 		cc->contended = true;
+    516 	}
+    517 
+>>  518 	spin_lock_irqsave(lock, *flags);
+    519 	return true;
+    520 }
+    521 
+    522 static struct lruvec *
+    523 compact_folio_lruvec_lock_irqsave(struct folio *folio, unsigned long *flags,
+    524 				  struct compact_control *cc)
+==========================================================================================
+[11] mm/hugetlb.c:190  函数 hugepage_put_subpool  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    160 						long min_hpages)
+    161 {
+    162 	struct hugepage_subpool *spool;
+    163 
+    164 	spool = kzalloc_obj(*spool);
+    165 	if (!spool)
+    166 		return NULL;
+    167 
+    168 	spin_lock_init(&spool->lock);
+    169 	spool->count = 1;
+    170 	spool->max_hpages = max_hpages;
+    171 	spool->hstate = h;
+    172 	spool->min_hpages = min_hpages;
+    173 
+    174 	if (min_hpages != -1 && hugetlb_acct_memory(h, min_hpages)) {
+    175 		kfree(spool);
+    176 		return NULL;
+    177 	}
+    178 	spool->rsv_hpages = min_hpages;
+    179 
+    180 	return spool;
+    181 }
+    182 
+    183 void hugepage_put_subpool(struct hugepage_subpool *spool)
+    184 {
+    185 	unsigned long flags;
+    186 
+    187 	if (!spool)
+    188 		return;
+    189 
+>>  190 	spin_lock_irqsave(&spool->lock, flags);
+    191 	BUG_ON(!spool->count);
+    192 	spool->count--;
+    193 	unlock_or_release_subpool(spool, flags);
+    194 }
+    195 
+    196 /*
+==========================================================================================
+[12] mm/hugetlb.c:258  函数 hugepage_subpool_put_pages  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+    228 			 * behalf of subpool.  Return difference.
+    229 			 */
+    230 			ret = delta - spool->rsv_hpages;
+    231 			spool->rsv_hpages = 0;
+    232 		} else {
+    233 			ret = 0;	/* reserves already accounted for */
+    234 			spool->rsv_hpages -= delta;
+    235 		}
+    236 	}
+    237 
+    238 unlock_ret:
+    239 	spin_unlock_irq(&spool->lock);
+    240 	return ret;
+    241 }
+    242 
+    243 /*
+    244  * Subpool accounting for freeing and unreserving pages.
+    245  * Return the number of global page reservations that must be dropped.
+    246  * The return value may only be different than the passed value (delta)
+    247  * in the case where a subpool minimum size must be maintained.
+    248  */
+    249 static long hugepage_subpool_put_pages(struct hugepage_subpool *spool,
+    250 				       long delta)
+    251 {
+    252 	long ret = delta;
+    253 	unsigned long flags;
+    254 
+    255 	if (!spool)
+    256 		return delta;
+    257 
+>>  258 	spin_lock_irqsave(&spool->lock, flags);
+    259 
+    260 	if (spool->max_hpages != -1)		/* maximum size accounting */
+    261 		spool->used_hpages -= delta;
+    262 
+    263 	 /* minimum size accounting */
+    264 	if (spool->min_hpages != -1 && spool->used_hpages < spool->min_hpages) {
+==========================================================================================
+[13] mm/hugetlb.c:6826  函数 hugetlb_reserve_pages  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+   6796 			rsv_adjust = hugepage_subpool_put_pages(spool,
+   6797 								chg - add);
+   6798 			hugetlb_acct_memory(h, -rsv_adjust);
+   6799 		} else if (h_cg) {
+   6800 			/*
+   6801 			 * The file_regions will hold their own reference to
+   6802 			 * h_cg->css. So we should release the reference held
+   6803 			 * via hugetlb_cgroup_charge_cgroup_rsvd() when we are
+   6804 			 * done.
+   6805 			 */
+   6806 			hugetlb_cgroup_put_rsvd_cgroup(h_cg);
+   6807 		}
+   6808 	}
+   6809 	return chg;
+   6810 
+   6811 out_put_pages:
+   6812 	spool_resv = chg - gbl_reserve;
+   6813 	if (spool_resv) {
+   6814 		/* put sub pool's reservation back, chg - gbl_reserve */
+   6815 		gbl_resv = hugepage_subpool_put_pages(spool, spool_resv);
+   6816 		/*
+   6817 		 * subpool's reserved pages can not be put back due to race,
+   6818 		 * return to hstate.
+   6819 		 */
+   6820 		hugetlb_acct_memory(h, -gbl_resv);
+   6821 	}
+   6822 	/* Restore used_hpages for pages that failed global reservation */
+   6823 	if (gbl_reserve && spool) {
+   6824 		unsigned long flags;
+   6825 
+>> 6826 		spin_lock_irqsave(&spool->lock, flags);
+   6827 		if (spool->max_hpages != -1)
+   6828 			spool->used_hpages -= gbl_reserve;
+   6829 		unlock_or_release_subpool(spool, flags);
+   6830 	}
+   6831 out_uncharge_cgroup:
+   6832 	hugetlb_cgroup_uncharge_cgroup_rsvd(hstate_index(h),
+==========================================================================================
+[14] mm/list_lru.c:22  函数 lock_list_lru  接口 spin_lock_irqsave  K3 缺 spin_unlock_irqrestore after spin_lock_irqsave（契约比例 0.947，226 个调用点）
+      1 // SPDX-License-Identifier: GPL-2.0-only
+      2 /*
+      3  * Copyright (c) 2013 Red Hat, Inc. and Parallels Inc. All rights reserved.
+      4  * Authors: David Chinner and Glauber Costa
+      5  *
+      6  * Generic LRU infrastructure
+      7  */
+      8 #include <linux/kernel.h>
+      9 #include <linux/module.h>
+     10 #include <linux/mm.h>
+     11 #include <linux/list_lru.h>
+     12 #include <linux/slab.h>
+     13 #include <linux/mutex.h>
+     14 #include <linux/memcontrol.h>
+     15 #include "slab.h"
+     16 #include "internal.h"
+     17 
+     18 static inline void lock_list_lru(struct list_lru_one *l, bool irq,
+     19 				 unsigned long *irq_flags)
+     20 {
+     21 	if (irq_flags)
+>>   22 		spin_lock_irqsave(&l->lock, *irq_flags);
+     23 	else if (irq)
+     24 		spin_lock_irq(&l->lock);
+     25 	else
+     26 		spin_lock(&l->lock);
+     27 }
+     28 
+==========================================================================================
+[15] kernel/sched/fair.c:10503  函数 migrate_degrades_locality  接口 node_distance  K2 缺 check result of node_distance（契约比例 0.938，16 个调用点）
+  10473 	int src_nid, dst_nid, dist;
+  10474 
+  10475 	if (!static_branch_likely(&sched_numa_balancing))
+  10476 		return 0;
+  10477 
+  10478 	if (!p->numa_faults || !(env->sd->flags & SD_NUMA))
+  10479 		return 0;
+  10480 
+  10481 	src_nid = cpu_to_node(env->src_cpu);
+  10482 	dst_nid = cpu_to_node(env->dst_cpu);
+  10483 
+  10484 	if (src_nid == dst_nid)
+  10485 		return 0;
+  10486 
+  10487 	/* Migrating away from the preferred node is always bad. */
+  10488 	if (src_nid == p->numa_preferred_nid) {
+  10489 		if (env->src_rq->nr_running > env->src_rq->nr_preferred_running)
+  10490 			return 1;
+  10491 		else
+  10492 			return 0;
+  10493 	}
+  10494 
+  10495 	/* Encourage migration to the preferred node. */
+  10496 	if (dst_nid == p->numa_preferred_nid)
+  10497 		return -1;
+  10498 
+  10499 	/* Leaving a core idle is often worse than degrading locality. */
+  10500 	if (env->idle == CPU_IDLE)
+  10501 		return 0;
+  10502 
+>>10503 	dist = node_distance(src_nid, dst_nid);
+  10504 	if (numa_group) {
+  10505 		src_weight = group_weight(p, src_nid, dist);
+  10506 		dst_weight = group_weight(p, dst_nid, dist);
+  10507 	} else {
+  10508 		src_weight = task_weight(p, src_nid, dist);
+  10509 		dst_weight = task_weight(p, dst_nid, dist);
+==========================================================================================
+[16] lib/decompress_bunzip2.c:643  函数 start_bunzip  接口 malloc  K2 缺 check result of malloc（契约比例 0.933，15 个调用点）
+    613 		bd->writeCount = previous;
+    614 		return (previous != RETVAL_LAST_BLOCK) ? previous : gotcount;
+    615 	}
+    616 	bd->writeCRC = 0xffffffffUL;
+    617 	pos = bd->writePos;
+    618 	xcurrent = bd->writeCurrent;
+    619 	goto decode_next_byte;
+    620 }
+    621 
+    622 static long INIT nofill(void *buf, unsigned long len)
+    623 {
+    624 	return -1;
+    625 }
+    626 
+    627 /* Allocate the structure, read file header.  If in_fd ==-1, inbuf must contain
+    628    a complete bunzip file (len bytes long).  If in_fd!=-1, inbuf and len are
+    629    ignored, and data is read from file handle into temporary buffer. */
+    630 static int INIT start_bunzip(struct bunzip_data **bdp, void *inbuf, long len,
+    631 			     long (*fill)(void*, unsigned long))
+    632 {
+    633 	struct bunzip_data *bd;
+    634 	unsigned int i, j, c;
+    635 	const unsigned int BZh0 =
+    636 		(((unsigned int)'B') << 24)+(((unsigned int)'Z') << 16)
+    637 		+(((unsigned int)'h') << 8)+(unsigned int)'0';
+    638 
+    639 	/* Figure out how much data to allocate */
+    640 	i = sizeof(struct bunzip_data);
+    641 
+    642 	/* Allocate bunzip_data.  Most fields initialize to zero. */
+>>  643 	bd = *bdp = malloc(i);
+    644 	if (!bd)
+    645 		return RETVAL_OUT_OF_MEMORY;
+    646 	memset(bd, 0, sizeof(struct bunzip_data));
+    647 	/* Setup input buffer */
+    648 	bd->inbuf = inbuf;
+    649 	bd->inbufCount = len;
+==========================================================================================
+[17] kernel/smp.c:675  函数 flush_smp_call_function_queue  接口 local_softirq_pending  K2 缺 check result of local_softirq_pending（契约比例 0.909，11 个调用点）
+    645 	 */
+    646 	if (entry) {
+    647 		csd = llist_entry(entry, typeof(*csd), node.llist);
+    648 		csd_do_func(sched_ttwu_pending, entry, csd);
+    649 	}
+    650 }
+    651 
+    652 
+    653 /**
+    654  * flush_smp_call_function_queue - Flush pending smp-call-function callbacks
+    655  *				   from task context (idle, migration thread)
+    656  *
+    657  * When TIF_POLLING_NRFLAG is supported and a CPU is in idle and has it
+    658  * set, then remote CPUs can avoid sending IPIs and wake the idle CPU by
+    659  * setting TIF_NEED_RESCHED. The idle task on the woken up CPU has to
+    660  * handle queued SMP function calls before scheduling.
+    661  *
+    662  * The migration thread has to ensure that an eventually pending wakeup has
+    663  * been handled before it migrates a task.
+    664  */
+    665 void flush_smp_call_function_queue(void)
+    666 {
+    667 	unsigned int was_pending;
+    668 	unsigned long flags;
+    669 
+    670 	if (llist_empty(this_cpu_ptr(&call_single_queue)))
+    671 		return;
+    672 
+    673 	local_irq_save(flags);
+    674 	/* Get the already pending soft interrupts for RT enabled kernels */
+>>  675 	was_pending = local_softirq_pending();
+    676 	__flush_smp_call_function_queue(true);
+    677 	if (local_softirq_pending())
+    678 		do_softirq_post_smp_call_flush(was_pending);
+    679 
+    680 	local_irq_restore(flags);
+    681 }
+==========================================================================================
+[18] fs/proc/task_mmu.c:2930  函数 pagemap_scan_pmd_entry  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+   2900 		}
+   2901 		goto flush_and_return;
+   2902 	}
+   2903 
+   2904 	if (userfaultfd_wp(vma) && !p->arg.category_anyof_mask &&
+   2905 	    !p->arg.category_inverted &&
+   2906 	    p->arg.category_mask == PAGE_IS_WRITTEN &&
+   2907 	    p->arg.return_mask == PAGE_IS_WRITTEN) {
+   2908 		for (addr = start; addr < end; pte++, addr += PAGE_SIZE) {
+   2909 			unsigned long next = addr + PAGE_SIZE;
+   2910 			pte_t ptent = ptep_get(pte);
+   2911 
+   2912 			if ((pte_present(ptent) && pte_uffd(ptent)) ||
+   2913 			    pte_swp_uffd_any(ptent))
+   2914 				continue;
+   2915 			ret = pagemap_scan_output(p->cur_vma_category | PAGE_IS_WRITTEN,
+   2916 						  p, addr, &next);
+   2917 			if (next == addr)
+   2918 				break;
+   2919 			if (~p->arg.flags & PM_SCAN_WP_MATCHING)
+   2920 				continue;
+   2921 			make_uffd_wp_pte(vma, addr, pte, ptent);
+   2922 			if (!flush_end)
+   2923 				start = addr;
+   2924 			flush_end = next;
+   2925 		}
+   2926 		goto flush_and_return;
+   2927 	}
+   2928 
+   2929 	for (addr = start; addr != end; pte++, addr += PAGE_SIZE) {
+>> 2930 		pte_t ptent = ptep_get(pte);
+   2931 		unsigned long categories = p->cur_vma_category |
+   2932 					   pagemap_page_category(p, vma, addr, ptent);
+   2933 		unsigned long next = addr + PAGE_SIZE;
+   2934 
+   2935 		if (!pagemap_scan_is_interesting_page(categories, p))
+   2936 			continue;
+==========================================================================================
+[19] fs/proc/task_mmu.c:3452  函数 gather_pte_stats  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+   3422 #endif
+   3423 
+   3424 static int gather_pte_stats(pmd_t *pmd, unsigned long addr,
+   3425 		unsigned long end, struct mm_walk *walk)
+   3426 {
+   3427 	struct numa_maps *md = walk->private;
+   3428 	struct vm_area_struct *vma = walk->vma;
+   3429 	spinlock_t *ptl;
+   3430 	pte_t *orig_pte;
+   3431 	pte_t *pte;
+   3432 
+   3433 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   3434 	ptl = pmd_trans_huge_lock(pmd, vma);
+   3435 	if (ptl) {
+   3436 		struct page *page;
+   3437 
+   3438 		page = can_gather_numa_stats_pmd(*pmd, vma, addr);
+   3439 		if (page)
+   3440 			gather_stats(page, md, pmd_dirty(*pmd),
+   3441 				     HPAGE_PMD_SIZE/PAGE_SIZE);
+   3442 		spin_unlock(ptl);
+   3443 		return 0;
+   3444 	}
+   3445 #endif
+   3446 	orig_pte = pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
+   3447 	if (!pte) {
+   3448 		walk->action = ACTION_AGAIN;
+   3449 		return 0;
+   3450 	}
+   3451 	do {
+>> 3452 		pte_t ptent = ptep_get(pte);
+   3453 		struct page *page = can_gather_numa_stats(ptent, vma, addr);
+   3454 		if (!page)
+   3455 			continue;
+   3456 		gather_stats(page, md, pte_dirty(ptent), 1);
+   3457 
+   3458 	} while (pte++, addr += PAGE_SIZE, addr != end);
+==========================================================================================
+[20] include/linux/pgtable.h:649  函数 ptep_get_and_clear  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    619 {
+    620 	return 0;
+    621 }
+    622 #endif
+    623 
+    624 #ifndef arch_check_zapped_pte
+    625 static inline void arch_check_zapped_pte(struct vm_area_struct *vma,
+    626 					 pte_t pte)
+    627 {
+    628 }
+    629 #endif
+    630 
+    631 #ifndef arch_check_zapped_pmd
+    632 static inline void arch_check_zapped_pmd(struct vm_area_struct *vma,
+    633 					 pmd_t pmd)
+    634 {
+    635 }
+    636 #endif
+    637 
+    638 #ifndef arch_check_zapped_pud
+    639 static inline void arch_check_zapped_pud(struct vm_area_struct *vma, pud_t pud)
+    640 {
+    641 }
+    642 #endif
+    643 
+    644 #ifndef __HAVE_ARCH_PTEP_GET_AND_CLEAR
+    645 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+    646 				       unsigned long address,
+    647 				       pte_t *ptep)
+    648 {
+>>  649 	pte_t pte = ptep_get(ptep);
+    650 	pte_clear(mm, address, ptep);
+    651 	page_table_check_pte_clear(mm, address, pte);
+    652 	return pte;
+    653 }
+    654 #endif
+    655 
+==========================================================================================
+[21] include/linux/pgtable.h:703  函数 ptep_clear  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    673  * pages that belong to the same folio.  The PTEs are all in the same PMD.
+    674  */
+    675 static inline void clear_young_dirty_ptes(struct vm_area_struct *vma,
+    676 					  unsigned long addr, pte_t *ptep,
+    677 					  unsigned int nr, cydp_t flags)
+    678 {
+    679 	pte_t pte;
+    680 
+    681 	for (;;) {
+    682 		if (flags == CYDP_CLEAR_YOUNG)
+    683 			ptep_test_and_clear_young(vma, addr, ptep);
+    684 		else {
+    685 			pte = ptep_get_and_clear(vma->vm_mm, addr, ptep);
+    686 			if (flags & CYDP_CLEAR_YOUNG)
+    687 				pte = pte_mkold(pte);
+    688 			if (flags & CYDP_CLEAR_DIRTY)
+    689 				pte = pte_mkclean(pte);
+    690 			set_pte_at(vma->vm_mm, addr, ptep, pte);
+    691 		}
+    692 		if (--nr == 0)
+    693 			break;
+    694 		ptep++;
+    695 		addr += PAGE_SIZE;
+    696 	}
+    697 }
+    698 #endif
+    699 
+    700 static inline void ptep_clear(struct mm_struct *mm, unsigned long addr,
+    701 			      pte_t *ptep)
+    702 {
+>>  703 	pte_t pte = ptep_get(ptep);
+    704 
+    705 	pte_clear(mm, addr, ptep);
+    706 	/*
+    707 	 * No need for ptep_get_and_clear(): page table check doesn't care about
+    708 	 * any bits that could have been set by HW concurrently.
+    709 	 */
+==========================================================================================
+[22] include/linux/pgtable.h:1049  函数 ptep_set_wrprotect  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+   1019 			      pte_t *ptep);
+   1020 #endif
+   1021 
+   1022 #ifndef __HAVE_ARCH_PMDP_HUGE_CLEAR_FLUSH
+   1023 extern pmd_t pmdp_huge_clear_flush(struct vm_area_struct *vma,
+   1024 			      unsigned long address,
+   1025 			      pmd_t *pmdp);
+   1026 extern pud_t pudp_huge_clear_flush(struct vm_area_struct *vma,
+   1027 			      unsigned long address,
+   1028 			      pud_t *pudp);
+   1029 #endif
+   1030 
+   1031 #ifndef pte_mkwrite
+   1032 static inline pte_t pte_mkwrite(pte_t pte, struct vm_area_struct *vma)
+   1033 {
+   1034 	return pte_mkwrite_novma(pte);
+   1035 }
+   1036 #endif
+   1037 
+   1038 #if defined(CONFIG_ARCH_WANT_PMD_MKWRITE) && !defined(pmd_mkwrite)
+   1039 static inline pmd_t pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma)
+   1040 {
+   1041 	return pmd_mkwrite_novma(pmd);
+   1042 }
+   1043 #endif
+   1044 
+   1045 #ifndef __HAVE_ARCH_PTEP_SET_WRPROTECT
+   1046 struct mm_struct;
+   1047 static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long address, pte_t *ptep)
+   1048 {
+>> 1049 	pte_t old_pte = ptep_get(ptep);
+   1050 	set_pte_at(mm, address, ptep, pte_wrprotect(old_pte));
+   1051 }
+   1052 #endif
+   1053 
+   1054 #ifndef ptep_try_set
+   1055 /**
+==========================================================================================
+[23] mm/damon/ops-common.c:205  函数 damon_folio_young_one  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    175 {
+    176 	struct rmap_walk_control rwc = {
+    177 		.rmap_one = damon_folio_mkold_one,
+    178 		.anon_lock = folio_lock_anon_vma_read,
+    179 	};
+    180 
+    181 	if (!folio_mapped(folio) || !folio_raw_mapping(folio)) {
+    182 		folio_set_idle(folio);
+    183 		return;
+    184 	}
+    185 
+    186 	if (!folio_trylock(folio))
+    187 		return;
+    188 
+    189 	rmap_walk(folio, &rwc);
+    190 	folio_unlock(folio);
+    191 
+    192 }
+    193 
+    194 static bool damon_folio_young_one(struct folio *folio,
+    195 		struct vm_area_struct *vma, unsigned long addr, void *arg)
+    196 {
+    197 	bool *accessed = arg;
+    198 	DEFINE_FOLIO_VMA_WALK(pvmw, folio, vma, addr, 0);
+    199 	pte_t pte;
+    200 
+    201 	*accessed = false;
+    202 	while (page_vma_mapped_walk(&pvmw)) {
+    203 		addr = pvmw.address;
+    204 		if (pvmw.pte) {
+>>  205 			pte = ptep_get(pvmw.pte);
+    206 
+    207 			/*
+    208 			 * PFN swap PTEs, such as device-exclusive ones, that
+    209 			 * actually map pages are "old" from a CPU perspective.
+    210 			 * The MMU notifier takes care of any device aspects.
+    211 			 */
+==========================================================================================
+[24] mm/kasan/shadow.c:477  函数 kasan_depopulate_vmalloc_pte  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    447 	 * // rest of vmalloc process		<data dependency>
+    448 	 * STORE p, a				LOAD shadow(x+99)
+    449 	 *
+    450 	 * If there is no barrier between the end of unpoisoning the shadow
+    451 	 * and the store of the result to p, the stores could be committed
+    452 	 * in a different order by CPU#0, and CPU#1 could erroneously observe
+    453 	 * poison in the shadow.
+    454 	 *
+    455 	 * We need some sort of barrier between the stores.
+    456 	 *
+    457 	 * In the vmalloc() case, this is provided by a smp_wmb() in
+    458 	 * clear_vm_uninitialized_flag(). In the per-cpu allocator and in
+    459 	 * get_vm_area() and friends, the caller gets shadow allocated but
+    460 	 * doesn't have any pages mapped into the virtual address space that
+    461 	 * has been reserved. Mapping those pages in will involve taking and
+    462 	 * releasing a page-table lock, which will provide the barrier.
+    463 	 */
+    464 
+    465 	return 0;
+    466 }
+    467 
+    468 static int kasan_depopulate_vmalloc_pte(pte_t *ptep, unsigned long addr,
+    469 					void *unused)
+    470 {
+    471 	pte_t pte;
+    472 	int none;
+    473 
+    474 	lazy_mmu_mode_pause();
+    475 
+    476 	spin_lock(&init_mm.page_table_lock);
+>>  477 	pte = ptep_get(ptep);
+    478 	none = pte_none(pte);
+    479 	if (likely(!none))
+    480 		pte_clear(&init_mm, addr, ptep);
+    481 	spin_unlock(&init_mm.page_table_lock);
+    482 
+    483 	if (likely(!none))
+==========================================================================================
+[25] mm/madvise.c:216  函数 swapin_walk_pmd_entry  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    186 	if (vma_flags_test(&new_vma_flags, VMA_HUGEPAGE_BIT))
+    187 		khugepaged_enter_vma(vma, vma_flags_to_legacy(new_vma_flags));
+    188 
+    189 	if (set_new_anon_name)
+    190 		return replace_anon_vma_name(vma, anon_name);
+    191 
+    192 	return 0;
+    193 }
+    194 
+    195 #ifdef CONFIG_SWAP
+    196 static int swapin_walk_pmd_entry(pmd_t *pmd, unsigned long start,
+    197 		unsigned long end, struct mm_walk *walk)
+    198 {
+    199 	struct vm_area_struct *vma = walk->private;
+    200 	struct swap_io_ctx ctx = {};
+    201 	pte_t *ptep = NULL;
+    202 	spinlock_t *ptl;
+    203 	unsigned long addr;
+    204 
+    205 	for (addr = start; addr < end; addr += PAGE_SIZE) {
+    206 		pte_t pte;
+    207 		softleaf_t entry;
+    208 		struct folio *folio;
+    209 
+    210 		if (!ptep++) {
+    211 			ptep = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
+    212 			if (!ptep)
+    213 				break;
+    214 		}
+    215 
+>>  216 		pte = ptep_get(ptep);
+    217 		entry = softleaf_from_pte(pte);
+    218 		if (unlikely(!softleaf_is_swap(entry)))
+    219 			continue;
+    220 
+    221 		pte_unmap_unlock(ptep, ptl);
+    222 		ptep = NULL;
+==========================================================================================
+[26] mm/mlock.c:311  函数 folio_mlock_step  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    281 	    !folio_may_be_lru_cached(folio) || lru_cache_disabled())
+    282 		mlock_folio_batch(fbatch);
+    283 	local_unlock(&mlock_fbatch.lock);
+    284 }
+    285 
+    286 /**
+    287  * munlock_folio - munlock a folio
+    288  * @folio: folio to be munlocked, either normal or a THP head.
+    289  */
+    290 void munlock_folio(struct folio *folio)
+    291 {
+    292 	struct folio_batch *fbatch;
+    293 
+    294 	local_lock(&mlock_fbatch.lock);
+    295 	fbatch = this_cpu_ptr(&mlock_fbatch.fbatch);
+    296 	/*
+    297 	 * folio_test_clear_mlocked(folio) must be left to __munlock_folio(),
+    298 	 * which will check whether the folio is multiply mlocked.
+    299 	 */
+    300 	folio_get(folio);
+    301 	if (!folio_batch_add(fbatch, folio) ||
+    302 	    !folio_may_be_lru_cached(folio) || lru_cache_disabled())
+    303 		mlock_folio_batch(fbatch);
+    304 	local_unlock(&mlock_fbatch.lock);
+    305 }
+    306 
+    307 static inline unsigned int folio_mlock_step(struct folio *folio,
+    308 		pte_t *pte, unsigned long addr, unsigned long end)
+    309 {
+    310 	unsigned int count = (end - addr) >> PAGE_SHIFT;
+>>  311 	pte_t ptent = ptep_get(pte);
+    312 
+    313 	if (!folio_test_large(folio))
+    314 		return 1;
+    315 
+    316 	return folio_pte_batch(folio, pte, ptent, count);
+    317 }
+==========================================================================================
+[27] mm/page_vma_mapped.c:326  函数 page_vma_mapped_walk  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    296 			continue;
+    297 		}
+    298 		if (!map_pte(pvmw, &pmde, &ptl)) {
+    299 			if (!pvmw->pte)
+    300 				goto restart;
+    301 			goto next_pte;
+    302 		}
+    303 this_pte:
+    304 		if (check_pte(pvmw, 1))
+    305 			return true;
+    306 next_pte:
+    307 		do {
+    308 			pvmw->address += PAGE_SIZE;
+    309 			if (pvmw->address >= end)
+    310 				return not_found(pvmw);
+    311 			/* Did we cross page table boundary? */
+    312 			if ((pvmw->address & (PMD_SIZE - PAGE_SIZE)) == 0) {
+    313 				if (pvmw->ptl) {
+    314 					spin_unlock(pvmw->ptl);
+    315 					pvmw->ptl = NULL;
+    316 				}
+    317 				pte_unmap(pvmw->pte);
+    318 				pvmw->pte = NULL;
+    319 				pvmw->flags |= PVMW_PGTABLE_CROSSED;
+    320 				goto restart;
+    321 			}
+    322 			pvmw->pte++;
+    323 			if (!pvmw->ptl)
+    324 				pteval = ptep_get_lockless(pvmw->pte);
+    325 			else
+>>  326 				pteval = ptep_get(pvmw->pte);
+    327 		} while (pte_none(pteval));
+    328 
+    329 		if (!pvmw->ptl) {
+    330 			spin_lock(ptl);
+    331 			if (unlikely(!pmd_same(pmde, pmdp_get_lockless(pvmw->pmd)))) {
+    332 				pte_unmap_unlock(pvmw->pte, ptl);
+==========================================================================================
+[28] mm/ptdump.c:124  函数 ptdump_pte_entry  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+     94 	}
+     95 
+     96 	return 0;
+     97 }
+     98 
+     99 static int ptdump_pmd_entry(pmd_t *pmd, unsigned long addr,
+    100 			    unsigned long next, struct mm_walk *walk)
+    101 {
+    102 	struct ptdump_state *st = walk->private;
+    103 	pmd_t val = pmdp_get(pmd);
+    104 
+    105 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
+    106 	if (pmd_page(val) == virt_to_page(lm_alias(kasan_early_shadow_pte)))
+    107 		return note_kasan_page_table(walk, addr);
+    108 #endif
+    109 
+    110 	if (st->effective_prot_pmd)
+    111 		st->effective_prot_pmd(st, val);
+    112 	if (pmd_leaf(val)) {
+    113 		st->note_page_pmd(st, addr, val);
+    114 		walk->action = ACTION_CONTINUE;
+    115 	}
+    116 
+    117 	return 0;
+    118 }
+    119 
+    120 static int ptdump_pte_entry(pte_t *pte, unsigned long addr,
+    121 			    unsigned long next, struct mm_walk *walk)
+    122 {
+    123 	struct ptdump_state *st = walk->private;
+>>  124 	pte_t val = ptep_get(pte);
+    125 
+    126 	if (st->effective_prot_pte)
+    127 		st->effective_prot_pte(st, val);
+    128 
+    129 	st->note_page_pte(st, addr, val);
+    130 
+==========================================================================================
+[29] mm/rmap.c:972  函数 folio_referenced_one  接口 ptep_get  K2 缺 check result of ptep_get（契约比例 0.903，124 个调用点）
+    942 			 * If page table boundary has been cross, current ptl
+    943 			 * only protect part of ptes.
+    944 			 */
+    945 			if (pvmw.flags & PVMW_PGTABLE_CROSSED)
+    946 				continue;
+    947 
+    948 			/* Restore the mlock which got missed */
+    949 			mlock_vma_folio(folio, vma);
+    950 			page_vma_mapped_walk_done(&pvmw);
+    951 			vma_flags_set(&pra->vma_flags, VMA_LOCKED_BIT);
+    952 			return false; /* To break the loop */
+    953 		}
+    954 
+    955 		/*
+    956 		 * Skip the non-shared swapbacked folio mapped solely by
+    957 		 * the exiting or OOM-reaped process. This avoids redundant
+    958 		 * swap-out followed by an immediate unmap.
+    959 		 */
+    960 		if ((!atomic_read(&vma->vm_mm->mm_users) ||
+    961 		    check_stable_address_space(vma->vm_mm)) &&
+    962 		    folio_test_anon(folio) && folio_test_swapbacked(folio) &&
+    963 		    !folio_maybe_mapped_shared(folio)) {
+    964 			pra->referenced = -1;
+    965 			page_vma_mapped_walk_done(&pvmw);
+    966 			return false;
+    967 		}
+    968 
+    969 		if (pvmw.pte && folio_test_large(folio)) {
+    970 			const unsigned long end_addr = pmd_addr_end(address, vma->vm_end);
+    971 			const unsigned int max_nr = (end_addr - address) >> PAGE_SHIFT;
+>>  972 			pte_t pteval = ptep_get(pvmw.pte);
+    973 
+    974 			nr = folio_pte_batch(folio, pvmw.pte, pteval, max_nr);
+    975 		}
+    976 
+    977 		/*
+    978 		 * When LRU is switching, we don’t know where the surrounding folios
+==========================================================================================
+[30] mm/memory.c:3911  函数 wp_page_reuse  接口 flush_cache_page  K3 缺 ptep_clear_flush after flush_cache_page（契约比例 0.9，10 个调用点）；K3 缺 set_pte_at after flush_cache_page（契约比例 0.9，10 个调用点）
+   3881 }
+   3882 
+   3883 /*
+   3884  * Handle write page faults for pages that can be reused in the current vma
+   3885  *
+   3886  * This can happen either due to the mapping being with the VM_SHARED flag,
+   3887  * or due to us being the last reference standing to the page. In either
+   3888  * case, all we need to do here is to mark the page as writable and update
+   3889  * any related book-keeping.
+   3890  */
+   3891 static inline void wp_page_reuse(struct vm_fault *vmf, struct folio *folio)
+   3892 	__releases(vmf->ptl)
+   3893 {
+   3894 	struct vm_area_struct *vma = vmf->vma;
+   3895 	pte_t entry;
+   3896 
+   3897 	VM_BUG_ON(!(vmf->flags & FAULT_FLAG_WRITE));
+   3898 	VM_WARN_ON(is_zero_pfn(pte_pfn(vmf->orig_pte)));
+   3899 
+   3900 	if (folio) {
+   3901 		VM_BUG_ON(folio_test_anon(folio) &&
+   3902 			  !PageAnonExclusive(vmf->page));
+   3903 		/*
+   3904 		 * Clear the folio's cpupid information as the existing
+   3905 		 * information potentially belongs to a now completely
+   3906 		 * unrelated process.
+   3907 		 */
+   3908 		folio_xchg_last_cpupid(folio, (1 << LAST_CPUPID_SHIFT) - 1);
+   3909 	}
+   3910 
+>> 3911 	flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
+   3912 	entry = pte_mkyoung(vmf->orig_pte);
+   3913 	entry = maybe_mkwrite(pte_mkdirty(entry), vma);
+   3914 	if (ptep_set_access_flags(vma, vmf->address, vmf->pte, entry, 1))
+   3915 		update_mmu_cache_range(vmf, vma, vmf->address, vmf->pte, 1);
+   3916 	pte_unmap_unlock(vmf->pte, vmf->ptl);
+   3917 	count_vm_event(PGREUSE);

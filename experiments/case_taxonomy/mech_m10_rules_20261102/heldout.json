@@ -1,0 +1,18 @@
+{
+ "note": "Researcher's screening of search.json (criteria E3), written before running the rules on the parents. Function = the changed function the rule should flag; for 929fa99b1215 the restore function that copies user SVE state into the task was chosen.",
+ "selected": [
+  {"rule": "R1", "commit": "5475c03fa25f", "arch": "mips", "function": "syscall_trace_enter",
+   "reason": "MIPS: a tracer's skip return value was always overwritten with -ENOSYS; same contract (the preset must not clobber what the tracer set)"},
+  {"rule": "R1", "commit": "69cb2be898be", "arch": "powerpc", "function": "system_call_exception",
+   "reason": "powerpc GENERIC_ENTRY: the out-of-range path returned -ENOSYS after syscall_enter_from_user_mode, overwriting the value set by seccomp/ptrace; same contract"},
+  {"rule": "R2", "commit": "1aa4bb916808", "arch": "x86", "function": "kvm_arch_mmu_enable_log_dirty_pt_masked",
+   "reason": "x86: off-by-one when splitting huge pages while clearing the dirty log left a huge mapping under dirty logging; same contract (page granularity while logging)"},
+  {"rule": "R3", "commit": "929fa99b1215", "arch": "arm64", "function": "restore_sve_fpsimd_context",
+   "reason": "arm64: signal handling must save and flush live FPSIMD/SVE/SME state before manipulating saved state; same contract"}
+ ],
+ "excluded": {
+  "R1": "e057b9477232 (saved x0 vs seccomp), df84fe947089 (seccomp skipped for NO_SYSCALL), b0cfc315ff38 (wrong register r0/r3), 63ded110979b (uprobe syscall number), 249c9b0cd193 (exception vector space)",
+  "R2": "the other 14 are about memcache top-up, max mapping level, NX hugepages, locking, splitting under lock or collapsing after logging, not about mapping granularity while logging",
+  "R3": "the other 22 are about magic numbers, POR/PKRU/XFD/TPIDR2 registers, SVE/SME frame validation, merging, failure resets or other architectures' frame layout"
+ }
+}

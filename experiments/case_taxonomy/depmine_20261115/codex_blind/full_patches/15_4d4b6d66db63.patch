@@ -1,0 +1,124 @@
+commit 4d4b6d66db63ceed399f1fb1a4b24081d2590eb1
+Author:     Ying Huang <huang.ying.caritas@gmail.com>
+AuthorDate: Mon Apr 24 14:54:08 2023 +0800
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Thu Apr 27 13:42:16 2023 -0700
+
+    mm,unmap: avoid flushing TLB in batch if PTE is inaccessible
+    
+    0Day/LKP reported a performance regression for commit 7e12beb8ca2a
+    ("migrate_pages: batch flushing TLB").  In the commit, the TLB flushing
+    during page migration is batched.  So, in try_to_migrate_one(),
+    ptep_clear_flush() is replaced with set_tlb_ubc_flush_pending().  In
+    further investigation, it is found that the TLB flushing can be avoided in
+    ptep_clear_flush() if the PTE is inaccessible.  In fact, we can optimize
+    in similar way for the batched TLB flushing too to improve the
+    performance.
+    
+    So in this patch, we check pte_accessible() before
+    set_tlb_ubc_flush_pending() in try_to_unmap/migrate_one().  Tests show
+    that the benchmark score of the anon-cow-rand-mt test case of
+    vm-scalability test suite can improve up to 2.1% with the patch on a Intel
+    server machine.  The TLB flushing IPI can reduce up to 44.3%.
+    
+    Link: https://lore.kernel.org/oe-lkp/202303192325.ecbaf968-yujie.liu@intel.com
+    Link: https://lore.kernel.org/oe-lkp/ab92aaddf1b52ede15e2c608696c36765a2602c1.camel@intel.com/
+    Link: https://lkml.kernel.org/r/20230424065408.188498-1-ying.huang@intel.com
+    Fixes: 7e12beb8ca2a ("migrate_pages: batch flushing TLB")
+    Signed-off-by: "Huang, Ying" <ying.huang@intel.com>
+    Reported-by: kernel test robot <yujie.liu@intel.com>
+    Reviewed-by: Nadav Amit <namit@vmware.com>
+    Reviewed-by: Xin Hao <xhao@linux.alibaba.com>
+    Cc: Mel Gorman <mgorman@techsingularity.net>
+    Cc: Hugh Dickins <hughd@google.com>
+    Cc: Matthew Wilcox (Oracle) <willy@infradead.org>
+    Cc: David Hildenbrand <david@redhat.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/mm/rmap.c b/mm/rmap.c
+index ba901c416785..19392e090bec 100644
+--- a/mm/rmap.c
++++ b/mm/rmap.c
+@@ -637,20 +637,24 @@ void try_to_unmap_flush_dirty(void)
+  * Bits 16-30 of mm->tlb_flush_batched bit record flushed generations.
+  */
+ #define TLB_FLUSH_BATCH_FLUSHED_SHIFT	16
+ #define TLB_FLUSH_BATCH_PENDING_MASK			\
+ 	((1 << (TLB_FLUSH_BATCH_FLUSHED_SHIFT - 1)) - 1)
+ #define TLB_FLUSH_BATCH_PENDING_LARGE			\
+ 	(TLB_FLUSH_BATCH_PENDING_MASK / 2)
+ 
+-static void set_tlb_ubc_flush_pending(struct mm_struct *mm, bool writable)
++static void set_tlb_ubc_flush_pending(struct mm_struct *mm, pte_t pteval)
+ {
+ 	struct tlbflush_unmap_batch *tlb_ubc = &current->tlb_ubc;
+ 	int batch;
++	bool writable = pte_dirty(pteval);
++
++	if (!pte_accessible(mm, pteval))
++		return;
+ 
+ 	arch_tlbbatch_add_mm(&tlb_ubc->arch, mm);
+ 	tlb_ubc->flush_required = true;
+ 
+ 	/*
+ 	 * Ensure compiler does not re-order the setting of tlb_flush_batched
+ 	 * before the PTE is cleared.
+ 	 */
+@@ -724,17 +728,17 @@ void flush_tlb_batched_pending(struct mm_struct *mm)
+ 		 * If the new TLB flushing is pending during flushing, leave
+ 		 * mm->tlb_flush_batched as is, to avoid losing flushing.
+ 		 */
+ 		atomic_cmpxchg(&mm->tlb_flush_batched, batch,
+ 			       pending | (pending << TLB_FLUSH_BATCH_FLUSHED_SHIFT));
+ 	}
+ }
+ #else
+-static void set_tlb_ubc_flush_pending(struct mm_struct *mm, bool writable)
++static void set_tlb_ubc_flush_pending(struct mm_struct *mm, pte_t pteval)
+ {
+ }
+ 
+ static bool should_defer_flush(struct mm_struct *mm, enum ttu_flags flags)
+ {
+ 	return false;
+ }
+ #endif /* CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH */
+@@ -1575,17 +1579,17 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+ 				 * a remote CPU could still be writing to the folio.
+ 				 * If the entry was previously clean then the
+ 				 * architecture must guarantee that a clear->dirty
+ 				 * transition on a cached TLB entry is written through
+ 				 * and traps if the PTE is unmapped.
+ 				 */
+ 				pteval = ptep_get_and_clear(mm, address, pvmw.pte);
+ 
+-				set_tlb_ubc_flush_pending(mm, pte_dirty(pteval));
++				set_tlb_ubc_flush_pending(mm, pteval);
+ 			} else {
+ 				pteval = ptep_clear_flush(vma, address, pvmw.pte);
+ 			}
+ 		}
+ 
+ 		/*
+ 		 * Now the pte is cleared. If this pte was uffd-wp armed,
+ 		 * we may want to replace a none pte with a marker pte if
+@@ -1956,17 +1960,17 @@ static bool try_to_migrate_one(struct folio *folio, struct vm_area_struct *vma,
+ 				 * a remote CPU could still be writing to the folio.
+ 				 * If the entry was previously clean then the
+ 				 * architecture must guarantee that a clear->dirty
+ 				 * transition on a cached TLB entry is written through
+ 				 * and traps if the PTE is unmapped.
+ 				 */
+ 				pteval = ptep_get_and_clear(mm, address, pvmw.pte);
+ 
+-				set_tlb_ubc_flush_pending(mm, pte_dirty(pteval));
++				set_tlb_ubc_flush_pending(mm, pteval);
+ 			} else {
+ 				pteval = ptep_clear_flush(vma, address, pvmw.pte);
+ 			}
+ 		}
+ 
+ 		/* Set the dirty flag on the folio now the pte is gone. */
+ 		if (pte_dirty(pteval))
+ 			folio_mark_dirty(folio);

@@ -1,0 +1,68 @@
+commit 3f5a238f24d7b75f9efe324d3539ad388f58536e
+Subject: LoongArch: BPF: Sign extend kfunc call arguments
+
+
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 8dc58781b8eb..5352d0c30fb2 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -950,6 +950,22 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			emit_insn(ctx, ldd, REG_TCC, LOONGARCH_GPR_SP, tcc_ptr_off);
+ 		}
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *m;
++			int i;
++
++			m = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!m)
++				return -EINVAL;
++
++			for (i = 0; i < m->nr_args; i++) {
++				u8 reg = regmap[BPF_REG_1 + i];
++				bool sign = m->arg_flags[i] & BTF_FMODEL_SIGNED_ARG;
++
++				emit_abi_ext(ctx, reg, m->arg_size[i], sign);
++			}
++		}
++
+ 		move_addr(ctx, t1, func_addr);
+ 		emit_insn(ctx, jirl, LOONGARCH_GPR_RA, t1, 0);
+ 
+diff --git a/arch/loongarch/net/bpf_jit.h b/arch/loongarch/net/bpf_jit.h
+index 5697158fd164..75b6330030a9 100644
+--- a/arch/loongarch/net/bpf_jit.h
++++ b/arch/loongarch/net/bpf_jit.h
+@@ -88,6 +88,32 @@ static inline void emit_sext_32(struct jit_ctx *ctx, enum loongarch_gpr reg, boo
+ 	emit_insn(ctx, addiw, reg, reg, 0);
+ }
+ 
++/* Emit proper extension according to ABI requirements.
++ * Note that it requires a value of size `size` already resides in register `reg`.
++ */
++static inline void emit_abi_ext(struct jit_ctx *ctx, int reg, u8 size, bool sign)
++{
++	/* ABI requires unsigned char/short to be zero-extended */
++	if (!sign && (size == 1 || size == 2))
++		return;
++
++	switch (size) {
++	case 1:
++		emit_insn(ctx, extwb, reg, reg);
++		break;
++	case 2:
++		emit_insn(ctx, extwh, reg, reg);
++		break;
++	case 4:
++		emit_insn(ctx, addiw, reg, reg, 0);
++		break;
++	case 8:
++		break;
++	default:
++		pr_warn("bpf_jit: invalid size %d for extension\n", size);
++	}
++}
++
+ static inline void move_addr(struct jit_ctx *ctx, enum loongarch_gpr rd, u64 addr)
+ {
+ 	u64 imm_11_0, imm_31_12, imm_51_32, imm_63_52;

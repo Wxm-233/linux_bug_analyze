@@ -1,0 +1,1027 @@
+{
+ "reviewer": "Claude",
+ "date": "2026-11-08",
+ "source": "results/current.json（修订 3 之后）",
+ "total_flags": 30584,
+ "seed": 20261108,
+ "sampled": 40,
+ "counts": {
+  "不是": 38,
+  "判断不了": 2
+ },
+ "suspected_real_ratio": 0.0,
+ "threshold": 0.25,
+ "noise_acceptable": false,
+ "reason_codes": {
+  "preempt": "性质链经过 preempt_schedule*：运行时只在抢占计数降到 0 时才调用，那时已不在原子上下文",
+  "printk": "性质链经过 printk/__warn_printk 到 console：printk 在原子上下文中只 trylock 或推迟输出，不会睡眠",
+  "boot": "原子状态来自 start_kernel 早期关中断阶段：单线程启动期，内核允许此时拿睡眠锁、GFP_KERNEL 分配",
+  "merge": "入口状态由其他调用者合并而来；按源码，标出的这条调用路径上并不处于该原子状态",
+  "path": "依赖运行时条件，静态分析没有建模（gfp 是否允许阻塞、futex 操作码、OOM 慢路径等）",
+  "lockmodel": "锁/解锁配对建模不准：调用点实际在解锁之后",
+  "async": "被调者是 smp_call_function_single_async，不等待 IPI 完成，不属于“发 IPI 并等待”",
+  "taskwork": "riscv 选了 HAVE_POSIX_CPU_TIMERS_TASK_WORK，RT 下 CPU 定时器到期在任务上下文处理"
+ },
+ "reason_counts": {
+  "path": 4,
+  "lockmodel": 1,
+  "printk": 9,
+  "boot": 12,
+  "preempt": 11,
+  "merge": 6,
+  "taskwork": 1,
+  "async": 1
+ },
+ "items": [
+  {
+   "index": 2,
+   "kind": "S",
+   "caller": "xa_store_bh",
+   "site": [
+    "include/linux/xarray.h",
+    596
+   ],
+   "callee": "__xa_store",
+   "witness": [
+    "__xa_store",
+    "__xas_nomem",
+    "kmem_cache_alloc_lru_noprof",
+    "slab_alloc_node",
+    "___slab_alloc",
+    "new_slab",
+    "allocate_slab",
+    "alloc_slab_page"
+   ],
+   "origin": "local",
+   "verdict": "不是",
+   "reasons": [
+    "path"
+   ],
+   "note": "xa_store_bh 持 xa_lock_bh；__xas_nomem 只在 gfp 允许阻塞时先解锁再分配"
+  },
+  {
+   "index": 19,
+   "kind": "S",
+   "caller": "kernel_signal_stop",
+   "site": [
+    "include/linux/sched/signal.h",
+    311
+   ],
+   "callee": "schedule",
+   "witness": [
+    "schedule"
+   ],
+   "origin": "local",
+   "verdict": "不是",
+   "reasons": [
+    "lockmodel"
+   ],
+   "note": "kernel_signal_stop 在 spin_unlock_irq 之后才 schedule()"
+  },
+  {
+   "index": 483,
+   "kind": "S",
+   "caller": "bpf_async_irq_worker",
+   "site": [
+    "kernel/bpf/helpers.c",
+    1678
+   ],
+   "callee": "kfree_nolock",
+   "witness": [
+    "kfree_nolock",
+    "__warn_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "console_unlock",
+    "__console_flush_and_unlock",
+    "console_flush_all"
+   ],
+   "origin": "local",
+   "verdict": "不是",
+   "reasons": [
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 2659,
+   "kind": "R",
+   "caller": "sched_init",
+   "site": [
+    "kernel/sched/core.c",
+    9100
+   ],
+   "callee": "fair_server_init",
+   "witness": [
+    "fair_server_init",
+    "init_dl_entity",
+    "init_dl_task_timer",
+    "hrtimer_setup",
+    "__hrtimer_setup",
+    "hrtimer_clockid_to_base",
+    "__warn_printk",
+    "warn_rcu_exit"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot",
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 2697,
+   "kind": "I",
+   "caller": "workqueue_init_early",
+   "site": [
+    "kernel/workqueue.c",
+    8179
+   ],
+   "callee": "_kzalloc_noprof",
+   "witness": [
+    "_kzalloc_noprof",
+    "_kmalloc_noprof",
+    "__kmalloc_large_noprof",
+    "___kmalloc_large_node",
+    "__alloc_frozen_pages_noprof",
+    "__alloc_pages_slowpath",
+    "__alloc_pages_may_oom",
+    "out_of_memory"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 3576,
+   "kind": "R",
+   "caller": "task_tgid_nr_ns",
+   "site": [
+    "include/linux/pid.h",
+    293
+   ],
+   "callee": "__task_pid_nr_ns",
+   "witness": [
+    "__task_pid_nr_ns",
+    "rcu_read_lock",
+    "rcu_is_watching",
+    "preempt_schedule_notrace",
+    "__schedule",
+    "context_switch",
+    "finish_task_switch",
+    "cgroup_task_dead"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 6620,
+   "kind": "I",
+   "caller": "detach_dying_workers",
+   "site": [
+    "kernel/workqueue.c",
+    2959
+   ],
+   "callee": "detach_worker",
+   "witness": [
+    "detach_worker",
+    "unbind_worker",
+    "set_cpus_allowed_ptr",
+    "__set_cpus_allowed_ptr",
+    "__set_cpus_allowed_ptr_locked",
+    "affine_move_task",
+    "preempt_schedule",
+    "preempt_schedule_common"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 7310,
+   "kind": "I",
+   "caller": "filemap_add_folio",
+   "site": [
+    "mm/filemap.c",
+    988
+   ],
+   "callee": "folio_add_lru",
+   "witness": [
+    "folio_add_lru",
+    "__folio_batch_add_and_move",
+    "preempt_schedule",
+    "preempt_schedule_common",
+    "__schedule",
+    "hrtick_schedule_exit",
+    "hrtick_cond_restart",
+    "hrtimer_start"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 8632,
+   "kind": "S",
+   "caller": "shrinker_alloc",
+   "site": [
+    "mm/shrinker.c",
+    709
+   ],
+   "callee": "shrinker_memcg_alloc",
+   "witness": [
+    "shrinker_memcg_alloc",
+    "class_mutex_constructor",
+    "mutex_lock"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": "kvfree_rcu_init 在 start_kernel 开中断之前"
+  },
+  {
+   "index": 9738,
+   "kind": "R",
+   "caller": "kvm_riscv_gstage_op_pte",
+   "site": [
+    "arch/riscv/kvm/gstage.c",
+    403
+   ],
+   "callee": "put_page",
+   "witness": [
+    "put_page",
+    "folio_put",
+    "__folio_put",
+    "free_huge_folio",
+    "_raw_spin_lock_irqsave"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "merge"
+   ],
+   "note": "KVM 页表页不是 huge folio；中断状态来自合并"
+  },
+  {
+   "index": 9771,
+   "kind": "R",
+   "caller": "kvm_pmu_release_perf_event",
+   "site": [
+    "arch/riscv/kvm/vcpu_pmu.c",
+    86
+   ],
+   "callee": "perf_event_disable",
+   "witness": [
+    "perf_event_disable",
+    "perf_event_ctx_unlock",
+    "put_ctx",
+    "wake_up_var",
+    "__wake_up_bit",
+    "__wake_up",
+    "__wake_up_common_lock",
+    "_raw_spin_lock_irqsave"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "merge"
+   ],
+   "note": "kvm_arch_vcpu_ioctl_run 循环里 kvm_riscv_check_vcpu_requests 在 local_irq_disable 之前（vcpu.c:948 对 961）"
+  },
+  {
+   "index": 10727,
+   "kind": "S",
+   "caller": "init_cpu_worker_pool",
+   "site": [
+    "kernel/workqueue.c",
+    8126
+   ],
+   "callee": "worker_pool_assign_id",
+   "witness": [
+    "worker_pool_assign_id",
+    "idr_alloc",
+    "idr_alloc_u32",
+    "idr_get_free",
+    "radix_tree_node_alloc",
+    "kmem_cache_alloc_noprof",
+    "slab_alloc_node",
+    "___slab_alloc"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 11006,
+   "kind": "I",
+   "caller": "cgroup_add_cftypes",
+   "site": [
+    "kernel/cgroup/cgroup.c",
+    4743
+   ],
+   "callee": "cgroup_unlock",
+   "witness": [
+    "cgroup_unlock",
+    "mutex_unlock",
+    "__mutex_unlock_slowpath",
+    "wake_up_process",
+    "try_to_wake_up",
+    "select_task_rq",
+    "select_fallback_rq",
+    "set_cpus_allowed_force"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 12238,
+   "kind": "R",
+   "caller": "mm_free_pgd",
+   "site": [
+    "kernel/fork.c",
+    591
+   ],
+   "callee": "pgd_free",
+   "witness": [
+    "pgd_free",
+    "__pgd_free",
+    "pagetable_dtor_free",
+    "pagetable_free",
+    "__pagetable_free",
+    "__free_pages",
+    "___free_pages",
+    "__free_frozen_pages"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "merge"
+   ],
+   "note": "源头 kthread_unuse_mm 在 task_unlock 之后才 mmdrop（kthread.c:1684/1686）"
+  },
+  {
+   "index": 12275,
+   "kind": "R",
+   "caller": "uprobe_clear_state",
+   "site": [
+    "kernel/events/uprobes.c",
+    1828
+   ],
+   "callee": "kfree",
+   "witness": [
+    "kfree",
+    "slab_free",
+    "__slab_free",
+    "_raw_spin_lock_irqsave"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "merge"
+   ],
+   "note": "perf_event_addr_filters_apply 在 raw_spin_unlock_irqrestore 之后才 mmput（core.c:11985/11990）"
+  },
+  {
+   "index": 12638,
+   "kind": "R",
+   "caller": "__futex_wait",
+   "site": [
+    "kernel/futex/waitwake.c",
+    717
+   ],
+   "callee": "futex_wait_setup",
+   "witness": [
+    "futex_wait_setup",
+    "futex_q_lock",
+    "spin_lock"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "path"
+   ],
+   "note": "退出路径 mm_release 经 do_futex 发的是 FUTEX_WAKE，不会走到 wait"
+  },
+  {
+   "index": 12847,
+   "kind": "I",
+   "caller": "__kmalloc_large_node_noprof",
+   "site": [
+    "mm/slub.c",
+    5385
+   ],
+   "callee": "___kmalloc_large_node",
+   "witness": [
+    "___kmalloc_large_node",
+    "__alloc_frozen_pages_noprof",
+    "__alloc_pages_slowpath",
+    "__alloc_pages_may_oom",
+    "out_of_memory",
+    "oom_kill_process",
+    "__oom_kill_process",
+    "mmdrop"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "path",
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 13224,
+   "kind": "R",
+   "caller": "copy_cgroup_ns",
+   "site": [
+    "kernel/cgroup/namespace.c",
+    72
+   ],
+   "callee": "spin_lock_irq",
+   "witness": [
+    "spin_lock_irq"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 13916,
+   "kind": "R",
+   "caller": "posixtimer_send_sigqueue",
+   "site": [
+    "kernel/signal.c",
+    2006
+   ],
+   "callee": "prepare_signal",
+   "witness": [
+    "prepare_signal",
+    "task_clear_jobctl_pending",
+    "task_clear_jobctl_trapping",
+    "wake_up_bit",
+    "__wake_up_bit",
+    "__wake_up",
+    "__wake_up_common_lock",
+    "_raw_spin_lock_irqsave"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "taskwork"
+   ],
+   "note": "arch/riscv/Kconfig:197"
+  },
+  {
+   "index": 13933,
+   "kind": "I",
+   "caller": "hrtimer_start_range_ns_user",
+   "site": [
+    "kernel/time/hrtimer.c",
+    1604
+   ],
+   "callee": "hrtimer_start_range_ns_common",
+   "witness": [
+    "hrtimer_start_range_ns_common",
+    "__hrtimer_start_range_ns",
+    "smp_call_function_single_async"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "async"
+   ],
+   "note": ""
+  },
+  {
+   "index": 13934,
+   "kind": "R",
+   "caller": "hrtimer_start_range_ns_user",
+   "site": [
+    "kernel/time/hrtimer.c",
+    1604
+   ],
+   "callee": "hrtimer_start_range_ns_common",
+   "witness": [
+    "hrtimer_start_range_ns_common",
+    "__hrtimer_start_range_ns",
+    "__hrtimer_cb_get_time",
+    "__warn_printk",
+    "warn_rcu_exit",
+    "preempt_schedule_notrace",
+    "__schedule",
+    "context_switch"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 14165,
+   "kind": "S",
+   "caller": "rb_allocate_cpu_buffer",
+   "site": [
+    "kernel/trace/ring_buffer.c",
+    2666
+   ],
+   "callee": "_printk",
+   "witness": [
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "console_unlock",
+    "__console_flush_and_unlock",
+    "console_flush_all",
+    "console_flush_one_record"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot",
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 14764,
+   "kind": "S",
+   "caller": "drain_all_pages",
+   "site": [
+    "mm/page_alloc.c",
+    2761
+   ],
+   "callee": "__drain_all_pages",
+   "witness": [
+    "__drain_all_pages",
+    "mutex_lock"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "path"
+   ],
+   "note": "直接回收只在 gfp 允许阻塞时进入"
+  },
+  {
+   "index": 15309,
+   "kind": "S",
+   "caller": "shrinker_unit_alloc",
+   "site": [
+    "mm/shrinker.c",
+    52
+   ],
+   "callee": "shrinker_unit_free",
+   "witness": [
+    "shrinker_unit_free",
+    "kfree",
+    "free_large_kmalloc",
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "console_unlock"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot",
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 17981,
+   "kind": "I",
+   "caller": "swiotlb_init",
+   "site": [
+    "kernel/dma/swiotlb.c",
+    538
+   ],
+   "callee": "swiotlb_init_remap",
+   "witness": [
+    "swiotlb_init_remap",
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "preempt_schedule",
+    "preempt_schedule_common",
+    "__schedule"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot",
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 18165,
+   "kind": "S",
+   "caller": "register_trace_event",
+   "site": [
+    "kernel/trace/trace_output.c",
+    886
+   ],
+   "callee": "down_write",
+   "witness": [
+    "down_write"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 18534,
+   "kind": "S",
+   "caller": "___kmalloc_large_node",
+   "site": [
+    "mm/slub.c",
+    5348
+   ],
+   "callee": "kmalloc_fix_flags",
+   "witness": [
+    "kmalloc_fix_flags",
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "console_unlock",
+    "__console_flush_and_unlock",
+    "console_flush_all"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 21899,
+   "kind": "S",
+   "caller": "swap_dup_entries_cluster",
+   "site": [
+    "mm/swapfile.c",
+    1724
+   ],
+   "callee": "__swap_cluster_put_entry",
+   "witness": [
+    "__swap_cluster_put_entry",
+    "swap_extend_table_try_free",
+    "kfree",
+    "free_large_kmalloc",
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit"
+   ],
+   "origin": "local",
+   "verdict": "不是",
+   "reasons": [
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 21955,
+   "kind": "R",
+   "caller": "balance_dirty_pages_ratelimited_flags",
+   "site": [
+    "mm/page-writeback.c",
+    2083
+   ],
+   "callee": "wb_put",
+   "witness": [
+    "wb_put",
+    "wb_put_many",
+    "percpu_ref_put_many",
+    "rcu_read_lock",
+    "rcu_is_watching",
+    "preempt_schedule_notrace",
+    "__schedule",
+    "context_switch"
+   ],
+   "origin": "local",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 22646,
+   "kind": "S",
+   "caller": "put_cred_rcu",
+   "site": [
+    "kernel/cred.c",
+    45
+   ],
+   "callee": "_printk",
+   "witness": [
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "console_unlock",
+    "__console_flush_and_unlock",
+    "console_flush_all",
+    "console_flush_one_record"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 22929,
+   "kind": "R",
+   "caller": "migration_entry_wait_huge",
+   "site": [
+    "mm/migrate.c",
+    556
+   ],
+   "callee": "hugetlb_vma_unlock_read",
+   "witness": [
+    "hugetlb_vma_unlock_read",
+    "up_read",
+    "__up_read",
+    "preempt_schedule",
+    "preempt_schedule_common",
+    "__schedule",
+    "context_switch",
+    "finish_task_switch"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 24979,
+   "kind": "I",
+   "caller": "charge_memcg",
+   "site": [
+    "mm/memcontrol.c",
+    5212
+   ],
+   "callee": "obj_cgroup_put",
+   "witness": [
+    "obj_cgroup_put",
+    "percpu_ref_put",
+    "percpu_ref_put_many",
+    "rcu_read_lock",
+    "rcu_is_watching",
+    "preempt_schedule_notrace",
+    "__schedule",
+    "hrtick_schedule_exit"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 25805,
+   "kind": "I",
+   "caller": "alloc_debug_processing",
+   "site": [
+    "mm/slub.c",
+    1782
+   ],
+   "callee": "slab_fix",
+   "witness": [
+    "slab_fix",
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "preempt_schedule",
+    "preempt_schedule_common",
+    "__schedule"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt",
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 25855,
+   "kind": "R",
+   "caller": "swap_cluster_alloc_table",
+   "site": [
+    "mm/swapfile.c",
+    460
+   ],
+   "callee": "folio_alloc_noprof",
+   "witness": [
+    "folio_alloc_noprof",
+    "__folio_alloc_node_noprof",
+    "__folio_alloc_noprof",
+    "__alloc_pages_noprof",
+    "__alloc_frozen_pages_noprof",
+    "__free_frozen_pages",
+    "free_one_page",
+    "_raw_spin_lock_irqsave"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "merge"
+   ],
+   "note": "swap_cluster_alloc_table 的 gfp 由调用者给，最多持 spinlock_t 的 ci->lock，不是 raw 锁"
+  },
+  {
+   "index": 26749,
+   "kind": "R",
+   "caller": "setup_trace_scratch",
+   "site": [
+    "kernel/trace/trace.c",
+    8408
+   ],
+   "callee": "_kzalloc_noprof",
+   "witness": [
+    "_kzalloc_noprof",
+    "_kmalloc_noprof",
+    "__kmalloc_cache_noprof",
+    "slab_alloc_node",
+    "___slab_alloc",
+    "alloc_single_from_new_slab",
+    "_raw_spin_lock_irqsave"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "boot"
+   ],
+   "note": ""
+  },
+  {
+   "index": 27991,
+   "kind": "I",
+   "caller": "unmap_hugepage_range",
+   "site": [
+    "mm/hugetlb.c",
+    5410
+   ],
+   "callee": "__unmap_hugepage_range",
+   "witness": [
+    "__unmap_hugepage_range",
+    "huge_pmd_unshare_flush",
+    "tlb_flush_unshared_tables",
+    "tlb_remove_table_sync_one",
+    "smp_call_function"
+   ],
+   "origin": "entry",
+   "verdict": "判断不了",
+   "reasons": [],
+   "note": "没查清 hugetlb 缺页路径上“持 spinlock_t 且关中断”的状态从哪个调用者传来，没法确认或排除"
+  },
+  {
+   "index": 29333,
+   "kind": "I",
+   "caller": "swap_vma_readahead",
+   "site": [
+    "mm/swap_state.c",
+    964
+   ],
+   "callee": "folio_put",
+   "witness": [
+    "folio_put",
+    "__folio_put",
+    "free_huge_folio",
+    "hugepage_subpool_put_pages",
+    "unlock_or_release_subpool",
+    "hugetlb_acct_memory",
+    "return_unused_surplus_pages",
+    "update_and_free_pages_bulk"
+   ],
+   "origin": "entry",
+   "verdict": "判断不了",
+   "reasons": [],
+   "note": "free_huge_folio 在 !in_task() 时推迟到工作队列；但标出的状态来源没查清"
+  },
+  {
+   "index": 29355,
+   "kind": "R",
+   "caller": "__folio_lock_or_retry",
+   "site": [
+    "mm/filemap.c",
+    1783
+   ],
+   "callee": "release_fault_lock",
+   "witness": [
+    "release_fault_lock",
+    "mmap_read_unlock",
+    "up_read",
+    "__up_read",
+    "preempt_schedule",
+    "preempt_schedule_common",
+    "__schedule",
+    "context_switch"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "preempt"
+   ],
+   "note": ""
+  },
+  {
+   "index": 29661,
+   "kind": "I",
+   "caller": "rcu_dump_cpu_stacks",
+   "site": [
+    "kernel/rcu/tree_stall.h",
+    406
+   ],
+   "callee": "__printk_deferred_exit",
+   "witness": [
+    "__printk_deferred_exit",
+    "__cant_migrate",
+    "_printk",
+    "vprintk",
+    "vprintk_default",
+    "vprintk_emit",
+    "preempt_schedule",
+    "preempt_schedule_common"
+   ],
+   "origin": "local",
+   "verdict": "不是",
+   "reasons": [
+    "preempt",
+    "printk"
+   ],
+   "note": ""
+  },
+  {
+   "index": 29841,
+   "kind": "I",
+   "caller": "zap_pte_range",
+   "site": [
+    "mm/memory.c",
+    2115
+   ],
+   "callee": "__pte_free_tlb",
+   "witness": [
+    "__pte_free_tlb",
+    "tlb_remove_ptdesc",
+    "tlb_remove_table",
+    "tlb_table_invalidate",
+    "tlb_flush_mmu_tlbonly",
+    "tlb_flush",
+    "flush_tlb_mm_range",
+    "__flush_tlb_range"
+   ],
+   "origin": "entry",
+   "verdict": "不是",
+   "reasons": [
+    "merge"
+   ],
+   "note": "源头 zap_pages 只持 mutex 和 mmap_read_lock（arena.c:810–838），没关中断"
+  }
+ ]
+}

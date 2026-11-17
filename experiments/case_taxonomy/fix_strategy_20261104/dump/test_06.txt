@@ -1,0 +1,727 @@
+##### B485 a60b990798eb PCI/MSI: Handle lack of irqdomain gracefully
+样本集标签：M1 K3 S0 掩盖1；对应物：drivers/pci/msi/msi.c:pci_msi_setup_msi_irqs（无父域时走旧式回退并告警）；理由：公共PCI/MSI假设没有MSI父域时可走旧式回退，RISC-V用层次化中断域不实现该回退
+--- 说明 ---
+PCI/MSI: Handle lack of irqdomain gracefully
+Alexandre observed a warning emitted from pci_msi_setup_msi_irqs() on a
+RISCV platform which does not provide PCI/MSI support:
+ WARNING: CPU: 1 PID: 1 at drivers/pci/msi/msi.h:121 pci_msi_setup_msi_irqs+0x2c/0x32
+ __pci_enable_msix_range+0x30c/0x596
+ pci_msi_setup_msi_irqs+0x2c/0x32
+ pci_alloc_irq_vectors_affinity+0xb8/0xe2
+RISCV uses hierarchical interrupt domains and correctly does not implement
+the legacy fallback. The warning triggers from the legacy fallback stub.
+That warning is bogus as the PCI/MSI layer knows whether a PCI/MSI parent
+domain is associated with the device or not. There is a check for MSI-X,
+which has a legacy assumption. But that legacy fallback assumption is only
+valid when legacy support is enabled, but otherwise the check should simply
+return -ENOTSUPP.
+--- 改动 ---
+diff --git a/drivers/pci/msi/irqdomain.c b/drivers/pci/msi/irqdomain.c
+index 569125726b3e..d7ba8795d60f 100644
+--- a/drivers/pci/msi/irqdomain.c
++++ b/drivers/pci/msi/irqdomain.c
+@@ -350,8 +350,11 @@ bool pci_msi_domain_supports(struct pci_dev *pdev, unsigned int feature_mask,
+ 
+ 	domain = dev_get_msi_domain(&pdev->dev);
+ 
+-	if (!domain || !irq_domain_is_hierarchy(domain))
+-		return mode == ALLOW_LEGACY;
++	if (!domain || !irq_domain_is_hierarchy(domain)) {
++		if (IS_ENABLED(CONFIG_PCI_MSI_ARCH_FALLBACKS))
++			return mode == ALLOW_LEGACY;
++		return false;
++	}
+ 
+ 	if (!irq_domain_is_msi_parent(domain)) {
+ 		/*
+diff --git a/drivers/pci/msi/msi.c b/drivers/pci/msi/msi.c
+index 3a45879d85db..2f647cac4cae 100644
+--- a/drivers/pci/msi/msi.c
++++ b/drivers/pci/msi/msi.c
+@@ -433,6 +433,10 @@ int __pci_enable_msi_range(struct pci_dev *dev, int minvec, int maxvec,
+ 	if (WARN_ON_ONCE(dev->msi_enabled))
+ 		return -EINVAL;
+ 
++	/* Test for the availability of MSI support */
++	if (!pci_msi_domain_supports(dev, 0, ALLOW_LEGACY))
++		return -ENOTSUPP;
++
+ 	nvec = pci_msi_vec_count(dev);
+ 	if (nvec < 0)
+ 		return nvec;
+
+##### B492 69146a8c893f ubi: ubi_get_ec_info: Fix compiling error 'cast specifies array type'
+样本集标签：M10 K2 S1 掩盖2；对应物：arch/arm64/include/asm/memory.h:untagged_addr；理由：RISC-V的untagged_addr对数组参数强制转换报错，其他架构不报
+--- 说明 ---
+ubi: ubi_get_ec_info: Fix compiling error 'cast specifies array type'
+On risc V platform, there is a type conversion for the return value
+(unsigned long type) of __untagged_addr_remote() in function
+untagged_addr(). The compiler will complain when the parameter 'addr'
+is an array type:
+  arch/riscv/include/asm/uaccess.h:33:9: error: cast specifies array type
+  (__force  __typeof__(addr))__untagged_addr_remote(current->mm, __addr)
+Fix it by converting the input parameter as a pointer.
+Fixes: 01099f635a4c ("ubi: Implement ioctl for detailed erase counters")
+Reported-by: kernel test robot <lkp@intel.com>
+Closes: https://lore.kernel.org/oe-kbuild-all/202501191405.WYnmdL0U-lkp@intel.com/
+Signed-off-by: Zhihao Cheng <chengzhihao1@huawei.com>
+Signed-off-by: Richard Weinberger <richard@nod.at>
+--- 改动 ---
+diff --git a/drivers/mtd/ubi/cdev.c b/drivers/mtd/ubi/cdev.c
+index 4c3e4edb6853..b700a0efaa93 100644
+--- a/drivers/mtd/ubi/cdev.c
++++ b/drivers/mtd/ubi/cdev.c
+@@ -851,7 +851,8 @@ static int ubi_get_ec_info(struct ubi_device *ubi, struct ubi_ecinfo_req __user
+ 		end_peb = ubi->peb_count;
+ 
+ 	/* Check access rights before filling erase_counters array */
+-	if (!access_ok(ureq->erase_counters, (end_peb-req.start) * sizeof(int32_t)))
++	if (!access_ok((void __user *)ureq->erase_counters,
++		       (end_peb-req.start) * sizeof(int32_t)))
+ 		return -EFAULT;
+ 
+ 	/* Fill erase counter array */
+
+##### B494 68cb0139fec8 cpuidle: Init cpuidle only for present CPUs
+样本集标签：M7 K2 S2 掩盖2；对应物：drivers/cpuidle/cpuidle-psci.c（同样按possible遍历）；理由：cpuidle驱动按possible CPU初始化而CPU设备只按present注册；nosmp时出错
+--- 说明 ---
+cpuidle: Init cpuidle only for present CPUs
+for_each_possible_cpu() is currently used to initialize cpuidle
+in below cpuidle drivers:
+  drivers/cpuidle/cpuidle-arm.c
+  drivers/cpuidle/cpuidle-big_little.c
+  drivers/cpuidle/cpuidle-psci.c
+  drivers/cpuidle/cpuidle-qcom-spm.c
+  drivers/cpuidle/cpuidle-riscv-sbi.c
+However, in cpu_dev_register_generic(), for_each_present_cpu()
+is used to register CPU devices which means the CPU devices are
+only registered for present CPUs and not all possible CPUs.
+With nosmp or maxcpus=0, only the boot CPU is present, lead
+to the failure:
+  |  Failed to register cpuidle device for cpu1
+--- 改动 ---
+diff --git a/drivers/cpuidle/cpuidle-arm.c b/drivers/cpuidle/cpuidle-arm.c
+index caba6f4bb1b7..e044fefdb816 100644
+--- a/drivers/cpuidle/cpuidle-arm.c
++++ b/drivers/cpuidle/cpuidle-arm.c
+@@ -137,9 +137,9 @@ static int __init arm_idle_init_cpu(int cpu)
+ /*
+  * arm_idle_init - Initializes arm cpuidle driver
+  *
+- * Initializes arm cpuidle driver for all CPUs, if any CPU fails
+- * to register cpuidle driver then rollback to cancel all CPUs
+- * registration.
++ * Initializes arm cpuidle driver for all present CPUs, if any
++ * CPU fails to register cpuidle driver then rollback to cancel
++ * all CPUs registration.
+  */
+ static int __init arm_idle_init(void)
+ {
+@@ -147,7 +147,7 @@ static int __init arm_idle_init(void)
+ 	struct cpuidle_driver *drv;
+ 	struct cpuidle_device *dev;
+ 
+-	for_each_possible_cpu(cpu) {
++	for_each_present_cpu(cpu) {
+ 		ret = arm_idle_init_cpu(cpu);
+ 		if (ret)
+ 			goto out_fail;
+diff --git a/drivers/cpuidle/cpuidle-big_little.c b/drivers/cpuidle/cpuidle-big_little.c
+index 74972deda0ea..4abba42fcc31 100644
+--- a/drivers/cpuidle/cpuidle-big_little.c
++++ b/drivers/cpuidle/cpuidle-big_little.c
+@@ -148,7 +148,7 @@ static int __init bl_idle_driver_init(struct cpuidle_driver *drv, int part_id)
+ 	if (!cpumask)
+ 		return -ENOMEM;
+ 
+-	for_each_possible_cpu(cpu)
++	for_each_present_cpu(cpu)
+ 		if (smp_cpuid_part(cpu) == part_id)
+ 			cpumask_set_cpu(cpu, cpumask);
+ 
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index 2562dc001fc1..a4594c3d6562 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -400,7 +400,7 @@ static int psci_idle_init_cpu(struct device *dev, int cpu)
+ /*
+  * psci_idle_probe - Initializes PSCI cpuidle driver
+  *
+- * Initializes PSCI cpuidle driver for all CPUs, if any CPU fails
++ * Initializes PSCI cpuidle driver for all present CPUs, if any CPU fails
+  * to register cpuidle driver then rollback to cancel all CPUs
+  * registration.
+  */
+@@ -410,7 +410,7 @@ static int psci_cpuidle_probe(struct platform_device *pdev)
+ 	struct cpuidle_driver *drv;
+ 	struct cpuidle_device *dev;
+ 
+-	for_each_possible_cpu(cpu) {
++	for_each_present_cpu(cpu) {
+ 		ret = psci_idle_init_cpu(&pdev->dev, cpu);
+ 		if (ret)
+ 			goto out_fail;
+diff --git a/drivers/cpuidle/cpuidle-qcom-spm.c b/drivers/cpuidle/cpuidle-qcom-spm.c
+index 3ab240e0e122..5f386761b156 100644
+--- a/drivers/cpuidle/cpuidle-qcom-spm.c
++++ b/drivers/cpuidle/cpuidle-qcom-spm.c
+@@ -135,7 +135,7 @@ static int spm_cpuidle_drv_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return dev_err_probe(&pdev->dev, ret, "set warm boot addr failed");
+ 
+-	for_each_possible_cpu(cpu) {
++	for_each_present_cpu(cpu) {
+ 		ret = spm_cpuidle_register(&pdev->dev, cpu);
+ 		if (ret && ret != -ENODEV) {
+ 			dev_err(&pdev->dev,
+diff --git a/drivers/cpuidle/cpuidle-riscv-sbi.c b/drivers/cpuidle/cpuidle-riscv-sbi.c
+index 0c92a628bbd4..0fe1ece9fbdc 100644
+--- a/drivers/cpuidle/cpuidle-riscv-sbi.c
++++ b/drivers/cpuidle/cpuidle-riscv-sbi.c
+@@ -529,8 +529,8 @@ static int sbi_cpuidle_probe(struct platform_device *pdev)
+ 			return ret;
+ 	}
+ 
+-	/* Initialize CPU idle driver for each CPU */
+-	for_each_possible_cpu(cpu) {
++	/* Initialize CPU idle driver for each present CPU */
++	for_each_present_cpu(cpu) {
+ 		ret = sbi_cpuidle_init_cpu(&pdev->dev, cpu);
+ 		if (ret) {
+ 			pr_debug("HART%ld: idle driver init failed\n",
+
+##### B498 e9d86b8e17e7 scripts: Do not strip .rela.dyn section
+样本集标签：M1 K3 S3 掩盖1；对应物：scripts/Makefile.vmlinux（剥离.rela.dyn）；理由：公共构建剥离了RISC-V可重定位内核运行时需要的.rela.dyn，kexec无法加载
+--- 说明 ---
+scripts: Do not strip .rela.dyn section
+The .rela.dyn section contains runtime relocations and is only emitted
+for a relocatable kernel.
+riscv uses this section to relocate the kernel at runtime but that section
+is stripped from vmlinux. That prevents kexec to successfully load vmlinux
+since it does not contain the relocations info needed.
+Fixes: 559d1e45a16d ("riscv: Use --emit-relocs in order to move .rela.dyn in init")
+Tested-by: Björn Töpel <bjorn@rivosinc.com>
+Reviewed-by: Björn Töpel <bjorn@rivosinc.com>
+Acked-by: Ard Biesheuvel <ardb@kernel.org>
+Link: https://lore.kernel.org/r/20250408072851.90275-1-alexghiti@rivosinc.com
+Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+--- 改动 ---
+diff --git a/scripts/Makefile.vmlinux b/scripts/Makefile.vmlinux
+index b0a6cd5b818c..85d60d986401 100644
+--- a/scripts/Makefile.vmlinux
++++ b/scripts/Makefile.vmlinux
+@@ -13,7 +13,7 @@ ifdef CONFIG_ARCH_VMLINUX_NEEDS_RELOCS
+ vmlinux-final := vmlinux.unstripped
+ 
+ quiet_cmd_strip_relocs = RSTRIP  $@
+-      cmd_strip_relocs = $(OBJCOPY) --remove-section='.rel*' $< $@
++      cmd_strip_relocs = $(OBJCOPY) --remove-section='.rel*' --remove-section=!'.rel*.dyn' $< $@
+ 
+ vmlinux: $(vmlinux-final) FORCE
+ 	$(call if_changed,strip_relocs)
+
+##### B506 5e2ff240b31a iommu: Clear the freelist after iommu_put_pages_list()
+样本集标签：M8 K3 S0 掩盖0；对应物：drivers/iommu/iommu-pages.c:iommu_put_pages_list（不再逐项删除）；理由：公共iommu改动后调用者须自行重置链表，RISC-V IOMMU的栈上链表未跟上
+--- 说明 ---
+iommu: Clear the freelist after iommu_put_pages_list()
+The commit below reworked how iommu_put_pages_list() worked to not do
+list_del() on every entry. This was done expecting all the callers to
+already re-init the list so doing a per-item deletion is not
+efficient.
+It was missed that fq_ring_free_locked() re-uses its list after calling
+iommu_put_pages_list() and so the leftover list reaches free'd struct
+pages and will crash or WARN/BUG/etc.
+Reinit the list to empty in fq_ring_free_locked() after calling
+iommu_put_pages_list().
+Audit to see if any other callers of iommu_put_pages_list() need the list
+to be empty:
+ - iommu_dma_free_fq_single() and iommu_dma_free_fq_percpu() immediately
+   frees the memory
+--- 改动 ---
+diff --git a/drivers/iommu/dma-iommu.c b/drivers/iommu/dma-iommu.c
+index 0af1ab36283c..7d2b51a890c7 100644
+--- a/drivers/iommu/dma-iommu.c
++++ b/drivers/iommu/dma-iommu.c
+@@ -154,6 +154,8 @@ static void fq_ring_free_locked(struct iommu_dma_cookie *cookie, struct iova_fq
+ 			       fq->entries[idx].iova_pfn,
+ 			       fq->entries[idx].pages);
+ 
++		fq->entries[idx].freelist =
++			IOMMU_PAGES_LIST_INIT(fq->entries[idx].freelist);
+ 		fq->head = (fq->head + 1) & fq->mod_mask;
+ 	}
+ }
+diff --git a/drivers/iommu/iommu-pages.c b/drivers/iommu/iommu-pages.c
+index 4cc77fddfeeb..238c09e5166b 100644
+--- a/drivers/iommu/iommu-pages.c
++++ b/drivers/iommu/iommu-pages.c
+@@ -105,7 +105,9 @@ EXPORT_SYMBOL_GPL(iommu_free_pages);
+  * iommu_put_pages_list - free a list of pages.
+  * @list: The list of pages to be freed
+  *
+- * Frees a list of pages allocated by iommu_alloc_pages_node_sz().
++ * Frees a list of pages allocated by iommu_alloc_pages_node_sz(). On return the
++ * passed list is invalid, the caller must use IOMMU_PAGES_LIST_INIT to reinit
++ * the list if it expects to use it again.
+  */
+ void iommu_put_pages_list(struct iommu_pages_list *list)
+ {
+
+##### B519 03ee64b5e525 rv: Support systems with time64-only syscalls
+样本集标签：M9 K3 S3 掩盖2；对应物：kernel/trace/rv/monitors（假设存在32位time_t系统调用）；理由：RV32只有64位time_t系统调用，公共rv监视器引用了不存在的调用号
+--- 说明 ---
+rv: Support systems with time64-only syscalls
+Some systems (like 32-bit RISC-V) only have the 64-bit time_t versions
+of syscalls.  So handle the 32-bit time_t version of those being
+undefined.
+Fixes: f74f8bb246cf ("rv: Add rtapp_sleep monitor")
+Closes: https://lore.kernel.org/oe-kbuild-all/202508160204.SsFyNfo6-lkp@intel.com
+Signed-off-by: Palmer Dabbelt <palmer@dabbelt.com>
+Acked-by: Nam Cao <namcao@linutronix.de>
+Link: https://lore.kernel.org/r/20250804194518.97620-2-palmer@dabbelt.com
+Signed-off-by: Gabriele Monaco <gmonaco@redhat.com>
+--- 改动 ---
+diff --git a/kernel/trace/rv/monitors/sleep/sleep.c b/kernel/trace/rv/monitors/sleep/sleep.c
+index eea447b06907..c1347da69e9d 100644
+--- a/kernel/trace/rv/monitors/sleep/sleep.c
++++ b/kernel/trace/rv/monitors/sleep/sleep.c
+@@ -127,7 +127,9 @@ static void handle_sys_enter(void *data, struct pt_regs *regs, long id)
+ 	mon = ltl_get_monitor(current);
+ 
+ 	switch (id) {
++#ifdef __NR_clock_nanosleep
+ 	case __NR_clock_nanosleep:
++#endif
+ #ifdef __NR_clock_nanosleep_time64
+ 	case __NR_clock_nanosleep_time64:
+ #endif
+@@ -138,7 +140,9 @@ static void handle_sys_enter(void *data, struct pt_regs *regs, long id)
+ 		ltl_atom_update(current, LTL_CLOCK_NANOSLEEP, true);
+ 		break;
+ 
++#ifdef __NR_futex
+ 	case __NR_futex:
++#endif
+ #ifdef __NR_futex_time64
+ 	case __NR_futex_time64:
+ #endif
+
+##### B522 7c0c01a216e6 vdso/datastore: Gate time data behind CONFIG_GENERIC_GETTIMEOFDAY
+样本集标签：M9 K3 S3 掩盖2；对应物：lib/vdso/datastore.c（总是分配时间数据页）；理由：RV32不用通用gettimeofday，公共vDSO仍分配时间数据
+--- 说明 ---
+vdso/datastore: Gate time data behind CONFIG_GENERIC_GETTIMEOFDAY
+When the generic vDSO does not provide time functions, as for example on
+riscv32, then the time data store is not necessary.
+Avoid allocating these time data pages when not used.
+Fixes: df7fcbefa710 ("vdso: Add generic time data storage")
+Signed-off-by: Thomas Weißschuh <thomas.weissschuh@linutronix.de>
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+Link: https://lore.kernel.org/all/20250826-vdso-cleanups-v1-1-d9b65750e49f@linutronix.de
+--- 改动 ---
+diff --git a/lib/vdso/datastore.c b/lib/vdso/datastore.c
+index 3693c6caf2c4..a565c30c71a0 100644
+--- a/lib/vdso/datastore.c
++++ b/lib/vdso/datastore.c
+@@ -11,14 +11,14 @@
+ /*
+  * The vDSO data page.
+  */
+-#ifdef CONFIG_HAVE_GENERIC_VDSO
++#ifdef CONFIG_GENERIC_GETTIMEOFDAY
+ static union {
+ 	struct vdso_time_data	data;
+ 	u8			page[PAGE_SIZE];
+ } vdso_time_data_store __page_aligned_data;
+ struct vdso_time_data *vdso_k_time_data = &vdso_time_data_store.data;
+ static_assert(sizeof(vdso_time_data_store) == PAGE_SIZE);
+-#endif /* CONFIG_HAVE_GENERIC_VDSO */
++#endif /* CONFIG_GENERIC_GETTIMEOFDAY */
+ 
+ #ifdef CONFIG_VDSO_GETRANDOM
+ static union {
+@@ -46,7 +46,7 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
+ 
+ 	switch (vmf->pgoff) {
+ 	case VDSO_TIME_PAGE_OFFSET:
+-		if (!IS_ENABLED(CONFIG_HAVE_GENERIC_VDSO))
++		if (!IS_ENABLED(CONFIG_GENERIC_GETTIMEOFDAY))
+ 			return VM_FAULT_SIGBUS;
+ 		pfn = __phys_to_pfn(__pa_symbol(vdso_k_time_data));
+ 		if (timens_page) {
+
+##### B524 04ff48239f46 copy_sighand: Handle architectures where sizeof(unsigned long) < sizeof(u64)
+样本集标签：M7 K3 S2 掩盖2；对应物：kernel/fork.c:copy_sighand（unsigned long标志）；理由：clone3后标志为64位，公共copy_*在32位架构上截断
+--- 说明 ---
+copy_sighand: Handle architectures where sizeof(unsigned long) < sizeof(u64)
+With the introduction of clone3 in commit 7f192e3cd316 ("fork: add
+clone3") the effective bit width of clone_flags on all architectures was
+increased from 32-bit to 64-bit. However, the signature of the copy_*
+helper functions (e.g., copy_sighand) used by copy_process was not
+adapted.
+As such, they truncate the flags on any 32-bit architectures that
+supports clone3 (arc, arm, csky, m68k, microblaze, mips32, openrisc,
+parisc32, powerpc32, riscv32, x86-32 and xtensa).
+For copy_sighand with CLONE_CLEAR_SIGHAND being an actual u64
+constant, this triggers an observable bug in kernel selftest
+clone3_clear_sighand:
+        if (clone_flags & CLONE_CLEAR_SIGHAND)
+in function copy_sighand within fork.c will always fail given:
+--- 改动 ---
+diff --git a/kernel/fork.c b/kernel/fork.c
+index af673856499d..4e2c5a3e8989 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1596,7 +1596,7 @@ static int copy_files(unsigned long clone_flags, struct task_struct *tsk,
+ 	return 0;
+ }
+ 
+-static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
++static int copy_sighand(u64 clone_flags, struct task_struct *tsk)
+ {
+ 	struct sighand_struct *sig;
+ 
+
+##### B525 812258ff4166 rust: cfi: only 64-bit arm and x86 support CFI_CLANG
+样本集标签：M9 K3 S2 掩盖0；对应物：arch/Kconfig:HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC；理由：rustc目标在RISC-V上不支持kcfi，公共配置未检查
+--- 说明 ---
+rust: cfi: only 64-bit arm and x86 support CFI_CLANG
+The kernel uses the standard rustc targets for non-x86 targets, and out
+of those only 64-bit arm's target has kcfi support enabled. For x86, the
+custom 64-bit target enables kcfi.
+The HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC config option that allows
+CFI_CLANG to be used in combination with RUST does not check whether the
+rustc target supports kcfi. This breaks the build on riscv (and
+presumably 32-bit arm) when CFI_CLANG and RUST are enabled at the same
+time.
+Ordinarily, a rustc-option check would be used to detect target support
+but unfortunately rustc-option filters out the target for reasons given
+in commit 46e24a545cdb4 ("rust: kasan/kbuild: fix missing flags on first
+build"). As a result, if the host supports kcfi but the target does not,
+e.g. when building for riscv on x86_64, the build would remain broken.
+--- 改动 ---
+diff --git a/arch/Kconfig b/arch/Kconfig
+index ebe08b9186ad..74ff01133532 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -965,6 +965,7 @@ config HAVE_CFI_ICALL_NORMALIZE_INTEGERS_RUSTC
+ 	def_bool y
+ 	depends on HAVE_CFI_ICALL_NORMALIZE_INTEGERS
+ 	depends on RUSTC_VERSION >= 107900
++	depends on ARM64 || X86_64
+ 	# With GCOV/KASAN we need this fix: https://github.com/rust-lang/rust/pull/129373
+ 	depends on (RUSTC_LLVM_VERSION >= 190103 && RUSTC_VERSION >= 108200) || \
+ 		(!GCOV_KERNEL && !KASAN_GENERIC && !KASAN_SW_TAGS)
+
+##### B527 fde0ab43b9a3 Fix CC_HAS_ASM_GOTO_OUTPUT on non-x86 architectures
+样本集标签：M1 K3 S3 掩盖1；对应物：init/Kconfig:CC_HAS_ASM_GOTO_OUTPUT（测试用x86助记符jmp）；理由：公共编译器探测用x86指令助记符，在arm、RISC-V等上误判为不支持
+--- 说明 ---
+Fix CC_HAS_ASM_GOTO_OUTPUT on non-x86 architectures
+There's a silly problem with the CC_HAS_ASM_GOTO_OUTPUT test: even with
+a working compiler it will fail on some architectures simply because it
+uses the mnemonic "jmp" for testing the inline asm.
+And as reported by Geert, not all architectures use that mnemonic, so
+the test fails spuriously on such platforms (including arm and riscv,
+but also several other architectures).
+This issue avoided any obvious test failures because the build still
+works thanks to falling back on the old non-asm-goto code, which just
+generates worse code.
+Just use an empty asm statement instead.
+Reported-and-tested-by: Geert Uytterhoeven <geert@linux-m68k.org>
+Suggested-by: Peter Zijlstra <peterz@infradead.org>
+Fixes: e2ffa15b9baa ("kbuild: Disable CC_HAS_ASM_GOTO_OUTPUT on clang < 17")
+--- 改动 ---
+diff --git a/init/Kconfig b/init/Kconfig
+index ecddb94db8dc..6a91ec742186 100644
+--- a/init/Kconfig
++++ b/init/Kconfig
+@@ -102,7 +102,7 @@ config CC_HAS_ASM_GOTO_OUTPUT
+ 	# Detect basic support
+ 	depends on $(success,echo 'int foo(int x) { asm goto ("": "=r"(x) ::: bar); return x; bar: return 0; }' | $(CC) -x c - -c -o /dev/null)
+ 	# Detect clang (< v17) scoped label issues
+-	depends on $(success,echo 'void b(void **);void* c(void);int f(void){{asm goto("jmp %l0"::::l0);return 0;l0:return 1;}void *x __attribute__((cleanup(b)))=c();{asm goto("jmp %l0"::::l1);return 2;l1:return 3;}}' | $(CC) -x c - -c -o /dev/null)
++	depends on $(success,echo 'void b(void **);void* c(void);int f(void){{asm goto(""::::l0);return 0;l0:return 1;}void *x __attribute__((cleanup(b)))=c();{asm goto(""::::l1);return 2;l1:return 3;}}' | $(CC) -x c - -c -o /dev/null)
+ 
+ config CC_HAS_ASM_GOTO_TIED_OUTPUT
+ 	depends on CC_HAS_ASM_GOTO_OUTPUT
+
+##### B531 b0f2942a1601 kbuild: Use '--strip-unneeded-symbol' for removing module device table symbols
+样本集标签：M1 K3 S3 掩盖1；对应物：scripts/Makefile.vmlinux（剥离模块设备表符号）；理由：公共modpost改动后，RISC-V可重定位且开KASAN时剥离符号失败
+--- 说明 ---
+kbuild: Use '--strip-unneeded-symbol' for removing module device table symbols
+After commit 5ab23c7923a1 ("modpost: Create modalias for builtin
+modules"), relocatable RISC-V kernels with CONFIG_KASAN=y start failing
+when attempting to strip the module device table symbols:
+  riscv64-linux-objcopy: not stripping symbol `__mod_device_table__kmod_irq_starfive_jh8100_intc__of__starfive_intc_irqchip_match_table' because it is named in a relocation
+  make[4]: *** [scripts/Makefile.vmlinux:97: vmlinux] Error 1
+The relocation appears to come from .LASANLOC5 in .data.rel.local:
+  $ llvm-objdump --disassemble-symbols=.LASANLOC5 --disassemble-all -r drivers/irqchip/irq-starfive-jh8100-intc.o
+  drivers/irqchip/irq-starfive-jh8100-intc.o:   file format elf64-littleriscv
+  Disassembly of section .data.rel.local:
+  0000000000000180 <.LASANLOC5>:
+  ...
+       1d0: 0000          unimp
+                  00000000000001d0:  R_RISCV_64   __mod_device_table__kmod_irq_starfive_jh8100_intc__of__starfive_intc_irqchip_match_table
+--- 改动 ---
+diff --git a/scripts/Makefile.vmlinux b/scripts/Makefile.vmlinux
+index c02f85c2e241..ced4379550d7 100644
+--- a/scripts/Makefile.vmlinux
++++ b/scripts/Makefile.vmlinux
+@@ -87,7 +87,7 @@ remove-section-$(CONFIG_ARCH_VMLINUX_NEEDS_RELOCS) += '.rel*' '!.rel*.dyn'
+ # https://sourceware.org/git/?p=binutils-gdb.git;a=commit;h=c12d9fa2afe7abcbe407a00e15719e1a1350c2a7
+ remove-section-$(CONFIG_ARCH_VMLINUX_NEEDS_RELOCS) += '.rel.*'
+ 
+-remove-symbols := -w --strip-symbol='__mod_device_table__*'
++remove-symbols := -w --strip-unneeded-symbol='__mod_device_table__*'
+ 
+ # To avoid warnings: "empty loadable segment detected at ..." from GNU objcopy,
+ # it is necessary to remove the PT_LOAD flag from the segment.
+
+##### B558 37beb4256016 randomize_kstack: Maintain kstack_offset per task
+样本集标签：M5 K1 S1 掩盖0；对应物：include/linux/randomize_kstack.h（要求关中断关抢占调用）；x86在关中断的退出路径中调用；理由：栈随机化偏移按per-cpu维护，要求关中断调用；arm64、LoongArch、RISC-V在开中断时调用
+--- 说明 ---
+randomize_kstack: Maintain kstack_offset per task
+kstack_offset was previously maintained per-cpu, but this caused a
+couple of issues. So let's instead make it per-task.
+Issue 1: add_random_kstack_offset() and choose_random_kstack_offset()
+expected and required to be called with interrupts and preemption
+disabled so that it could manipulate per-cpu state. But arm64, loongarch
+and risc-v are calling them with interrupts and preemption enabled. I
+don't _think_ this causes any functional issues, but it's certainly
+unexpected and could lead to manipulating the wrong cpu's state, which
+could cause a minor performance degradation due to bouncing the cache
+lines. By maintaining the state per-task those functions can safely be
+called in preemptible context.
+Issue 2: add_random_kstack_offset() is called before executing the
+syscall and expands the stack using a previously chosen random offset.
+--- 改动 ---
+diff --git a/include/linux/randomize_kstack.h b/include/linux/randomize_kstack.h
+index 1d982dbdd0d0..5d3916ca747c 100644
+--- a/include/linux/randomize_kstack.h
++++ b/include/linux/randomize_kstack.h
+@@ -9,7 +9,6 @@
+ 
+ DECLARE_STATIC_KEY_MAYBE(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,
+ 			 randomize_kstack_offset);
+-DECLARE_PER_CPU(u32, kstack_offset);
+ 
+ /*
+  * Do not use this anywhere else in the kernel. This is used here because
+@@ -50,15 +49,14 @@ DECLARE_PER_CPU(u32, kstack_offset);
+  * add_random_kstack_offset - Increase stack utilization by previously
+  *			      chosen random offset
+  *
+- * This should be used in the syscall entry path when interrupts and
+- * preempt are disabled, and after user registers have been stored to
+- * the stack. For testing the resulting entropy, please see:
+- * tools/testing/selftests/lkdtm/stack-entropy.sh
++ * This should be used in the syscall entry path after user registers have been
++ * stored to the stack. Preemption may be enabled. For testing the resulting
++ * entropy, please see: tools/testing/selftests/lkdtm/stack-entropy.sh
+  */
+ #define add_random_kstack_offset() do {					\
+ 	if (static_branch_maybe(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,	\
+ 				&randomize_kstack_offset)) {		\
+-		u32 offset = raw_cpu_read(kstack_offset);		\
++		u32 offset = current->kstack_offset;			\
+ 		u8 *ptr = __kstack_alloca(KSTACK_OFFSET_MAX(offset));	\
+ 		/* Keep allocation even after "ptr" loses scope. */	\
+ 		asm volatile("" :: "r"(ptr) : "memory");		\
+@@ -69,9 +67,9 @@ DECLARE_PER_CPU(u32, kstack_offset);
+  * choose_random_kstack_offset - Choose the random offset for the next
+  *				 add_random_kstack_offset()
+  *
+- * This should only be used during syscall exit when interrupts and
+- * preempt are disabled. This position in the syscall flow is done to
+- * frustrate attacks from userspace attempting to learn the next offset:
++ * This should only be used during syscall exit. Preemption may be enabled. This
++ * position in the syscall flow is done to frustrate attacks from userspace
++ * attempting to learn the next offset:
+  * - Maximize the timing uncertainty visible from userspace: if the
+  *   offset is chosen at syscall entry, userspace has much more control
+  *   over the timing between choosing offsets. "How long will we be in
+@@ -85,14 +83,20 @@ DECLARE_PER_CPU(u32, kstack_offset);
+ #define choose_random_kstack_offset(rand) do {				\
+ 	if (static_branch_maybe(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,	\
+ 				&randomize_kstack_offset)) {		\
+-		u32 offset = raw_cpu_read(kstack_offset);		\
++		u32 offset = current->kstack_offset;			\
+ 		offset = ror32(offset, 5) ^ (rand);			\
+-		raw_cpu_write(kstack_offset, offset);			\
++		current->kstack_offset = offset;			\
+ 	}								\
+ } while (0)
++
++static inline void random_kstack_task_init(struct task_struct *tsk)
++{
++	tsk->kstack_offset = 0;
++}
+ #else /* CONFIG_RANDOMIZE_KSTACK_OFFSET */
+ #define add_random_kstack_offset()		do { } while (0)
+ #define choose_random_kstack_offset(rand)	do { } while (0)
++#define random_kstack_task_init(tsk)		do { } while (0)
+ #endif /* CONFIG_RANDOMIZE_KSTACK_OFFSET */
+ 
+ #endif
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index a7b4a980eb2f..8358e430dd7f 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1592,6 +1592,10 @@ struct task_struct {
+ 	unsigned long			prev_lowest_stack;
+ #endif
+ 
++#ifdef CONFIG_RANDOMIZE_KSTACK_OFFSET
++	u32				kstack_offset;
++#endif
++
+ #ifdef CONFIG_X86_MCE
+ 	void __user			*mce_vaddr;
+ 	__u64				mce_kflags;
+diff --git a/init/main.c b/init/main.c
+index 1cb395dd94e4..0a1d8529212e 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -833,7 +833,6 @@ static inline void initcall_debug_enable(void)
+ #ifdef CONFIG_RANDOMIZE_KSTACK_OFFSET
+ DEFINE_STATIC_KEY_MAYBE_RO(CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT,
+ 			   randomize_kstack_offset);
+-DEFINE_PER_CPU(u32, kstack_offset);
+ 
+ static int __init early_randomize_kstack_offset(char *buf)
+ {
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 65113a304518..5715adeb6adf 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -95,6 +95,7 @@
+ #include <linux/thread_info.h>
+ #include <linux/kstack_erase.h>
+ #include <linux/kasan.h>
++#include <linux/randomize_kstack.h>
+ #include <linux/scs.h>
+ #include <linux/io_uring.h>
+ #include <linux/io_uring_types.h>
+@@ -2233,6 +2234,7 @@ __latent_entropy struct task_struct *copy_process(
+ 	if (retval)
+ 		goto bad_fork_cleanup_io;
+ 
++	random_kstack_task_init(p);
+ 	stackleak_task_init(p);
+ 
+ 	if (pid != &init_struct_pid) {
+
+##### B576 e4d3386b74fb ALSA: pcm: Don't setup bogus iov_iter for silencing
+样本集标签：M1 K3 S0 掩盖3；对应物：sound/core/pcm_lib.c:interleaved_copy（对NULL数据构造iov_iter）；理由：公共PCM静音路径构造了无效iov_iter，多数架构碰巧无事，RISC-V空指针
+--- 说明 ---
+ALSA: pcm: Don't setup bogus iov_iter for silencing
+At transition to the iov_iter for PCM data transfer, we blindly
+applied the iov_iter setup also for silencing (i.e. data = NULL), and
+it leads to a calculation of bogus iov_iter.  Fortunately this didn't
+cause troubles on most of architectures but it goes wrong on RISC-V
+now, causing a NULL dereference.
+Handle the NULL data case to treat the silencing in interleaved_copy()
+for addressing the bug above.  noninterleaved_copy() has already the
+NULL data handling, so it doesn't need changes.
+Reported-by: Jiakai Xu <xujiakai24@mails.ucas.ac.cn>
+Closes: https://lore.kernel.org/20260515051516.3103036-1-xujiakai24@mails.ucas.ac.cn
+Fixes: cf393babb37a ("ALSA: pcm: Add copy ops with iov_iter")
+Cc: <stable@vger.kernel.org>
+Link: https://patch.msgid.link/20260517165121.31399-1-tiwai@suse.de
+--- 改动 ---
+diff --git a/sound/core/pcm_lib.c b/sound/core/pcm_lib.c
+index 09c421cd9319..fe597f7d522d 100644
+--- a/sound/core/pcm_lib.c
++++ b/sound/core/pcm_lib.c
+@@ -2138,6 +2138,9 @@ static int interleaved_copy(struct snd_pcm_substream *substream,
+ 	off = frames_to_bytes(runtime, off);
+ 	frames = frames_to_bytes(runtime, frames);
+ 
++	if (!data)
++		return fill_silence(substream, 0, hwoff, NULL, frames);
++
+ 	return do_transfer(substream, 0, hwoff, data + off, frames, transfer,
+ 			   in_kernel);
+ }
+
+##### B577 c37e0a4b79a6 ring-buffer: Fix event length with forced 8-byte alignment
+样本集标签：M7 K3 S2 掩盖2；对应物：kernel/trace/ring_buffer.c:rb_calculate_event_length（RB_FORCE_8BYTE_ALIGNMENT）；理由：强制8字节对齐的架构事件长度多算4字节
+--- 说明 ---
+ring-buffer: Fix event length with forced 8-byte alignment
+When RB_FORCE_8BYTE_ALIGNMENT is true, rb_calculate_event_length()
+reserves the space of event->array[0] for placing the data length and
+rb_update_event() stores the data length in event->array[0]
+accordingly. As a result the whole event length will add extra 4 bytes
+for sizeof(event.array[0]) unconditionally.
+But ring_buffer_event_length() only subtracts the
+sizeof(event->array[0]) for events larger than RB_MAX_SMALL_DATA +
+sizeof(event->array[0]). As a result, small events on architectures
+with RB_FORCE_8BYTE_ALIGNMENT=true report a data length that is 4
+bytes larger than expected.
+To fix it, add the RB_FORCE_8BYTE_ALIGNMENT as a condition to subtract
+the size of that length field whenever RB_FORCE_8BYTE_ALIGNMENT is
+true.
+--- 改动 ---
+diff --git a/kernel/trace/ring_buffer.c b/kernel/trace/ring_buffer.c
+index 56a328e94395..d9af2bbaf9c0 100644
+--- a/kernel/trace/ring_buffer.c
++++ b/kernel/trace/ring_buffer.c
+@@ -270,7 +270,8 @@ unsigned ring_buffer_event_length(struct ring_buffer_event *event)
+ 	if (event->type_len > RINGBUF_TYPE_DATA_TYPE_LEN_MAX)
+ 		return length;
+ 	length -= RB_EVNT_HDR_SIZE;
+-	if (length > RB_MAX_SMALL_DATA + sizeof(event->array[0]))
++	if (length > RB_MAX_SMALL_DATA + sizeof(event->array[0]) ||
++	    RB_FORCE_8BYTE_ALIGNMENT)
+                 length -= sizeof(event->array[0]);
+ 	return length;
+ }
+
+##### B578 57ad674d032b scripts/sorttable: Handle RISC-V patchable ftrace entries
+样本集标签：M1 K3 S3 掩盖1；对应物：scripts/sorttable.c（假设mcount地址等于函数符号地址）；理由：RISC-V的可修补NOP区在函数符号前8字节，公共排序脚本按符号范围检查出错
+--- 说明 ---
+scripts/sorttable: Handle RISC-V patchable ftrace entries
+RISC-V uses -fpatchable-function-entry=8,4 when the compressed ISA is
+enabled and -fpatchable-function-entry=4,2 otherwise. In both cases, the
+patchable NOP area starts 8 bytes before the function symbol address.
+The __mcount_loc entries therefore point at the patchable NOP area
+associated with a function, while nm reports the function symbol at the
+entry address used for the function range check.
+After RISC-V selected HAVE_BUILDTIME_MCOUNT_SORT, sorttable started
+applying that range check at build time. Without allowing entries just
+before the reported function address, the mcount sorter treats valid
+RISC-V ftrace callsites as invalid weak-function entries and writes
+them back as zero. The resulting kernel boots with no ftrace entries,
+breaking dynamic ftrace and users such as livepatch.
+The failure is silent during the final link because zeroing weak-function
+--- 改动 ---
+diff --git a/scripts/sorttable.c b/scripts/sorttable.c
+index e8ed11c680c6..d8dc2a1b7c31 100644
+--- a/scripts/sorttable.c
++++ b/scripts/sorttable.c
+@@ -891,17 +891,22 @@ static int do_file(char const *const fname, void *addr)
+ 	table_sort_t custom_sort = NULL;
+ 
+ 	switch (elf_map_machine(ehdr)) {
+-	case EM_AARCH64:
+ #ifdef MCOUNT_SORT_ENABLED
++	case EM_AARCH64:
++		/* arm64 also needs RELA-based weak-function fixups. */
+ 		sort_reloc = true;
+ 		rela_type = 0x403;
+-		/* arm64 uses patchable function entry placing before function */
++		/* fallthrough */
++	case EM_RISCV:
++		/* arm64 and RISC-V place patchable entries before the function. */
+ 		before_func = 8;
++#else
++	case EM_AARCH64:
++	case EM_RISCV:
+ #endif
+ 		/* fallthrough */
+ 	case EM_386:
+ 	case EM_LOONGARCH:
+-	case EM_RISCV:
+ 	case EM_S390:
+ 	case EM_X86_64:
+ 		custom_sort = sort_relative_table_with_data;
+

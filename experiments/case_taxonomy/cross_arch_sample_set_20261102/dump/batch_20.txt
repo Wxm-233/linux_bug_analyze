@@ -1,0 +1,1316 @@
+
+##### B500
+=== c6e888d02d51 B 2025-04-11 +1/-1
+selftests: coredump: Raise timeout to 2 minutes
+
+The test's runtime (nearly 20s) is dangerously close to the limit (30s) on
+qemu-system-riscv64:
+
+$ time ./stackdump_test > /dev/null
+real	0m19.210s
+user	0m0.077s
+sys	0m0.359s
+
+There could be machines slower than qemu-system-riscv64. Therefore raise
+the test timeout to 2 minutes to be safe.
+
+Fixes: 15858da53542 ("selftests: coredump: Add stackdump test")
+functions: 
+fixes: 15858da53542(common)
+diff --git a/tools/testing/selftests/coredump/stackdump_test.c b/tools/testing/selftests/coredump/stackdump_test.c
+index 9da10fb5e597..fe3c728cd6be 100644
+--- a/tools/testing/selftests/coredump/stackdump_test.c
++++ b/tools/testing/selftests/coredump/stackdump_test.c
+@@ -90,5 +90,5 @@ FIXTURE_TEARDOWN(coredump)
+ }
+ 
+-TEST_F(coredump, stackdump)
++TEST_F_TIMEOUT(coredump, stackdump, 120)
+ {
+ 	struct sigaction action = {};
+
+##### B501
+=== d635ba4207c3 B 2025-04-11 +2/-2
+mailbox: mchp-ipc-sbi: Fix COMPILE_TEST build error
+
+If COMPILE_TEST is y but RISCV_SBI is n, build fails:
+
+drivers/mailbox/mailbox-mchp-ipc-sbi.c: In function 'mchp_ipc_sbi_chan_send':
+drivers/mailbox/mailbox-mchp-ipc-sbi.c:119:23: error: storage size of 'ret' isn't known
+	struct sbiret ret;
+	              ^~~
+  CC      drivers/nvmem/lpc18xx_otp.o
+drivers/mailbox/mailbox-mchp-ipc-sbi.c:121:15: error: implicit declaration of function 'sbi_ecall' [-Werror=implicit-function-declaration]
+	ret = sbi_ecall(SBI_EXT_MICROCHIP_TECHNOLOGY, command, channel,
+	      ^~~~~~~~~
+
+move COMPILE_TEST to ARCH_MICROCHIP dependency as other drivers.
+
+Fixes: e4b1d67e7141 ("mailbox: add Microchip IPC support")
+functions: 
+fixes: e4b1d67e7141(common)
+diff --git a/drivers/mailbox/Kconfig b/drivers/mailbox/Kconfig
+index ed52db272f4d..e8445cda7c61 100644
+--- a/drivers/mailbox/Kconfig
++++ b/drivers/mailbox/Kconfig
+@@ -192,6 +192,6 @@ config POLARFIRE_SOC_MAILBOX
+ config MCHP_SBI_IPC_MBOX
+ 	tristate "Microchip Inter-processor Communication (IPC) SBI driver"
+-	depends on RISCV_SBI || COMPILE_TEST
+-	depends on ARCH_MICROCHIP
++	depends on RISCV_SBI
++	depends on ARCH_MICROCHIP || COMPILE_TEST
+ 	help
+ 	  Mailbox implementation for Microchip devices with an
+
+##### B502
+=== e194d2067c95 B 2025-04-11 +2/-0
+selftests: coredump: Properly initialize pointer
+
+The buffer pointer "line" is not initialized. This pointer is passed to
+getline().
+
+It can still work if the stack is zero-initialized, because getline() can
+work with a NULL pointer as buffer.
+
+But this is obviously broken. This bug shows up while running the test on a
+riscv64 machine.
+
+Fix it by properly initializing the pointer.
+
+Fixes: 15858da53542 ("selftests: coredump: Add stackdump test")
+functions: tools/testing/selftests/coredump/stackdump_test.c:TEST_F
+fixes: 15858da53542(common)
+diff --git a/tools/testing/selftests/coredump/stackdump_test.c b/tools/testing/selftests/coredump/stackdump_test.c
+index 137b2364a082..c23cf95c3f6d 100644
+--- a/tools/testing/selftests/coredump/stackdump_test.c
++++ b/tools/testing/selftests/coredump/stackdump_test.c
+@@ -139,8 +139,10 @@ TEST_F(coredump, stackdump)
+ 
+ 	/* Step 4: Make sure all stack pointer values are non-zero */
++	line = NULL;
+ 	for (i = 0; -1 != getline(&line, &line_length, file); ++i) {
+ 		stack = strtoull(line, NULL, 10);
+ 		ASSERT_NE(stack, 0);
+ 	}
++	free(line);
+ 
+ 	ASSERT_EQ(i, 1 + NUM_THREAD_SPAWN);
+
+##### B503
+=== dcaeeb8ae84c B 2025-04-25 +1/-0
+can: m_can: m_can_class_allocate_dev(): initialize spin lock on device probe
+
+The spin lock tx_handling_spinlock in struct m_can_classdev is not
+being initialized. This leads the following spinlock bad magic
+complaint from the kernel, eg. when trying to send CAN frames with
+cansend from can-utils:
+
+| BUG: spinlock bad magic on CPU#0, cansend/95
+|  lock: 0xff60000002ec1010, .magic: 00000000, .owner: <none>/-1, .owner_cpu: 0
+| CPU: 0 UID: 0 PID: 95 Comm: cansend Not tainted 6.15.0-rc3-00032-ga79be02bba5c #5 NONE
+| Hardware name: MachineWare SIM-V (DT)
+| Call Trace:
+| [<ffffffff800133e0>] dump_backtrace+0x1c/0x24
+| [<ffffffff800022f2>] show_stack+0x28/0x34
+| [<ffffffff8000de3e>] dump_stack_lvl+0x4a/0x68
+| [<ffffffff8000de70>] dump_stack+0x14/0x1c
+| [<ffffffff80003134>] spin_dump+0x62/0x6e
+| [<ffffffff800883ba>] do_raw_spin_lock+0xd0/0x142
+| [<ffffffff807a6fcc>] _raw_spin_lock_irqsave+0x20/0x2c
+| [<ffffffff80536dba>] m_can_start_xmit+0x90/0x34a
+| [<ffffffff806148b0>] dev_hard_start_xmit+0xa6/0xee
+| [<ffffffff8065b730>] sch_direct_xmit+0x114/0x292
+| [<ffffffff80614e2a>] __dev_queue_xmit+0x3b0/0xaa8
+| [<ffffffff8073b8fa>] can_send+0xc6/0x242
+| [<ffffffff8073d1c0>] raw_sendmsg+0x1a8/0x36c
+| [<ffffffff805ebf06>] sock_write_iter+0x9a/0xee
+| [<ffffffff801d06ea>] vfs_write+0x184/0x3a6
+| [<ffffffff801d0a88>] ksys_write+0xa0/0xc0
+| [<ffffffff801d0abc>] __riscv_sys_write+0x14/0x1c
+| [<ffffffff8079ebf8>] do_trap_ecall_u+0x168/0x212
+| [<ffffffff807a830a>] handle_exception+0x146/0x152
+
+Initializing the spin lock in m_can_class_allocate_dev solves that
+problem.
+
+Fixes: 1fa80e23c150 ("can: m_can: Introduce a tx_fifo_in_flight counter")
+functions: drivers/net/can/m_can/m_can.c:m_can_class_allocate_dev
+fixes: 1fa80e23c150(common)
+diff --git a/drivers/net/can/m_can/m_can.c b/drivers/net/can/m_can/m_can.c
+index 884a6352c42b..326ede9d400f 100644
+--- a/drivers/net/can/m_can/m_can.c
++++ b/drivers/net/can/m_can/m_can.c
+@@ -2380,4 +2380,5 @@ struct m_can_classdev *m_can_class_allocate_dev(struct device *dev,
+ 
+ 	m_can_of_parse_mram(class_dev, mram_config_vals);
++	spin_lock_init(&class_dev->tx_handling_spinlock);
+ out:
+ 	return class_dev;
+
+##### B504
+=== 01c13a1d0e34 B 2025-05-12 +3/-2
+iommu: make inclusion of riscv directory conditional
+
+Nothing in there is active if CONFIG_RISCV_IOMMU is not enabled, so the whole
+directory can depend on that switch as well.
+
+Fixes: 5c0ebbd3c6c6 ("iommu/riscv: Add RISC-V IOMMU platform device driver")
+functions: 
+fixes: 5c0ebbd3c6c6(common)
+diff --git a/drivers/iommu/Makefile b/drivers/iommu/Makefile
+index a486032d3e07..355294fa9033 100644
+--- a/drivers/iommu/Makefile
++++ b/drivers/iommu/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+-obj-y += arm/ iommufd/ riscv/
++obj-y += arm/ iommufd/
+ obj-$(CONFIG_AMD_IOMMU) += amd/
+ obj-$(CONFIG_INTEL_IOMMU) += intel/
++obj-$(CONFIG_RISCV_IOMMU) += riscv/
+ obj-$(CONFIG_IOMMU_API) += iommu.o
+ obj-$(CONFIG_IOMMU_SUPPORT) += iommu-pages.o
+diff --git a/drivers/iommu/riscv/Makefile b/drivers/iommu/riscv/Makefile
+index f54c9ed17d41..b5929f9f23e6 100644
+--- a/drivers/iommu/riscv/Makefile
++++ b/drivers/iommu/riscv/Makefile
+@@ -1,3 +1,3 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+-obj-$(CONFIG_RISCV_IOMMU) += iommu.o iommu-platform.o
++obj-y += iommu.o iommu-platform.o
+ obj-$(CONFIG_RISCV_IOMMU_PCI) += iommu-pci.o
+
+##### B505
+=== 08fb624802d8 B 2025-05-14 +5/-5
+irqchip/riscv-imsic: Start local sync timer on correct CPU
+
+When starting the local sync timer to synchronize the state of a remote
+CPU it should be added on the CPU to be synchronized, not the initiating
+CPU. This results in interrupt delivery being delayed until the timer
+eventually runs (due to another mask/unmask/migrate operation) on the
+target CPU.
+
+Fixes: 0f67911e821c ("irqchip/riscv-imsic: Separate next and previous pointers in IMSIC vector")
+functions: drivers/irqchip/irq-riscv-imsic-state.c:__imsic_local_timer_start, drivers/irqchip/irq-riscv-imsic-state.c:imsic_local_sync_all, drivers/irqchip/irq-riscv-imsic-state.c:__imsic_remote_sync
+fixes: 0f67911e821c(common)
+diff --git a/drivers/irqchip/irq-riscv-imsic-state.c b/drivers/irqchip/irq-riscv-imsic-state.c
+index bdf5cd2037f2..62f76950a113 100644
+--- a/drivers/irqchip/irq-riscv-imsic-state.c
++++ b/drivers/irqchip/irq-riscv-imsic-state.c
+@@ -209,5 +209,5 @@ static bool __imsic_local_sync(struct imsic_local_priv *lpriv)
+ 
+ #ifdef CONFIG_SMP
+-static void __imsic_local_timer_start(struct imsic_local_priv *lpriv)
++static void __imsic_local_timer_start(struct imsic_local_priv *lpriv, unsigned int cpu)
+ {
+ 	lockdep_assert_held(&lpriv->lock);
+@@ -215,9 +215,9 @@ static void __imsic_local_timer_start(struct imsic_local_priv *lpriv)
+ 	if (!timer_pending(&lpriv->timer)) {
+ 		lpriv->timer.expires = jiffies + 1;
+-		add_timer_on(&lpriv->timer, smp_processor_id());
++		add_timer_on(&lpriv->timer, cpu);
+ 	}
+ }
+ #else
+-static inline void __imsic_local_timer_start(struct imsic_local_priv *lpriv)
++static inline void __imsic_local_timer_start(struct imsic_local_priv *lpriv, unsigned int cpu)
+ {
+ }
+@@ -234,5 +234,5 @@ void imsic_local_sync_all(bool force_all)
+ 		bitmap_fill(lpriv->dirty_bitmap, imsic->global.nr_ids + 1);
+ 	if (!__imsic_local_sync(lpriv))
+-		__imsic_local_timer_start(lpriv);
++		__imsic_local_timer_start(lpriv, smp_processor_id());
+ 
+ 	raw_spin_unlock_irqrestore(&lpriv->lock, flags);
+@@ -279,5 +279,5 @@ static void __imsic_remote_sync(struct imsic_local_priv *lpriv, unsigned int cpu
+ 		}
+ 
+-		__imsic_local_timer_start(lpriv);
++		__imsic_local_timer_start(lpriv, cpu);
+ 	}
+ }
+
+##### B506
+=== 5e2ff240b31a B 2025-05-14 +5/-1
+iommu: Clear the freelist after iommu_put_pages_list()
+
+The commit below reworked how iommu_put_pages_list() worked to not do
+list_del() on every entry. This was done expecting all the callers to
+already re-init the list so doing a per-item deletion is not
+efficient.
+
+It was missed that fq_ring_free_locked() re-uses its list after calling
+iommu_put_pages_list() and so the leftover list reaches free'd struct
+pages and will crash or WARN/BUG/etc.
+
+Reinit the list to empty in fq_ring_free_locked() after calling
+iommu_put_pages_list().
+
+Audit to see if any other callers of iommu_put_pages_list() need the list
+to be empty:
+
+ - iommu_dma_free_fq_single() and iommu_dma_free_fq_percpu() immediately
+   frees the memory
+
+ - iommu_v1_map_pages(), v1_free_pgtable(), domain_exit(),
+   riscv_iommu_map_pages() uses a stack variable which goes out of scope
+
+ - intel_iommu_tlb_sync() uses a gather in a iotlb_sync() callback, the
+   caller re-inits the gather
+
+Fixes: 13f43d7cf3e0 ("iommu/pages: Formalize the freelist API")
+functions: drivers/iommu/dma-iommu.c:fq_ring_free_locked
+fixes: 13f43d7cf3e0(common)
+diff --git a/drivers/iommu/dma-iommu.c b/drivers/iommu/dma-iommu.c
+index 0af1ab36283c..7d2b51a890c7 100644
+--- a/drivers/iommu/dma-iommu.c
++++ b/drivers/iommu/dma-iommu.c
+@@ -155,4 +155,6 @@ static void fq_ring_free_locked(struct iommu_dma_cookie *cookie, struct iova_fq
+ 			       fq->entries[idx].pages);
+ 
++		fq->entries[idx].freelist =
++			IOMMU_PAGES_LIST_INIT(fq->entries[idx].freelist);
+ 		fq->head = (fq->head + 1) & fq->mod_mask;
+ 	}
+diff --git a/drivers/iommu/iommu-pages.c b/drivers/iommu/iommu-pages.c
+index 4cc77fddfeeb..238c09e5166b 100644
+--- a/drivers/iommu/iommu-pages.c
++++ b/drivers/iommu/iommu-pages.c
+@@ -106,5 +106,7 @@ EXPORT_SYMBOL_GPL(iommu_free_pages);
+  * @list: The list of pages to be freed
+  *
+- * Frees a list of pages allocated by iommu_alloc_pages_node_sz().
++ * Frees a list of pages allocated by iommu_alloc_pages_node_sz(). On return the
++ * passed list is invalid, the caller must use IOMMU_PAGES_LIST_INIT to reinit
++ * the list if it expects to use it again.
+  */
+ void iommu_put_pages_list(struct iommu_pages_list *list)
+
+##### B507
+=== 0c52f621f5be B 2025-05-15 +1/-1
+scsi: hisi_sas: Fix warning detected by sparse
+
+LKP reports below warning when building for RISC-V with randconfig
+configuration.
+
+drivers/scsi/hisi_sas/hisi_sas_v3_hw.c:4554:25: sparse:
+sparse: incorrect type in argument 4 (different base types)
+@@     expected restricted __le32 [usertype] *[assigned] ptr
+@@     got unsigned int * @@
+
+Type cast to fix this warning.
+
+Fixes: 4ca7fe99fc84 ("scsi: hisi_sas: Use macro instead of magic number")
+functions: drivers/scsi/hisi_sas/hisi_sas_v3_hw.c:debugfs_fifo_data_v3_hw_show
+fixes: 4ca7fe99fc84(common)
+diff --git a/drivers/scsi/hisi_sas/hisi_sas_v3_hw.c b/drivers/scsi/hisi_sas/hisi_sas_v3_hw.c
+index d7f45a2eb200..bc5d5356dd00 100644
+--- a/drivers/scsi/hisi_sas/hisi_sas_v3_hw.c
++++ b/drivers/scsi/hisi_sas/hisi_sas_v3_hw.c
+@@ -4559,5 +4559,5 @@ static int debugfs_fifo_data_v3_hw_show(struct seq_file *s, void *p)
+ 	debugfs_show_row_32_v3_hw(s, 0,
+ 			HISI_SAS_FIFO_DATA_DW_SIZE * HISI_SAS_REG_MEM_SIZE,
+-			phy->fifo.rd_data);
++			(__le32 *)phy->fifo.rd_data);
+ 
+ 	return 0;
+
+##### B508
+=== db8266017e0a B 2025-05-16 +1/-1
+dt-bindings: PCI: microchip,pcie-host: Fix DMA coherency property
+
+PolarFire SoC may be configured in a way that requires non-coherent DMA
+handling. On RISC-V, buses are coherent by default & the dma-noncoherent
+property is required to denote buses or devices that are non-coherent.
+For some reason, instead of adding dma-noncoherent to the binding
+the pointless, NOP, property dma-coherent was. Swap dma-coherent for
+dma-noncoherent.
+
+Fixes: 04aa999eb96fd ("dt-bindings: PCI: microchip,pcie-host: Allow dma-noncoherent")
+functions: 
+fixes: 04aa999eb96f(common)
+diff --git a/Documentation/devicetree/bindings/pci/microchip,pcie-host.yaml b/Documentation/devicetree/bindings/pci/microchip,pcie-host.yaml
+index 1aadfdee868f..47b0bad690d5 100644
+--- a/Documentation/devicetree/bindings/pci/microchip,pcie-host.yaml
++++ b/Documentation/devicetree/bindings/pci/microchip,pcie-host.yaml
+@@ -51,5 +51,5 @@ properties:
+       pattern: '^fic[0-3]$'
+ 
+-  dma-coherent: true
++  dma-noncoherent: true
+ 
+   ranges:
+
+##### B509
+=== dd133162c9cf B 2025-05-22 +3/-0
+ACPI: platform_profile: Avoid initializing on non-ACPI platforms
+
+The platform profile driver is loaded even on platforms that do not have
+ACPI enabled. The initialization of the sysfs entries was recently moved
+from platform_profile_register() to the module init call, and those
+entries need acpi_kobj to be initialized which is not the case when ACPI
+is disabled.
+
+This results in the following warning:
+
+ WARNING: CPU: 5 PID: 1 at fs/sysfs/group.c:131 internal_create_group+0xa22/0xdd8
+ Modules linked in:
+ CPU: 5 UID: 0 PID: 1 Comm: swapper/0 Tainted: G        W           6.15.0-rc7-dirty #6 PREEMPT
+ Tainted: [W]=WARN
+ Hardware name: riscv-virtio,qemu (DT)
+ epc : internal_create_group+0xa22/0xdd8
+  ra : internal_create_group+0xa22/0xdd8
+
+ Call Trace:
+
+ internal_create_group+0xa22/0xdd8
+ sysfs_create_group+0x22/0x2e
+ platform_profile_init+0x74/0xb2
+ do_one_initcall+0x198/0xa9e
+ kernel_init_freeable+0x6d8/0x780
+ kernel_init+0x28/0x24c
+ ret_from_fork+0xe/0x18
+
+Fix this by checking if ACPI is enabled before trying to create sysfs
+entries.
+
+Fixes: 77be5cacb2c2 ("ACPI: platform_profile: Create class for ACPI platform profile")
+[ rjw: Subject and changelog edits ]
+functions: drivers/acpi/platform_profile.c:platform_profile_init
+fixes: 77be5cacb2c2(common)
+diff --git a/drivers/acpi/platform_profile.c b/drivers/acpi/platform_profile.c
+index ffbfd32f4cf1..b43f4459a4f6 100644
+--- a/drivers/acpi/platform_profile.c
++++ b/drivers/acpi/platform_profile.c
+@@ -689,4 +689,7 @@ static int __init platform_profile_init(void)
+ 	int err;
+ 
++	if (acpi_disabled)
++		return -EOPNOTSUPP;
++
+ 	err = class_register(&platform_profile_class);
+ 	if (err)
+
+##### B510
+=== 7bc76fb3883a B 2025-06-03 +2/-2
+RISC-V: Documentation: Add enough title underlines to CMODX
+
+This reports as a warning in linux-next along the lines of
+
+    Documentation/arch/riscv/cmodx.rst:14: WARNING: Title underline too short.
+
+    CMODX in the Kernel Space
+    --------------------- [docutils]
+    Documentation/arch/riscv/cmodx.rst:43: WARNING: Title underline too short.
+
+    CMODX in the User Space
+    --------------------- [docutils]
+    Documentation/arch/riscv/cmodx.rst:43: WARNING: Title underline too short.
+
+    CMODX in the User Space
+    --------------------- [docutils]
+
+Fixes: 0e07200b2af6 ("riscv: Documentation: add a description about dynamic ftrace")
+functions: 
+fixes: 0e07200b2af6(common)
+diff --git a/Documentation/arch/riscv/cmodx.rst b/Documentation/arch/riscv/cmodx.rst
+index e009873b2d17..40ba53bed5df 100644
+--- a/Documentation/arch/riscv/cmodx.rst
++++ b/Documentation/arch/riscv/cmodx.rst
+@@ -12,5 +12,5 @@ instruction.
+ 
+ CMODX in the Kernel Space
+----------------------
++-------------------------
+ 
+ Dynamic ftrace
+@@ -41,5 +41,5 @@ execution can be derect to another custom trampoline.
+ 
+ CMODX in the User Space
+----------------------
++-----------------------
+ 
+ Though fence.i is an unprivileged instruction, the default Linux ABI prohibits
+
+##### B511
+=== bc75552b80e6 B 2025-06-10 +28/-20
+raid6: riscv: Fix NULL pointer dereference caused by a missing clobber
+
+When running the raid6 user-space test program on RISC-V QEMU, there's a
+segmentation fault which seems caused by accessing a NULL pointer,
+which is the pointer variable p/q in raid6_rvv*_gen/xor_syndrome_real(),
+p/q should have been equal to dptr[x], but when I use GDB command to
+see its value, which was 0x10 like below:
+
+"
+Program received signal SIGSEGV, Segmentation fault.
+0x0000000000011062 in raid6_rvv2_xor_syndrome_real (disks=<optimized out>, start=0, stop=<optimized out>, bytes=4096, ptrs=<optimized out>) at rvv.c:386
+(gdb) p p
+$1 = (u8 *) 0x10 <error: Cannot access memory at address 0x10>
+"
+
+The issue was found to be related with:
+1) Compile optimization
+   There's no segmentation fault if compiling the raid6test program with
+   the optimization flag -O0.
+2) The RISC-V vector command vsetvli
+   If not used t0 as the first parameter in vsetvli, there's no
+   segmentation fault either.
+
+This patch selects the 2nd solution to fix the issue.
+
+[Palmer: The actual issue here is a missing clobber in the vsetvli code.
+It's a little tricky: we've already probed for VLENB so we don't need to
+look at the output register, we just need to have an X register in the
+instruction as that's the form required to actually set VL.  Thus we
+clobber a register, and without describing that we end up breaking
+compilers.]
+
+Fixes: 6093faaf9593 ("raid6: Add RISC-V SIMD syndrome and recovery calculations")
+functions: lib/raid6/rvv.c:raid6_rvv1_gen_syndrome_real, lib/raid6/rvv.c:raid6_rvv1_xor_syndrome_real, lib/raid6/rvv.c:raid6_rvv2_gen_syndrome_real, lib/raid6/rvv.c:raid6_rvv2_xor_syndrome_real, lib/raid6/rvv.c:raid6_rvv4_gen_syndrome_real, lib/raid6/rvv.c:raid6_rvv4_xor_syndrome_real, lib/raid6/rvv.c:raid6_rvv8_gen_syndrome_real, lib/raid6/rvv.c:raid6_rvv8_xor_syndrome_real
+fixes: 6093faaf9593(common)
+ lib/raid6/rvv.c | 48 ++++++++++++++++++++++++++++--------------------
+ 1 file changed, 28 insertions(+), 20 deletions(-)
+diff --git a/lib/raid6/rvv.c b/lib/raid6/rvv.c
+index f0887344b274..7d82efa5b14f 100644
+--- a/lib/raid6/rvv.c
++++ b/lib/raid6/rvv.c
+@@ -27,7 +27,7 @@ static void raid6_rvv1_gen_syndrome_real(int disks, unsigned long bytes, void **
+ {
+ 	u8 **dptr = (u8 **)ptrs;
+-	unsigned long d;
+-	int z, z0;
+ 	u8 *p, *q;
++	unsigned long vl, d;
++	int z, z0;
+ 
+ 	z0 = disks - 3;		/* Highest data disk */
+@@ -37,6 +37,7 @@ static void raid6_rvv1_gen_syndrome_real(int disks, unsigned long bytes, void **
+ 	asm volatile (".option	push\n"
+ 		      ".option	arch,+v\n"
+-		      "vsetvli	t0, x0, e8, m1, ta, ma\n"
++		      "vsetvli	%0, x0, e8, m1, ta, ma\n"
+ 		      ".option	pop\n"
++		      : "=&r" (vl)
+ 	);
+ 
+@@ -100,5 +101,5 @@ static void raid6_rvv1_xor_syndrome_real(int disks, int start, int stop,
+ 	u8 **dptr = (u8 **)ptrs;
+ 	u8 *p, *q;
+-	unsigned long d;
++	unsigned long vl, d;
+ 	int z, z0;
+ 
+@@ -109,6 +110,7 @@ static void raid6_rvv1_xor_syndrome_real(int disks, int start, int stop,
+ 	asm volatile (".option	push\n"
+ 		      ".option	arch,+v\n"
+-		      "vsetvli	t0, x0, e8, m1, ta, ma\n"
++		      "vsetvli	%0, x0, e8, m1, ta, ma\n"
+ 		      ".option	pop\n"
++		      : "=&r" (vl)
+ 	);
+ 
+@@ -196,7 +198,7 @@ static void raid6_rvv2_gen_syndrome_real(int disks, unsigned long bytes, void **
+ {
+ 	u8 **dptr = (u8 **)ptrs;
+-	unsigned long d;
+-	int z, z0;
+ 	u8 *p, *q;
++	unsigned long vl, d;
++	int z, z0;
+ 
+ 	z0 = disks - 3;		/* Highest data disk */
+@@ -206,6 +208,7 @@ static void raid6_rvv2_gen_syndrome_real(int disks, unsigned long bytes, void **
+ 	asm volatile (".option	push\n"
+ 		      ".option	arch,+v\n"
+-		      "vsetvli	t0, x0, e8, m1, ta, ma\n"
++		      "vsetvli	%0, x0, e8, m1, ta, ma\n"
+ 		      ".option	pop\n"
++		      : "=&r" (vl)
+ 	);
+ 
+@@ -288,5 +291,5 @@ static void raid6_rvv2_xor_syndrome_real(int disks, int start, int stop,
+ 	u8 **dptr = (u8 **)ptrs;
+... (84 more diff lines)
+
+##### B512
+=== b3979e3d2fc9 B 2025-06-11 +55/-55
+ipv6: Move fib6_config_validate() to ip6_route_add().
+
+syzkaller created an IPv6 route from a malformed packet, which has
+a prefix len > 128, triggering the splat below. [0]
+
+This is a similar issue fixed by commit 586ceac9acb7 ("ipv6: Restore
+fib6_config validation for SIOCADDRT.").
+
+The cited commit removed fib6_config validation from some callers
+of ip6_add_route().
+
+Let's move the validation back to ip6_route_add() and
+ip6_route_multipath_add().
+
+[0]:
+UBSAN: array-index-out-of-bounds in ./include/net/ipv6.h:616:34
+index 20 is out of range for type '__u8 [16]'
+CPU: 1 UID: 0 PID: 7444 Comm: syz.0.708 Not tainted 6.16.0-rc1-syzkaller-g19272b37aa4f #0 PREEMPT
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+[<ffffffff80078a80>] dump_backtrace+0x2e/0x3c arch/riscv/kernel/stacktrace.c:132
+[<ffffffff8000327a>] show_stack+0x30/0x3c arch/riscv/kernel/stacktrace.c:138
+[<ffffffff80061012>] __dump_stack lib/dump_stack.c:94 [inline]
+[<ffffffff80061012>] dump_stack_lvl+0x12e/0x1a6 lib/dump_stack.c:120
+[<ffffffff800610a6>] dump_stack+0x1c/0x24 lib/dump_stack.c:129
+[<ffffffff8001c0ea>] ubsan_epilogue+0x14/0x46 lib/ubsan.c:233
+[<ffffffff819ba290>] __ubsan_handle_out_of_bounds+0xf6/0xf8 lib/ubsan.c:455
+[<ffffffff85b363a4>] ipv6_addr_prefix include/net/ipv6.h:616 [inline]
+[<ffffffff85b363a4>] ip6_route_info_create+0x8f8/0x96e net/ipv6/route.c:3793
+[<ffffffff85b635da>] ip6_route_add+0x2a/0x1aa net/ipv6/route.c:3889
+[<ffffffff85b02e08>] addrconf_prefix_route+0x2c4/0x4e8 net/ipv6/addrconf.c:2487
+[<ffffffff85b23bb2>] addrconf_prefix_rcv+0x1720/0x1e62 net/ipv6/addrconf.c:2878
+[<ffffffff85b92664>] ndisc_router_discovery+0x1a06/0x3504 net/ipv6/ndisc.c:1570
+[<ffffffff85b99038>] ndisc_rcv+0x500/0x600 net/ipv6/ndisc.c:1874
+[<ffffffff85bc2c18>] icmpv6_rcv+0x145e/0x1e0a net/ipv6/icmp.c:988
+[<ffffffff85af6798>] ip6_protocol_deliver_rcu+0x18a/0x1976 net/ipv6/ip6_input.c:436
+[<ffffffff85af8078>] ip6_input_finish+0xf4/0x174 net/ipv6/ip6_input.c:480
+[<ffffffff85af8262>] NF_HOOK include/linux/netfilter.h:317 [inline]
+[<ffffffff85af8262>] NF_HOOK include/linux/netfilter.h:311 [inline]
+[<ffffffff85af8262>] ip6_input+0x16a/0x70c net/ipv6/ip6_input.c:491
+[<ffffffff85af8dcc>] ip6_mc_input+0x5c8/0x1268 net/ipv6/ip6_input.c:588
+functions: net/ipv6/route.c:ip6_route_add, net/ipv6/route.c:fib6_config_validate, net/ipv6/route.c:ipv6_route_ioctl, net/ipv6/route.c:ip6_route_multipath_add, net/ipv6/route.c:inet6_rtm_newroute
+fixes: fa76c1674f2e(common)
+ net/ipv6/route.c | 110 +++++++++++++++++++++++++++++++++++++--------------------------------------
+ 1 file changed, 55 insertions(+), 55 deletions(-)
+diff --git a/net/ipv6/route.c b/net/ipv6/route.c
+index 0143262094b0..79c8f1acf8a3 100644
+--- a/net/ipv6/route.c
++++ b/net/ipv6/route.c
+@@ -3738,4 +3738,51 @@ void fib6_nh_release_dsts(struct fib6_nh *fib6_nh)
+ }
+ 
++static int fib6_config_validate(struct fib6_config *cfg,
++				struct netlink_ext_ack *extack)
++{
++	/* RTF_PCPU is an internal flag; can not be set by userspace */
++	if (cfg->fc_flags & RTF_PCPU) {
++		NL_SET_ERR_MSG(extack, "Userspace can not set RTF_PCPU");
++		goto errout;
++	}
++
++	/* RTF_CACHE is an internal flag; can not be set by userspace */
++	if (cfg->fc_flags & RTF_CACHE) {
++		NL_SET_ERR_MSG(extack, "Userspace can not set RTF_CACHE");
++		goto errout;
++	}
++
++	if (cfg->fc_type > RTN_MAX) {
++		NL_SET_ERR_MSG(extack, "Invalid route type");
++		goto errout;
++	}
++
++	if (cfg->fc_dst_len > 128) {
++		NL_SET_ERR_MSG(extack, "Invalid prefix length");
++		goto errout;
++	}
++
++#ifdef CONFIG_IPV6_SUBTREES
++	if (cfg->fc_src_len > 128) {
++		NL_SET_ERR_MSG(extack, "Invalid source address length");
++		goto errout;
++	}
++
++	if (cfg->fc_nh_id && cfg->fc_src_len) {
++		NL_SET_ERR_MSG(extack, "Nexthops can not be used with source routing");
++		goto errout;
++	}
++#else
++	if (cfg->fc_src_len) {
++		NL_SET_ERR_MSG(extack,
++			       "Specifying source address requires IPV6_SUBTREES to be enabled");
++		goto errout;
++	}
++#endif
++	return 0;
++errout:
++	return -EINVAL;
++}
++
+ static struct fib6_info *ip6_route_info_create(struct fib6_config *cfg,
+ 					       gfp_t gfp_flags,
+@@ -3887,4 +3934,8 @@ int ip6_route_add(struct fib6_config *cfg, gfp_t gfp_flags,
+ 	int err;
+ 
++	err = fib6_config_validate(cfg, extack);
+... (84 more diff lines)
+
+##### B513
+=== b41c1d8d0790 B 2025-07-04 +37/-25
+fscrypt: Don't use problematic non-inline crypto engines
+
+Make fscrypt no longer use Crypto API drivers for non-inline crypto
+engines, even when the Crypto API prioritizes them over CPU-based code
+(which unfortunately it often does).  These drivers tend to be really
+problematic, especially for fscrypt's workload.  This commit has no
+effect on inline crypto engines, which are different and do work well.
+
+Specifically, exclude drivers that have CRYPTO_ALG_KERN_DRIVER_ONLY or
+CRYPTO_ALG_ALLOCATES_MEMORY set.  (Later, CRYPTO_ALG_ASYNC should be
+excluded too.  That's omitted for now to keep this commit backportable,
+since until recently some CPU-based code had CRYPTO_ALG_ASYNC set.)
+
+There are two major issues with these drivers: bugs and performance.
+
+First, these drivers tend to be buggy.  They're fundamentally much more
+error-prone and harder to test than the CPU-based code.  They often
+don't get tested before kernel releases, and even if they do, the crypto
+self-tests don't properly test these drivers.  Released drivers have
+en/decrypted or hashed data incorrectly.  These bugs cause issues for
+fscrypt users who often didn't even want to use these drivers, e.g.:
+
+- https://github.com/google/fscryptctl/issues/32
+- https://github.com/google/fscryptctl/issues/9
+- https://lore.kernel.org/r/PH0PR02MB731916ECDB6C613665863B6CFFAA2@PH0PR02MB7319.namprd02.prod.outlook.com
+
+These drivers have also similarly caused issues for dm-crypt users,
+including data corruption and deadlocks.  Since Linux v5.10, dm-crypt
+has disabled most of them by excluding CRYPTO_ALG_ALLOCATES_MEMORY.
+
+Second, these drivers tend to be *much* slower than the CPU-based code.
+This may seem counterintuitive, but benchmarks clearly show it.  There's
+a *lot* of overhead associated with going to a hardware driver, off the
+CPU, and back again.  To prove this, I gathered as many systems with
+this type of crypto engine as I could, and I measured synchronous
+encryption of 4096-byte messages (which matches fscrypt's workload):
+
+Intel Emerald Rapids server:
+   AES-256-XTS:
+      xts-aes-vaes-avx512   16171 MB/s  [CPU-based, Vector AES]
+      qat_aes_xts             289 MB/s  [Offload, Intel QuickAssist]
+functions: fs/crypto/hkdf.c:fscrypt_init_hkdf, fs/crypto/keysetup.c:fscrypt_allocate_skcipher, fs/crypto/keysetup_v1.c:derive_key_aes
+fixes: b30ab0e03407(common)
+ Documentation/filesystems/fscrypt.rst | 37 +++++++++++++++----------------------
+ fs/crypto/fscrypt_private.h           | 17 +++++++++++++++++
+ fs/crypto/hkdf.c                      |  2 +-
+ fs/crypto/keysetup.c                  |  3 ++-
+ fs/crypto/keysetup_v1.c               |  3 ++-
+ 5 files changed, 37 insertions(+), 25 deletions(-)
+diff --git a/Documentation/filesystems/fscrypt.rst b/Documentation/filesystems/fscrypt.rst
+index f63791641c1d..696a5844bfa3 100644
+--- a/Documentation/filesystems/fscrypt.rst
++++ b/Documentation/filesystems/fscrypt.rst
+@@ -148,7 +148,6 @@ However, these ioctls have some limitations:
+   your kernel command line.  However, this has a performance cost.
+ 
+-- Secret keys might still exist in CPU registers, in crypto
+-  accelerator hardware (if used by the crypto API to implement any of
+-  the algorithms), or in other places not explicitly considered here.
++- Secret keys might still exist in CPU registers or in other places
++  not explicitly considered here.
+ 
+ Full system compromise
+@@ -407,7 +406,10 @@ acceleration is unavailable.  For more information about Adiantum, see
+ `the Adiantum paper <https://eprint.iacr.org/2018/720.pdf>`_.
+ 
+-The (AES-128-CBC-ESSIV, AES-128-CBC-CTS) pair exists only to support
+-systems whose only form of AES acceleration is an off-CPU crypto
+-accelerator such as CAAM or CESA that does not support XTS.
++The (AES-128-CBC-ESSIV, AES-128-CBC-CTS) pair was added to try to
++provide a more efficient option for systems that lack AES instructions
++in the CPU but do have a non-inline crypto engine such as CAAM or CESA
++that supports AES-CBC (and not AES-XTS).  This is deprecated.  It has
++been shown that just doing AES on the CPU is actually faster.
++Moreover, Adiantum is faster still and is recommended on such systems.
+ 
+ The remaining mode pairs are the "national pride ciphers":
+@@ -1319,20 +1321,11 @@ Inline encryption support
+ =========================
+ 
+-By default, fscrypt uses the kernel crypto API for all cryptographic
+-operations (other than HKDF, which fscrypt partially implements
+-itself).  The kernel crypto API supports hardware crypto accelerators,
+-but only ones that work in the traditional way where all inputs and
+-outputs (e.g. plaintexts and ciphertexts) are in memory.  fscrypt can
+-take advantage of such hardware, but the traditional acceleration
+-model isn't particularly efficient and fscrypt hasn't been optimized
+-for it.
+-
+-Instead, many newer systems (especially mobile SoCs) have *inline
+-encryption hardware* that can encrypt/decrypt data while it is on its
+-way to/from the storage device.  Linux supports inline encryption
+-through a set of extensions to the block layer called *blk-crypto*.
+-blk-crypto allows filesystems to attach encryption contexts to bios
+-(I/O requests) to specify how the data will be encrypted or decrypted
+-in-line.  For more information about blk-crypto, see
++Many newer systems (especially mobile SoCs) have *inline encryption
++hardware* that can encrypt/decrypt data while it is on its way to/from
++the storage device.  Linux supports inline encryption through a set of
++extensions to the block layer called *blk-crypto*.  blk-crypto allows
++filesystems to attach encryption contexts to bios (I/O requests) to
++specify how the data will be encrypted or decrypted in-line.  For more
++information about blk-crypto, see
+ :ref:`Documentation/block/inline-encryption.rst <inline_encryption>`.
+ 
+diff --git a/fs/crypto/fscrypt_private.h b/fs/crypto/fscrypt_private.h
+index c1d92074b65c..6e7164530a1e 100644
+--- a/fs/crypto/fscrypt_private.h
++++ b/fs/crypto/fscrypt_private.h
+... (57 more diff lines)
+
+##### B514
+=== 27917e8194f9 B 2025-07-09 +21/-19
+erofs: address D-cache aliasing
+
+Flush the D-cache before unlocking folios for compressed inodes, as
+they are dirtied during decompression.
+
+Avoid calling flush_dcache_folio() on every CPU write, since it's more
+like playing whack-a-mole without real benefit.
+
+It has no impact on x86 and arm64/risc-v: on x86, flush_dcache_folio()
+is a no-op, and on arm64/risc-v, PG_dcache_clean (PG_arch_1) is clear
+for new page cache folios.  However, certain ARM boards are affected,
+as reported.
+
+Fixes: 3883a79abd02 ("staging: erofs: introduce VLE decompression support")
+functions: fs/erofs/data.c:erofs_onlinefolio_end, fs/erofs/decompressor.c:z_erofs_transform_plain, fs/erofs/fileio.c:erofs_fileio_ki_complete, fs/erofs/fileio.c:erofs_fileio_scan_folio, fs/erofs/zdata.c:z_erofs_scan_folio, fs/erofs/zdata.c:z_erofs_fill_other_copies, fs/erofs/zdata.c:z_erofs_decompress_pcluster
+fixes: 3883a79abd02(common)
+ fs/erofs/data.c         | 16 +++++++++++-----
+ fs/erofs/decompressor.c | 12 ++++--------
+ fs/erofs/fileio.c       |  4 ++--
+ fs/erofs/internal.h     |  2 +-
+ fs/erofs/zdata.c        |  6 +++---
+ 5 files changed, 21 insertions(+), 19 deletions(-)
+diff --git a/fs/erofs/data.c b/fs/erofs/data.c
+index 221e0ff1ed0d..16e4a6bd9b97 100644
+--- a/fs/erofs/data.c
++++ b/fs/erofs/data.c
+@@ -215,7 +215,9 @@ int erofs_map_dev(struct super_block *sb, struct erofs_map_dev *map)
+ /*
+  * bit 30: I/O error occurred on this folio
++ * bit 29: CPU has dirty data in D-cache (needs aliasing handling);
+  * bit 0 - 29: remaining parts to complete this folio
+  */
+-#define EROFS_ONLINEFOLIO_EIO			(1 << 30)
++#define EROFS_ONLINEFOLIO_EIO		30
++#define EROFS_ONLINEFOLIO_DIRTY		29
+ 
+ void erofs_onlinefolio_init(struct folio *folio)
+@@ -234,5 +236,5 @@ void erofs_onlinefolio_split(struct folio *folio)
+ }
+ 
+-void erofs_onlinefolio_end(struct folio *folio, int err)
++void erofs_onlinefolio_end(struct folio *folio, int err, bool dirty)
+ {
+ 	int orig, v;
+@@ -240,11 +242,15 @@ void erofs_onlinefolio_end(struct folio *folio, int err)
+ 	do {
+ 		orig = atomic_read((atomic_t *)&folio->private);
+-		v = (orig - 1) | (err ? EROFS_ONLINEFOLIO_EIO : 0);
++		DBG_BUGON(orig <= 0);
++		v = dirty << EROFS_ONLINEFOLIO_DIRTY;
++		v |= (orig - 1) | (!!err << EROFS_ONLINEFOLIO_EIO);
+ 	} while (atomic_cmpxchg((atomic_t *)&folio->private, orig, v) != orig);
+ 
+-	if (v & ~EROFS_ONLINEFOLIO_EIO)
++	if (v & (BIT(EROFS_ONLINEFOLIO_DIRTY) - 1))
+ 		return;
+ 	folio->private = 0;
+-	folio_end_read(folio, !(v & EROFS_ONLINEFOLIO_EIO));
++	if (v & BIT(EROFS_ONLINEFOLIO_DIRTY))
++		flush_dcache_folio(folio);
++	folio_end_read(folio, !(v & BIT(EROFS_ONLINEFOLIO_EIO)));
+ }
+ 
+diff --git a/fs/erofs/decompressor.c b/fs/erofs/decompressor.c
+index bf62e2836b60..358061d7b660 100644
+--- a/fs/erofs/decompressor.c
++++ b/fs/erofs/decompressor.c
+@@ -302,11 +302,9 @@ static int z_erofs_transform_plain(struct z_erofs_decompress_req *rq,
+ 		if (cur && rq->out[0]) {
+ 			kin = kmap_local_page(rq->in[nrpages_in - 1]);
+-			if (rq->out[0] == rq->in[nrpages_in - 1]) {
++			if (rq->out[0] == rq->in[nrpages_in - 1])
+ 				memmove(kin + rq->pageofs_out, kin + pi, cur);
+-				flush_dcache_page(rq->out[0]);
+-			} else {
++			else
+ 				memcpy_to_page(rq->out[0], rq->pageofs_out,
+ 					       kin + pi, cur);
+-			}
+ 			kunmap_local(kin);
+ 		}
+@@ -326,12 +324,10 @@ static int z_erofs_transform_plain(struct z_erofs_decompress_req *rq,
+... (68 more diff lines)
+
+##### B515
+=== 8b428f42f3ed B 2025-07-09 +11/-1
+nbd: fix lockdep deadlock warning
+
+nbd grabs device lock nbd->config_lock for updating nr_hw_queues, this
+ways cause the following lock dependency:
+
+-> #2 (&disk->open_mutex){+.+.}-{4:4}:
+       lock_acquire kernel/locking/lockdep.c:5871 [inline]
+       lock_acquire+0x1ac/0x448 kernel/locking/lockdep.c:5828
+       __mutex_lock_common kernel/locking/mutex.c:602 [inline]
+       __mutex_lock+0x166/0x1292 kernel/locking/mutex.c:747
+       mutex_lock_nested+0x14/0x1c kernel/locking/mutex.c:799
+       __del_gendisk+0x132/0xac6 block/genhd.c:706
+       del_gendisk+0xf6/0x19a block/genhd.c:819
+       nbd_dev_remove+0x3c/0xf2 drivers/block/nbd.c:268
+       nbd_dev_remove_work+0x1c/0x26 drivers/block/nbd.c:284
+       process_one_work+0x96a/0x1f32 kernel/workqueue.c:3238
+       process_scheduled_works kernel/workqueue.c:3321 [inline]
+       worker_thread+0x5ce/0xde8 kernel/workqueue.c:3402
+       kthread+0x39c/0x7d4 kernel/kthread.c:464
+       ret_from_fork_kernel+0x2a/0xbb2 arch/riscv/kernel/process.c:214
+       ret_from_fork_kernel_asm+0x16/0x18 arch/riscv/kernel/entry.S:327
+
+-> #1 (&set->update_nr_hwq_lock){++++}-{4:4}:
+       lock_acquire kernel/locking/lockdep.c:5871 [inline]
+       lock_acquire+0x1ac/0x448 kernel/locking/lockdep.c:5828
+       down_write+0x9c/0x19a kernel/locking/rwsem.c:1577
+       blk_mq_update_nr_hw_queues+0x3e/0xb86 block/blk-mq.c:5041
+       nbd_start_device+0x140/0xb2c drivers/block/nbd.c:1476
+       nbd_genl_connect+0xae0/0x1b24 drivers/block/nbd.c:2201
+       genl_family_rcv_msg_doit+0x206/0x2e6 net/netlink/genetlink.c:1115
+       genl_family_rcv_msg net/netlink/genetlink.c:1195 [inline]
+       genl_rcv_msg+0x514/0x78e net/netlink/genetlink.c:1210
+       netlink_rcv_skb+0x206/0x3be net/netlink/af_netlink.c:2534
+       genl_rcv+0x36/0x4c net/netlink/genetlink.c:1219
+       netlink_unicast_kernel net/netlink/af_netlink.c:1313 [inline]
+       netlink_unicast+0x4f0/0x82c net/netlink/af_netlink.c:1339
+       netlink_sendmsg+0x85e/0xdd6 net/netlink/af_netlink.c:1883
+       sock_sendmsg_nosec net/socket.c:712 [inline]
+       __sock_sendmsg+0xcc/0x160 net/socket.c:727
+       ____sys_sendmsg+0x63e/0x79c net/socket.c:2566
+       ___sys_sendmsg+0x144/0x1e6 net/socket.c:2620
+functions: drivers/block/nbd.c:nbd_start_device
+fixes: 98e68f67020c(common)
+diff --git a/drivers/block/nbd.c b/drivers/block/nbd.c
+index 7bdc7eb808ea..709bad75c47b 100644
+--- a/drivers/block/nbd.c
++++ b/drivers/block/nbd.c
+@@ -1474,5 +1474,15 @@ static int nbd_start_device(struct nbd_device *nbd)
+ 	}
+ 
+-	blk_mq_update_nr_hw_queues(&nbd->tag_set, config->num_connections);
++retry:
++	mutex_unlock(&nbd->config_lock);
++	blk_mq_update_nr_hw_queues(&nbd->tag_set, num_connections);
++	mutex_lock(&nbd->config_lock);
++
++	/* if another code path updated nr_hw_queues, retry until succeed */
++	if (num_connections != config->num_connections) {
++		num_connections = config->num_connections;
++		goto retry;
++	}
++
+ 	nbd->pid = task_pid_nr(current);
+ 
+
+##### B516
+=== 0c43094f8cc9 B 2025-07-15 +26/-113
+eventpoll: Replace rwlock with spinlock
+
+The ready event list of an epoll object is protected by read-write
+semaphore:
+
+  - The consumer (waiter) acquires the write lock and takes items.
+  - the producer (waker) takes the read lock and adds items.
+
+The point of this design is enabling epoll to scale well with large number
+of producers, as multiple producers can hold the read lock at the same
+time.
+
+Unfortunately, this implementation may cause scheduling priority inversion
+problem. Suppose the consumer has higher scheduling priority than the
+producer. The consumer needs to acquire the write lock, but may be blocked
+by the producer holding the read lock. Since read-write semaphore does not
+support priority-boosting for the readers (even with CONFIG_PREEMPT_RT=y),
+we have a case of priority inversion: a higher priority consumer is blocked
+by a lower priority producer. This problem was reported in [1].
+
+Furthermore, this could also cause stall problem, as described in [2].
+
+Fix this problem by replacing rwlock with spinlock.
+
+This reduces the event bandwidth, as the producers now have to contend with
+each other for the spinlock. According to the benchmark from
+https://github.com/rouming/test-tools/blob/master/stress-epoll.c:
+
+    On 12 x86 CPUs:
+                  Before     After        Diff
+        threads  events/ms  events/ms
+              8       7162       4956     -31%
+             16       8733       5383     -38%
+             32       7968       5572     -30%
+             64      10652       5739     -46%
+            128      11236       5931     -47%
+
+    On 4 riscv CPUs:
+                  Before     After        Diff
+        threads  events/ms  events/ms
+              8       2958       2833      -4%
+functions: fs/eventpoll.c:ep_start_scan, fs/eventpoll.c:ep_done_scan, fs/eventpoll.c:__ep_remove, fs/eventpoll.c:ep_alloc, fs/eventpoll.c:list_add_tail_lockless, fs/eventpoll.c:chain_epi_lockless, fs/eventpoll.c:ep_poll_callback, fs/eventpoll.c:ep_insert, fs/eventpoll.c:ep_modify, fs/eventpoll.c:ep_poll
+fixes: a218cc491420(common)
+ fs/eventpoll.c | 139 +++++++++++++++--------------------------------------------------------------
+ 1 file changed, 26 insertions(+), 113 deletions(-)
+diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+index b22d6f819f78..ee7c4b683ec3 100644
+--- a/fs/eventpoll.c
++++ b/fs/eventpoll.c
+@@ -47,8 +47,8 @@
+  * 1) epnested_mutex (mutex)
+  * 2) ep->mtx (mutex)
+- * 3) ep->lock (rwlock)
++ * 3) ep->lock (spinlock)
+  *
+  * The acquire order is the one listed above, from 1 to 3.
+- * We need a rwlock (ep->lock) because we manipulate objects
++ * We need a spinlock (ep->lock) because we manipulate objects
+  * from inside the poll callback, that might be triggered from
+  * a wake_up() that in turn might be called from IRQ context.
+@@ -196,5 +196,5 @@ struct eventpoll {
+ 
+ 	/* Lock which protects rdllist and ovflist */
+-	rwlock_t lock;
++	spinlock_t lock;
+ 
+ 	/* RB tree root used to store monitored fd structs */
+@@ -742,8 +742,8 @@ static void ep_start_scan(struct eventpoll *ep, struct list_head *txlist)
+ 	 */
+ 	lockdep_assert_irqs_enabled();
+-	write_lock_irq(&ep->lock);
++	spin_lock_irq(&ep->lock);
+ 	list_splice_init(&ep->rdllist, txlist);
+ 	WRITE_ONCE(ep->ovflist, NULL);
+-	write_unlock_irq(&ep->lock);
++	spin_unlock_irq(&ep->lock);
+ }
+ 
+@@ -753,5 +753,5 @@ static void ep_done_scan(struct eventpoll *ep,
+ 	struct epitem *epi, *nepi;
+ 
+-	write_lock_irq(&ep->lock);
++	spin_lock_irq(&ep->lock);
+ 	/*
+ 	 * During the time we spent inside the "sproc" callback, some
+@@ -794,5 +794,5 @@ static void ep_done_scan(struct eventpoll *ep,
+ 	}
+ 
+-	write_unlock_irq(&ep->lock);
++	spin_unlock_irq(&ep->lock);
+ }
+ 
+@@ -869,8 +869,8 @@ static bool __ep_remove(struct eventpoll *ep, struct epitem *epi, bool force)
+ 	rb_erase_cached(&epi->rbn, &ep->rbr);
+ 
+-	write_lock_irq(&ep->lock);
++	spin_lock_irq(&ep->lock);
+ 	if (ep_is_linked(epi))
+ 		list_del_init(&epi->rdllink);
+-	write_unlock_irq(&ep->lock);
++	spin_unlock_irq(&ep->lock);
+ 
+ 	wakeup_source_unregister(ep_wakeup_source(epi));
+@@ -1153,5 +1153,5 @@ static int ep_alloc(struct eventpoll **pep)
+ 
+... (191 more diff lines)
+
+##### B517
+=== f8a03516a530 B 2025-07-18 +0/-5
+raid6: riscv: Clean up unused header file inclusion
+
+These two C files don't reference things defined in simd.h or types.h
+so remove these redundant #inclusions.
+
+Fixes: 6093faaf9593 ("raid6: Add RISC-V SIMD syndrome and recovery calculations")
+functions: 
+fixes: 6093faaf9593(common)
+diff --git a/lib/raid6/recov_rvv.c b/lib/raid6/recov_rvv.c
+index 5d54c4b437df..5f779719c3d3 100644
+--- a/lib/raid6/recov_rvv.c
++++ b/lib/raid6/recov_rvv.c
+@@ -5,7 +5,5 @@
+  */
+ 
+-#include <asm/simd.h>
+ #include <asm/vector.h>
+-#include <crypto/internal/simd.h>
+ #include <linux/raid/pq.h>
+ 
+diff --git a/lib/raid6/rvv.c b/lib/raid6/rvv.c
+index 7d82efa5b14f..b193ea176d5d 100644
+--- a/lib/raid6/rvv.c
++++ b/lib/raid6/rvv.c
+@@ -10,9 +10,6 @@
+  */
+ 
+-#include <asm/simd.h>
+ #include <asm/vector.h>
+-#include <crypto/internal/simd.h>
+ #include <linux/raid/pq.h>
+-#include <linux/types.h>
+ #include "rvv.h"
+ 
+
+##### B518
+=== cb9f6a40382c B 2025-08-02 +1/-1
+irqchip/riscv-imsic: Don't dereference before NULL pointer check
+
+smatch warns about a dereference before check:
+drivers/irqchip/irq-riscv-imsic-platform.c:317 imsic_irqdomain_init() warn: variable dereferenced before check 'imsic' (see line 311)    
+
+Cure it by moving the firmware not assignement after the checks.
+
+Fixes: 59422904dd98 ("irqchip/riscv-imsic: Convert to msi_create_parent_irq_domain() helper")
+ drivers/irqchip/irq-riscv-imsic-platform.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+functions: drivers/irqchip/irq-riscv-imsic-platform.c:imsic_irqdomain_init
+fixes: 59422904dd98(common)
+diff --git a/drivers/irqchip/irq-riscv-imsic-platform.c b/drivers/irqchip/irq-riscv-imsic-platform.c
+index 74a2a28f9403..643c8e459611 100644
+--- a/drivers/irqchip/irq-riscv-imsic-platform.c
++++ b/drivers/irqchip/irq-riscv-imsic-platform.c
+@@ -309,5 +309,4 @@ int imsic_irqdomain_init(void)
+ {
+ 	struct irq_domain_info info = {
+-		.fwnode		= imsic->fwnode,
+ 		.ops		= &imsic_base_domain_ops,
+ 		.host_data	= imsic,
+@@ -326,4 +325,5 @@ int imsic_irqdomain_init(void)
+ 
+ 	/* Create Base IRQ domain */
++	info.fwnode = imsic->fwnode,
+ 	imsic->base_domain = msi_create_parent_irq_domain(&info, &imsic_msi_parent_ops);
+ 	if (!imsic->base_domain) {
+
+##### B519
+=== 03ee64b5e525 B 2025-08-04 +4/-0
+rv: Support systems with time64-only syscalls
+
+Some systems (like 32-bit RISC-V) only have the 64-bit time_t versions
+of syscalls.  So handle the 32-bit time_t version of those being
+undefined.
+
+Fixes: f74f8bb246cf ("rv: Add rtapp_sleep monitor")
+functions: kernel/trace/rv/monitors/sleep/sleep.c:handle_sys_enter
+fixes: f74f8bb246cf(common)
+diff --git a/kernel/trace/rv/monitors/sleep/sleep.c b/kernel/trace/rv/monitors/sleep/sleep.c
+index eea447b06907..c1347da69e9d 100644
+--- a/kernel/trace/rv/monitors/sleep/sleep.c
++++ b/kernel/trace/rv/monitors/sleep/sleep.c
+@@ -128,5 +128,7 @@ static void handle_sys_enter(void *data, struct pt_regs *regs, long id)
+ 
+ 	switch (id) {
++#ifdef __NR_clock_nanosleep
+ 	case __NR_clock_nanosleep:
++#endif
+ #ifdef __NR_clock_nanosleep_time64
+ 	case __NR_clock_nanosleep_time64:
+@@ -139,5 +141,7 @@ static void handle_sys_enter(void *data, struct pt_regs *regs, long id)
+ 		break;
+ 
++#ifdef __NR_futex
+ 	case __NR_futex:
++#endif
+ #ifdef __NR_futex_time64
+ 	case __NR_futex_time64:
+
+##### B520
+=== 5b3706597b90 B 2025-08-18 +2/-2
+ACPI: RISC-V: Fix FFH_CPPC_CSR error handling
+
+The cppc_ffh_csr_read() and cppc_ffh_csr_write() returns Linux error
+code in "data->ret.error" so cpc_read_ffh() and cpc_write_ffh() must
+not use sbi_err_map_linux_errno() for FFH_CPPC_CSR.
+
+Fixes: 30f3ffbee86b ("ACPI: RISC-V: Add CPPC driver")
+functions: drivers/acpi/riscv/cppc.c:cpc_read_ffh, drivers/acpi/riscv/cppc.c:cpc_write_ffh
+fixes: 30f3ffbee86b(common)
+diff --git a/drivers/acpi/riscv/cppc.c b/drivers/acpi/riscv/cppc.c
+index 440cf9fb91aa..42c1a9052470 100644
+--- a/drivers/acpi/riscv/cppc.c
++++ b/drivers/acpi/riscv/cppc.c
+@@ -120,5 +120,5 @@ int cpc_read_ffh(int cpu, struct cpc_reg *reg, u64 *val)
+ 		*val = data.ret.value;
+ 
+-		return (data.ret.error) ? sbi_err_map_linux_errno(data.ret.error) : 0;
++		return data.ret.error;
+ 	}
+ 
+@@ -149,5 +149,5 @@ int cpc_write_ffh(int cpu, struct cpc_reg *reg, u64 val)
+ 		smp_call_function_single(cpu, cppc_ffh_csr_write, &data, 1);
+ 
+-		return (data.ret.error) ? sbi_err_map_linux_errno(data.ret.error) : 0;
++		return data.ret.error;
+ 	}
+ 
+
+##### B521
+=== 99d4d1a07087 B 2025-08-20 +1/-1
+iommu/riscv: prevent NULL deref in iova_to_phys
+
+The riscv_iommu_pte_fetch() function returns either NULL for
+unmapped/never-mapped iova, or a valid leaf pte pointer that
+requires no further validation.
+
+riscv_iommu_iova_to_phys() failed to handle NULL returns.
+Prevent null pointer dereference in
+riscv_iommu_iova_to_phys(), and remove the pte validation.
+
+Fixes: 488ffbf18171 ("iommu/riscv: Paging domain support")
+functions: drivers/iommu/riscv/iommu.c:riscv_iommu_iova_to_phys
+fixes: 488ffbf18171(common)
+diff --git a/drivers/iommu/riscv/iommu.c b/drivers/iommu/riscv/iommu.c
+index 2d0d31ba2886..0eae2f4bdc5e 100644
+--- a/drivers/iommu/riscv/iommu.c
++++ b/drivers/iommu/riscv/iommu.c
+@@ -1284,5 +1284,5 @@ static phys_addr_t riscv_iommu_iova_to_phys(struct iommu_domain *iommu_domain,
+ 
+ 	ptr = riscv_iommu_pte_fetch(domain, iova, &pte_size);
+-	if (_io_pte_none(*ptr) || !_io_pte_present(*ptr))
++	if (!ptr)
+ 		return 0;
+ 
+
+##### B522
+=== 7c0c01a216e6 B 2025-08-26 +3/-3
+vdso/datastore: Gate time data behind CONFIG_GENERIC_GETTIMEOFDAY
+
+When the generic vDSO does not provide time functions, as for example on
+riscv32, then the time data store is not necessary.
+
+Avoid allocating these time data pages when not used.
+
+Fixes: df7fcbefa710 ("vdso: Add generic time data storage")
+functions: lib/vdso/datastore.c:vvar_fault
+fixes: df7fcbefa710(common)
+diff --git a/lib/vdso/datastore.c b/lib/vdso/datastore.c
+index 3693c6caf2c4..a565c30c71a0 100644
+--- a/lib/vdso/datastore.c
++++ b/lib/vdso/datastore.c
+@@ -12,5 +12,5 @@
+  * The vDSO data page.
+  */
+-#ifdef CONFIG_HAVE_GENERIC_VDSO
++#ifdef CONFIG_GENERIC_GETTIMEOFDAY
+ static union {
+ 	struct vdso_time_data	data;
+@@ -19,5 +19,5 @@ static union {
+ struct vdso_time_data *vdso_k_time_data = &vdso_time_data_store.data;
+ static_assert(sizeof(vdso_time_data_store) == PAGE_SIZE);
+-#endif /* CONFIG_HAVE_GENERIC_VDSO */
++#endif /* CONFIG_GENERIC_GETTIMEOFDAY */
+ 
+ #ifdef CONFIG_VDSO_GETRANDOM
+@@ -47,5 +47,5 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
+ 	switch (vmf->pgoff) {
+ 	case VDSO_TIME_PAGE_OFFSET:
+-		if (!IS_ENABLED(CONFIG_HAVE_GENERIC_VDSO))
++		if (!IS_ENABLED(CONFIG_GENERIC_GETTIMEOFDAY))
+ 			return VM_FAULT_SIGBUS;
+ 		pfn = __phys_to_pfn(__pa_symbol(vdso_k_time_data));
+
+##### B523
+=== 04d3cd43700a B 2025-08-27 +1/-1
+arm64: kexec: initialize kexec_buf struct in load_other_segments()
+
+Patch series "kexec: Fix invalid field access".
+
+The kexec_buf structure was previously declared without initialization. 
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures.  This un-initialized field will contain garbage.
+
+This is also triggering a UBSAN warning when the uninitialized data was
+accessed:
+
+	------------[ cut here ]------------
+	UBSAN: invalid-load in ./include/linux/kexec.h:210:10
+	load of value 252 is not a valid value for type '_Bool'
+
+Zero-initializing kexec_buf at declaration ensures all fields are cleanly
+set, preventing future instances of uninitialized memory being used.
+
+An initial fix was already landed for arm64[0], and this patchset fixes
+the problem on the remaining arm64 code and on riscv, as raised by Mark.
+
+Discussions about this problem could be found at[1][2].
+
+
+This patch (of 3):
+
+The kexec_buf structure was previously declared without initialization.
+commit bf454ec31add ("kexec_file: allow to place kexec_buf randomly")
+added a field that is always read but not consistently populated by all
+architectures. This un-initialized field will contain garbage.
+
+This is also triggering a UBSAN warning when the uninitialized data was
+accessed:
+
+	------------[ cut here ]------------
+	UBSAN: invalid-load in ./include/linux/kexec.h:210:10
+	load of value 252 is not a valid value for type '_Bool'
+
+Zero-initializing kexec_buf at declaration ensures all fields are
+cleanly set, preventing future instances of uninitialized memory being
+functions: arch/arm64/kernel/machine_kexec_file.c:load_other_segments
+fixes: bf454ec31add(common)
+diff --git a/arch/arm64/kernel/machine_kexec_file.c b/arch/arm64/kernel/machine_kexec_file.c
+index af1ca875c52c..410060ebd86d 100644
+--- a/arch/arm64/kernel/machine_kexec_file.c
++++ b/arch/arm64/kernel/machine_kexec_file.c
+@@ -95,5 +95,5 @@ int load_other_segments(struct kimage *image,
+ 			char *cmdline)
+ {
+-	struct kexec_buf kbuf;
++	struct kexec_buf kbuf = {};
+ 	void *dtb = NULL;
+ 	unsigned long initrd_load_addr = 0, dtb_len,
+
+##### B524
+=== 04ff48239f46 B 2025-09-01 +1/-1
+copy_sighand: Handle architectures where sizeof(unsigned long) < sizeof(u64)
+
+With the introduction of clone3 in commit 7f192e3cd316 ("fork: add
+clone3") the effective bit width of clone_flags on all architectures was
+increased from 32-bit to 64-bit. However, the signature of the copy_*
+helper functions (e.g., copy_sighand) used by copy_process was not
+adapted.
+
+As such, they truncate the flags on any 32-bit architectures that
+supports clone3 (arc, arm, csky, m68k, microblaze, mips32, openrisc,
+parisc32, powerpc32, riscv32, x86-32 and xtensa).
+
+For copy_sighand with CLONE_CLEAR_SIGHAND being an actual u64
+constant, this triggers an observable bug in kernel selftest
+clone3_clear_sighand:
+
+        if (clone_flags & CLONE_CLEAR_SIGHAND)
+
+in function copy_sighand within fork.c will always fail given:
+
+        unsigned long /* == uint32_t */ clone_flags
+        #define CLONE_CLEAR_SIGHAND 0x100000000ULL
+
+This commit fixes the bug by always passing clone_flags to copy_sighand
+via their declared u64 type, invariant of architecture-dependent integer
+sizes.
+
+Fixes: b612e5df4587 ("clone3: add CLONE_CLEAR_SIGHAND")
+functions: 
+fixes: b612e5df4587(common)
+diff --git a/kernel/fork.c b/kernel/fork.c
+index af673856499d..4e2c5a3e8989 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1597,5 +1597,5 @@ static int copy_files(unsigned long clone_flags, struct task_struct *tsk,
+ }
+ 
+-static int copy_sighand(unsigned long clone_flags, struct task_struct *tsk)
++static int copy_sighand(u64 clone_flags, struct task_struct *tsk)
+ {
+ 	struct sighand_struct *sig;

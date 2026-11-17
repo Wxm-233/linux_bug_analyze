@@ -1,0 +1,46 @@
+########## 第22条  编号 A036  提交 a179a4bfb694  日期 2024-01-17
+
+【提交说明】
+riscv: Fix hugetlb_mask_last_page() when NAPOT is enabled
+
+When NAPOT is enabled, a new hugepage size is available and then we need
+to make hugetlb_mask_last_page() aware of that.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+
+【改动统计】
+ arch/riscv/mm/hugetlbpage.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 865ac5c7d159..87406b26c3da 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -125,6 +125,26 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
+ 	return pte;
+ }
+ 
++unsigned long hugetlb_mask_last_page(struct hstate *h)
++{
++	unsigned long hp_size = huge_page_size(h);
++
++	switch (hp_size) {
++#ifndef __PAGETABLE_PMD_FOLDED
++	case PUD_SIZE:
++		return P4D_SIZE - PUD_SIZE;
++#endif
++	case PMD_SIZE:
++		return PUD_SIZE - PMD_SIZE;
++	case napot_cont_size(NAPOT_CONT64KB_ORDER):
++		return PMD_SIZE - napot_cont_size(NAPOT_CONT64KB_ORDER);
++	default:
++		break;
++	}
++
++	return 0UL;
++}
++
+ static pte_t get_clear_contig(struct mm_struct *mm,
+ 			      unsigned long addr,
+ 			      pte_t *ptep,

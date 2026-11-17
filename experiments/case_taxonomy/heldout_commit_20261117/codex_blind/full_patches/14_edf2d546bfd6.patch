@@ -1,0 +1,115 @@
+commit edf2d546bfd6f5c4d143715cef1b1e7ce5718c4e
+Author:     Alexandre Ghiti <alexghiti@rivosinc.com>
+AuthorDate: Mon Jun 24 10:21:41 2024 +0200
+Commit:     Palmer Dabbelt <palmer@rivosinc.com>
+CommitDate: Wed Jun 26 07:37:27 2024 -0700
+
+    riscv: patch: Flush the icache right after patching to avoid illegal insns
+    
+    We cannot delay the icache flush after patching some functions as we may
+    have patched a function that will get called before the icache flush.
+    
+    The only way to completely avoid such scenario is by flushing the icache
+    as soon as we patch a function. This will probably be costly as we don't
+    batch the icache maintenance anymore.
+    
+    Fixes: 6ca445d8af0e ("riscv: Fix early ftrace nop patching")
+    Reported-by: Conor Dooley <conor.dooley@microchip.com>
+    Closes: https://lore.kernel.org/linux-riscv/20240613-lubricant-breath-061192a9489a@wendy/
+    Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+    Reviewed-by: Andy Chiu <andy.chiu@sifive.com>
+    Link: https://lore.kernel.org/r/20240624082141.153871-1-alexghiti@rivosinc.com
+    Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+
+diff --git a/arch/riscv/kernel/ftrace.c b/arch/riscv/kernel/ftrace.c
+index 87cbd86576b2..4b95c574fd04 100644
+--- a/arch/riscv/kernel/ftrace.c
++++ b/arch/riscv/kernel/ftrace.c
+@@ -120,9 +120,6 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
+ 	out = ftrace_make_nop(mod, rec, MCOUNT_ADDR);
+ 	mutex_unlock(&text_mutex);
+ 
+-	if (!mod)
+-		local_flush_icache_range(rec->ip, rec->ip + MCOUNT_INSN_SIZE);
+-
+ 	return out;
+ }
+ 
+@@ -156,9 +153,9 @@ static int __ftrace_modify_code(void *data)
+ 	} else {
+ 		while (atomic_read(&param->cpu_count) <= num_online_cpus())
+ 			cpu_relax();
+-	}
+ 
+-	local_flush_icache_all();
++		local_flush_icache_all();
++	}
+ 
+ 	return 0;
+ }
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 4007563fb607..ab03732d06c4 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -89,6 +89,14 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 
+ 	memset(waddr, c, len);
+ 
++	/*
++	 * We could have just patched a function that is about to be
++	 * called so make sure we don't execute partially patched
++	 * instructions by flushing the icache as soon as possible.
++	 */
++	local_flush_icache_range((unsigned long)waddr,
++				 (unsigned long)waddr + len);
++
+ 	patch_unmap(FIX_TEXT_POKE0);
+ 
+ 	if (across_pages)
+@@ -135,6 +143,14 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 
+ 	ret = copy_to_kernel_nofault(waddr, insn, len);
+ 
++	/*
++	 * We could have just patched a function that is about to be
++	 * called so make sure we don't execute partially patched
++	 * instructions by flushing the icache as soon as possible.
++	 */
++	local_flush_icache_range((unsigned long)waddr,
++				 (unsigned long)waddr + len);
++
+ 	patch_unmap(FIX_TEXT_POKE0);
+ 
+ 	if (across_pages)
+@@ -189,9 +205,6 @@ int patch_text_set_nosync(void *addr, u8 c, size_t len)
+ 
+ 	ret = patch_insn_set(tp, c, len);
+ 
+-	if (!ret)
+-		flush_icache_range((uintptr_t)tp, (uintptr_t)tp + len);
+-
+ 	return ret;
+ }
+ NOKPROBE_SYMBOL(patch_text_set_nosync);
+@@ -224,9 +237,6 @@ int patch_text_nosync(void *addr, const void *insns, size_t len)
+ 
+ 	ret = patch_insn_write(tp, insns, len);
+ 
+-	if (!ret)
+-		flush_icache_range((uintptr_t) tp, (uintptr_t) tp + len);
+-
+ 	return ret;
+ }
+ NOKPROBE_SYMBOL(patch_text_nosync);
+@@ -253,9 +263,9 @@ static int patch_text_cb(void *data)
+ 	} else {
+ 		while (atomic_read(&patch->cpu_count) <= num_online_cpus())
+ 			cpu_relax();
+-	}
+ 
+-	local_flush_icache_all();
++		local_flush_icache_all();
++	}
+ 
+ 	return ret;
+ }

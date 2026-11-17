@@ -1,0 +1,1201 @@
+
+##### A200
+=== ca525d53f994 A 2025-10-17 +2/-0
+RISC-V: Define pgprot_dmacoherent() for non-coherent devices
+
+The pgprot_dmacoherent() is used when allocating memory for
+non-coherent devices and by default pgprot_dmacoherent() is
+same as pgprot_noncached() unless architecture overrides it.
+
+Currently, there is no pgprot_dmacoherent() definition for
+RISC-V hence non-coherent device memory is being mapped as
+IO thereby making CPU access to such memory slow.
+
+Define pgprot_dmacoherent() to be same as pgprot_writecombine()
+for RISC-V so that CPU access non-coherent device memory as
+NOCACHE which is better than accessing it as IO.
+
+Fixes: ff689fd21cb1 ("riscv: add RISC-V Svpbmt extension support")
+functions: 
+fixes: ff689fd21cb1(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 29e994a9afb6..5a08eb5fe99f 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -655,4 +655,6 @@ static inline pgprot_t pgprot_writecombine(pgprot_t _prot)
+ }
+ 
++#define pgprot_dmacoherent pgprot_writecombine
++
+ /*
+  * Both Svade and Svadu control the hardware behavior when the PTE A/D bits need to be set. By
+
+##### A201
+=== 5fada1605733 A 2025-10-20 +7/-2
+riscv: tests: Make RISCV_KPROBES_KUNIT tristate
+
+This disallows KUNIT=m and RISCV_KPROBES_KUNIT=y, which produces these
+relocs_check.sh warnings when RELOCATABLE=y:
+
+    WARNING: 3 bad relocations
+    ffffffff81e24118 R_RISCV_64        kunit_unary_assert_format
+    ffffffff81e24a60 R_RISCV_64        kunit_binary_assert_format
+    ffffffff81e269d0 R_RISCV_JUMP_SLOT  __kunit_do_failed_assertion
+
+This fixes allmodconfig build.
+
+Fixes: f2fab612824f ("riscv: Add kprobes KUnit test")
+functions: 
+fixes: f2fab612824f(riscv)
+diff --git a/arch/riscv/kernel/tests/Kconfig.debug b/arch/riscv/kernel/tests/Kconfig.debug
+index 5db4df44279e..40f8dafffa0a 100644
+--- a/arch/riscv/kernel/tests/Kconfig.debug
++++ b/arch/riscv/kernel/tests/Kconfig.debug
+@@ -32,5 +32,5 @@ config RISCV_MODULE_LINKING_KUNIT
+ 
+ config RISCV_KPROBES_KUNIT
+-       bool "KUnit test for riscv kprobes" if !KUNIT_ALL_TESTS
++       tristate "KUnit test for riscv kprobes" if !KUNIT_ALL_TESTS
+        depends on KUNIT
+        depends on KPROBES
+diff --git a/arch/riscv/kernel/tests/kprobes/Makefile b/arch/riscv/kernel/tests/kprobes/Makefile
+index 4cb6c66a98e8..df7256f62313 100644
+--- a/arch/riscv/kernel/tests/kprobes/Makefile
++++ b/arch/riscv/kernel/tests/kprobes/Makefile
+@@ -1 +1,3 @@
+-obj-y += test-kprobes.o test-kprobes-asm.o
++obj-$(CONFIG_RISCV_KPROBES_KUNIT) += kprobes_riscv_kunit.o
++
++kprobes_riscv_kunit-objs := test-kprobes.o test-kprobes-asm.o
+diff --git a/arch/riscv/kernel/tests/kprobes/test-kprobes.c b/arch/riscv/kernel/tests/kprobes/test-kprobes.c
+index 0716c88bcec7..664535ca0a98 100644
+--- a/arch/riscv/kernel/tests/kprobes/test-kprobes.c
++++ b/arch/riscv/kernel/tests/kprobes/test-kprobes.c
+@@ -55,2 +55,5 @@ static struct kunit_suite kprobes_test_suite = {
+ 
+ kunit_test_suites(&kprobes_test_suite);
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("KUnit test for riscv kprobes");
+
+##### A202
+=== 060ea84a484e A 2025-10-27 +19/-2
+riscv: stacktrace: Disable KASAN checks for non-current tasks
+
+Unwinding the stack of a task other than current, KASAN would report
+"BUG: KASAN: out-of-bounds in walk_stackframe+0x41c/0x460"
+
+There is a same issue on x86 and has been resolved by the commit
+84936118bdf3 ("x86/unwind: Disable KASAN checks for non-current tasks")
+The solution could be applied to RISC-V too.
+
+This patch also can solve the issue:
+https://seclists.org/oss-sec/2025/q4/23
+
+Fixes: 5d8544e2d007 ("RISC-V: Generic library routines and assembly")
+[pjw@kernel.org: clean up checkpatch issues]
+functions: arch/riscv/kernel/stacktrace.c:walk_stackframe
+fixes: 5d8544e2d007(riscv)
+diff --git a/arch/riscv/kernel/stacktrace.c b/arch/riscv/kernel/stacktrace.c
+index 3fe9e6edef8f..b41b6255751c 100644
+--- a/arch/riscv/kernel/stacktrace.c
++++ b/arch/riscv/kernel/stacktrace.c
+@@ -17,4 +17,20 @@
+ #ifdef CONFIG_FRAME_POINTER
+ 
++/*
++ * This disables KASAN checking when reading a value from another task's stack,
++ * since the other task could be running on another CPU and could have poisoned
++ * the stack in the meantime.
++ */
++#define READ_ONCE_TASK_STACK(task, x)			\
++({							\
++	unsigned long val;				\
++	unsigned long addr = x;				\
++	if ((task) == current)				\
++		val = READ_ONCE(addr);			\
++	else						\
++		val = READ_ONCE_NOCHECK(addr);		\
++	val;						\
++})
++
+ extern asmlinkage void handle_exception(void);
+ extern unsigned long ret_from_exception_end;
+@@ -70,6 +86,7 @@ void notrace walk_stackframe(struct task_struct *task, struct pt_regs *regs,
+ 			pc = regs->ra;
+ 		} else {
+-			fp = frame->fp;
+-			pc = ftrace_graph_ret_addr(current, &graph_idx, frame->ra,
++			fp = READ_ONCE_TASK_STACK(task, frame->fp);
++			pc = READ_ONCE_TASK_STACK(task, frame->ra);
++			pc = ftrace_graph_ret_addr(current, &graph_idx, pc,
+ 						   &frame->ra);
+ 			if (pc >= (unsigned long)handle_exception &&
+
+##### A203
+=== a74f038fa50e A 2025-10-27 +1/-1
+riscv: ptdump: use seq_puts() in pt_dump_seq_puts() macro
+
+The pt_dump_seq_puts() macro incorrectly uses seq_printf() instead of
+seq_puts(). This is both a performance issue and conceptually wrong,
+as the macro name suggests plain string output (puts) but the
+implementation uses formatted output (printf).
+
+The macro is used in ptdump.c:301 to output a newline character. Using
+seq_printf() adds unnecessary overhead for format string parsing when
+outputting this constant string.
+
+This bug was introduced in commit 59c4da8640cc ("riscv: Add support to
+dump the kernel page tables") in 2020, which copied the implementation
+pattern from other architectures that had the same bug.
+
+Fixes: 59c4da8640cc ("riscv: Add support to dump the kernel page tables")
+functions: 
+fixes: 59c4da8640cc(riscv)
+diff --git a/arch/riscv/mm/ptdump.c b/arch/riscv/mm/ptdump.c
+index 3b51690cc876..34299c2b231f 100644
+--- a/arch/riscv/mm/ptdump.c
++++ b/arch/riscv/mm/ptdump.c
+@@ -22,5 +22,5 @@
+ ({					\
+ 	if (m)				\
+-		seq_printf(m, fmt);	\
++		seq_puts(m, fmt);	\
+ })
+ 
+
+##### A204
+=== 3ad1b71fdc57 A 2025-10-29 +1/-1
+riscv: Build loader.bin exclusively for Canaan K210
+
+According to the explanation in commit ef10bdf9c3e6 ("riscv:
+Kconfig.socs: Split ARCH_CANAAN and SOC_CANAAN_K210"),
+loader.bin is a special feature of the Canaan K210 and
+is not applicable to other SoCs.
+
+Fixes: e79dfcbfb902 ("riscv: make image compression configurable")
+functions: 
+fixes: e79dfcbfb902(riscv)
+diff --git a/arch/riscv/Makefile b/arch/riscv/Makefile
+index ecf2fcce2d92..3998d4036f15 100644
+--- a/arch/riscv/Makefile
++++ b/arch/riscv/Makefile
+@@ -160,5 +160,5 @@ boot-image-$(CONFIG_KERNEL_ZSTD)	:= Image.zst
+ boot-image-$(CONFIG_KERNEL_XZ)		:= Image.xz
+ ifdef CONFIG_RISCV_M_MODE
+-boot-image-$(CONFIG_ARCH_CANAAN)	:= loader.bin
++boot-image-$(CONFIG_SOC_CANAAN_K210)	:= loader.bin
+ endif
+ boot-image-$(CONFIG_EFI_ZBOOT)		:= vmlinuz.efi
+
+##### A205
+=== dc20452e6caf A 2025-11-07 +1/-1
+riscv: Fix CONFIG_AS_HAS_INSN for new .insn usage
+
+After commit 44aa25c000b4 ("riscv: asm: use .insn for making custom
+instructions"), builds using LLVM older that 19 or binutils older than
+2.38 fail with:
+
+  arch/riscv/include/asm/vdso/processor.h: Assembler messages:
+  arch/riscv/include/asm/vdso/processor.h:27: Error: unrecognized opcode `0x100000f'
+  arch/riscv/include/asm/vdso/processor.h:27: Error: unrecognized opcode `0x100000f'
+  arch/riscv/include/asm/vdso/processor.h:27: Error: unrecognized opcode `0x100000f'
+  arch/riscv/include/asm/vdso/processor.h:27: Error: unrecognized opcode `0x100000f'
+  make[4]: *** [scripts/Makefile.build:287: arch/riscv/kernel/vdso/vgettimeofday.o] Error 1
+
+  In file included from <built-in>:4:
+  In file included from lib/vdso/gettimeofday.c:6:
+  In file included from include/vdso/datapage.h:21:
+  In file included from include/vdso/processor.h:10:
+  arch/riscv/include/asm/vdso/processor.h:23:2: error: expected instruction format
+     23 |         ALT_RISCV_PAUSE();
+        |         ^
+  arch/riscv/include/asm/errata_list.h:47:3: note: expanded from macro 'ALT_RISCV_PAUSE'
+     47 |                 RISCV_PAUSE, /* Original RISC‑V pause insn */ \
+        |                 ^
+  arch/riscv/include/asm/insn-def.h:259:21: note: expanded from macro 'RISCV_PAUSE'
+    259 | #define RISCV_PAUSE     ASM_INSN_I("0x100000f")
+        |                         ^
+  arch/riscv/include/asm/asm.h:16:26: note: expanded from macro 'ASM_INSN_I'
+     16 | #define ASM_INSN_I(__x) ".insn " __x
+        |                          ^
+  <inline asm>:5:7: note: instantiated into assembly here
+      5 | .insn 0x100000f
+        |       ^
+
+binutils gained support for '.insn <value>' in 2.38 [1] and LLVM gained
+support in 19 [2]. Adjust the test for CONFIG_AS_HAS_INSN to ensure that
+all versions of .insn are supported before being used.
+
+Fixes: 44aa25c000b4 ("riscv: asm: use .insn for making custom instructions")
+functions: 
+fixes: 44aa25c000b4(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 22cda9c452d2..fadec20b87a8 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -368,5 +368,5 @@ config RISCV_NONSTANDARD_CACHE_OPS
+ 
+ config AS_HAS_INSN
+-	def_bool $(as-instr,.insn r 51$(comma) 0$(comma) 0$(comma) t0$(comma) t0$(comma) zero)
++	def_bool $(as-instr,.insn 0x100000f)
+ 
+ config AS_HAS_OPTION_ARCH
+
+##### A206
+=== 91f815b7073d A 2025-11-13 +1/-1
+riscv: Update MIPS vendor id to 0x127
+
+[1] defines MIPS vendor id as 0x127. All previous MIPS RISC-V patches
+were tested on QEMU, also modified to use 0x722 as MIPS_VENDOR_ID. This
+new value should reflect real hardware.
+
+[1] https://mips.com/wp-content/uploads/2025/06/P8700_Programmers_Reference_Manual_Rev1.84_5-31-2025.pdf
+
+Fixes: a8fed1bc03ac ("riscv: Add xmipsexectl as a vendor extension")
+functions: 
+fixes: a8fed1bc03ac(riscv)
+diff --git a/arch/riscv/include/asm/vendorid_list.h b/arch/riscv/include/asm/vendorid_list.h
+index 3b09874d7a6d..7f5030ee1fcf 100644
+--- a/arch/riscv/include/asm/vendorid_list.h
++++ b/arch/riscv/include/asm/vendorid_list.h
+@@ -8,7 +8,7 @@
+ #define ANDES_VENDOR_ID		0x31e
+ #define MICROCHIP_VENDOR_ID	0x029
++#define MIPS_VENDOR_ID		0x127
+ #define SIFIVE_VENDOR_ID	0x489
+ #define THEAD_VENDOR_ID		0x5b7
+-#define MIPS_VENDOR_ID		0x722
+ 
+ #endif
+
+##### A207
+=== 974555d6e417 A 2025-11-21 +22/-0
+RISC-V: KVM: Fix guest page fault within HLV* instructions
+
+When executing HLV* instructions at the HS mode, a guest page fault
+may occur when a g-stage page table migration between triggering the
+virtual instruction exception and executing the HLV* instruction.
+
+This may be a corner case, and one simpler way to handle this is to
+re-execute the instruction where the virtual  instruction exception
+occurred, and the guest page fault will be automatically handled.
+
+Fixes: b91f0e4cb8a3 ("RISC-V: KVM: Factor-out instruction emulation into separate sources")
+functions: arch/riscv/kvm/vcpu_insn.c:kvm_riscv_vcpu_virtual_insn, arch/riscv/kvm/vcpu_insn.c:kvm_riscv_vcpu_mmio_load, arch/riscv/kvm/vcpu_insn.c:kvm_riscv_vcpu_mmio_store
+fixes: b91f0e4cb8a3(riscv)
+diff --git a/arch/riscv/kvm/vcpu_insn.c b/arch/riscv/kvm/vcpu_insn.c
+index de1f96ea6225..4d89b94128ae 100644
+--- a/arch/riscv/kvm/vcpu_insn.c
++++ b/arch/riscv/kvm/vcpu_insn.c
+@@ -299,4 +299,20 @@ static int system_opcode_insn(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ }
+ 
++static bool is_load_guest_page_fault(unsigned long scause)
++{
++	/**
++	 * If a g-stage page fault occurs, the direct approach
++	 * is to let the g-stage page fault handler handle it
++	 * naturally, however, calling the g-stage page fault
++	 * handler here seems rather strange.
++	 * Considering this is a corner case, we can directly
++	 * return to the guest and re-execute the same PC, this
++	 * will trigger a g-stage page fault again and then the
++	 * regular g-stage page fault handler will populate
++	 * g-stage page table.
++	 */
++	return (scause == EXC_LOAD_GUEST_PAGE_FAULT);
++}
++
+ /**
+  * kvm_riscv_vcpu_virtual_insn -- Handle virtual instruction trap
+@@ -324,4 +340,6 @@ int kvm_riscv_vcpu_virtual_insn(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 							  &utrap);
+ 			if (utrap.scause) {
++				if (is_load_guest_page_fault(utrap.scause))
++					return 1;
+ 				utrap.sepc = ct->sepc;
+ 				kvm_riscv_vcpu_trap_redirect(vcpu, &utrap);
+@@ -379,4 +397,6 @@ int kvm_riscv_vcpu_mmio_load(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 						  &utrap);
+ 		if (utrap.scause) {
++			if (is_load_guest_page_fault(utrap.scause))
++				return 1;
+ 			/* Redirect trap if we failed to read instruction */
+ 			utrap.sepc = ct->sepc;
+@@ -505,4 +525,6 @@ int kvm_riscv_vcpu_mmio_store(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 						  &utrap);
+ 		if (utrap.scause) {
++			if (is_load_guest_page_fault(utrap.scause))
++				return 1;
+ 			/* Redirect trap if we failed to read instruction */
+ 			utrap.sepc = ct->sepc;
+
+##### A208
+=== 5e5be092ffad A 2025-11-30 +0/-4
+riscv: pgtable: Cleanup useless VA_USER_XXX definitions
+
+These marcos are not used after commit b5b4287accd7 ("riscv: mm: Use
+hint address in mmap if available"). Cleanup VA_USER_XXX definitions
+in asm/pgtable.h.
+
+Fixes: b5b4287accd7 ("riscv: mm: Use hint address in mmap if available")
+functions: 
+fixes: b5b4287accd7(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 6bb1f5bdc5d2..9acd58a67123 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -125,8 +125,4 @@
+ #include <asm/pgtable-64.h>
+ 
+-#define VA_USER_SV39 (UL(1) << (VA_BITS_SV39 - 1))
+-#define VA_USER_SV48 (UL(1) << (VA_BITS_SV48 - 1))
+-#define VA_USER_SV57 (UL(1) << (VA_BITS_SV57 - 1))
+-
+ #define MMAP_VA_BITS_64 ((VA_BITS >= VA_BITS_SV48) ? VA_BITS_SV48 : VA_BITS)
+ #define MMAP_MIN_VA_BITS_64 (VA_BITS_SV39)
+
+##### A209
+=== 1cd5bb6e9e02 A 2025-12-06 +14/-7
+lib/crypto: riscv: Depend on RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+
+Replace the RISCV_ISA_V dependency of the RISC-V crypto code with
+RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS, which implies RISCV_ISA_V as
+well as vector unaligned accesses being efficient.
+
+This is necessary because this code assumes that vector unaligned
+accesses are supported and are efficient.  (It does so to avoid having
+to use lots of extra vsetvli instructions to switch the element width
+back and forth between 8 and either 32 or 64.)
+
+This was omitted from the code originally just because the RISC-V kernel
+support for detecting this feature didn't exist yet.  Support has now
+been added, but it's fragmented into per-CPU runtime detection, a
+command-line parameter, and a kconfig option.  The kconfig option is the
+only reasonable way to do it, though, so let's just rely on that.
+
+Fixes: eb24af5d7a05 ("crypto: riscv - add vector crypto accelerated AES-{ECB,CBC,CTR,XTS}")
+Fixes: bb54668837a0 ("crypto: riscv - add vector crypto accelerated ChaCha20")
+Fixes: 600a3853dfa0 ("crypto: riscv - add vector crypto accelerated GHASH")
+Fixes: 8c8e40470ffe ("crypto: riscv - add vector crypto accelerated SHA-{256,224}")
+Fixes: b3415925a08b ("crypto: riscv - add vector crypto accelerated SHA-{512,384}")
+Fixes: 563a5255afa2 ("crypto: riscv - add vector crypto accelerated SM3")
+Fixes: b8d06352bbf3 ("crypto: riscv - add vector crypto accelerated SM4")
+functions: 
+fixes: eb24af5d7a05(riscv), bb54668837a0(riscv), 600a3853dfa0(riscv), 8c8e40470ffe(riscv), b3415925a08b(riscv), 563a5255afa2(riscv), b8d06352bbf3(riscv)
+ arch/riscv/crypto/Kconfig | 12 ++++++++----
+ lib/crypto/Kconfig        |  9 ++++++---
+ 2 files changed, 14 insertions(+), 7 deletions(-)
+diff --git a/arch/riscv/crypto/Kconfig b/arch/riscv/crypto/Kconfig
+index a75d6325607b..14c5acb935e9 100644
+--- a/arch/riscv/crypto/Kconfig
++++ b/arch/riscv/crypto/Kconfig
+@@ -5,5 +5,6 @@ menu "Accelerated Cryptographic Algorithms for CPU (riscv)"
+ config CRYPTO_AES_RISCV64
+ 	tristate "Ciphers: AES, modes: ECB, CBC, CTS, CTR, XTS"
+-	depends on 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
++	depends on 64BIT && TOOLCHAIN_HAS_VECTOR_CRYPTO && \
++		   RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+ 	select CRYPTO_ALGAPI
+ 	select CRYPTO_LIB_AES
+@@ -21,5 +22,6 @@ config CRYPTO_AES_RISCV64
+ config CRYPTO_GHASH_RISCV64
+ 	tristate "Hash functions: GHASH"
+-	depends on 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
++	depends on 64BIT && TOOLCHAIN_HAS_VECTOR_CRYPTO && \
++		   RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+ 	select CRYPTO_GCM
+ 	help
+@@ -31,5 +33,6 @@ config CRYPTO_GHASH_RISCV64
+ config CRYPTO_SM3_RISCV64
+ 	tristate "Hash functions: SM3 (ShangMi 3)"
+-	depends on 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
++	depends on 64BIT && TOOLCHAIN_HAS_VECTOR_CRYPTO && \
++		   RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+ 	select CRYPTO_HASH
+ 	select CRYPTO_LIB_SM3
+@@ -43,5 +46,6 @@ config CRYPTO_SM3_RISCV64
+ config CRYPTO_SM4_RISCV64
+ 	tristate "Ciphers: SM4 (ShangMi 4)"
+-	depends on 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
++	depends on 64BIT && TOOLCHAIN_HAS_VECTOR_CRYPTO && \
++		   RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+ 	select CRYPTO_ALGAPI
+ 	select CRYPTO_SM4
+diff --git a/lib/crypto/Kconfig b/lib/crypto/Kconfig
+index a3647352bff6..6871a41e5069 100644
+--- a/lib/crypto/Kconfig
++++ b/lib/crypto/Kconfig
+@@ -62,5 +62,6 @@ config CRYPTO_LIB_CHACHA_ARCH
+ 	default y if MIPS && CPU_MIPS32_R2
+ 	default y if PPC64 && CPU_LITTLE_ENDIAN && VSX
+-	default y if RISCV && 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
++	default y if RISCV && 64BIT && TOOLCHAIN_HAS_VECTOR_CRYPTO && \
++		     RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+ 	default y if S390
+ 	default y if X86_64
+@@ -185,5 +186,6 @@ config CRYPTO_LIB_SHA256_ARCH
+ 	default y if MIPS && CPU_CAVIUM_OCTEON
+ 	default y if PPC && SPE
+-	default y if RISCV && 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
++	default y if RISCV && 64BIT && TOOLCHAIN_HAS_VECTOR_CRYPTO && \
++		     RISCV_EFFICIENT_VECTOR_UNALIGNED_ACCESS
+ 	default y if S390
+ 	default y if SPARC64
+@@ -203,5 +205,6 @@ config CRYPTO_LIB_SHA512_ARCH
+ 	default y if ARM64
+ 	default y if MIPS && CPU_CAVIUM_OCTEON
+-	default y if RISCV && 64BIT && RISCV_ISA_V && TOOLCHAIN_HAS_VECTOR_CRYPTO
+... (4 more diff lines)
+
+##### A210
+=== 521cadb4b69e A 2025-12-10 +1/-0
+riscv: ERRATA_STARFIVE_JH7100: Fix missing dependency on new CONFIG_CACHEMAINT_FOR_DMA
+
+The Kconfig menu entry was converted to a menuconfig to allow it to be
+hidden for !CONFIG_RISCV. The drivers under this new option were selected
+by some other Kconfig symbols and so an extra select CACHEMAINT_FOR_DMA is
+needed.
+
+Fixes: 4d1608d0ab33 ("cache: Make top level Kconfig menu a boolean dependent on RISCV")
+functions: 
+fixes: 4d1608d0ab33(common)
+diff --git a/arch/riscv/Kconfig.errata b/arch/riscv/Kconfig.errata
+index aca9b0cfcfec..3c945d086c7d 100644
+--- a/arch/riscv/Kconfig.errata
++++ b/arch/riscv/Kconfig.errata
+@@ -85,4 +85,5 @@ config ERRATA_STARFIVE_JH7100
+ 	select RISCV_DMA_NONCOHERENT
+ 	select RISCV_NONSTANDARD_CACHE_OPS
++	select CACHEMAINT_FOR_DMA
+ 	select SIFIVE_CCACHE
+ 	default n
+
+##### A211
+=== 8f3e00af8e52 A 2025-12-19 +2/-4
+riscv, bpf: Fix incorrect usage of BPF_TRAMP_F_ORIG_STACK
+
+The usage of BPF_TRAMP_F_ORIG_STACK in __arch_prepare_bpf_trampoline() is
+wrong, and it should be BPF_TRAMP_F_CALL_ORIG, which caused crash as
+Andreas reported:
+
+  Insufficient stack space to handle exception!
+  Task stack:     [0xff20000000010000..0xff20000000014000]
+  Overflow stack: [0xff600000ffdad070..0xff600000ffdae070]
+  CPU: 1 UID: 0 PID: 1 Comm: systemd Not tainted 6.18.0-rc5+ #15 PREEMPT(voluntary)
+  Hardware name: riscv-virtio qemu/qemu, BIOS 2025.10 10/01/2025
+  epc : copy_from_kernel_nofault+0xa/0x198
+   ra : bpf_probe_read_kernel+0x20/0x60
+  epc : ffffffff802b732a ra : ffffffff801e6070 sp : ff2000000000ffe0
+   gp : ffffffff82262ed0 tp : 0000000000000000 t0 : ffffffff80022320
+   t1 : ffffffff801e6056 t2 : 0000000000000000 s0 : ff20000000010040
+   s1 : 0000000000000008 a0 : ff20000000010050 a1 : ff60000083b3d320
+   a2 : 0000000000000008 a3 : 0000000000000097 a4 : 0000000000000000
+   a5 : 0000000000000000 a6 : 0000000000000021 a7 : 0000000000000003
+   s2 : ff20000000010050 s3 : ff6000008459fc18 s4 : ff60000083b3d340
+   s5 : ff20000000010060 s6 : 0000000000000000 s7 : ff20000000013aa8
+   s8 : 0000000000000000 s9 : 0000000000008000 s10: 000000000058dcb0
+   s11: 000000000058dca7 t3 : 000000006925116d t4 : ff6000008090f026
+   t5 : 00007fff9b0cbaa8 t6 : 0000000000000016
+  status: 0000000200000120 badaddr: 0000000000000000 cause: 8000000000000005
+  Kernel panic - not syncing: Kernel stack overflow
+  CPU: 1 UID: 0 PID: 1 Comm: systemd Not tainted 6.18.0-rc5+ #15 PREEMPT(voluntary)
+  Hardware name: riscv-virtio qemu/qemu, BIOS 2025.10 10/01/2025
+  Call Trace:
+  [<ffffffff8001a1f8>] dump_backtrace+0x28/0x38
+  [<ffffffff80002502>] show_stack+0x3a/0x50
+  [<ffffffff800122be>] dump_stack_lvl+0x56/0x80
+  [<ffffffff80012300>] dump_stack+0x18/0x22
+  [<ffffffff80002abe>] vpanic+0xf6/0x328
+  [<ffffffff80002d2e>] panic+0x3e/0x40
+  [<ffffffff80019ef0>] handle_bad_stack+0x98/0xa0
+  [<ffffffff801e6070>] bpf_probe_read_kernel+0x20/0x60
+
+Just fix it.
+
+Fixes: 47c9214dcbea ("bpf: fix the usage of BPF_TRAMP_F_SKIP_FRAME")
+functions: arch/riscv/net/bpf_jit_comp64.c:__arch_prepare_bpf_trampoline
+fixes: 47c9214dcbea(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 5f9457e910e8..37888abee70c 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1134,8 +1134,4 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	store_args(nr_arg_slots, args_off, ctx);
+ 
+-	/* skip to actual body of traced function */
+-	if (flags & BPF_TRAMP_F_ORIG_STACK)
+-		orig_call += RV_FENTRY_NINSNS * 4;
+-
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
+ 		emit_imm(RV_REG_A0, ctx->insns ? (const s64)im : RV_MAX_COUNT_IMM, ctx);
+@@ -1172,4 +1168,6 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
++		/* skip to actual body of traced function */
++		orig_call += RV_FENTRY_NINSNS * 4;
+ 		restore_args(min_t(int, nr_arg_slots, RV_MAX_REG_ARGS), args_off, ctx);
+ 		restore_stack_args(nr_arg_slots - RV_MAX_REG_ARGS, args_off, stk_arg_off, ctx);
+
+##### A212
+=== 8632180daf73 A 2025-12-23 +11/-12
+riscv: cpufeature: Fix Zk bundled extension missing Zknh
+
+The Zk extension is a bundle consisting of Zkn, Zkr, and Zkt. The Zkn
+extension itself is a bundle consisting of Zbkb, Zbkc, Zbkx, Zknd, Zkne,
+and Zknh.
+
+The current implementation of riscv_zk_bundled_exts manually listed
+the dependencies but missed RISCV_ISA_EXT_ZKNH.
+
+Fix this by introducing a RISCV_ISA_EXT_ZKN macro that lists the Zkn
+components and using it in both riscv_zk_bundled_exts and
+riscv_zkn_bundled_exts.
+
+This adds the missing Zknh extension to Zk and reduces code duplication.
+
+Fixes: 0d8295ed975b ("riscv: add ISA extension parsing for scalar crypto")
+functions: 
+fixes: 0d8295ed975b(riscv)
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index c05b11596c19..fa591aff9d33 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -302,21 +302,20 @@ static const unsigned int riscv_a_exts[] = {
+ };
+ 
++#define RISCV_ISA_EXT_ZKN	\
++	RISCV_ISA_EXT_ZBKB,	\
++	RISCV_ISA_EXT_ZBKC,	\
++	RISCV_ISA_EXT_ZBKX,	\
++	RISCV_ISA_EXT_ZKND,	\
++	RISCV_ISA_EXT_ZKNE,	\
++	RISCV_ISA_EXT_ZKNH
++
+ static const unsigned int riscv_zk_bundled_exts[] = {
+-	RISCV_ISA_EXT_ZBKB,
+-	RISCV_ISA_EXT_ZBKC,
+-	RISCV_ISA_EXT_ZBKX,
+-	RISCV_ISA_EXT_ZKND,
+-	RISCV_ISA_EXT_ZKNE,
++	RISCV_ISA_EXT_ZKN,
+ 	RISCV_ISA_EXT_ZKR,
+-	RISCV_ISA_EXT_ZKT,
++	RISCV_ISA_EXT_ZKT
+ };
+ 
+ static const unsigned int riscv_zkn_bundled_exts[] = {
+-	RISCV_ISA_EXT_ZBKB,
+-	RISCV_ISA_EXT_ZBKC,
+-	RISCV_ISA_EXT_ZBKX,
+-	RISCV_ISA_EXT_ZKND,
+-	RISCV_ISA_EXT_ZKNE,
+-	RISCV_ISA_EXT_ZKNH,
++	RISCV_ISA_EXT_ZKN
+ };
+ 
+
+##### A213
+=== 66562b66dcbc A 2025-12-30 +0/-4
+riscv: boot: Always make Image from vmlinux, not vmlinux.unstripped
+
+Since commit 4b47a3aefb29 ("kbuild: Restore pattern to avoid stripping
+.rela.dyn from vmlinux") vmlinux has .rel*.dyn preserved. Therefore, use
+vmlinux to produce Image, not vmlinux.unstripped.
+
+Doing so fixes booting a RELOCATABLE=y Image with kexec. The problem is
+caused by this chain of events:
+
+- Since commit 3e86e4d74c04 ("kbuild: keep .modinfo section in
+  vmlinux.unstripped"), vmlinux.unstripped gets a .modinfo section.
+- The .modinfo section has SHF_ALLOC, so it ends up in Image, at the end
+  of it.
+- The Image header's image_size field does not expect to include
+  .modinfo and does not account for it, since it should not be in Image.
+- If .modinfo is large enough, the file size of Image ends up larger
+  than image_size, which eventually leads to it failing
+  sanity_check_segment_list().
+
+Using vmlinux instead of vmlinux.unstripped means that the unexpected
+.modinfo section is gone from Image, fixing the file size problem.
+
+Fixes: 3e86e4d74c04 ("kbuild: keep .modinfo section in vmlinux.unstripped")
+functions: 
+fixes: 3e86e4d74c04(common)
+diff --git a/arch/riscv/boot/Makefile b/arch/riscv/boot/Makefile
+index bfc3d0b75b9b..5301adf5f3f5 100644
+--- a/arch/riscv/boot/Makefile
++++ b/arch/riscv/boot/Makefile
+@@ -32,9 +32,5 @@ $(obj)/xipImage: vmlinux FORCE
+ endif
+ 
+-ifdef CONFIG_RELOCATABLE
+-$(obj)/Image: vmlinux.unstripped FORCE
+-else
+ $(obj)/Image: vmlinux FORCE
+-endif
+ 	$(call if_changed,objcopy)
+ 
+
+##### A214
+=== 75870639bf5d A 2026-01-04 +4/-2
+riscv: kvm: Fix vstimecmp update hazard on RV32
+
+On RV32, updating the 64-bit stimecmp (or vstimecmp) CSR requires two
+separate 32-bit writes. A race condition exists if the timer triggers
+during these two writes.
+
+The RISC-V Privileged Specification (e.g., Section 3.2.1 for mtimecmp)
+recommends a specific 3-step sequence to avoid spurious interrupts
+when updating 64-bit comparison registers on 32-bit systems:
+
+1. Set the low-order bits (stimecmp) to all ones (ULONG_MAX).
+2. Set the high-order bits (stimecmph) to the desired value.
+3. Set the low-order bits (stimecmp) to the desired value.
+
+Current implementation writes the LSB first without ensuring a future
+value, which may lead to a transient state where the 64-bit comparison
+is incorrectly evaluated as "expired" by the hardware. This results in
+spurious timer interrupts.
+
+This patch adopts the spec-recommended 3-step sequence to ensure the
+intermediate 64-bit state is never smaller than the current time.
+
+Fixes: 8f5cb44b1bae ("RISC-V: KVM: Support sstc extension")
+functions: arch/riscv/kvm/vcpu_timer.c:kvm_riscv_vcpu_update_vstimecmp, arch/riscv/kvm/vcpu_timer.c:kvm_riscv_vcpu_timer_restore
+fixes: 8f5cb44b1bae(riscv)
+diff --git a/arch/riscv/kvm/vcpu_timer.c b/arch/riscv/kvm/vcpu_timer.c
+index 85a7262115e1..f36247e4c783 100644
+--- a/arch/riscv/kvm/vcpu_timer.c
++++ b/arch/riscv/kvm/vcpu_timer.c
+@@ -73,6 +73,7 @@ static int kvm_riscv_vcpu_update_vstimecmp(struct kvm_vcpu *vcpu, u64 ncycles)
+ {
+ #if defined(CONFIG_32BIT)
+-	ncsr_write(CSR_VSTIMECMP, ncycles & 0xFFFFFFFF);
++	ncsr_write(CSR_VSTIMECMP,  ULONG_MAX);
+ 	ncsr_write(CSR_VSTIMECMPH, ncycles >> 32);
++	ncsr_write(CSR_VSTIMECMP, (u32)ncycles);
+ #else
+ 	ncsr_write(CSR_VSTIMECMP, ncycles);
+@@ -308,6 +309,7 @@ void kvm_riscv_vcpu_timer_restore(struct kvm_vcpu *vcpu)
+ 
+ #if defined(CONFIG_32BIT)
+-	ncsr_write(CSR_VSTIMECMP, (u32)t->next_cycles);
++	ncsr_write(CSR_VSTIMECMP, ULONG_MAX);
+ 	ncsr_write(CSR_VSTIMECMPH, (u32)(t->next_cycles >> 32));
++	ncsr_write(CSR_VSTIMECMP, (u32)(t->next_cycles));
+ #else
+ 	ncsr_write(CSR_VSTIMECMP, t->next_cycles);
+
+##### A215
+=== 8565617a8599 A 2026-01-16 +12/-11
+KVM: riscv: Fix Spectre-v1 in APLIC interrupt handling
+
+Guests can control IRQ indices via MMIO. Sanitize them with
+array_index_nospec() to prevent speculative out-of-bounds access
+to the aplic->irqs[] array.
+
+Similar to arm64 commit 41b87599c743 ("KVM: arm/arm64: vgic: fix possible
+spectre-v1 in vgic_get_irq()") and x86 commit 8c86405f606c ("KVM: x86:
+Protect ioapic_read_indirect() from Spectre-v1/L1TF attacks").
+
+Fixes: 74967aa208e2 ("RISC-V: KVM: Add in-kernel emulation of AIA APLIC")
+functions: arch/riscv/kvm/aia_aplic.c:aplic_read_sourcecfg, arch/riscv/kvm/aia_aplic.c:aplic_write_sourcecfg, arch/riscv/kvm/aia_aplic.c:aplic_read_target, arch/riscv/kvm/aia_aplic.c:aplic_write_target, arch/riscv/kvm/aia_aplic.c:aplic_read_pending, arch/riscv/kvm/aia_aplic.c:aplic_write_pending, arch/riscv/kvm/aia_aplic.c:aplic_read_enabled, arch/riscv/kvm/aia_aplic.c:aplic_write_enabled, arch/riscv/kvm/aia_aplic.c:aplic_read_input, arch/riscv/kvm/aia_aplic.c:aplic_update_irq_range, arch/riscv/kvm/aia_aplic.c:kvm_riscv_aia_aplic_inject
+fixes: 74967aa208e2(riscv)
+ arch/riscv/kvm/aia_aplic.c | 23 ++++++++++++-----------
+ 1 file changed, 12 insertions(+), 11 deletions(-)
+diff --git a/arch/riscv/kvm/aia_aplic.c b/arch/riscv/kvm/aia_aplic.c
+index d1e50bf5c351..3464f3351df7 100644
+--- a/arch/riscv/kvm/aia_aplic.c
++++ b/arch/riscv/kvm/aia_aplic.c
+@@ -11,4 +11,5 @@
+ #include <linux/kvm_host.h>
+ #include <linux/math.h>
++#include <linux/nospec.h>
+ #include <linux/spinlock.h>
+ #include <linux/swab.h>
+@@ -46,5 +47,5 @@ static u32 aplic_read_sourcecfg(struct aplic *aplic, u32 irq)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return 0;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+@@ -62,5 +63,5 @@ static void aplic_write_sourcecfg(struct aplic *aplic, u32 irq, u32 val)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	if (val & APLIC_SOURCECFG_D)
+@@ -82,5 +83,5 @@ static u32 aplic_read_target(struct aplic *aplic, u32 irq)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return 0;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+@@ -98,5 +99,5 @@ static void aplic_write_target(struct aplic *aplic, u32 irq, u32 val)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	val &= APLIC_TARGET_EIID_MASK |
+@@ -117,5 +118,5 @@ static bool aplic_read_pending(struct aplic *aplic, u32 irq)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return false;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+@@ -133,5 +134,5 @@ static void aplic_write_pending(struct aplic *aplic, u32 irq, bool pending)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+@@ -171,5 +172,5 @@ static bool aplic_read_enabled(struct aplic *aplic, u32 irq)
+ 	if (!irq || aplic->nr_irqs <= irq)
+ 		return false;
+-	irqd = &aplic->irqs[irq];
++	irqd = &aplic->irqs[array_index_nospec(irq, aplic->nr_irqs)];
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+@@ -187,5 +188,5 @@ static void aplic_write_enabled(struct aplic *aplic, u32 irq, bool enabled)
+... (27 more diff lines)
+
+##### A216
+=== 24433b2b5c74 A 2026-01-20 +4/-0
+RISC-V: KVM: Fix error code returned for Ssaia ONE_REG
+
+Return -ENOENT for Ssaia ONE_REG when Ssaia is not enabled
+for a VCPU.
+
+This will make Ssaia ONE_REG error codes consistent with
+other ONE_REG interfaces of KVM RISC-V.
+
+Fixes: 2a88f38cd58d ("RISC-V: KVM: return ENOENT in *_one_reg() when reg is unknown")
+functions: arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_get_csr, arch/riscv/kvm/aia.c:kvm_riscv_vcpu_aia_set_csr
+fixes: 2a88f38cd58d(riscv)
+diff --git a/arch/riscv/kvm/aia.c b/arch/riscv/kvm/aia.c
+index 38de97d2f5b8..5ec503288555 100644
+--- a/arch/riscv/kvm/aia.c
++++ b/arch/riscv/kvm/aia.c
+@@ -186,4 +186,6 @@ int kvm_riscv_vcpu_aia_get_csr(struct kvm_vcpu *vcpu,
+ 	unsigned long regs_max = sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long);
+ 
++	if (!riscv_isa_extension_available(vcpu->arch.isa, SSAIA))
++		return -ENOENT;
+ 	if (reg_num >= regs_max)
+ 		return -ENOENT;
+@@ -205,4 +207,6 @@ int kvm_riscv_vcpu_aia_set_csr(struct kvm_vcpu *vcpu,
+ 	unsigned long regs_max = sizeof(struct kvm_riscv_aia_csr) / sizeof(unsigned long);
+ 
++	if (!riscv_isa_extension_available(vcpu->arch.isa, SSAIA))
++		return -ENOENT;
+ 	if (reg_num >= regs_max)
+ 		return -ENOENT;
+
+##### A217
+=== 45700a743af3 A 2026-01-20 +8/-10
+RISC-V: KVM: Fix error code returned for Smstateen ONE_REG
+
+Return -ENOENT for Smstateen ONE_REG when:
+1) Smstateen is not enabled for a VCPU
+2) ONE_REG id is out of range
+
+This will make Smstateen ONE_REG error codes consistent
+with other ONE_REG interfaces of KVM RISC-V.
+
+Fixes: c04913f2b54e ("RISCV: KVM: Add sstateen0 to ONE_REG")
+functions: arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_smstateen_set_csr, arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_smstateen_get_csr, arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_get_reg_csr, arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_set_reg_csr
+fixes: c04913f2b54e(riscv)
+diff --git a/arch/riscv/kvm/vcpu_onereg.c b/arch/riscv/kvm/vcpu_onereg.c
+index a4c8703a96a9..45ecc0082e90 100644
+--- a/arch/riscv/kvm/vcpu_onereg.c
++++ b/arch/riscv/kvm/vcpu_onereg.c
+@@ -566,6 +566,8 @@ static inline int kvm_riscv_vcpu_smstateen_set_csr(struct kvm_vcpu *vcpu,
+ 		sizeof(unsigned long);
+ 
++	if (!riscv_isa_extension_available(vcpu->arch.isa, SMSTATEEN))
++		return -ENOENT;
+ 	if (reg_num >= regs_max)
+-		return -EINVAL;
++		return -ENOENT;
+ 
+ 	reg_num = array_index_nospec(reg_num, regs_max);
+@@ -583,6 +585,8 @@ static int kvm_riscv_vcpu_smstateen_get_csr(struct kvm_vcpu *vcpu,
+ 		sizeof(unsigned long);
+ 
++	if (!riscv_isa_extension_available(vcpu->arch.isa, SMSTATEEN))
++		return -ENOENT;
+ 	if (reg_num >= regs_max)
+-		return -EINVAL;
++		return -ENOENT;
+ 
+ 	reg_num = array_index_nospec(reg_num, regs_max);
+@@ -616,8 +620,5 @@ static int kvm_riscv_vcpu_get_reg_csr(struct kvm_vcpu *vcpu,
+ 		break;
+ 	case KVM_REG_RISCV_CSR_SMSTATEEN:
+-		rc = -EINVAL;
+-		if (riscv_has_extension_unlikely(RISCV_ISA_EXT_SMSTATEEN))
+-			rc = kvm_riscv_vcpu_smstateen_get_csr(vcpu, reg_num,
+-							      &reg_val);
++		rc = kvm_riscv_vcpu_smstateen_get_csr(vcpu, reg_num, &reg_val);
+ 		break;
+ 	default:
+@@ -661,8 +662,5 @@ static int kvm_riscv_vcpu_set_reg_csr(struct kvm_vcpu *vcpu,
+ 		break;
+ 	case KVM_REG_RISCV_CSR_SMSTATEEN:
+-		rc = -EINVAL;
+-		if (riscv_has_extension_unlikely(RISCV_ISA_EXT_SMSTATEEN))
+-			rc = kvm_riscv_vcpu_smstateen_set_csr(vcpu, reg_num,
+-							      reg_val);
++		rc = kvm_riscv_vcpu_smstateen_set_csr(vcpu, reg_num, reg_val);
+ 		break;
+ 	default:
+
+##### A218
+=== c61ec3e8cc5d A 2026-01-20 +4/-0
+RISC-V: KVM: Check host Ssaia extension when creating AIA irqchip
+
+The KVM user-space may create KVM AIA irqchip before checking
+VCPU Ssaia extension availability so KVM AIA irqchip must fail
+when host does not have Ssaia extension.
+
+Fixes: 89d01306e34d ("RISC-V: KVM: Implement device interface for AIA irqchip")
+functions: arch/riscv/kvm/aia_device.c:aia_create
+fixes: 89d01306e34d(riscv)
+diff --git a/arch/riscv/kvm/aia_device.c b/arch/riscv/kvm/aia_device.c
+index 9a45c85239fe..49c71d3cdb00 100644
+--- a/arch/riscv/kvm/aia_device.c
++++ b/arch/riscv/kvm/aia_device.c
+@@ -12,4 +12,5 @@
+ #include <linux/kvm_host.h>
+ #include <linux/uaccess.h>
++#include <linux/cpufeature.h>
+ 
+ static int aia_create(struct kvm_device *dev, u32 type)
+@@ -23,4 +24,7 @@ static int aia_create(struct kvm_device *dev, u32 type)
+ 		return -EEXIST;
+ 
++	if (!riscv_isa_extension_available(NULL, SSAIA))
++		return -ENODEV;
++
+ 	ret = -EBUSY;
+ 	if (kvm_trylock_all_vcpus(kvm))
+
+##### A219
+=== 841e47d56cef A 2026-01-21 +1/-1
+riscv: Add intermediate cast to 'unsigned long' in __get_user_asm
+
+After commit bdce162f2e57 ("riscv: Use 64-bit variable for output in
+__get_user_asm"), there is a warning when building for 32-bit RISC-V:
+
+  In file included from include/linux/uaccess.h:13,
+                   from include/linux/sched/task.h:13,
+                   from include/linux/sched/signal.h:9,
+                   from include/linux/rcuwait.h:6,
+                   from include/linux/mm.h:36,
+                   from include/linux/migrate.h:5,
+                   from mm/migrate.c:16:
+  mm/migrate.c: In function 'do_pages_move':
+  arch/riscv/include/asm/uaccess.h:115:15: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+    115 |         (x) = (__typeof__(x))__tmp;                             \
+        |               ^
+  arch/riscv/include/asm/uaccess.h:198:17: note: in expansion of macro '__get_user_asm'
+    198 |                 __get_user_asm("lb", (x), __gu_ptr, label);     \
+        |                 ^~~~~~~~~~~~~~
+  arch/riscv/include/asm/uaccess.h:218:9: note: in expansion of macro '__get_user_nocheck'
+    218 |         __get_user_nocheck(x, ptr, __gu_failed);                        \
+        |         ^~~~~~~~~~~~~~~~~~
+  arch/riscv/include/asm/uaccess.h:255:9: note: in expansion of macro '__get_user_error'
+    255 |         __get_user_error(__gu_val, __gu_ptr, __gu_err);         \
+        |         ^~~~~~~~~~~~~~~~
+  arch/riscv/include/asm/uaccess.h:285:17: note: in expansion of macro '__get_user'
+    285 |                 __get_user((x), __p) :                          \
+        |                 ^~~~~~~~~~
+  mm/migrate.c:2358:29: note: in expansion of macro 'get_user'
+   2358 |                         if (get_user(p, pages + i))
+        |                             ^~~~~~~~
+
+Add an intermediate cast to 'unsigned long', which is guaranteed to be the same
+width as a pointer, before the cast to the type of the output variable to clear
+up the warning.
+
+Fixes: bdce162f2e57 ("riscv: Use 64-bit variable for output in __get_user_asm")
+functions: 
+fixes: bdce162f2e57(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index 53a643c0f6fe..11c9886c3b70 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -113,5 +113,5 @@ do {								\
+ 		: "=&r" (__tmp)					\
+ 		: "m" (*(ptr)) : : label);			\
+-	(x) = (__typeof__(x))__tmp;				\
++	(x) = (__typeof__(x))(unsigned long)__tmp;		\
+ } while (0)
+ #else /* !CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+
+##### A220
+=== ba89709a3610 A 2026-01-25 +3/-3
+riscv: signal: fix some warnings reported by sparse
+
+Clean up a few warnings reported by sparse in
+arch/riscv/kernel/signal.c.  These come from code that was added
+recently; they were missed when I initially reviewed the patch.
+
+Fixes: 818d78ba1b3f ("riscv: signal: abstract header saving for setup_sigcontext")
+[pjw@kernel.org: updated to apply]
+functions: arch/riscv/kernel/signal.c:setup_sigcontext
+fixes: 818d78ba1b3f(riscv)
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index 5a956108b1ea..dbb067e345f0 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -146,5 +146,5 @@ struct arch_ext_priv {
+ };
+ 
+-struct arch_ext_priv arch_ext_list[] = {
++static struct arch_ext_priv arch_ext_list[] = {
+ 	{
+ 		.magic = RISCV_V_MAGIC,
+@@ -153,5 +153,5 @@ struct arch_ext_priv arch_ext_list[] = {
+ };
+ 
+-const size_t nr_arch_exts = ARRAY_SIZE(arch_ext_list);
++static const size_t nr_arch_exts = ARRAY_SIZE(arch_ext_list);
+ 
+ static long restore_sigcontext(struct pt_regs *regs,
+@@ -298,5 +298,5 @@ static long setup_sigcontext(struct rt_sigframe __user *frame,
+ 			err |= __put_user(arch_ext->magic, &sc_ext_ptr->magic);
+ 			err |= __put_user(ext_size, &sc_ext_ptr->size);
+-			sc_ext_ptr = (void *)sc_ext_ptr + ext_size;
++			sc_ext_ptr = (void __user *)sc_ext_ptr + ext_size;
+ 		}
+ 	}
+
+##### A221
+=== db909bd7986c A 2026-01-25 +25/-0
+riscv: mm: Fixup no5lvl failure when vaddr is invalid
+
+Unlike no4lvl, no5lvl still continues to detect satp, which
+requires va=pa mapping. When pa=0x800000000000, no5lvl
+would fail in Sv48 mode due to an illegal VA value of
+0x800000000000.
+
+So, prevent detecting the satp flow for no5lvl, when
+vaddr is invalid. Add the is_vaddr_valid() function for
+checking.
+
+Fixes: 26e7aacb83df ("riscv: Allow to downgrade paging mode from the command line")
+[pjw@kernel.org: cleaned up commit message]
+functions: arch/riscv/mm/init.c:set_satp_mode
+fixes: 26e7aacb83df(riscv)
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index decd7df40fa4..fa8d2f6f554b 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -793,4 +793,25 @@ static void __init set_mmap_rnd_bits_max(void)
+ }
+ 
++static bool __init is_vaddr_valid(unsigned long va)
++{
++	unsigned long up = 0;
++
++	switch (satp_mode) {
++	case SATP_MODE_39:
++		up = 1UL << 38;
++		break;
++	case SATP_MODE_48:
++		up = 1UL << 47;
++		break;
++	case SATP_MODE_57:
++		up = 1UL << 56;
++		break;
++	default:
++		return false;
++	}
++
++	return (va < up) || (va >= (ULONG_MAX - up + 1));
++}
++
+ /*
+  * There is a simple way to determine if 4-level is supported by the
+@@ -834,4 +855,7 @@ static __init void set_satp_mode(uintptr_t dtb_pa)
+ 			   PMD_SIZE, PAGE_KERNEL_EXEC);
+ retry:
++	if (!is_vaddr_valid(set_satp_mode_pmd))
++		goto out;
++
+ 	create_pgd_mapping(early_pg_dir,
+ 			   set_satp_mode_pmd,
+@@ -856,4 +880,5 @@ static __init void set_satp_mode(uintptr_t dtb_pa)
+ 	}
+ 
++out:
+ 	memset(early_pg_dir, 0, PAGE_SIZE);
+ 	memset(early_p4d, 0, PAGE_SIZE);
+
+##### A222
+=== 0ea05c4f7527 A 2026-01-28 +1/-1
+riscv: compat: fix COMPAT_UTS_MACHINE definition
+
+The COMPAT_UTS_MACHINE for riscv was incorrectly defined as "riscv".
+Change it to "riscv32" to reflect the correct 32-bit compat name.
+
+Fixes: 06d0e3723647 ("riscv: compat: Add basic compat data type implementation")
+functions: 
+fixes: 06d0e3723647(riscv)
+diff --git a/arch/riscv/include/asm/compat.h b/arch/riscv/include/asm/compat.h
+index 6081327e55f5..28e115eed218 100644
+--- a/arch/riscv/include/asm/compat.h
++++ b/arch/riscv/include/asm/compat.h
+@@ -3,5 +3,5 @@
+ #define __ASM_COMPAT_H
+ 
+-#define COMPAT_UTS_MACHINE	"riscv\0\0"
++#define COMPAT_UTS_MACHINE	"riscv32\0\0"
+ 
+ /*
+
+##### A223
+=== 8678591b4746 A 2026-02-25 +29/-2
+kbuild: Split .modinfo out from ELF_DETAILS
+
+Commit 3e86e4d74c04 ("kbuild: keep .modinfo section in
+vmlinux.unstripped") added .modinfo to ELF_DETAILS while removing it
+from COMMON_DISCARDS, as it was needed in vmlinux.unstripped and
+ELF_DETAILS was present in all architecture specific vmlinux linker
+scripts. While this shuffle is fine for vmlinux, ELF_DETAILS and
+COMMON_DISCARDS may be used by other linker scripts, such as the s390
+and x86 compressed boot images, which may not expect to have a .modinfo
+section. In certain circumstances, this could result in a bootloader
+failing to load the compressed kernel [1].
+
+Commit ddc6cbef3ef1 ("s390/boot/vmlinux.lds.S: Ensure bzImage ends with
+SecureBoot trailer") recently addressed this for the s390 bzImage but
+the same bug remains for arm, parisc, and x86. The presence of .modinfo
+in the x86 bzImage was the root cause of the issue worked around with
+commit d50f21091358 ("kbuild: align modinfo section for Secureboot
+Authenticode EDK2 compat"). misc.c in arch/x86/boot/compressed includes
+lib/decompress_unzstd.c, which in turn includes lib/xxhash.c and its
+MODULE_LICENSE / MODULE_DESCRIPTION macros due to the STATIC definition.
+
+Split .modinfo out from ELF_DETAILS into its own macro and handle it in
+all vmlinux linker scripts. Discard .modinfo in the places where it was
+previously being discarded from being in COMMON_DISCARDS, as it has
+never been necessary in those uses.
+
+Fixes: 3e86e4d74c04 ("kbuild: keep .modinfo section in vmlinux.unstripped")
+functions: 
+fixes: 3e86e4d74c04(common)
+ arch/parisc/kernel/vmlinux.lds.S          | 1 +
+ arch/powerpc/kernel/vmlinux.lds.S         | 1 +
+ arch/riscv/kernel/vmlinux.lds.S           | 1 +
+ arch/s390/kernel/vmlinux.lds.S            | 1 +
+ arch/sh/kernel/vmlinux.lds.S              | 1 +
+ arch/sparc/kernel/vmlinux.lds.S           | 1 +
+ arch/um/kernel/dyn.lds.S                  | 1 +
+ arch/um/kernel/uml.lds.S                  | 1 +
+ arch/x86/boot/compressed/vmlinux.lds.S    | 2 +-
+ arch/x86/kernel/vmlinux.lds.S             | 1 +
+ include/asm-generic/vmlinux.lds.h         | 4 +++-
+ 27 files changed, 29 insertions(+), 2 deletions(-)
+diff --git a/arch/alpha/kernel/vmlinux.lds.S b/arch/alpha/kernel/vmlinux.lds.S
+index 2efa7dfc798a..2d136c63db16 100644
+--- a/arch/alpha/kernel/vmlinux.lds.S
++++ b/arch/alpha/kernel/vmlinux.lds.S
+@@ -72,4 +72,5 @@ SECTIONS
+ 	STABS_DEBUG
+ 	DWARF_DEBUG
++	MODINFO
+ 	ELF_DETAILS
+ 
+diff --git a/arch/arc/kernel/vmlinux.lds.S b/arch/arc/kernel/vmlinux.lds.S
+index 61a1b2b96e1d..6af63084ff28 100644
+--- a/arch/arc/kernel/vmlinux.lds.S
++++ b/arch/arc/kernel/vmlinux.lds.S
+@@ -124,4 +124,5 @@ SECTIONS
+ 
+ 	STABS_DEBUG
++	MODINFO
+ 	ELF_DETAILS
+ 	DISCARDS
+diff --git a/arch/arm/boot/compressed/vmlinux.lds.S b/arch/arm/boot/compressed/vmlinux.lds.S
+index d411abd4310e..2d916647df03 100644
+--- a/arch/arm/boot/compressed/vmlinux.lds.S
++++ b/arch/arm/boot/compressed/vmlinux.lds.S
+@@ -22,4 +22,5 @@ SECTIONS
+     *(.ARM.exidx*)
+     *(.ARM.extab*)
++    *(.modinfo)
+     *(.note.*)
+     *(.rel.*)
+diff --git a/arch/arm/kernel/vmlinux-xip.lds.S b/arch/arm/kernel/vmlinux-xip.lds.S
+index f2e8d4fac068..5afb725998ec 100644
+--- a/arch/arm/kernel/vmlinux-xip.lds.S
++++ b/arch/arm/kernel/vmlinux-xip.lds.S
+@@ -155,4 +155,5 @@ SECTIONS
+ 	STABS_DEBUG
+ 	DWARF_DEBUG
++	MODINFO
+ 	ARM_DETAILS
+ 
+diff --git a/arch/arm/kernel/vmlinux.lds.S b/arch/arm/kernel/vmlinux.lds.S
+index d592a203f9c6..c07843c3c53d 100644
+--- a/arch/arm/kernel/vmlinux.lds.S
++++ b/arch/arm/kernel/vmlinux.lds.S
+@@ -154,4 +154,5 @@ SECTIONS
+ 	STABS_DEBUG
+ 	DWARF_DEBUG
++	MODINFO
+ 	ARM_DETAILS
+ 
+diff --git a/arch/arm64/kernel/vmlinux.lds.S b/arch/arm64/kernel/vmlinux.lds.S
+index ad6133b89e7a..2964aad0362e 100644
+--- a/arch/arm64/kernel/vmlinux.lds.S
++++ b/arch/arm64/kernel/vmlinux.lds.S
+@@ -350,4 +350,5 @@ SECTIONS
+ 	STABS_DEBUG
+ 	DWARF_DEBUG
++	MODINFO
+ 	ELF_DETAILS
+ 
+... (219 more diff lines)
+
+##### A224
+=== 1b2c6b56a9fa A 2026-03-03 +5/-2
+riscv: mm: Unconditionally sfence.vma for spurious fault
+
+Svvptc does not guarantee that it's safe to just return here. Since we
+have already cleared our bit, if, theoretically, the bounded timeframe
+for the accessed page to become valid still hasn't happened after sret,
+we could fault again and actually crash.
+
+Hopefully, these spurious faults should be rare enough that this is an
+acceptable slowdown.
+
+Fixes: 503638e0babf ("riscv: Stop emitting preventive sfence.vma for new vmalloc mappings")
+functions: 
+fixes: 503638e0babf(riscv)
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index ebf6918b4e9b..c6988983cdf7 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -76,6 +76,9 @@
+ 	amoxor.d	a0, a1, (a0)
+ 
+-	/* Only emit a sfence.vma if the uarch caches invalid entries */
+-	ALTERNATIVE("sfence.vma", "nop", 0, RISCV_ISA_EXT_SVVPTC, 1)
++	/*
++	 * A sfence.vma is required here. Even if we had Svvptc, there's no
++	 * guarantee that after returning we wouldn't just fault again.
++	 */
++	sfence.vma
+ 
+ 	REG_L	a0, TASK_TI_A0(tp)

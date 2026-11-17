@@ -1,0 +1,289 @@
+{
+ "X1_pre": {
+  "实现一致性（效果依赖）": {
+   "1": [
+    "`post_alloc_hook` 调用 `tag_clear_highpage`（mm/page_alloc.c:1828），规则 R1；依赖性质：`page` 使用前必须已写入（清零或初始化）；违反：riscv（Z3）、x86_64（Z3）；成立：arm64、arm64（开 MTE）"
+   ],
+   "2": [],
+   "3": [
+    "`kvm_get_dirty_log_protect` 调用 `kvm_arch_sync_dirty_log`（virt/kvm/kvm_main.c:2254）：资源 `kvm、memslot`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`kvm_clear_dirty_log_protect` 调用 `kvm_arch_sync_dirty_log`（virt/kvm/kvm_main.c:2376）：资源 `kvm、memslot`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`__irq_set_trigger` 调用 `mask_irq`（kernel/irq/manage.c:922）：资源 `desc`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`ring_buffer_read_page` 调用 `local_set`（kernel/trace/ring_buffer.c:6702）：资源 `bpage`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`move_ptes` 调用 `pte_none`（mm/mremap.c:263）：资源 `new_ptep`，性质“已写入（清零或初始化）、页表项已设置”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`check_stack_read_fixed_off` 调用 `verbose`（kernel/bpf/verifier.c:5445）：资源 `env`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核"
+   ],
+   "4": []
+  },
+  "类型一致性": null,
+  "调用上下文": null
+ },
+ "X1_fix": {
+  "实现一致性（效果依赖）": {
+   "1": [],
+   "2": [
+    "`post_alloc_hook` 调用 `tag_clear_highpage`（mm/page_alloc.c:1828），规则 R1，由 Z2、Z3、Z4、Z7 检查，所有架构成立"
+   ],
+   "3": [
+    "`kvm_get_dirty_log_protect` 调用 `kvm_arch_sync_dirty_log`（virt/kvm/kvm_main.c:2254）：资源 `kvm、memslot`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`kvm_clear_dirty_log_protect` 调用 `kvm_arch_sync_dirty_log`（virt/kvm/kvm_main.c:2376）：资源 `kvm、memslot`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`__irq_set_trigger` 调用 `mask_irq`（kernel/irq/manage.c:922）：资源 `desc`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`ring_buffer_read_page` 调用 `local_set`（kernel/trace/ring_buffer.c:6702）：资源 `bpage`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`move_ptes` 调用 `pte_none`（mm/mremap.c:263）：资源 `new_ptep`，性质“已写入（清零或初始化）、页表项已设置”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`check_stack_read_fixed_off` 调用 `verbose`（kernel/bpf/verifier.c:5445）：资源 `env`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核"
+   ],
+   "4": []
+  },
+  "类型一致性": null,
+  "调用上下文": null
+ },
+ "A101": {
+  "实现一致性（效果依赖）": null,
+  "类型一致性": {
+   "1": [],
+   "2": [],
+   "3": [],
+   "4": [
+    "用例 2594：`mmap` i:40000000 i:100000000 i:fffffffffffffff4 i:0 i:2 i:80000000（a101_pre 返回 ENOMEM；a101_fix 返回 EINVAL；a101_ref_arm64 返回 EINVAL；a101_ref_x86_64 返回 EINVAL）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [3, 4] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 6832：`mmap` i:ffffffffffffff7b i:1000 i:1 i:3 f:perfsw i:0（a101_pre 返回 ENOMEM；a101_fix 返回 big；a101_ref_arm64 返回 big；a101_ref_x86_64 返回 big）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [2, 3, 5] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 6961：`mmap` i:ffffffffffffffef i:1000 i:1 i:3 f:ustream i:0（a101_pre 返回 ENOMEM；a101_fix 返回 ENODEV；a101_ref_arm64 返回 ENODEV；a101_ref_x86_64 返回 ENODEV）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [2, 3, 5] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 7046：`mmap` i:ffffffffffffffff i:1 i:ffffffffffffffe1 i:80000000 f:dir i:0（a101_pre 返回 ENOMEM；a101_fix 返回 EINVAL；a101_ref_arm64 返回 EINVAL；a101_ref_x86_64 返回 EINVAL）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [0, 1, 5] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 7771：`mmap` i:40000000 i:1000 i:1 i:3 f:perfsw i:0（a101_pre 返回 ENOMEM；a101_fix 返回 big；a101_ref_arm64 返回 big；a101_ref_x86_64 返回 big）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [2, 3, 5] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 11776：`mmap` i:fffffffffffffff0 i:1000 i:1 i:3 f:perfsw i:0（a101_pre 返回 ENOMEM；a101_fix 返回 big；a101_ref_arm64 返回 big；a101_ref_x86_64 返回 big）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [2, 3, 5] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 12704：`mmap` i:40000000 i:1000 i:1 i:40 f:perfsw i:0（a101_pre 返回 ENOMEM；a101_fix 返回 EINVAL；a101_ref_arm64 返回 EINVAL；a101_ref_x86_64 返回 EINVAL）\n  静态归因不对：第一候选 **实现一致性检查**：rb_alloc_aux（kernel/events/ring_buffer.c:748），参数 [3] 的值与提示吻合；边界项 `virt_to_page`，证据 2，得分 0.1934；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 14728：`mmap` i:ffffffffffffffef i:1000 i:1 i:3 f:perfsw i:0（a101_pre 返回 ENOMEM；a101_fix 返回 big；a101_ref_arm64 返回 big；a101_ref_x86_64 返回 big）\n  静态归因不对：第一候选 **不归类**：try_grab_folio（mm/gup.c:144），参数 [2, 3, 5] 的值与提示吻合；边界项 `WARN_ON_ONCE`，证据 1，得分 0.0513；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 15320：`mmap` i:40000000 i:1000 i:1 i:3 f:perfsw i:7fffffffffffffff（a101_pre 返回 ENOMEM；a101_fix 返回 EINVAL；a101_ref_arm64 返回 EINVAL；a101_ref_x86_64 返回 EINVAL）\n  静态归因不对：第一候选 **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a101_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a101_fix: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a101_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a101_ref_x86_64: 指针检查上限 0x8000000000000000，可映射最高 0xfffffffffff000；**同架构自洽问题**：a101_pre, a101_fix, a101_ref_x86_64 两个上限对不上"
+   ]
+  },
+  "调用上下文": null
+ },
+ "A310": {
+  "实现一致性（效果依赖）": null,
+  "类型一致性": {
+   "1": [
+    "用例 2522：`raw_nr` i:ffffffffffffffff i:2463a388e60ef978 i:25 i:7fffffff i:7fffffffffffffff i:1000 i:1000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 2900：`raw_nr` i:ffffffffffffffff i:8000000000000000 i:7fffffff i:100 i:1 i:ffffffff i:100（a310_pre 返回 neg；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 3821：`raw_nr` i:ffffffffffffffff i:80000000 i:2 i:ffffffffffffffff i:100 i:10 i:ffffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 6020：`raw_nr` i:ffffffffffffffff i:ffffffffffffffff i:ffffffffffffffff i:ffff i:719137941a8eb531 i:8000000000000000 i:ff（a310_pre 返回 EPERM；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 7578：`raw_nr` i:ffffffffffffffff i:ff i:1000 i:ff i:2 i:40 i:7fffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 8295：`raw_nr` i:ffffffffffffffff i:100 i:100 i:100 i:ffffffff i:12 i:10000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 9074：`raw_nr` i:ffffffffffffffff i:7fffffff i:7fffffffffffffff i:8000000000000000 i:80000000 i:8000000000000000 i:8707c6f1e89c19ce（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 9112：`raw_nr` i:ffffffffffffffff i:0 i:0 i:0 i:0 i:0 i:0（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 11498：`raw_nr` i:ffffffffffffffff i:7fffffff i:7fffffff i:2 i:10 i:10 i:2（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 11890：`raw_nr` i:ffffffffffffffff i:1 i:100 i:1000 i:0 i:10 i:ffffffffffffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 12139：`raw_nr` i:ffffffffffffffff i:7c i:100000000 i:8 i:40 i:10 i:7（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 12329：`raw_nr` i:ffffffffffffffff i:6e i:10 i:10000 i:8 i:ffff i:8000000000000000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 12512：`raw_nr` i:ffffffffffffffff i:ffffffffffffffff i:4a8eed93efe5550f i:93b7822548c60861 i:1 i:10 i:8（a310_pre 返回 EPERM；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 13877：`raw_nr` i:ffffffffffffffff i:10000 i:10000 i:40 i:ffffffff i:10000 i:80000000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 13914：`raw_nr` i:ffffffffffffffff i:7fffffff i:100000000 i:8 i:1000 i:ff i:ff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 13988：`raw_nr` i:ffffffffffffffff i:ffff i:100 i:ffff i:2 i:7fffffff i:ff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 14217：`raw_nr` i:ffffffffffffffff i:1 i:7fffffff i:1000 i:ffff i:7fffffffffffffff i:ffffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 14335：`raw_nr` i:ffffffffffffffff i:0 i:80000000 i:2 i:1 i:ffffffff i:8000000000000000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 14489：`raw_nr` i:ffffffffffffffff i:40 i:ff i:ffff i:ff i:100 i:7fffffffffffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 14524：`raw_nr` i:ffffffffffffffff i:10 i:8 i:ffff i:8000000000000000 i:6405c29e2be49b63 i:0（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 14713：`raw_nr` i:ffffffffffffffff i:10000 i:10000 i:7fffffffffffffff i:ffff i:ffffffff i:100（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（第一候选）",
+    "用例 15274：`raw_nr` i:ffffffffffffffff i:6e i:10 i:10000 i:8 i:ffff i:8000000000000000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（非第一候选）",
+    "用例 15395：`raw_nr` i:ffffffffffffffff i:1 i:7fffffff i:1000 i:ffff i:7fffffffffffffff i:ffffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（非第一候选）",
+    "用例 15403：`raw_nr` i:ffffffffffffffff i:0 i:80000000 i:2 i:1 i:ffffffff i:8000000000000000（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（非第一候选）",
+    "用例 15421：`raw_nr` i:ffffffffffffffff i:40 i:ff i:ffff i:ff i:100 i:7fffffffffffffff（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（非第一候选）",
+    "用例 15424：`raw_nr` i:ffffffffffffffff i:10 i:8 i:ffff i:8000000000000000 i:6405c29e2be49b63 i:0（a310_pre 返回 arg0；a310_fix 返回 ENOSYS；a310_ref_arm64 返回 ENOSYS；a310_ref_x86_64 返回 ENOSYS）\n  - **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1cf、arm64=0x1cf、x86_64=0x1cf（非第一候选）"
+   ],
+   "2": [],
+   "3": [],
+   "4": []
+  },
+  "调用上下文": null
+ },
+ "A171": {
+  "实现一致性（效果依赖）": null,
+  "类型一致性": {
+   "1": [
+    "用例 15767：`recvfrom` i:2b i:fffffffffffff i:8000000000000000 i:2803 b:z:1 b:g:8184（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15778：`recvfrom` i:7 i:fffffffffffff i:10000000000001 i:0 i:a888 i:5（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15805：`recvfrom` f:signalfd i:8000000000000000 i:100000000 i:0 t:0 i:0（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15821：`recvfrom` f:dir i:fffffffffffff i:10 i:0 i:0 i:0（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15846：`recvfrom` f:eventfd o:g:62 i:fffffffffffff i:0 t:0 i:2（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15856：`ppoll` i:8000000000000000 i:0 b:z:0 i:0 i:8（a171_pre 返回 arg1；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15866：`recvfrom` f:signalfd i:7fffffffffffffff i:7fffffffffffffff i:800000 i:0 i:1（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15884：`recvfrom` f:pipewr i:8000000000000000 i:7ffffffffffffffe i:8 t:0 i:1（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15889：`recvfrom` f:udp i:fffffffffffff i:10000000000000 i:8000 t:0 b:a:1（a171_pre 返回 EAGAIN；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15938：`recvfrom` i:fffffff2 i:10000000000000 i:fffffffffffff i:189 t:0 i:3（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15947：`recvfrom` i:3d i:fffffffffffff i:7fffffffffffffff i:ffffffea i:abec9d2905e3e921 i:a（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 15993：`recvfrom` f:ustream i:8000000000000000 i:10000000000000 i:ffffffff t:0 i:7（a171_pre 返回 EINVAL；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 16005：`recvfrom` f:udgram i:32a1a87d11dcf0ac i:10000000000000 i:285 b:g:1 i:3（a171_pre 返回 EOPNOTSUPP；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 16030：`recvfrom` f:inotify o:g:62 i:8000000000000000 i:33 i:33 i:46fc037e76eb9c70（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 16044：`recvfrom` i:fffffff2 i:8000000000000000 i:1 i:33 i:fffffffffffffff2 i:ffffffffffffffff（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 16078：`recvfrom` i:fffffff2 i:46ab63c911babe62 i:10000000000000 i:ffffffff b:z:1 i:2（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 16139：`recvfrom` f:signalfd i:8000000000000000 i:40 i:652c07c3 b:g:1 i:3（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）",
+    "用例 16484：`ppoll` i:8000000000000000 i:0 b:z:0 i:0 i:8（a171_pre 返回 arg1；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  - **类型一致性检查**：用户地址上限（相对上限提示值）；静态取值 riscv=0x7fffffffffffffff、arm64=0x10000000000000、x86_64=nonconst；探测 a171_pre: 指针检查上限 0x8000000000000000，可映射最高 0x100000000000000、a171_fix: 指针检查上限 0x100000000000001，可映射最高 0x100000000000000、a171_ref_arm64: 指针检查上限 0x10000000000001，可映射最高 0x10000000000000、a171_ref_x86_64: 指针检查上限 0xfffffffffff001，可映射最高 0xfffffffffff000；**同架构自洽问题**：a171_pre 两个上限对不上（第一候选）"
+   ],
+   "2": [],
+   "3": [],
+   "4": [
+    "用例 350：`recvfrom` i:40d i:468d3e8195844fd6 i:8 i:3c b:g:1 i:2（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 1281：`sendto` f:udp i:5c4b7b79a6e1813e i:8 i:0 b:z:1 i:40（a171_pre 返回 EINVAL；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 3400：`listmount` b:a:1 i:1c242ff49989fa55 i:dc19 i:0（a171_pre 返回 E2BIG；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 4509：`sendto` f:neg i:aee6e91beb2f45e i:40 i:55a8e489 t:0 i:2000（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 5410：`sendto` f:ustream i:3d3ce47b5f837ebf i:ffffffffffffffff i:f84d8a2e b:g:8184 i:1000（a171_pre 返回 EINVAL；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 5656：`sendto` i:ffffff8d i:16d2fce67b42625e i:6dba i:ffffffff t:0 i:2000（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 6979：`recvfrom` f:ustream i:10ac45bf02b072a0 i:100000000 i:ffffffff i:73eefcb77a1b9a9c b:a:0（a171_pre 返回 EINVAL；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：put_cmsg（net/core/scm.c:255），参数 [3] 的值与提示吻合；边界项 `unsafe_put_user`，证据 2，得分 0.1201；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 7242：`listmount` b:a:0 i:27b615807ac3c17b i:1000 i:0（a171_pre 返回 E2BIG；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 7445：`recvfrom` i:fffffff2 i:7e8bbaa0a486a6c6 i:1 i:400000 t:0 i:2（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 7671：`recvfrom` f:neg i:7d91eb7047568b4c i:100000000 i:1 i:403 i:4（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：put_cmsg（net/core/scm.c:255），参数 [3] 的值与提示吻合；边界项 `unsafe_put_user`，证据 2，得分 0.1201；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 7753：`recvfrom` i:400 i:4e3cc68658279d6b i:8 i:4dd96f9d t:0 i:5（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **不归类**：ip6_datagram_dst_update（net/ipv6/datagram.c:83），参数 [0] 的值与提示吻合；边界项 `const_test_bit`，证据 1，得分 0.0129；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 8637：`recvfrom` i:308 i:7356397ceea4ed7c i:90b3 i:6 t:0 i:0（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 8765：`listmount` b:a:8184 i:606de0f4e0ebcd10 i:0 i:0（a171_pre 返回 E2BIG；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 9559：`recvfrom` i:3 i:fffc112d230d09e i:1 i:2 i:0 i:0（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 10161：`recvfrom` i:2b i:59e8f87ecae936de i:0 i:0 b:z:0 i:2（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 10790：`mincore` i:0 i:7fffffffffffffff i:8000000000000000（a171_pre 返回 EFAULT；a171_fix 返回 ENOMEM；a171_ref_arm64 返回 ENOMEM；a171_ref_x86_64 返回 ENOMEM）\n  静态归因不对：第一候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:258），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4239；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 10983：`recvfrom` f:pidfd o:a:62 i:2000 i:b2c961e i:0 i:8（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：import_ubuf（lib/iov_iter.c:1532），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.2826；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 11115：`recvfrom` i:a8c8 o:a:62 i:7fffffffffffffff i:2000208 t:0 i:ffffffffffffffff（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 11344：`mincore` i:40000000 i:0 i:7ffffffffffffffe（a171_pre 返回 arg1；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:265），参数 [2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4239；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 11914：`recvfrom` f:eventfd o:g:62 i:fffffffffffff i:0 t:0 i:2（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 12211：`recvfrom` i:ffffffff o:z:62 i:10 i:2 t:0 b:z:0（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：import_ubuf（lib/iov_iter.c:1532），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.2826；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 12601：`recvfrom` i:86 i:7ffffffffffffffe i:1 i:6e9fe1b7 i:10104 i:0（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 12856：`mincore` i:100000000 i:0 i:7fffffffffffffff（a171_pre 返回 arg1；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:265），参数 [2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4239；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 12891：`recvfrom` i:8002b i:44a6bb22cd17f097 i:80000000 i:7 t:0 i:7（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：put_cmsg（net/core/scm.c:255），参数 [3] 的值与提示吻合；边界项 `unsafe_put_user`，证据 2，得分 0.1201；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 13257：`recvfrom` f:unopen i:7ffffffffffffffe i:0 i:2b i:0 i:2（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 13757：`recvfrom` i:800b3 i:147d3a56e5706046 i:10000000000001 i:ffffffff i:42629f819c24702a i:1（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 13798：`recvfrom` f:udgram i:32a1a87d11dcf0ac i:10000000000000 i:285 b:g:1 i:3（a171_pre 返回 EOPNOTSUPP；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 14085：`recvfrom` f:inotify o:g:62 i:8000000000000000 i:33 i:33 i:46fc037e76eb9c70（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：import_ubuf（lib/iov_iter.c:1532），参数 [1, 2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.2826；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 14360：`mincore` i:0 i:1 i:7ffffffffffffffe（a171_pre 返回 ENOMEM；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:265），参数 [2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4239；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 14793：`recvfrom` i:fffffff2 i:46ab63c911babe62 i:10000000000000 i:ffffffff b:z:1 i:2（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 14812：`listmount` b:a:0 o:g:62 i:10 i:0（a171_pre 返回 E2BIG；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：__do_sys_listmount（fs/namespace.c:6154），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4239；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 14828：`recvfrom` f:memfd i:709d34300dbd1570 i:100000000 i:4 t:0 b:z:8184（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：put_cmsg（net/core/scm.c:255），参数 [3] 的值与提示吻合；边界项 `unsafe_put_user`，证据 2，得分 0.1201；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 15435：`mincore` i:0 i:0 i:7ffffffffffffffe（a171_pre 返回 arg0；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:265），参数 [2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4239；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 15658：`recvfrom` f:memfd i:4387188f2cab6078 i:0 i:80024 t:0 i:a（a171_pre 返回 ENOTSOCK；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  没有静态来源",
+    "用例 15739：`recvfrom` i:10000 i:3abf6d8e7ab850cb i:ffffffffffffffff i:10003 i:5 i:0（a171_pre 返回 EBADF；a171_fix 返回 EFAULT；a171_ref_arm64 返回 EFAULT；a171_ref_x86_64 返回 EFAULT）\n  静态归因不对：第一候选 **实现一致性检查**：move_addr_to_user（net/socket.c:300），参数 [5] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5253；静态取值 riscv=None、arm64=None、x86_64=None"
+   ]
+  },
+  "调用上下文": null
+ },
+ "A181": {
+  "实现一致性（效果依赖）": null,
+  "类型一致性": {
+   "1": [
+    "用例 12705：`recvmsg` f:udgram t:0 i:4（a181_pre 返回 val；a181_fix 返回 val；a181_ref_arm64 返回 val；a181_ref_x86_64 返回 val）\n  - **实现一致性检查**：scm_detach_fds（net/core/scm.c:385），参数 [2] 的值与提示吻合；边界项 `put_user`，证据 2，得分 0.0953；静态取值 riscv=None、arm64=None、x86_64=None（第一候选）",
+    "用例 15097：`recvmsg` f:udgram t:0 i:0（a181_pre 返回 val；a181_fix 返回 val；a181_ref_arm64 返回 val；a181_ref_x86_64 返回 val）\n  - **实现一致性检查**：____sys_recvmsg（net/socket.c:2836），参数 [2] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.4503；静态取值 riscv=None、arm64=None、x86_64=None（第一候选）"
+   ],
+   "2": [],
+   "3": [],
+   "4": [
+    "用例 14531：`recvmsg` f:udgram t:0 i:88（a181_pre 返回 val；a181_fix 返回 val；a181_ref_arm64 返回 val；a181_ref_x86_64 返回 val）\n  没有静态来源"
+   ]
+  },
+  "调用上下文": null
+ },
+ "B467": {
+  "实现一致性（效果依赖）": null,
+  "类型一致性": {
+   "1": [
+    "用例 15743：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  - **实现一致性检查**：结构体字段 struct perf_event_attr|type，改为 0xffffffff（pm1）；比较位置 pmu_legacy_ctr_get_idx（drivers/perf/riscv_pmu_legacy.c:20，架构代码）、perf_event_modify_attr（kernel/events/core.c:3267）、perf_swevent_init（kernel/events/core.c:10282）、cpu_clock_event_init（kernel/events/core.c:11339）（第一候选）",
+    "用例 15959：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  - **实现一致性检查**：结构体字段 struct perf_event_attr|type，改为 0x93a4d8f（outside）；比较位置 pmu_legacy_ctr_get_idx（drivers/perf/riscv_pmu_legacy.c:20，架构代码）、perf_event_modify_attr（kernel/events/core.c:3267）、perf_swevent_init（kernel/events/core.c:10282）、cpu_clock_event_init（kernel/events/core.c:11339）（第一候选）",
+    "用例 16010：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  - **实现一致性检查**：结构体字段 struct perf_event_attr|type，改为 0xa6ed8551（outside）；比较位置 pmu_legacy_ctr_get_idx（drivers/perf/riscv_pmu_legacy.c:20，架构代码）、perf_event_modify_attr（kernel/events/core.c:3267）、perf_swevent_init（kernel/events/core.c:10282）、cpu_clock_event_init（kernel/events/core.c:11339）（第一候选）",
+    "用例 16112：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  - **实现一致性检查**：结构体字段 struct perf_event_attr|type，改为 0x3300fe12（outside）；比较位置 pmu_legacy_ctr_get_idx（drivers/perf/riscv_pmu_legacy.c:20，架构代码）、perf_event_modify_attr（kernel/events/core.c:3267）、perf_swevent_init（kernel/events/core.c:10282）、cpu_clock_event_init（kernel/events/core.c:11339）（第一候选）"
+   ],
+   "2": [],
+   "3": [],
+   "4": [
+    "用例 3356：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  静态归因不对：第一候选 **不归类**：perf_event_alloc（kernel/events/core.c:12270），参数 [2] 的值与提示吻合；边界项 `cpu_to_node`，证据 1，得分 0.285；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 5878：`perf_event_open` t:1 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  静态归因不对：第一候选 **不归类**：perf_event_alloc（kernel/events/core.c:12270），参数 [2] 的值与提示吻合；边界项 `cpu_to_node`，证据 1，得分 0.285；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 6226：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  静态归因不对：第一候选 **不归类**：perf_event_alloc（kernel/events/core.c:12270），参数 [2] 的值与提示吻合；边界项 `cpu_to_node`，证据 1，得分 0.285；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 8066：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  静态归因不对：第一候选 **不归类**：perf_event_alloc（kernel/events/core.c:12270），参数 [2] 的值与提示吻合；边界项 `cpu_to_node`，证据 1，得分 0.285；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 10129：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  静态归因不对：第一候选 **不归类**：perf_event_alloc（kernel/events/core.c:12270），参数 [2] 的值与提示吻合；边界项 `cpu_to_node`，证据 1，得分 0.285；静态取值 riscv=None、arm64=None、x86_64=None",
+    "用例 10935：`perf_event_open` t:0 s:self i:0 f:neg i:0（b467_pre 返回 EINVAL；b467_fix 返回 ENOENT；b467_ref_arm64 返回 ENOENT；b467_ref_x86_64 返回 ENOENT）\n  静态归因不对：第一候选 **不归类**：perf_event_alloc（kernel/events/core.c:12270），参数 [2] 的值与提示吻合；边界项 `cpu_to_node`，证据 1，得分 0.285；静态取值 riscv=None、arm64=None、x86_64=None"
+   ]
+  },
+  "调用上下文": null
+ },
+ "A175": {
+  "实现一致性（效果依赖）": null,
+  "类型一致性": null,
+  "调用上下文": {
+   "1": [
+    "用例 4（illegal_insn）：修复前 riscv 告警、修复后不告警；告警签名：BUG: sleeping function called from invalid context at kernel/locking/spinlock_rt.c | in_atomic=0,irqs_disabled=1,preempt_count=0；对应的静态标记：S handle_break -> force_sig_fault (arch/riscv/kernel/traps.c:294)，入口状态 irq=1",
+    "用例 5（illegal_insn）：修复前 riscv 告警、修复后不告警；告警签名：BUG: sleeping function called from invalid context at kernel/locking/spinlock_rt.c | in_atomic=0,irqs_disabled=1,preempt_count=0；对应的静态标记：S handle_break -> force_sig_fault (arch/riscv/kernel/traps.c:294)，入口状态 irq=1",
+    "用例 6（illegal_insn）：修复前 riscv 告警、修复后不告警；告警签名：BUG: sleeping function called from invalid context at kernel/locking/spinlock_rt.c | in_atomic=0,irqs_disabled=1,preempt_count=0；对应的静态标记：S handle_break -> force_sig_fault (arch/riscv/kernel/traps.c:294)，入口状态 irq=1"
+   ],
+   "2": [],
+   "3": [],
+   "4": [
+    "用例 1（breakpoint）：弱检出——修复前 riscv 和 arm64 都告警（部分架构告警），修复后只剩 arm64；arm64 自己的问题已由上游另行修复（31575e11ecf7、0ac7584c08ce）",
+    "用例 2（breakpoint）：弱检出——修复前 riscv 和 arm64 都告警（部分架构告警），修复后只剩 arm64；arm64 自己的问题已由上游另行修复（31575e11ecf7、0ac7584c08ce）",
+    "用例 3（breakpoint）：弱检出——修复前 riscv 和 arm64 都告警（部分架构告警），修复后只剩 arm64；arm64 自己的问题已由上游另行修复（31575e11ecf7、0ac7584c08ce）"
+   ]
+  }
+ },
+ "CUR": {
+  "实现一致性（效果依赖）": {
+   "1": [],
+   "2": [],
+   "3": [
+    "`__irq_set_trigger` 调用 `mask_irq`（kernel/irq/manage.c:944）：资源 `desc`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`ring_buffer_read_page` 调用 `local_set`（kernel/trace/ring_buffer.c:7304）：资源 `dpage`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`move_ptes` 调用 `pte_none`（mm/mremap.c:267）：资源 `new_ptep`，性质“已写入（清零或初始化）、页表项已设置”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`print_instance` 调用 `verbose`（kernel/bpf/liveness.c:507）：资源 `env`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`arg_track_log` 调用 `verbose`（kernel/bpf/liveness.c:1042）：资源 `env、idx`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核",
+    "`propagate_precision` 调用 `verbose`（kernel/bpf/states.c:1038）：资源 `env、fr、i`，性质“已写入（清零或初始化）”；资源在内核内部，需要 ACTOR 或调试内核"
+   ],
+   "4": []
+  },
+  "类型一致性": {
+   "1": [],
+   "2": [],
+   "3": [
+    "arm64 与众不同：listmount|EFAULT|E2BIG（5 个用例，例 12087）；候选 **实现一致性检查**：__do_sys_listmount（fs/namespace.c:6149），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mincore|EFAULT|ENOMEM（1 个用例，例 12355）；候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:313），参数 [2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mincore|EFAULT|arg1（3 个用例，例 12906）；候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:313），参数 [2] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mincore|EINVAL|EINVAL（9 个用例，例 11963）；候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:306），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mincore|ENOMEM|EFAULT（2 个用例，例 10830）；候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:306），参数 [0, 1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mincore|ENOMEM|ENOMEM（6 个用例，例 11403）；候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:306），参数 [1] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mincore|ENOMEM|arg1（2 个用例，例 13118）；候选 **实现一致性检查**：__do_sys_mincore（mm/mincore.c:306），参数 [0] 的值与提示吻合；边界项 `access_ok`，证据 2，得分 0.4227；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mlock2|arg2|ENOMEM（1 个用例，例 11207）；候选 **实现一致性检查**：follow_huge_pud（mm/gup.c:671），参数 [0] 的值与提示吻合；边界项 `pud_pfn`，证据 2，得分 0.3869；静态取值 riscv=nonconst、arm64=undefined、x86_64=nonconst；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mlock|arg2|ENOMEM（1 个用例，例 13345）；候选 **实现一致性检查**：follow_huge_pud（mm/gup.c:671），参数 [0] 的值与提示吻合；边界项 `pud_pfn`，证据 2，得分 0.3869；静态取值 riscv=nonconst、arm64=undefined、x86_64=nonconst；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：mprotect|ENOMEM|EINVAL（3 个用例，例 2820）；候选 **实现一致性检查**：change_pud_range（mm/mprotect.c:614），参数 [0] 的值与提示吻合；边界项 `pud_offset`，证据 2，得分 0.8；静态取值 riscv=nonconst、arm64=nonconst、x86_64=nonconst；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：openat|6|EINVAL（1 个用例，例 120）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：openat|EFAULT|EINVAL（1 个用例，例 2818）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：openat|EINVAL|4（1 个用例，例 8706）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：openat|EINVAL|7（2 个用例，例 6282）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：openat|EINVAL|EFAULT（1 个用例，例 4860）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：openat|EISDIR|EINVAL（1 个用例，例 5039）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：perf_event_open|ENOENT|EINVAL（2 个用例，例 15883）；候选 **实现一致性检查**：结构体字段 struct perf_event_attr|type，改为 0x2（const）；比较位置 pmu_legacy_ctr_get_idx（drivers/perf/riscv_pmu_legacy.c:19，架构代码）、perf_event_modify_attr（kernel/events/core.c:3492）、perf_swevent_init（kernel/events/core.c:11296）、perf_tp_event_init（kernel/events/core.c:11358）；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：pipe2|EINVAL|arg2（1 个用例，例 3191）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：prctl|32|EINVAL（3 个用例，例 8272）；候选 **实现一致性检查**：__do_sys_prctl（kernel/sys.c:2565），参数 [1] 的值与提示吻合；边界项 `put_user`，证据 2，得分 0.5676；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：prctl|64|EINVAL（3 个用例，例 8189）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：prctl|arg1|EINVAL（1 个用例，例 9371）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：recvmmsg|val|val（1 个用例，例 5581）；候选 **实现一致性检查**：____sys_recvmsg（net/socket.c:2946），参数 [3] 的值与提示吻合；边界项 `__put_user`，证据 2，得分 0.5803；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "arm64 与众不同：remap_file_pages|EINVAL|EINVAL（1 个用例，例 6138）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：clock_gettime|EINVAL|EFAULT（3 个用例，例 1666）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：clock_gettime|EINVAL|arg2（3 个用例，例 881）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：fcntl|EFAULT|EINVAL（2 个用例，例 13747）；候选 **实现一致性检查**：f_getowner_uids（fs/fcntl.c:324），参数 [2] 的值与提示吻合；边界项 `put_user`，证据 2，得分 0.3784；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：prctl|EFAULT|EINVAL（2 个用例，例 6695）；候选 **实现一致性检查**：__do_sys_prctl（kernel/sys.c:2565），参数 [1] 的值与提示吻合；边界项 `put_user`，证据 2，得分 0.5676；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：prctl|EINVAL|EFAULT（4 个用例，例 4107）；候选 **实现一致性检查**：prctl_get_tid_address（kernel/sys.c:2338），参数 [1] 的值与提示吻合；边界项 `put_user`，证据 2，得分 0.4541；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：raw_nr|ENOSYS|EFAULT（1 个用例，例 8495）；候选 **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1d9、arm64=0x1d9、x86_64=0x1d9；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：raw_nr|ENOSYS|EINVAL（10 个用例，例 3690）；候选 **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1d9、arm64=0x1d9、x86_64=0x1d9；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：raw_nr|ENOSYS|ENOTDIR（1 个用例，例 5907）；候选 **类型一致性检查**：系统调用号的检查；静态取值 riscv=0x1d9、arm64=0x1d9、x86_64=0x1d9；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：rseq|EFAULT|EINVAL（1 个用例，例 1284）；候选 **实现一致性检查**：rseq_register（kernel/rseq.c:448），参数 [0] 的值与提示吻合；边界项 `user_access_begin`，证据 2，得分 0.3404；静态取值 riscv=nonconst、arm64=nonconst、x86_64=nonconst；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：rseq|arg2|EINVAL（13 个用例，例 77）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：sched_getaffinity|32|8（3 个用例，例 923）；候选 **不归类**：queued_spin_lock_slowpath（kernel/locking/qspinlock.c:282），参数 [0] 的值与提示吻合；边界项 `queued_spin_trylock`，证据 1，得分 0.065；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：sched_getaffinity|EFAULT|8（2 个用例，例 722）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：sched_getaffinity|arg1|8（2 个用例，例 4875）；候选 **不归类**：queued_spin_lock_slowpath（kernel/locking/qspinlock.c:282），参数 [0] 的值与提示吻合；边界项 `queued_spin_trylock`，证据 1，得分 0.065；静态取值 riscv=None、arm64=None、x86_64=None；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：sched_setaffinity|EFAULT|EINVAL（1 个用例，例 5077）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "riscv 与众不同：sched_setaffinity|EFAULT|ESRCH（4 个用例，例 2086）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "x86_64 与众不同：fcntl|arg3|ESRCH（1 个用例，例 8390）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "x86_64 与众不同：getpriority|21|ESRCH（1 个用例，例 2317）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "x86_64 与众不同：pwrite64|24576|32768（1 个用例，例 4507）；候选 **实现一致性检查**：__alloc_pages_slowpath（mm/page_alloc.c:5035），参数 [3] 的值与提示吻合；边界项 `current`，证据 2，得分 0.0499；静态取值 riscv=nonconst、arm64=nonconst、x86_64=nonconst；需人工判断（以往各轮判断这类差异多为环境或能力差异）",
+    "x86_64 与众不同：setpriority|arg0|ESRCH（1 个用例，例 403）；没有静态来源；需人工判断（以往各轮判断这类差异多为环境或能力差异）"
+   ],
+   "4": []
+  },
+  "调用上下文": {
+   "1": [],
+   "2": [],
+   "3": [
+    "当前版本执行上下文静态标记 30584 条（S 10760、I 9736、R 10088）。动态：三个调试内核跑完 8107 个用例各 3 次，用例阶段告警 0 条，没有触发任何标记；启动阶段只有 dbg_arm64 的一条与跨架构无关的跟踪事件格式告警。原来那一轮从中抽 40 条人工核对：疑似真问题 0、不是 38、判断不了 2"
+   ],
+   "4": []
+  }
+ }
+}

@@ -1,0 +1,29 @@
+{
+ "judge": "Claude, 2026-11-16, read df2908090cda sources of every summary function and every changed call site",
+ "summaries": {
+  "total": 14, "correct": 13, "wrong": 1,
+  "rows": [
+   {"func": "can_gather_numa_stats", "file": "fs/proc/task_mmu.c:3375", "ok": true, "why": "首行 if (!pte_present(pte)) return NULL；其后只返回 NULL 或 page"},
+   {"func": "can_gather_numa_stats_pmd", "file": "fs/proc/task_mmu.c:3399", "ok": true, "why": "同上，pmd_present"},
+   {"func": "get_pte_pfn", "file": "mm/vmscan.c:3440", "ok": true, "why": "if (!pte_present(pte) || is_zero_pfn(pfn)) return -1；之后的返回都在 present 之后。注意第一行先算了 pte_pfn(pte)，但非 present 时这个值没被使用"},
+   {"func": "check_ptes_for_batched_move", "file": "mm/userfaultfd.c:1280", "ok": true, "why": "src 项 !pte_present 时返回 NULL；返回 folio 时 src 一定 present"},
+   {"func": "pte_to_hmm_pfn_flags", "file": "mm/hmm.c:234", "ok": true, "why": "非 present 返回 0，否则返回含 HMM_PFN_VALID 的非 0 值"},
+   {"func": "apply_range_clear_cb", "file": "kernel/bpf/arena.c:210", "ok": true, "why": "非 present 返回 0；-EINVAL 只在 present 之后"},
+   {"func": "ksm_next_page_pmd_entry", "file": "mm/ksm.c:2527", "ok": true, "why": "返回 1（找到）只发生在 pmd present（叶子或页表）之后"},
+   {"func": "clear_refs_pte_range / damon_young_pmd_entry / damos_va_migrate_pmd_entry / damos_va_stat_pmd_entry / existing_page_cb / madvise_free_pte_range", "ok": true, "count": 6,
+    "why": "所有 return 都是 0，“返回非 0 则 present”永远不会被用到；成立但无用（页表遍历回调，只经函数指针调用）"},
+   {"func": "copy_huge_pmd", "file": "mm/huge_memory.c:1908", "ok": false,
+    "why": "错误。函数用 goto out/out_unlock 统一返回 ret（-ENOMEM、-EAGAIN）。分析器把标签处的语句按顺序流算事实，看不到从前面 goto 跳过来的路径，误以为 `return ret` 处已经查过 pmd_trans_huge。实际上 !pmd_trans_huge（包括 pmd 为空）时返回 -EAGAIN，摘要“返回非 0 则 present”不成立。",
+    "effect": "唯一的直接调用者 copy_pmd_range（mm/memory.c:1480）在 if (!err) continue; 之后得到错误事实，但其后没有受限接口调用点被它滤掉，本轮结果不受影响"}
+  ]
+ },
+ "changes": {
+  "total": 4, "verified_safe": 4,
+  "rows": [
+   {"loc": "fs/proc/task_mmu.c:3440", "A": "pmd_dirty", "via": "can_gather_numa_stats_pmd", "ok": true, "why": "page = can_gather_numa_stats_pmd(*pmd, ...); if (page) gather_stats(..., pmd_dirty(*pmd), ...)"},
+   {"loc": "fs/proc/task_mmu.c:3456", "A": "pte_dirty", "via": "can_gather_numa_stats", "ok": true, "why": "page = can_gather_numa_stats(ptent, ...); if (!page) continue; gather_stats(..., pte_dirty(ptent), 1)"},
+   {"loc": "mm/vmscan.c:3610", "A": "pte_dirty", "via": "get_pte_pfn", "ok": true, "why": "循环里 pfn = get_pte_pfn(ptent, ...); if (pfn == -1) continue; ptent 之后未重读"},
+   {"loc": "mm/vmscan.c:4350", "A": "pte_dirty", "via": "get_pte_pfn", "ok": true, "why": "同上（lru_gen_look_around）"}
+  ]
+ }
+}

@@ -1,0 +1,55 @@
+diff --git a/arch/loongarch/include/asm/pgtable.h b/arch/loongarch/include/asm/pgtable.h
+--- a/arch/loongarch/include/asm/pgtable.h
++++ b/arch/loongarch/include/asm/pgtable.h
+@@ -12,6 +12,7 @@
+ #include <linux/compiler.h>
+ #include <asm/addrspace.h>
++#include <asm/barrier.h>
+ #include <asm/page.h>
+ #include <asm/pgtable-bits.h>
+ 
+@@ -203,6 +204,13 @@ static inline pud_t *pud_pgtable(pud_t pud)
+ static inline void set_pud(pud_t *pud, pud_t pudval)
+ {
+ 	WRITE_ONCE(*pud, pudval);
++
++	/*
++	 * A valid block mapping must be visible to the page table walker
++	 * before any subsequent access through it.
++	 */
++	if ((pud_val(pudval) & _PAGE_HUGE) && (pud_val(pudval) & _PAGE_PRESENT))
++		__sync();
+ }
+ 
+ static inline void pud_clear(pud_t *pudp)
+@@ -251,6 +259,13 @@ static inline int pmd_present(pmd_t pmd)
+ static inline void set_pmd(pmd_t *pmd, pmd_t pmdval)
+ {
+ 	WRITE_ONCE(*pmd, pmdval);
++
++	/*
++	 * A valid block mapping must be visible to the page table walker
++	 * before any subsequent access through it.
++	 */
++	if ((pmd_val(pmdval) & _PAGE_HUGE) && (pmd_val(pmdval) & _PAGE_PRESENT))
++		__sync();
+ }
+ 
+ static inline void pmd_clear(pmd_t *pmdp)
+@@ -377,6 +392,15 @@ static inline void set_pte(pte_t *ptep, pte_t pteval)
+ 		if (pte_none(ptep_get(buddy)))
+ 			WRITE_ONCE(*buddy, __pte(pte_val(ptep_get(buddy)) | _PAGE_GLOBAL));
+ #endif /* CONFIG_SMP */
+ 	}
++
++	/*
++	 * Only for valid kernel (global) mappings; invalid PTEs are covered
++	 * by TLB maintenance and user mappings by the fault/update_mmu_cache
++	 * path (a spurious fault just re-executes the instruction).
++	 */
++	if ((pte_val(pteval) & (_PAGE_PRESENT | _PAGE_GLOBAL)) ==
++	    (_PAGE_PRESENT | _PAGE_GLOBAL))
++		__sync();
+ }
+ 
+ static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)

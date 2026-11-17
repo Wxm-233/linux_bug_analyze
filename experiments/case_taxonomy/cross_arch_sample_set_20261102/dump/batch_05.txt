@@ -1,0 +1,1240 @@
+
+##### A125
+=== 40e6073e7648 A 2024-12-15 +4/-1
+riscv: qspinlock: Fixup _Q_PENDING_LOOPS definition
+
+When CONFIG_RISCV_QUEUED_SPINLOCKS=y, the _Q_PENDING_LOOPS
+definition is missing. Add the _Q_PENDING_LOOPS definition for
+pure qspinlock usage.
+
+Fixes: ab83647fadae ("riscv: Add qspinlock support")
+functions: 
+fixes: ab83647fadae(riscv)
+diff --git a/arch/riscv/include/asm/spinlock.h b/arch/riscv/include/asm/spinlock.h
+index e5121b89acea..52f11bfd0079 100644
+--- a/arch/riscv/include/asm/spinlock.h
++++ b/arch/riscv/include/asm/spinlock.h
+@@ -4,6 +4,9 @@
+ #define __ASM_RISCV_SPINLOCK_H
+ 
+-#ifdef CONFIG_RISCV_COMBO_SPINLOCKS
++#ifdef CONFIG_QUEUED_SPINLOCKS
+ #define _Q_PENDING_LOOPS	(1 << 9)
++#endif
++
++#ifdef CONFIG_RISCV_COMBO_SPINLOCKS
+ 
+ #define __no_arch_spinlock_redefine
+
+##### A126
+=== 5cd900b8b7e4 A 2025-01-03 +10/-10
+riscv: use local label names instead of global ones in assembly
+
+Local labels should be prefix by '.L' or they'll be exported in the
+symbol table. Additionally, this messes up the backtrace by displaying
+an incorrect symbol:
+
+  ...
+  [   12.751810] [<ffffffff80441628>] _copy_from_user+0x28/0xc2
+  [   12.752035] [<ffffffff800152ca>] handle_misaligned_load+0x1ca/0x2fc
+  [   12.752310] [<ffffffff80a033e8>] do_trap_load_misaligned+0x24/0xee
+  [   12.752596] [<ffffffff80a0dcae>] _new_vmalloc_restore_context_a0+0xc2/0xce
+
+After:
+  ...
+  [   10.243916] [<ffffffff804415e4>] _copy_from_user+0x28/0xc2
+  [   10.244026] [<ffffffff800152ca>] handle_misaligned_load+0x1ca/0x2fc
+  [   10.244150] [<ffffffff80a033a0>] do_trap_load_misaligned+0x24/0xee
+  [   10.244268] [<ffffffff80a0dc66>] handle_exception+0x146/0x152
+
+Fixes: 503638e0babf3 ("riscv: Stop emitting preventive sfence.vma for new vmalloc mappings")
+functions: 
+fixes: 503638e0babf(riscv)
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index 7a6c48e6d211..33a5a9f2a0d4 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -24,19 +24,19 @@
+ 	csrr 	a0, CSR_CAUSE
+ 	/* Exclude IRQs */
+-	blt  	a0, zero, _new_vmalloc_restore_context_a0
++	blt  	a0, zero, .Lnew_vmalloc_restore_context_a0
+ 
+ 	REG_S 	a1, TASK_TI_A1(tp)
+ 	/* Only check new_vmalloc if we are in page/protection fault */
+ 	li   	a1, EXC_LOAD_PAGE_FAULT
+-	beq  	a0, a1, _new_vmalloc_kernel_address
++	beq  	a0, a1, .Lnew_vmalloc_kernel_address
+ 	li   	a1, EXC_STORE_PAGE_FAULT
+-	beq  	a0, a1, _new_vmalloc_kernel_address
++	beq  	a0, a1, .Lnew_vmalloc_kernel_address
+ 	li   	a1, EXC_INST_PAGE_FAULT
+-	bne  	a0, a1, _new_vmalloc_restore_context_a1
++	bne  	a0, a1, .Lnew_vmalloc_restore_context_a1
+ 
+-_new_vmalloc_kernel_address:
++.Lnew_vmalloc_kernel_address:
+ 	/* Is it a kernel address? */
+ 	csrr 	a0, CSR_TVAL
+-	bge 	a0, zero, _new_vmalloc_restore_context_a1
++	bge 	a0, zero, .Lnew_vmalloc_restore_context_a1
+ 
+ 	/* Check if a new vmalloc mapping appeared that could explain the trap */
+@@ -70,5 +70,5 @@ _new_vmalloc_kernel_address:
+ 	REG_L	a2, 0(a0)
+ 	and	a2, a2, a1
+-	beq	a2, zero, _new_vmalloc_restore_context
++	beq	a2, zero, .Lnew_vmalloc_restore_context
+ 
+ 	/* Atomically reset the current cpu bit in new_vmalloc */
+@@ -84,9 +84,9 @@ _new_vmalloc_kernel_address:
+ 	sret
+ 
+-_new_vmalloc_restore_context:
++.Lnew_vmalloc_restore_context:
+ 	REG_L 	a2, TASK_TI_A2(tp)
+-_new_vmalloc_restore_context_a1:
++.Lnew_vmalloc_restore_context_a1:
+ 	REG_L 	a1, TASK_TI_A1(tp)
+-_new_vmalloc_restore_context_a0:
++.Lnew_vmalloc_restore_context_a0:
+ 	REG_L	a0, TASK_TI_A0(tp)
+ .endm
+
+##### A127
+=== 7826c8f37220 A 2025-01-10 +53/-30
+RISC-V: KVM: Fix inclusion of Smnpm in the guest ISA bitmap
+
+The Smnpm extension requires special handling because the guest ISA
+extension maps to a different extension (Ssnpm) on the host side.
+commit 1851e7836212 ("RISC-V: KVM: Allow Smnpm and Ssnpm extensions for
+guests") missed that the vcpu->arch.isa bit is based only on the host
+extension, so currently both KVM_RISCV_ISA_EXT_{SMNPM,SSNPM} map to
+vcpu->arch.isa[RISCV_ISA_EXT_SSNPM]. This does not cause any problems
+for the guest, because both extensions are force-enabled anyway when the
+host supports Ssnpm, but prevents checking for (guest) Smnpm in the SBI
+FWFT logic.
+
+Redefine kvm_isa_ext_arr to look up the guest extension, since only the
+guest -> host mapping is unambiguous. Factor out the logic for checking
+for host support of an extension, so this special case only needs to be
+handled in one place, and be explicit about which variables hold a host
+vs a guest ISA extension.
+
+Fixes: 1851e7836212 ("RISC-V: KVM: Allow Smnpm and Ssnpm extensions for guests")
+functions: arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_setup_isa, arch/riscv/kvm/vcpu_onereg.c:riscv_vcpu_get_isa_ext_single, arch/riscv/kvm/vcpu_onereg.c:riscv_vcpu_set_isa_ext_single, arch/riscv/kvm/vcpu_onereg.c:copy_isa_ext_reg_indices
+fixes: 1851e7836212(riscv)
+ arch/riscv/kvm/vcpu_onereg.c | 83 +++++++++++++++++++++++++++++++++++++++++-----------------------
+ 1 file changed, 53 insertions(+), 30 deletions(-)
+diff --git a/arch/riscv/kvm/vcpu_onereg.c b/arch/riscv/kvm/vcpu_onereg.c
+index 2e1b646f0d61..cce6a38ea54f 100644
+--- a/arch/riscv/kvm/vcpu_onereg.c
++++ b/arch/riscv/kvm/vcpu_onereg.c
+@@ -24,5 +24,5 @@
+ [KVM_RISCV_ISA_EXT_##ext] = RISCV_ISA_EXT_##ext
+ 
+-/* Mapping between KVM ISA Extension ID & Host ISA extension ID */
++/* Mapping between KVM ISA Extension ID & guest ISA extension ID */
+ static const unsigned long kvm_isa_ext_arr[] = {
+ 	/* Single letter extensions (alphabetically sorted) */
+@@ -36,5 +36,5 @@ static const unsigned long kvm_isa_ext_arr[] = {
+ 	[KVM_RISCV_ISA_EXT_V] = RISCV_ISA_EXT_v,
+ 	/* Multi letter extensions (alphabetically sorted) */
+-	[KVM_RISCV_ISA_EXT_SMNPM] = RISCV_ISA_EXT_SSNPM,
++	KVM_ISA_EXT_ARR(SMNPM),
+ 	KVM_ISA_EXT_ARR(SMSTATEEN),
+ 	KVM_ISA_EXT_ARR(SSAIA),
+@@ -113,4 +113,34 @@ static unsigned long kvm_riscv_vcpu_base2isa_ext(unsigned long base_ext)
+ }
+ 
++static int kvm_riscv_vcpu_isa_check_host(unsigned long kvm_ext, unsigned long *guest_ext)
++{
++	unsigned long host_ext;
++
++	if (kvm_ext >= KVM_RISCV_ISA_EXT_MAX ||
++	    kvm_ext >= ARRAY_SIZE(kvm_isa_ext_arr))
++		return -ENOENT;
++
++	*guest_ext = kvm_isa_ext_arr[kvm_ext];
++	switch (*guest_ext) {
++	case RISCV_ISA_EXT_SMNPM:
++		/*
++		 * Pointer masking effective in (H)S-mode is provided by the
++		 * Smnpm extension, so that extension is reported to the guest,
++		 * even though the CSR bits for configuring VS-mode pointer
++		 * masking on the host side are part of the Ssnpm extension.
++		 */
++		host_ext = RISCV_ISA_EXT_SSNPM;
++		break;
++	default:
++		host_ext = *guest_ext;
++		break;
++	}
++
++	if (!__riscv_isa_extension_available(NULL, host_ext))
++		return -ENOENT;
++
++	return 0;
++}
++
+ static bool kvm_riscv_vcpu_isa_enable_allowed(unsigned long ext)
+ {
+@@ -220,11 +250,11 @@ static bool kvm_riscv_vcpu_isa_disable_allowed(unsigned long ext)
+ void kvm_riscv_vcpu_setup_isa(struct kvm_vcpu *vcpu)
+ {
+-	unsigned long host_isa, i;
++	unsigned long guest_ext, i;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(kvm_isa_ext_arr); i++) {
+... (82 more diff lines)
+
+##### A128
+=== 9d87cf525fd2 A 2025-01-15 +1/-1
+RISC-V: Mark riscv_v_init() as __init
+
+This trips up with Xtheadvector enabled, but as far as I can tell it's
+just been an issue since the original patchset.
+
+Fixes: 7ca7a7b9b635 ("riscv: Add sysctl to set the default vector rule for new processes")
+functions: 
+fixes: 7ca7a7b9b635(riscv)
+diff --git a/arch/riscv/kernel/vector.c b/arch/riscv/kernel/vector.c
+index 821818886fab..39f0577f580d 100644
+--- a/arch/riscv/kernel/vector.c
++++ b/arch/riscv/kernel/vector.c
+@@ -310,5 +310,5 @@ static int __init riscv_v_sysctl_init(void) { return 0; }
+ #endif /* ! CONFIG_SYSCTL */
+ 
+-static int riscv_v_init(void)
++static int __init riscv_v_init(void)
+ {
+ 	return riscv_v_sysctl_init();
+
+##### A129
+=== 1898300abf35 A 2025-01-30 +1/-1
+riscv/atomic: Do proper sign extension also for unsigned in arch_cmpxchg
+
+Sign extend also an unsigned compare value to match what lr.w is doing.
+Otherwise try_cmpxchg may spuriously return true when used on a u32 value
+that has the sign bit set, as it happens often in inode_set_ctime_current.
+
+Do this in three conversion steps.  The first conversion to long is needed
+to avoid a -Wpointer-to-int-cast warning when arch_cmpxchg is used with a
+pointer type.  Then convert to int and back to long to always sign extend
+the 32-bit value to 64-bit.
+
+Fixes: 6c58f25e6938 ("riscv/atomic: Fix sign extension for RV64I")
+functions: 
+fixes: 6c58f25e6938(riscv)
+diff --git a/arch/riscv/include/asm/cmpxchg.h b/arch/riscv/include/asm/cmpxchg.h
+index 4cadc56220fe..427c41dde643 100644
+--- a/arch/riscv/include/asm/cmpxchg.h
++++ b/arch/riscv/include/asm/cmpxchg.h
+@@ -232,5 +232,5 @@
+ 			       sc_prepend, sc_append,			\
+ 			       cas_prepend, cas_append,			\
+-			       __ret, __ptr, (long), __old, __new);	\
++			       __ret, __ptr, (long)(int)(long), __old, __new);	\
+ 		break;							\
+ 	case 8:								\
+
+##### A130
+=== 599c44cd21f4 A 2025-02-03 +1/-1
+riscv/futex: sign extend compare value in atomic cmpxchg
+
+Make sure the compare value in the lr/sc loop is sign extended to match
+what lr.w does.  Fortunately, due to the compiler keeping the register
+contents sign extended anyway the lack of the explicit extension didn't
+result in wrong code so far, but this cannot be relied upon.
+
+Fixes: b90edb33010b ("RISC-V: Add futex support.")
+functions: 
+fixes: b90edb33010b(riscv)
+diff --git a/arch/riscv/include/asm/futex.h b/arch/riscv/include/asm/futex.h
+index 72be100afa23..90c86b115e00 100644
+--- a/arch/riscv/include/asm/futex.h
++++ b/arch/riscv/include/asm/futex.h
+@@ -94,5 +94,5 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
+ 		_ASM_EXTABLE_UACCESS_ERR(2b, 3b, %[r])	\
+ 	: [r] "+r" (ret), [v] "=&r" (val), [u] "+m" (*uaddr), [t] "=&r" (tmp)
+-	: [ov] "Jr" (oldval), [nv] "Jr" (newval)
++	: [ov] "Jr" ((long)(int)oldval), [nv] "Jr" (newval)
+ 	: "memory");
+ 	__disable_user_access();
+
+##### A131
+=== 5f1a58ed91a0 A 2025-02-06 +2/-2
+riscv: ftrace: Add parentheses in macro definitions of make_call_t0 and make_call_ra
+
+This patch adds parentheses to parameters caller and callee of macros
+make_call_t0 and make_call_ra. Every existing invocation of these two
+macros uses a single variable for each argument, so the absence of the
+parentheses seems okay. However, future invocations might use more
+complex expressions as arguments. For example, a future invocation might
+look like this: make_call_t0(a - b, c, call). Without parentheses in the
+macro definition, the macro invocation expands to:
+
+...
+unsigned int offset = (unsigned long) c - (unsigned long) a - b;
+...
+
+which is clearly wrong.
+
+The use of parentheses ensures arguments are correctly evaluated and
+potentially saves future users of make_call_t0 and make_call_ra debugging
+trouble.
+
+Fixes: 6724a76cff85 ("riscv: ftrace: Reduce the detour code size to half")
+functions: 
+fixes: 6724a76cff85(riscv)
+diff --git a/arch/riscv/include/asm/ftrace.h b/arch/riscv/include/asm/ftrace.h
+index ec6db1162021..9704a73e515a 100644
+--- a/arch/riscv/include/asm/ftrace.h
++++ b/arch/riscv/include/asm/ftrace.h
+@@ -93,5 +93,5 @@ struct dyn_arch_ftrace {
+ do {									\
+ 	unsigned int offset =						\
+-		(unsigned long) callee - (unsigned long) caller;	\
++		(unsigned long) (callee) - (unsigned long) (caller);	\
+ 	call[0] = to_auipc_t0(offset);					\
+ 	call[1] = to_jalr_t0(offset);					\
+@@ -109,5 +109,5 @@ do {									\
+ do {									\
+ 	unsigned int offset =						\
+-		(unsigned long) callee - (unsigned long) caller;	\
++		(unsigned long) (callee) - (unsigned long) (caller);	\
+ 	call[0] = to_auipc_ra(offset);					\
+ 	call[1] = to_jalr_ra(offset);					\
+
+##### A132
+=== 351e02b1733b A 2025-02-17 +2/-1
+riscv: KVM: Fix SBI sleep_type use
+
+The spec says sleep_type is 32 bits wide and "In case the data is
+defined as 32bit wide, higher privilege software must ensure that it
+only uses 32 bit data." Mask off upper bits of sleep_type before
+using it.
+
+Fixes: 023c15151fbb ("RISC-V: KVM: Add SBI system suspend support")
+functions: arch/riscv/kvm/vcpu_sbi_system.c:kvm_sbi_ext_susp_handler
+fixes: 023c15151fbb(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_system.c b/arch/riscv/kvm/vcpu_sbi_system.c
+index 5d55e08791fa..bc0ebba89003 100644
+--- a/arch/riscv/kvm/vcpu_sbi_system.c
++++ b/arch/riscv/kvm/vcpu_sbi_system.c
+@@ -5,4 +5,5 @@
+ 
+ #include <linux/kvm_host.h>
++#include <linux/wordpart.h>
+ 
+ #include <asm/kvm_vcpu_sbi.h>
+@@ -20,5 +21,5 @@ static int kvm_sbi_ext_susp_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 	switch (funcid) {
+ 	case SBI_EXT_SUSP_SYSTEM_SUSPEND:
+-		if (cp->a0 != SBI_SUSP_SLEEP_TYPE_SUSPEND_TO_RAM) {
++		if (lower_32_bits(cp->a0) != SBI_SUSP_SLEEP_TYPE_SUSPEND_TO_RAM) {
+ 			retdata->err_val = SBI_ERR_INVALID_PARAM;
+ 			return 0;
+
+##### A133
+=== e3219b0c491f A 2025-02-17 +2/-1
+riscv: KVM: Fix hart suspend_type use
+
+The spec says suspend_type is 32 bits wide and "In case the data is
+defined as 32bit wide, higher privilege software must ensure that it
+only uses 32 bit data." Mask off upper bits of suspend_type before
+using it.
+
+Fixes: 763c8bed8c05 ("RISC-V: KVM: Implement SBI HSM suspend call")
+functions: arch/riscv/kvm/vcpu_sbi_hsm.c:kvm_sbi_ext_hsm_handler
+fixes: 763c8bed8c05(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_hsm.c b/arch/riscv/kvm/vcpu_sbi_hsm.c
+index 13a35eb77e8e..3070bb31745d 100644
+--- a/arch/riscv/kvm/vcpu_sbi_hsm.c
++++ b/arch/riscv/kvm/vcpu_sbi_hsm.c
+@@ -10,4 +10,5 @@
+ #include <linux/err.h>
+ #include <linux/kvm_host.h>
++#include <linux/wordpart.h>
+ #include <asm/sbi.h>
+ #include <asm/kvm_vcpu_sbi.h>
+@@ -110,5 +111,5 @@ static int kvm_sbi_ext_hsm_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 		return 0;
+ 	case SBI_EXT_HSM_HART_SUSPEND:
+-		switch (cp->a0) {
++		switch (lower_32_bits(cp->a0)) {
+ 		case SBI_HSM_SUSPEND_RET_DEFAULT:
+ 			kvm_riscv_vcpu_wfi(vcpu);
+
+##### A134
+=== 7ff4faba6357 A 2025-02-18 +4/-2
+pinctrl: spacemit: enable config option
+
+Pinctrl is an essential driver for SpacemiT's SoC,
+The uart driver requires it, same as sd card driver,
+so let's enable it by default for this SoC.
+
+The CONFIG_PINCTRL_SPACEMIT_K1 isn't enabled when using
+'make defconfig' to select kernel configuration options.
+This result in a broken uart driver where fail at probe()
+stage due to no pins found.
+
+Fixes: a83c29e1d145 ("pinctrl: spacemit: add support for SpacemiT K1 SoC")
+functions: 
+fixes: a83c29e1d145(common)
+diff --git a/arch/riscv/Kconfig.socs b/arch/riscv/Kconfig.socs
+index 1916cf7ba450..17606940bb52 100644
+--- a/arch/riscv/Kconfig.socs
++++ b/arch/riscv/Kconfig.socs
+@@ -27,4 +27,5 @@ config ARCH_SOPHGO
+ config ARCH_SPACEMIT
+ 	bool "SpacemiT SoCs"
++	select PINCTRL
+ 	help
+ 	  This enables support for SpacemiT SoC platform hardware.
+diff --git a/drivers/pinctrl/spacemit/Kconfig b/drivers/pinctrl/spacemit/Kconfig
+index 168f8a5ffbb9..a2f98b3f8a75 100644
+--- a/drivers/pinctrl/spacemit/Kconfig
++++ b/drivers/pinctrl/spacemit/Kconfig
+@@ -5,7 +5,8 @@
+ 
+ config PINCTRL_SPACEMIT_K1
+-	tristate "SpacemiT K1 SoC Pinctrl driver"
++	bool "SpacemiT K1 SoC Pinctrl driver"
+ 	depends on ARCH_SPACEMIT || COMPILE_TEST
+ 	depends on OF
++	default y
+ 	select GENERIC_PINCTRL_GROUPS
+ 	select GENERIC_PINMUX_FUNCTIONS
+diff --git a/drivers/pinctrl/spacemit/pinctrl-k1.c b/drivers/pinctrl/spacemit/pinctrl-k1.c
+index a32579d73613..59fd555ff38d 100644
+--- a/drivers/pinctrl/spacemit/pinctrl-k1.c
++++ b/drivers/pinctrl/spacemit/pinctrl-k1.c
+@@ -1045,5 +1045,5 @@ static struct platform_driver k1_pinctrl_driver = {
+ 	},
+ };
+-module_platform_driver(k1_pinctrl_driver);
++builtin_platform_driver(k1_pinctrl_driver);
+ 
+ MODULE_AUTHOR("Yixun Lan <dlan@gentoo.org>");
+
+##### A135
+=== 02410ac72ac3 A 2025-02-26 +46/-27
+mm: hugetlb: Add huge page size param to huge_ptep_get_and_clear()
+
+In order to fix a bug, arm64 needs to be told the size of the huge page
+for which the huge_pte is being cleared in huge_ptep_get_and_clear().
+Provide for this by adding an `unsigned long sz` parameter to the
+function. This follows the same pattern as huge_pte_clear() and
+set_huge_pte_at().
+
+This commit makes the required interface modifications to the core mm as
+well as all arches that implement this function (arm64, loongarch, mips,
+parisc, powerpc, riscv, s390, sparc). The actual arm64 bug will be fixed
+in a separate commit.
+
+Fixes: 66b3923a1a0f ("arm64: hugetlb: add support for PTE contiguous bit")
+functions: arch/arm64/mm/hugetlbpage.c:huge_ptep_modify_prot_start, mm/hugetlb.c:move_huge_pte, mm/hugetlb.c:__unmap_hugepage_range
+fixes: 66b3923a1a0f(common)
+ arch/parisc/mm/hugetlbpage.c         |  2 +-
+ arch/powerpc/include/asm/hugetlb.h   |  6 ++++--
+ arch/riscv/include/asm/hugetlb.h     |  3 ++-
+ arch/riscv/mm/hugetlbpage.c          |  2 +-
+ arch/s390/include/asm/hugetlb.h      | 16 ++++++++++++----
+ arch/s390/mm/hugetlbpage.c           |  4 ++--
+ arch/sparc/include/asm/hugetlb.h     |  2 +-
+ arch/sparc/mm/hugetlbpage.c          |  2 +-
+ include/asm-generic/hugetlb.h        |  2 +-
+ include/linux/hugetlb.h              |  4 +++-
+ mm/hugetlb.c                         |  4 ++--
+ 16 files changed, 46 insertions(+), 27 deletions(-)
+diff --git a/arch/arm64/include/asm/hugetlb.h b/arch/arm64/include/asm/hugetlb.h
+index c6dff3e69539..03db9cb21ace 100644
+--- a/arch/arm64/include/asm/hugetlb.h
++++ b/arch/arm64/include/asm/hugetlb.h
+@@ -43,6 +43,6 @@ extern int huge_ptep_set_access_flags(struct vm_area_struct *vma,
+ 				      pte_t pte, int dirty);
+ #define __HAVE_ARCH_HUGE_PTEP_GET_AND_CLEAR
+-extern pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+-				     unsigned long addr, pte_t *ptep);
++extern pte_t huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
++				     pte_t *ptep, unsigned long sz);
+ #define __HAVE_ARCH_HUGE_PTEP_SET_WRPROTECT
+ extern void huge_ptep_set_wrprotect(struct mm_struct *mm,
+diff --git a/arch/arm64/mm/hugetlbpage.c b/arch/arm64/mm/hugetlbpage.c
+index 98a2a0e64e25..06db4649af91 100644
+--- a/arch/arm64/mm/hugetlbpage.c
++++ b/arch/arm64/mm/hugetlbpage.c
+@@ -397,6 +397,6 @@ void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
+ }
+ 
+-pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+-			      unsigned long addr, pte_t *ptep)
++pte_t huge_ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
++			      pte_t *ptep, unsigned long sz)
+ {
+ 	int ncontig;
+@@ -550,4 +550,6 @@ bool __init arch_hugetlb_valid_size(unsigned long size)
+ pte_t huge_ptep_modify_prot_start(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep)
+ {
++	unsigned long psize = huge_page_size(hstate_vma(vma));
++
+ 	if (alternative_has_cap_unlikely(ARM64_WORKAROUND_2645198)) {
+ 		/*
+@@ -559,5 +561,5 @@ pte_t huge_ptep_modify_prot_start(struct vm_area_struct *vma, unsigned long addr
+ 			return huge_ptep_clear_flush(vma, addr, ptep);
+ 	}
+-	return huge_ptep_get_and_clear(vma->vm_mm, addr, ptep);
++	return huge_ptep_get_and_clear(vma->vm_mm, addr, ptep, psize);
+ }
+ 
+diff --git a/arch/loongarch/include/asm/hugetlb.h b/arch/loongarch/include/asm/hugetlb.h
+index c8e4057734d0..4dc4b3e04225 100644
+--- a/arch/loongarch/include/asm/hugetlb.h
++++ b/arch/loongarch/include/asm/hugetlb.h
+@@ -37,5 +37,6 @@ static inline void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
+ #define __HAVE_ARCH_HUGE_PTEP_GET_AND_CLEAR
+ static inline pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+-					    unsigned long addr, pte_t *ptep)
++					    unsigned long addr, pte_t *ptep,
++					    unsigned long sz)
+ {
+ 	pte_t clear;
+@@ -52,6 +53,7 @@ static inline pte_t huge_ptep_clear_flush(struct vm_area_struct *vma,
+ {
+ 	pte_t pte;
++	unsigned long sz = huge_page_size(hstate_vma(vma));
+ 
+-	pte = huge_ptep_get_and_clear(vma->vm_mm, addr, ptep);
++	pte = huge_ptep_get_and_clear(vma->vm_mm, addr, ptep, sz);
+ 	flush_tlb_page(vma, addr);
+... (210 more diff lines)
+
+##### A136
+=== 17ec3e71ba79 A 2025-02-27 +63/-45
+crypto: lib/Kconfig - Hide arch options from user
+
+The ARCH_MAY_HAVE patch missed arm64, mips and s390.  But it may
+also lead to arch options being enabled but ineffective because
+of modular/built-in conflicts.
+
+As the primary user of all these options wireguard is selecting
+the arch options anyway, make the same selections at the lib/crypto
+option level and hide the arch options from the user.
+
+Instead of selecting them centrally from lib/crypto, simply set
+the default of each arch option as suggested by Eric Biggers.
+
+Change the Crypto API generic algorithms to select the top-level
+lib/crypto options instead of the generic one as otherwise there
+is no way to enable the arch options (Eric Biggers).  Introduce a
+set of INTERNAL options to work around dependency cycles on the
+CONFIG_CRYPTO symbol.
+
+Fixes: 1047e21aecdf ("crypto: lib/Kconfig - Fix lib built-in failure when arch is modular")
+functions: 
+fixes: 1047e21aecdf(common)
+ arch/arm/crypto/Kconfig     | 16 ++++++++++------
+ arch/arm64/crypto/Kconfig   |  6 ++++--
+ arch/mips/crypto/Kconfig    |  7 +++++--
+ arch/powerpc/crypto/Kconfig | 11 +++++++----
+ arch/riscv/crypto/Kconfig   |  1 -
+ arch/s390/crypto/Kconfig    |  3 ++-
+ arch/x86/crypto/Kconfig     | 17 +++++++++++------
+ crypto/Kconfig              |  6 +++---
+ lib/crypto/Kconfig          | 41 +++++++++++++++++++++--------------------
+ 9 files changed, 63 insertions(+), 45 deletions(-)
+diff --git a/arch/arm/crypto/Kconfig b/arch/arm/crypto/Kconfig
+index 47d9cc59f254..23e4ea067ddb 100644
+--- a/arch/arm/crypto/Kconfig
++++ b/arch/arm/crypto/Kconfig
+@@ -4,8 +4,10 @@ menu "Accelerated Cryptographic Algorithms for CPU (arm)"
+ 
+ config CRYPTO_CURVE25519_NEON
+-	tristate "Public key crypto: Curve25519 (NEON)"
++	tristate
+ 	depends on KERNEL_MODE_NEON
++	select CRYPTO_KPP
+ 	select CRYPTO_LIB_CURVE25519_GENERIC
+-	select CRYPTO_ARCH_MAY_HAVE_LIB_CURVE25519
++	select CRYPTO_ARCH_HAVE_LIB_CURVE25519
++	default CRYPTO_LIB_CURVE25519_INTERNAL
+ 	help
+ 	  Curve25519 algorithm
+@@ -46,7 +48,8 @@ config CRYPTO_NHPOLY1305_NEON
+ 
+ config CRYPTO_POLY1305_ARM
+-	tristate "Hash functions: Poly1305 (NEON)"
++	tristate
+ 	select CRYPTO_HASH
+-	select CRYPTO_ARCH_MAY_HAVE_LIB_POLY1305
++	select CRYPTO_ARCH_HAVE_LIB_POLY1305
++	default CRYPTO_LIB_POLY1305_INTERNAL
+ 	help
+ 	  Poly1305 authenticator algorithm (RFC7539)
+@@ -213,7 +216,8 @@ config CRYPTO_AES_ARM_CE
+ 
+ config CRYPTO_CHACHA20_NEON
+-	tristate "Ciphers: ChaCha20, XChaCha20, XChaCha12 (NEON)"
++	tristate
+ 	select CRYPTO_SKCIPHER
+-	select CRYPTO_ARCH_MAY_HAVE_LIB_CHACHA
++	select CRYPTO_ARCH_HAVE_LIB_CHACHA
++	default CRYPTO_LIB_CHACHA_INTERNAL
+ 	help
+ 	  Length-preserving ciphers: ChaCha20, XChaCha20, and XChaCha12
+diff --git a/arch/arm64/crypto/Kconfig b/arch/arm64/crypto/Kconfig
+index 5636ab83f22a..3418c8d3c78d 100644
+--- a/arch/arm64/crypto/Kconfig
++++ b/arch/arm64/crypto/Kconfig
+@@ -27,8 +27,9 @@ config CRYPTO_NHPOLY1305_NEON
+ 
+ config CRYPTO_POLY1305_NEON
+-	tristate "Hash functions: Poly1305 (NEON)"
++	tristate
+ 	depends on KERNEL_MODE_NEON
+ 	select CRYPTO_HASH
+ 	select CRYPTO_ARCH_HAVE_LIB_POLY1305
++	default CRYPTO_LIB_POLY1305_INTERNAL
+ 	help
+ 	  Poly1305 authenticator algorithm (RFC7539)
+@@ -187,9 +188,10 @@ config CRYPTO_AES_ARM64_NEON_BLK
+ 
+ config CRYPTO_CHACHA20_NEON
+-	tristate "Ciphers: ChaCha (NEON)"
++	tristate
+ 	depends on KERNEL_MODE_NEON
+... (246 more diff lines)
+
+##### A137
+=== 475afa39b123 A 2025-02-28 +1/-1
+riscv: Fix the __riscv_copy_vec_words_unaligned implementation
+
+Correct the VEC_S macro definition to fix the implementation
+of vector words copy in the case of unalignment in RISC-V.
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+functions: 
+fixes: e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/vec-copy-unaligned.S b/arch/riscv/kernel/vec-copy-unaligned.S
+index d16f19f1b3b6..7ce4de6f6e69 100644
+--- a/arch/riscv/kernel/vec-copy-unaligned.S
++++ b/arch/riscv/kernel/vec-copy-unaligned.S
+@@ -12,5 +12,5 @@
+ #define WORD_SEW CONCATENATE(e, WORD_EEW)
+ #define VEC_L CONCATENATE(vle, WORD_EEW).v
+-#define VEC_S CONCATENATE(vle, WORD_EEW).v
++#define VEC_S CONCATENATE(vse, WORD_EEW).v
+ 
+ /* void __riscv_copy_vec_words_unaligned(void *, const void *, size_t) */
+
+##### A138
+=== 05ee21f0fcb8 A 2025-03-04 +13/-14
+riscv: Fix set up of cpu hotplug callbacks
+
+CPU hotplug callbacks should be set up even if we detected all
+current cpus emulate misaligned accesses, since we want to
+ensure our expectations of all cpus emulating is maintained.
+
+Fixes: 6e5ce7f2eae3 ("riscv: Decouple emulated unaligned accesses from access speed")
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+functions: arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_speed_all_cpus, arch/riscv/kernel/unaligned_access_speed.c:vec_check_unaligned_access_speed_all_cpus, arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_all_cpus
+fixes: 6e5ce7f2eae3(riscv), e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 780f1c5f512a..c9d3237649bb 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -248,11 +248,4 @@ static void __init check_unaligned_access_speed_all_cpus(void)
+ 	smp_call_on_cpu(0, check_unaligned_access, bufs[0], true);
+ 
+-	/*
+-	 * Setup hotplug callbacks for any new CPUs that come online or go
+-	 * offline.
+-	 */
+-	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
+-				  riscv_online_cpu, riscv_offline_cpu);
+-
+ out:
+ 	for_each_cpu(cpu, cpu_online_mask) {
+@@ -384,11 +377,4 @@ static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __alway
+ 	schedule_on_each_cpu(check_vector_unaligned_access);
+ 
+-	/*
+-	 * Setup hotplug callbacks for any new CPUs that come online or go
+-	 * offline.
+-	 */
+-	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
+-				  riscv_online_cpu_vec, NULL);
+-
+ 	return 0;
+ }
+@@ -416,4 +402,17 @@ static int __init check_unaligned_access_all_cpus(void)
+ 	}
+ 
++	/*
++	 * Setup hotplug callbacks for any new CPUs that come online or go
++	 * offline.
++	 */
++#ifdef CONFIG_RISCV_PROBE_UNALIGNED_ACCESS
++	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
++				  riscv_online_cpu, riscv_offline_cpu);
++#endif
++#ifdef CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS
++	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
++				  riscv_online_cpu_vec, NULL);
++#endif
++
+ 	return 0;
+ }
+
+##### A139
+=== 2744ec472de3 A 2025-03-04 +16/-15
+riscv: Fix set up of vector cpu hotplug callback
+
+Whether or not we have RISCV_PROBE_VECTOR_UNALIGNED_ACCESS we need to
+set up a cpu hotplug callback to check if we have vector at all,
+since, when we don't have vector, we need to set
+vector_misaligned_access to unsupported rather than leave it the
+default of unknown.
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+functions: arch/riscv/kernel/unaligned_access_speed.c:riscv_online_cpu_vec, arch/riscv/kernel/unaligned_access_speed.c:vec_check_unaligned_access_speed_all_cpus, arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_all_cpus
+fixes: e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index c9d3237649bb..d9d4ca1fadc7 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -357,4 +357,18 @@ static void check_vector_unaligned_access(struct work_struct *work __always_unus
+ }
+ 
++/* Measure unaligned access speed on all CPUs present at boot in parallel. */
++static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++{
++	schedule_on_each_cpu(check_vector_unaligned_access);
++
++	return 0;
++}
++#else /* CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS */
++static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
++{
++	return 0;
++}
++#endif
++
+ static int riscv_online_cpu_vec(unsigned int cpu)
+ {
+@@ -364,4 +378,5 @@ static int riscv_online_cpu_vec(unsigned int cpu)
+ 	}
+ 
++#ifdef CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS
+ 	if (per_cpu(vector_misaligned_access, cpu) != RISCV_HWPROBE_MISALIGNED_VECTOR_UNKNOWN)
+ 		return 0;
+@@ -369,20 +384,8 @@ static int riscv_online_cpu_vec(unsigned int cpu)
+ 	check_vector_unaligned_access_emulated(NULL);
+ 	check_vector_unaligned_access(NULL);
+-	return 0;
+-}
+-
+-/* Measure unaligned access speed on all CPUs present at boot in parallel. */
+-static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+-{
+-	schedule_on_each_cpu(check_vector_unaligned_access);
++#endif
+ 
+ 	return 0;
+ }
+-#else /* CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS */
+-static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __always_unused)
+-{
+-	return 0;
+-}
+-#endif
+ 
+ static int __init check_unaligned_access_all_cpus(void)
+@@ -410,8 +413,6 @@ static int __init check_unaligned_access_all_cpus(void)
+ 				  riscv_online_cpu, riscv_offline_cpu);
+ #endif
+-#ifdef CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS
+ 	cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN, "riscv:online",
+ 				  riscv_online_cpu_vec, NULL);
+-#endif
+ 
+ 	return 0;
+
+##### A140
+=== a00e022be531 A 2025-03-04 +13/-13
+riscv: Annotate unaligned access init functions
+
+Several functions used in unaligned access probing are only run at
+init time. Annotate them appropriately.
+
+Fixes: f413aae96cda ("riscv: Set unaligned access speed at compile time")
+functions: 
+fixes: f413aae96cda(riscv)
+ arch/riscv/include/asm/cpufeature.h        |  4 ++--
+ arch/riscv/kernel/traps_misaligned.c       |  8 ++++----
+ arch/riscv/kernel/unaligned_access_speed.c | 14 +++++++-------
+ 3 files changed, 13 insertions(+), 13 deletions(-)
+diff --git a/arch/riscv/include/asm/cpufeature.h b/arch/riscv/include/asm/cpufeature.h
+index 569140d6e639..19defdc2002d 100644
+--- a/arch/riscv/include/asm/cpufeature.h
++++ b/arch/riscv/include/asm/cpufeature.h
+@@ -64,5 +64,5 @@ void __init riscv_user_isa_enable(void);
+ 	_RISCV_ISA_EXT_DATA(_name, _id, _sub_exts, ARRAY_SIZE(_sub_exts), _validate)
+ 
+-bool check_unaligned_access_emulated_all_cpus(void);
++bool __init check_unaligned_access_emulated_all_cpus(void);
+ #if defined(CONFIG_RISCV_SCALAR_MISALIGNED)
+ void check_unaligned_access_emulated(struct work_struct *work __always_unused);
+@@ -77,5 +77,5 @@ static inline bool unaligned_ctl_available(void)
+ #endif
+ 
+-bool check_vector_unaligned_access_emulated_all_cpus(void);
++bool __init check_vector_unaligned_access_emulated_all_cpus(void);
+ #if defined(CONFIG_RISCV_VECTOR_MISALIGNED)
+ void check_vector_unaligned_access_emulated(struct work_struct *work __always_unused);
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 7cc108aed74e..aacbd9d7196e 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -606,5 +606,5 @@ void check_vector_unaligned_access_emulated(struct work_struct *work __always_un
+ }
+ 
+-bool check_vector_unaligned_access_emulated_all_cpus(void)
++bool __init check_vector_unaligned_access_emulated_all_cpus(void)
+ {
+ 	int cpu;
+@@ -626,5 +626,5 @@ bool check_vector_unaligned_access_emulated_all_cpus(void)
+ }
+ #else
+-bool check_vector_unaligned_access_emulated_all_cpus(void)
++bool __init check_vector_unaligned_access_emulated_all_cpus(void)
+ {
+ 	return false;
+@@ -660,5 +660,5 @@ void check_unaligned_access_emulated(struct work_struct *work __always_unused)
+ }
+ 
+-bool check_unaligned_access_emulated_all_cpus(void)
++bool __init check_unaligned_access_emulated_all_cpus(void)
+ {
+ 	int cpu;
+@@ -685,5 +685,5 @@ bool unaligned_ctl_available(void)
+ }
+ #else
+-bool check_unaligned_access_emulated_all_cpus(void)
++bool __init check_unaligned_access_emulated_all_cpus(void)
+ {
+ 	return false;
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 91f189cf1611..b7a8ff7ba6df 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -122,5 +122,5 @@ static int check_unaligned_access(void *param)
+ }
+ 
+-static void check_unaligned_access_nonboot_cpu(void *param)
++static void __init check_unaligned_access_nonboot_cpu(void *param)
+ {
+... (43 more diff lines)
+
+##### A141
+=== e6d0adf2eb5b A 2025-03-04 +7/-10
+riscv: Fix check_unaligned_access_all_cpus
+
+check_vector_unaligned_access_emulated_all_cpus(), like its name
+suggests, will return true when all cpus emulate unaligned vector
+accesses. If the function returned false it may have been because
+vector isn't supported at all (!has_vector()) or because at least
+one cpu doesn't emulate unaligned vector accesses. Since false may
+be returned for two cases, checking for it isn't sufficient when
+attempting to determine if we should proceed with the vector speed
+check. Move the !has_vector() functionality to
+check_unaligned_access_all_cpus() in order for
+check_vector_unaligned_access_emulated_all_cpus() to return false
+for a single case.
+
+Fixes: e7c9d66e313b ("RISC-V: Report vector unaligned access speed hwprobe")
+functions: arch/riscv/kernel/traps_misaligned.c:check_vector_unaligned_access_emulated_all_cpus, arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_all_cpus
+fixes: e7c9d66e313b(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index aacbd9d7196e..4354c87c0376 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -610,10 +610,4 @@ bool __init check_vector_unaligned_access_emulated_all_cpus(void)
+ 	int cpu;
+ 
+-	if (!has_vector()) {
+-		for_each_online_cpu(cpu)
+-			per_cpu(vector_misaligned_access, cpu) = RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED;
+-		return false;
+-	}
+-
+ 	schedule_on_each_cpu(check_vector_unaligned_access_emulated);
+ 
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 161964cf2abc..02b485dc4bc4 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -404,11 +404,14 @@ static int __init vec_check_unaligned_access_speed_all_cpus(void *unused __alway
+ static int __init check_unaligned_access_all_cpus(void)
+ {
+-	bool all_cpus_emulated, all_cpus_vec_unsupported;
++	bool all_cpus_emulated;
++	int cpu;
+ 
+ 	all_cpus_emulated = check_unaligned_access_emulated_all_cpus();
+-	all_cpus_vec_unsupported = check_vector_unaligned_access_emulated_all_cpus();
+ 
+-	if (!all_cpus_vec_unsupported &&
+-	    IS_ENABLED(CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS)) {
++	if (!has_vector()) {
++		for_each_online_cpu(cpu)
++			per_cpu(vector_misaligned_access, cpu) = RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED;
++	} else if (!check_vector_unaligned_access_emulated_all_cpus() &&
++		   IS_ENABLED(CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS)) {
+ 		kthread_run(vec_check_unaligned_access_speed_all_cpus,
+ 			    NULL, "vec_check_unaligned_access_speed_all_cpus");
+
+##### A142
+=== 67a5ba8f742f A 2025-03-17 +11/-13
+riscv: fgraph: Fix stack layout to match __arch_ftrace_regs argument of ftrace_return_to_handler
+
+Naresh Kamboju reported a "Bad frame pointer" kernel warning while
+running LTP trace ftrace_stress_test.sh in riscv. We can reproduce the
+same issue with the following command:
+
+```
+$ cd /sys/kernel/debug/tracing
+$ echo 'f:myprobe do_nanosleep%return args1=$retval' > dynamic_events
+$ echo 1 > events/fprobes/enable
+$ echo 1 > tracing_on
+$ sleep 1
+```
+
+And we can get the following kernel warning:
+
+[  127.692888] ------------[ cut here ]------------
+[  127.693755] Bad frame pointer: expected ff2000000065be50, received ba34c141e9594000
+[  127.693755]   from func do_nanosleep return to ffffffff800ccb16
+[  127.698699] WARNING: CPU: 1 PID: 129 at kernel/trace/fgraph.c:755 ftrace_return_to_handler+0x1b2/0x1be
+[  127.699894] Modules linked in:
+[  127.700908] CPU: 1 UID: 0 PID: 129 Comm: sleep Not tainted 6.14.0-rc3-g0ab191c74642 #32
+[  127.701453] Hardware name: riscv-virtio,qemu (DT)
+[  127.701859] epc : ftrace_return_to_handler+0x1b2/0x1be
+[  127.702032]  ra : ftrace_return_to_handler+0x1b2/0x1be
+[  127.702151] epc : ffffffff8013b5e0 ra : ffffffff8013b5e0 sp : ff2000000065bd10
+[  127.702221]  gp : ffffffff819c12f8 tp : ff60000080853100 t0 : 6e00000000000000
+[  127.702284]  t1 : 0000000000000020 t2 : 6e7566206d6f7266 s0 : ff2000000065bd80
+[  127.702346]  s1 : ff60000081262000 a0 : 000000000000007b a1 : ffffffff81894f20
+[  127.702408]  a2 : 0000000000000010 a3 : fffffffffffffffe a4 : 0000000000000000
+[  127.702470]  a5 : 0000000000000000 a6 : 0000000000000008 a7 : 0000000000000038
+[  127.702530]  s2 : ba34c141e9594000 s3 : 0000000000000000 s4 : ff2000000065bdd0
+[  127.702591]  s5 : 00007fff8adcf400 s6 : 000055556dc1d8c0 s7 : 0000000000000068
+[  127.702651]  s8 : 00007fff8adf5d10 s9 : 000000000000006d s10: 0000000000000001
+[  127.702710]  s11: 00005555737377c8 t3 : ffffffff819d899e t4 : ffffffff819d899e
+[  127.702769]  t5 : ffffffff819d89a0 t6 : ff2000000065bb18
+[  127.702826] status: 0000000200000120 badaddr: 0000000000000000 cause: 0000000000000003
+[  127.703292] [<ffffffff8013b5e0>] ftrace_return_to_handler+0x1b2/0x1be
+[  127.703760] [<ffffffff80017bce>] return_to_handler+0x16/0x26
+[  127.704009] [<ffffffff80017bb8>] return_to_handler+0x0/0x26
+[  127.704057] [<ffffffff800d3352>] common_nsleep+0x42/0x54
+functions: 
+fixes: a3ed4157b7d8(riscv)
+diff --git a/arch/riscv/kernel/mcount.S b/arch/riscv/kernel/mcount.S
+index 068168046e0e..da4a4000e57e 100644
+--- a/arch/riscv/kernel/mcount.S
++++ b/arch/riscv/kernel/mcount.S
+@@ -13,6 +13,4 @@
+ #include <asm/ftrace.h>
+ 
+-#define ABI_SIZE_ON_STACK	80
+-
+ 	.text
+ 
+@@ -29,10 +27,10 @@
+ 	 */
+ 	.macro SAVE_RET_ABI_STATE
+-	addi	sp, sp, -ABI_SIZE_ON_STACK
+-	REG_S	ra, 1*SZREG(sp)
+-	REG_S	s0, 8*SZREG(sp)
+-	REG_S	a0, 10*SZREG(sp)
+-	REG_S	a1, 11*SZREG(sp)
+-	addi	s0, sp, ABI_SIZE_ON_STACK
++	addi	sp, sp, -FREGS_SIZE_ON_STACK
++	REG_S	ra, FREGS_RA(sp)
++	REG_S	s0, FREGS_S0(sp)
++	REG_S	a0, FREGS_A0(sp)
++	REG_S	a1, FREGS_A1(sp)
++	addi	s0, sp, FREGS_SIZE_ON_STACK
+ 	.endm
+ 
+@@ -44,9 +42,9 @@
+ 
+ 	.macro RESTORE_RET_ABI_STATE
+-	REG_L	ra, 1*SZREG(sp)
+-	REG_L	s0, 8*SZREG(sp)
+-	REG_L	a0, 10*SZREG(sp)
+-	REG_L	a1, 11*SZREG(sp)
+-	addi	sp, sp, ABI_SIZE_ON_STACK
++	REG_L	ra, FREGS_RA(sp)
++	REG_L	s0, FREGS_S0(sp)
++	REG_L	a0, FREGS_A0(sp)
++	REG_L	a1, FREGS_A1(sp)
++	addi	sp, sp, FREGS_SIZE_ON_STACK
+ 	.endm
+ 
+
+##### A143
+=== 83d78ac677b9 A 2025-03-17 +45/-31
+riscv: Fix hugetlb retrieval of number of ptes in case of !present pte
+
+Ryan sent a fix [1] for arm64 that applies to riscv too: in some hugetlb
+functions, we must not use the pte value to get the size of a mapping
+because the pte may not be present.
+
+So use the already present size parameter for huge_pte_clear() and the
+newly introduced size parameter for huge_ptep_get_and_clear(). And make
+sure to gather A/D bits only on present ptes.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+functions: arch/riscv/mm/hugetlbpage.c:get_clear_contig, arch/riscv/mm/hugetlbpage.c:set_huge_pte_at, arch/riscv/mm/hugetlbpage.c:huge_ptep_get_and_clear, arch/riscv/mm/hugetlbpage.c:huge_pte_clear
+fixes: 82a1a1f3bfb6(riscv)
+ arch/riscv/mm/hugetlbpage.c | 76 ++++++++++++++++++++++++++++++++++++++---------------------------
+ 1 file changed, 45 insertions(+), 31 deletions(-)
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index b4a78a4b35cf..375dd96bb4a0 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -149,20 +149,23 @@ static pte_t get_clear_contig(struct mm_struct *mm,
+ 			      unsigned long addr,
+ 			      pte_t *ptep,
+-			      unsigned long pte_num)
++			      unsigned long ncontig)
+ {
+-	pte_t orig_pte = ptep_get(ptep);
+-	unsigned long i;
+-
+-	for (i = 0; i < pte_num; i++, addr += PAGE_SIZE, ptep++) {
+-		pte_t pte = ptep_get_and_clear(mm, addr, ptep);
+-
+-		if (pte_dirty(pte))
+-			orig_pte = pte_mkdirty(orig_pte);
+-
+-		if (pte_young(pte))
+-			orig_pte = pte_mkyoung(orig_pte);
++	pte_t pte, tmp_pte;
++	bool present;
++
++	pte = ptep_get_and_clear(mm, addr, ptep);
++	present = pte_present(pte);
++	while (--ncontig) {
++		ptep++;
++		addr += PAGE_SIZE;
++		tmp_pte = ptep_get_and_clear(mm, addr, ptep);
++		if (present) {
++			if (pte_dirty(tmp_pte))
++				pte = pte_mkdirty(pte);
++			if (pte_young(tmp_pte))
++				pte = pte_mkyoung(pte);
++		}
+ 	}
+-
+-	return orig_pte;
++	return pte;
+ }
+ 
+@@ -213,4 +216,24 @@ static void clear_flush(struct mm_struct *mm,
+ }
+ 
++static int num_contig_ptes_from_size(unsigned long sz, size_t *pgsize)
++{
++	unsigned long hugepage_shift;
++
++	if (sz >= PGDIR_SIZE)
++		hugepage_shift = PGDIR_SHIFT;
++	else if (sz >= P4D_SIZE)
++		hugepage_shift = P4D_SHIFT;
++	else if (sz >= PUD_SIZE)
++		hugepage_shift = PUD_SHIFT;
++	else if (sz >= PMD_SIZE)
++		hugepage_shift = PMD_SHIFT;
++	else
++		hugepage_shift = PAGE_SHIFT;
++
+... (59 more diff lines)
+
+##### A144
+=== e8eb8e1bdae9 A 2025-03-17 +1/-1
+riscv: fgraph: Select HAVE_FUNCTION_GRAPH_TRACER depends on HAVE_DYNAMIC_FTRACE_WITH_ARGS
+
+Currently, fgraph on riscv relies on the infrastructure of
+DYNAMIC_FTRACE_WITH_ARGS. However, DYNAMIC_FTRACE_WITH_ARGS may be
+turned off on riscv, which will cause the enabled fgraph to be abnormal.
+Therefore, let's select HAVE_FUNCTION_GRAPH_TRACER depends on
+HAVE_DYNAMIC_FTRACE_WITH_ARGS.
+
+Fixes: a3ed4157b7d8 ("fgraph: Replace fgraph_ret_regs with ftrace_regs")
+functions: 
+fixes: a3ed4157b7d8(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bae5fd79d690..e2c80e88b5cd 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -151,5 +151,5 @@ config RISCV
+ 	select HAVE_FTRACE_GRAPH_FUNC
+ 	select HAVE_FTRACE_MCOUNT_RECORD if !XIP_KERNEL
+-	select HAVE_FUNCTION_GRAPH_TRACER
++	select HAVE_FUNCTION_GRAPH_TRACER if HAVE_DYNAMIC_FTRACE_WITH_ARGS
+ 	select HAVE_FUNCTION_GRAPH_FREGS
+ 	select HAVE_FUNCTION_TRACER if !XIP_KERNEL && !PREEMPTION
+
+##### A145
+=== 850d7b14c8f7 A 2025-03-26 +1/-1
+riscv/kexec_file: Fix comment in purgatory relocator
+
+Apparently sec_base doesn't mean relocated symbol value, which seems a
+copy-pasting error in the comment. Assigned with the address of section
+indexed by sym->st_shndx, it should represent base address of the
+relevant section. Let's fix the comment to avoid possible confusion.
+
+Fixes: 838b3e28488f ("RISC-V: Load purgatory in kexec_file")
+functions: arch/riscv/kernel/elf_kexec.c:arch_kexec_apply_relocations_add
+fixes: 838b3e28488f(riscv)
+diff --git a/arch/riscv/kernel/elf_kexec.c b/arch/riscv/kernel/elf_kexec.c
+index e783a72d051f..0dc5450f2c7f 100644
+--- a/arch/riscv/kernel/elf_kexec.c
++++ b/arch/riscv/kernel/elf_kexec.c
+@@ -391,5 +391,5 @@ int arch_kexec_apply_relocations_add(struct purgatory_info *pi,
+ 		unsigned long addr;	/* final location after relocation */
+ 		unsigned long val;	/* relocated symbol value */
+-		unsigned long sec_base;	/* relocated symbol value */
++		unsigned long sec_base;	/* relocated section base address */
+ 		void *loc;		/* tmp location to modify */
+ 
+
+##### A146
+=== bb58e1579f43 A 2025-03-26 +5/-1
+RISC-V: errata: Use medany for relocatable builds
+
+We're trying to mix non-PIC/PIE objects into the otherwise-PIE
+relocatable kernels, to avoid GOT/PLT references during early boot
+alternative resolution (which happens before the GOT/PLT are set up).
+
+riscv64-unknown-linux-gnu-ld: arch/riscv/errata/sifive/errata.o: relocation R_RISCV_HI20 against `tlb_flush_all_threshold' can not be used when making a shared object; recompile with -fPIC
+riscv64-unknown-linux-gnu-ld: arch/riscv/errata/thead/errata.o: relocation R_RISCV_HI20 against `riscv_cbom_block_size' can not be used when making a shared object; recompile with -fPIC
+
+Fixes: 8dc2a7e8027f ("riscv: Fix relocatable kernels with early alternatives using -fno-pie")
+functions: 
+fixes: 8dc2a7e8027f(riscv)
+diff --git a/arch/riscv/errata/Makefile b/arch/riscv/errata/Makefile
+index f0da9d7b39c3..bc6c77ba837d 100644
+--- a/arch/riscv/errata/Makefile
++++ b/arch/riscv/errata/Makefile
+@@ -1,4 +1,8 @@
+ ifdef CONFIG_RELOCATABLE
+-KBUILD_CFLAGS += -fno-pie
++# We can't use PIC/PIE when handling early-boot errata parsing, as the kernel
++# doesn't have a GOT setup at that point.  So instead just use medany: it's
++# usually position-independent, so it should be good enough for the errata
++# handling.
++KBUILD_CFLAGS += -fno-pie -mcmodel=medany
+ endif
+ 
+
+##### A147
+=== 3f7023171df4 A 2025-03-28 +1/-0
+riscv/purgatory: 4B align purgatory_start
+
+When a crashkernel is launched on RISC-V, the entry to purgatory is
+done by trapping via the stvec CSR. From riscv_kexec_norelocate():
+
+  |  ...
+  |  /*
+  |   * Switch to physical addressing
+  |   * This will also trigger a jump to CSR_STVEC
+  |   * which in this case is the address of the new
+  |   * kernel.
+  |   */
+  |  csrw    CSR_STVEC, a2
+  |  csrw    CSR_SATP, zero
+
+stvec requires that the address is 4B aligned, which was not the case,
+e.g.:
+
+  | Loaded purgatory at 0xffffc000
+  | kexec_file: kexec_file_load: type:1, start:0xffffd232 head:0x4 flags:0x6
+
+The address 0xffffd232 not 4B aligned.
+
+Correct by adding proper function alignment.
+
+With this change, crashkernels loaded with kexec-file will be able to
+properly enter the purgatory.
+
+Fixes: 736e30af583fb ("RISC-V: Add purgatory")
+functions: 
+fixes: 736e30af583f(riscv)
+diff --git a/arch/riscv/purgatory/entry.S b/arch/riscv/purgatory/entry.S
+index 0e6ca6d5ae4b..c5db2f072c34 100644
+--- a/arch/riscv/purgatory/entry.S
++++ b/arch/riscv/purgatory/entry.S
+@@ -13,4 +13,5 @@
+ .text
+ 
++.align	2
+ SYM_CODE_START(purgatory_start)
+ 
+
+##### A148
+=== 48d9aabf2dc5 A 2025-03-28 +2/-2
+RISC-V: Kconfig: Fix help text of CMDLINE_EXTEND
+
+It is the built-in command line appended to the bootloader command line,
+not the bootloader command line appended to the built-in command line.
+
+Fixes: 3aed8c43267e ("RISC-V: Update Kconfig to better handle CMDLINE")
+functions: 
+fixes: 3aed8c43267e(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 674cf6ff7188..78640cd353fd 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -1177,6 +1177,6 @@ config CMDLINE_EXTEND
+ 	bool "Extend bootloader kernel arguments"
+ 	help
+-	  The command-line arguments provided during boot will be
+-	  appended to the built-in command line. This is useful in
++	  The built-in command line will be appended to the command-
++	  line arguments provided during boot. This is useful in
+ 	  cases where the provided arguments are insufficient and
+ 	  you don't want to or cannot modify them.
+
+##### A149
+=== 6ee928185aeb A 2025-03-31 +2/-0
+riscv: Add norvc after .option arch in runtime const
+
+.option arch clobbers .option norvc. Prevent gas from emitting
+compressed instructions in the runtime const alternative blocks by
+setting .option norvc after .option arch. This issue starts appearing on
+gcc 15, which adds zca to the march.
+
+Reported by: Klara Modin <klarasmodin@gmail.com>
+Fixes: a44fb5722199 ("riscv: Add runtime constant support")
+functions: 
+fixes: a44fb5722199(riscv)
+diff --git a/arch/riscv/include/asm/runtime-const.h b/arch/riscv/include/asm/runtime-const.h
+index c07d049fdd5d..451fd76b8811 100644
+--- a/arch/riscv/include/asm/runtime-const.h
++++ b/arch/riscv/include/asm/runtime-const.h
+@@ -57,4 +57,5 @@
+ 	".option push\n\t"					\
+ 	".option arch,+zba\n\t"					\
++	".option norvc\n\t"					\
+ 	"slli	%[__tmp],%[__tmp],32\n\t"			\
+ 	"add.uw %[__ret],%[__ret],%[__tmp]\n\t"			\
+@@ -66,4 +67,5 @@
+ 	".option push\n\t"					\
+ 	".option arch,+zbkb\n\t"				\
++	".option norvc\n\t"					\
+ 	"pack	%[__ret],%[__ret],%[__tmp]\n\t"			\
+ 	"nop\n\t"						\

@@ -1,0 +1,242 @@
+[
+  {
+    "k": 1,
+    "loc": "fs/jfs/namei.c:1225",
+    "verdict": "不可能",
+    "why": "JFS 的磁盘 inode 编号是 __le32 di_number，diRead 还会校验 i_ino 与该编号相等（fs/jfs/jfs_imap.c:377）。old_ip 是已经存在的有效 inode，赋给 ino_t 的编号不含有效的高 32 位。"
+  },
+  {
+    "k": 2,
+    "loc": "fs/ubifs/tnc.c:3536",
+    "verdict": "不可能",
+    "why": "这里窄化的是 data_key_init 的 inode->i_ino 参数，不是文件字节偏移或 block。UBIFS 键的 inode 编号字段只有 u32，分配器在 INUM_WATERMARK=0xFFFFFF00 处停止分配（fs/ubifs/dir.c:149），有效编号可由 32 位 ino_t 完整表示。"
+  },
+  {
+    "k": 3,
+    "loc": "fs/iomap/direct-io.c:832",
+    "verdict": "不可能",
+    "why": "读请求起点若已到 EOF，会在 direct-io.c:733 提前返回；本次 iomi.len 则来自 size_t 类型的 iov_iter_count。因而这里超出已记录 EOF 的长度差不超过本次迭代器长度，传给 size_t 不会丢掉有效高位，绝对文件位置超过 4 GiB 并不改变这个界限。"
+  },
+  {
+    "k": 4,
+    "loc": "arch/powerpc/kernel/time.c:978",
+    "verdict": "不可能",
+    "why": "该文件属于 PowerPC，不能套用报告列出的 arm/i386 等组合；即使考虑 PowerPC32，这个分步除法也不会丢失有效高位。rb 的除前值为“余数乘 2^32 加一个 32 位分量”，余数小于 divisor，do_div(rb, divisor) 把 rb 原地改成至多 UINT32_MAX 的商，故 y=rb 安全。"
+  },
+  {
+    "k": 5,
+    "loc": "fs/btrfs/lru_cache.c:51",
+    "verdict": "不可能",
+    "why": "Maple Tree 的机器字长索引在这里仅用于选桶，桶内 match_entry 会继续比较完整 u64 key 和 gen（lru_cache.c:23-30）。store 遇到索引碰撞也把新条目接入同一链表，因此低 32 位相同的不同键不会被当作同一个条目。"
+  },
+  {
+    "k": 6,
+    "loc": "fs/iomap/direct-io.c:120",
+    "verdict": "不可能",
+    "why": "dio->size 记录这一次直接 I/O 实际处理的字节数，受初始 iov_iter_count 限制，并非文件的绝对大小。正常读写入口把单次长度限制在 MAX_RW_COUNT/SSIZE_MAX 内，故超过 4 GiB 的文件位置不会让这里的 ssize_t 返回值截断。"
+  },
+  {
+    "k": 7,
+    "loc": "fs/isofs/inode.c:1025",
+    "verdict": "不可能",
+    "why": "赋值后紧接着检查 iblock != b_off，超出 unsigned long 范围就以 -EIO 退出，不会把截断后的块号用于映射（inode.c:1034-1037）。此外支持的多段文件在遍历超过 100 个后续 section 时也会退出，每段长度来自 32 位记录，不能据此推导出可成功读取的超大块号被静默回绕。"
+  },
+  {
+    "k": 8,
+    "loc": "fs/btrfs/send.c:5436",
+    "verdict": "不可能",
+    "why": "len 每轮取 min(end-offset, read_size)，而 read_size=max_send_read_size(sctx) 受发送缓冲区上限限制。该路径用于旧版 send 流，V1 缓冲区只有 64 KiB，memset 的长度不可能因一个很大的文件空洞而超过 32 位。"
+  },
+  {
+    "k": 9,
+    "loc": "fs/btrfs/free-space-cache.c:1455",
+    "verdict": "不可能",
+    "why": "报告中的第 3 号实参是第四个参数 dirty_len，它是当前页内需要标脏的长度，至多 PAGE_SIZE。写缓存前 io_ctl_init 还要求所有页面的 CRC 加 generation 能放入首个页面，相关缓存大小受到限制，不会在这里产生超过 32 位的有效长度。"
+  },
+  {
+    "k": 10,
+    "loc": "fs/udf/namei.c:171",
+    "verdict": "不可能",
+    "why": "该函数只把 AD_IN_ICB 的内嵌目录搬到外部数据块，内嵌内容必须装在一个文件条目块中。udf/inode.c:1594-1603 已校验 i_lenAlloc 与 i_size 相等且 i_size 不超过块内剩余空间，因此 memcpy 的长度远小于 4 GiB。"
+  },
+  {
+    "k": 11,
+    "loc": "fs/jfs/jfs_imap.c:1377",
+    "verdict": "不可能",
+    "why": "父 inode 编号来自 JFS 的 32 位磁盘编号空间，这里加一仅构造同一 IAG 内的分配提示。即使父编号为 UINT32_MAX，加一在 32 位 inum 中回绕为零，随后 ino==0 分支会把 inum 恢复成父编号；64 位计算也会因 IAG 内低位为零而走同一回退。"
+  },
+  {
+    "k": 12,
+    "loc": "fs/btrfs/inode.c:6886",
+    "verdict": "可能",
+    "why": "objectid 的分配只受 64 位 BTRFS_LAST_FREE_OBJECTID 限制，32 位上相差 2^32 的两个 inode 会共用一个 XArray 索引。若另一个 inode 正处于 xa_reserve 与 xa_store 之间，本次新建失败后的 xa_release 会清掉对方的 XA_ZERO_ENTRY，破坏其随后 GFP_ATOMIC 写入的预留保证，内存紧张时可导致分配失败或断言。xa_release 不会删除已经存入的普通 inode 指针，这里的风险是预留槽冲突。"
+  },
+  {
+    "k": 13,
+    "loc": "fs/jbd2/journal.c:1719",
+    "verdict": "不可能",
+    "why": "first 直接由 be32_to_cpu(sb->s_first) 得到，其数值最多为 UINT32_MAX。局部变量采用 unsigned long long 是为了让 first 加最小日志块数时不溢出，最终写回 unsigned long 不丢失原始字段的有效位。"
+  },
+  {
+    "k": 14,
+    "loc": "kernel/time/timekeeping.c:771",
+    "verdict": "可能",
+    "why": "若 32 位系统的 CLOCK_MONOTONIC 累积到 2^32 秒（约 136 年），seconds 及其对应的 64 位纳秒时间仍在表示范围内，写入 unsigned long ktime_sec 却会回绕。ktime_get_seconds() 随后返回回绕后的秒数，与完整单调时间不一致；源码 timekeeping.c:1159-1165 明示这是为单字读取而接受的约 136 年覆盖边界，因此这里只保留这个极端触发条件，不把当前墙钟年份当作触发。"
+  },
+  {
+    "k": 15,
+    "loc": "fs/qnx4/dir.c:32",
+    "verdict": "不可能",
+    "why": "QNX4 的 inode->i_size 从磁盘 32 位 di_size 读取（fs/qnx4/inode.c:323），循环又保证 ctx->pos < i_size。右移 QNX4_BLOCK_SIZE_BITS=9 后块号不足 2^23，既不会溢出 32 位 unsigned long，也不会溢出 qnx4_block_map 的有符号 long 参数。"
+  },
+  {
+    "k": 16,
+    "loc": "fs/xfs/xfs_filestream.c:373",
+    "verdict": "可能",
+    "why": "32 位 XFS 可挂载 inode64 文件系统，启用 filestreams 后，不同目录 inode 若相差 2^32，就会在机器字长 MRU 键中别名。xfs_mru_cache_delete 按截断键直接删除且不比较完整 inode 编号，可能清除另一个目录的 allocation group 关联，破坏该目录原有的 filestream 分配关联；这里没有据此声称文件数据损坏。"
+  },
+  {
+    "k": 17,
+    "loc": "fs/xfs/xfs_filestream.c:215",
+    "verdict": "可能",
+    "why": "在 32 位 XFS 的 inode64/filestreams 场景中，两个父目录编号若低 32 位相同，pino 传入 unsigned long 键时会发生冲突。MRU 只保存该窄键且没有完整编号校验，lookup 会把另一目录的 pag 当作当前目录的关联，从而选择错误的 filestream allocation group。"
+  },
+  {
+    "k": 18,
+    "loc": "fs/exfat/namei.c:771",
+    "verdict": "不可能",
+    "why": "目录版本达到 2^32 后，传入 unsigned long 的确会丢掉高位，但重验证用 inode_eq_iversion 比较的是完整当前版本与零扩展后的缓存版本（namei.c:60）。结果是负 dentry 被保守地判失效并重新查目录，不会把已经过期的“不存在”结果错误地当作有效；这里只能据此确认缓存命中率下降，不能确认文件查询结果错误。"
+  },
+  {
+    "k": 19,
+    "loc": "fs/nfsd/vfs.c:754",
+    "verdict": "不可能",
+    "why": "同一函数在调用前已经执行 count=min_t(u64, count, 1<<22)，把 COPY 分段限制为 4 MiB。首次调用及 COPY_FILE_SPLICE 回退共用这个受限 count，传给 size_t 不会截断。"
+  },
+  {
+    "k": 20,
+    "loc": "fs/smb/client/file.c:3480",
+    "verdict": "可能",
+    "why": "32 位上若 SMB 交换文件实际分配至少 2^32 个 512 字节块（例如完整分配的 2 TiB 文件），inode->i_blocks 写入 unsigned long blocks 会回绕。后续 blocks*512 与 64 位 isize 比较会把没有空洞的文件误报为有空洞并拒绝 swapon；交换头可以只声明较小的使用区间，mm/swapfile.c:3520 只拒绝文件短于该区间，不能用交换区页数上限排除这么大的后备文件。"
+  },
+  {
+    "k": 21,
+    "loc": "fs/f2fs/inode.c:1049",
+    "verdict": "不可能",
+    "why": "F2FS 的 inode 编号就是 nid_t 节点编号，nid_t 在 fs/f2fs/f2fs.h:166 定义为 u32。新建时由 f2fs_alloc_nid 分配并赋给 i_ino，已有 inode 也来自同一节点编号空间，因此把它作为 32 位 pgoff_t 页索引不会截断有效编号。"
+  },
+  {
+    "k": 22,
+    "loc": "fs/ext4/extents.c:4704",
+    "verdict": "可能",
+    "why": "在支持 FALLOC_FL_WRITE_ZEROES 的设备上，32 位 ext4 遇到例如 2 GiB 的已写连续映射时，(loff_t)map.m_len<<blkbits 传给 ssize_t len 会变成负数；ES 缓存可以跨多个磁盘 extent 合并，不能用单个未写 extent 的长度上限排除。以 4 KiB 块、2 GiB 映射、offset=0 为例，len 变为 -2147483648，转换函数的 EXT4_MAX_BLOCKS 随后得到 0xFFF80000 个块，转换范围可能越过已清零区间，误转换相邻未清零的 unwritten extent 或返回错误。"
+  },
+  {
+    "k": 23,
+    "loc": "lib/vsprintf.c:128",
+    "verdict": "不可能",
+    "why": "simple_strtoul 的接口本来就返回本机 unsigned long，复用 simple_strtoull 后只保留该类型的表示范围是这个旧接口的既有语义。输入超出 unsigned long 范围时确实可能取低位，但此函数没有承诺保留 64 位数值；需要完整 64 位值的调用方应使用相应的 64 位接口，不能仅凭这里的包装判定结果错误。"
+  },
+  {
+    "k": 24,
+    "loc": "fs/ceph/file.c:1265",
+    "verdict": "不可能",
+    "why": "这里的 i_size-*ki_pos 是本次同步读取到 EOF 的返回字节数，而非绝对文件偏移，读到 EOF 时它不超过已经消费的 iov_iter 长度。正常读取入口受 SSIZE_MAX/MAX_RW_COUNT 限制，Ceph 还通过 I/O 共享锁及 FILE_RD capability 与截短协调，不能因文件本身超过 4 GiB 就推导出该返回长度截断。"
+  },
+  {
+    "k": 25,
+    "loc": "fs/ubifs/journal.c:1945",
+    "verdict": "不可能",
+    "why": "host->i_ino 是 UBIFS 主文件的编号，键的编号字段固定为 u32。UBIFS 分配器以低于 UINT32_MAX 的 INUM_WATERMARK 拒绝继续分配，所以传给 ino_key_init 的 ino_t 不会丢失有效高位。"
+  },
+  {
+    "k": 26,
+    "loc": "fs/f2fs/inline.c:243",
+    "verdict": "不可能",
+    "why": "f2fs_get_inode_folio 使用 inode 的节点编号作页索引，F2FS 的 nid_t 固定为 u32。inode->i_ino 来自这个编号空间（namei.c:240-261），不是文件字节位置，因此 32 位 pgoff_t 可以完整表示。"
+  },
+  {
+    "k": 27,
+    "loc": "kernel/bpf/trampoline.c:1321",
+    "verdict": "不可能",
+    "why": "u64_stats_add 的 unsigned long 增量若在 32 位上收到超过约 4.29 秒的纳秒数，算术上确实会截断，但该版本支持真正运行 BPF trampoline 的架构实现均为 64 位，PowerPC32 还显式返回 -EOPNOTSUPP（arch/powerpc/net/bpf_jit_comp.c:833）。共享 trampoline.c 可在 32 位编译，另一个直接调用 exit 的 kern_sys_bpf 路径却传 start=0，使统计函数提前返回，未形成可执行的 32 位触发路径。"
+  },
+  {
+    "k": 28,
+    "loc": "fs/vboxsf/super.c:260",
+    "verdict": "不可能",
+    "why": "vboxsf/utils.c:32 使用 idr_alloc_cyclic(...,1,0,...) 分配 inode 编号，并把成功返回的 int 写入 i_ino。IDR 分配的正编号不超过 INT_MAX，idr_remove 接收 unsigned long 时没有有效高位可丢。"
+  },
+  {
+    "k": 29,
+    "loc": "kernel/fail_function.c:125",
+    "verdict": "不可能",
+    "why": "错误注入操作的是本机函数的单个机器字返回值，fei_attr.retval 和 adjust_error_retval 的参数、返回值均为 unsigned long。fei_retval_set 已显式把通用 debugfs 的 u64 输入转换为 retv，并用同一机器字值校验 NULL/ERRNO/TRUE 等返回语义，因此这里不需要保留一个额外的 64 位返回值。"
+  },
+  {
+    "k": 30,
+    "loc": "fs/ext4/xattr.c:2288",
+    "verdict": "不可能",
+    "why": "这里的 ea_inode 来自 ext4_xattr_inode_lookup_create，缓存命中时要求 i_size_read(ea_inode)==value_len，新建时也写入同一个受限 value_len（xattr.c:1561、1610）。用户扩展属性值上限为 64 KiB，且即便采用 ext4 内部检查上限也只有 16 MiB，因此作为 size_t 配额长度传递不会超过 32 位。"
+  },
+  {
+    "k": 31,
+    "loc": "fs/f2fs/inline.c:624",
+    "verdict": "不可能",
+    "why": "目录 inode->i_ino 仍是固定 u32 的 F2FS nid_t 节点编号，目录变大不会扩大这个编号的位宽。f2fs_get_inode_folio 的 pgoff_t 实参表示 inode 节点缓存的页号，不是目录读取的字节偏移，在 32 位上可以完整表示。"
+  },
+  {
+    "k": 32,
+    "loc": "fs/quota/quota_v1.c:140",
+    "verdict": "不可能",
+    "why": "在 32 位架构上 v1_disk_dqblk 的六个 u32 加两个 unsigned long 共 32 字节，而这里的 BLOCK_SIZE 为 1024。blocks 只参与记录大小取模和乘 BLOCK_SIZE 后再取模，该项对 32 恒为零；即使大文件的 blocks 高位被截掉，最终记录对齐检查仍只取决于 off，不会改变判断结果。"
+  },
+  {
+    "k": 33,
+    "loc": "arch/x86/kernel/setup.c:389",
+    "verdict": "不可能",
+    "why": "这是 x86 代码，不能套用其他 32 位架构的 phys_addr_t 配置；i386 开启 PAE 时会选择 PHYS_ADDR_T_64BIT，memblock_phys_free 的地址参数可以保留超过 4 GiB 的物理地址。未开启 PAE 时合法可访问物理地址本来限于 32 位，高地址 initrd 不能作为该配置可成功搬移的输入，不能同时假设支持高地址且 phys_addr_t 仍只有 32 位。"
+  },
+  {
+    "k": 34,
+    "loc": "fs/ntfs/wof.c:644",
+    "verdict": "不可能",
+    "why": "传入的是 copy_start-folio_start，即拷贝目标在当前 folio 内的相对偏移。copy_start 和 copy_end 是 folio 与解压块范围的交集，因此这个偏移受 folio 大小限制，绝对文件位置的高位相减抵消，不会因读取超过 4 GiB 的位置而丢失有效偏移。"
+  },
+  {
+    "k": 35,
+    "loc": "fs/f2fs/inline.c:123",
+    "verdict": "不可能",
+    "why": "F2FS 的 inode->i_ino 来自固定 u32 的 nid_t 节点编号空间，新建分配路径可见 namei.c:240-261。这里把 inode 节点编号传给 pgoff_t，与数据文件偏移无关，32 位上没有需要保留的高位。"
+  },
+  {
+    "k": 36,
+    "loc": "arch/powerpc/kernel/legacy_serial.c:201",
+    "verdict": "不可能",
+    "why": "该代码只属于 PowerPC，不能套用报告中的 arm/i386/riscv32/mips32 类型组合。add_legacy_port 的 base、taddr 都是 phys_addr_t，PowerPC32 支持大物理地址的 PHYS_64BIT 配置会选择 PHYS_ADDR_T_64BIT（platforms/Kconfig.cputype:343-349），未启用时超过 32 位的 MMIO 地址不属于该内核可访问的合法地址空间。"
+  },
+  {
+    "k": 37,
+    "loc": "fs/hpfs/inode.c:217",
+    "verdict": "不可能",
+    "why": "HPFS 的 inode 编号就是 fnode 所在的扇区编号，fs/hpfs/hpfs.h:29-32 把 secno/fnode_secno 定义为 u32。创建及目录查找均用这个编号建立 inode，故即使 VFS i_ino 字段为 64 位，传给 hpfs_map_fnode 的有效值仍在 32 位内。"
+  },
+  {
+    "k": 38,
+    "loc": "fs/nfs/nfs42proc.c:511",
+    "verdict": "不可能",
+    "why": "res->write_res.count 是本次 COPY 完成的字节数，符合协议的服务端不会返回超过请求 count 的完成量。32 位调用路径的 count 来自 size_t，且 vfs_copy_file_range 先经 rw_verify_area 排除 (ssize_t)count<0 的请求，所以有效完成量可由 ssize_t 表示，并不随绝对文件偏移变大。"
+  },
+  {
+    "k": 39,
+    "loc": "fs/ext4/ialloc.c:270",
+    "verdict": "不可能",
+    "why": "ext4 的总 inode 数由磁盘 __le32 s_inodes_count 指定，有效 inode 编号不超过该值，加载时也有范围校验。这里的 unsigned long ino 保存这个 32 位编号即可，不需要把文件大小或块地址的 64 位范围套用到 inode 编号上。"
+  },
+  {
+    "k": 40,
+    "loc": "fs/nfs/nfs42proc.c:434",
+    "verdict": "不可能",
+    "why": "args->count 在 nfs42_proc_copy 中直接由 size_t count 初始化（nfs42proc.c:518-532），重试路径没有把它扩大成另一个更大的 64 位数值。因而在 32 位上再赋给 size_t count 会精确恢复原值，超过 4 GiB 的 src_pos/dst_pos 与这个长度参数是分开的。"
+  }
+]

@@ -1,0 +1,16 @@
+{
+ "note": "First annotator's check (model Claude). Part 1: every position hit in the evaluation window (is the fix the problem the rule names?). Part 2: all 4 issues of flags_eval_v6.1.json (fewer than 15 per rule). a = suspected real problem, b = not, c = cannot tell.",
+ "hits": [
+  {"commit": "130aee3fd998", "subject": "riscv: Avoid enabling interrupts in die()", "issue": "CTX|sleep|console_lock|might_sleep", "consistent": false,
+   "reason": "the fix stops spin_unlock_irq from re-enabling interrupts in die(); the flag claims a possible sleep through console_lock inside die_lock"},
+  {"commit": "0b1d60d6dd9e", "subject": "riscv: Fix build with CONFIG_CC_OPTIMIZE_FOR_SIZE=y", "issue": "CTX|noinstr|cpu_relax|called from noinstr/__cpuidle", "consistent": false,
+   "reason": "the fix drops a static branch from cpu_relax that broke -Os builds; the flag is about the noinstr contract"}
+ ],
+ "issues": [
+  {"issue": "CTX|sleep|machine_shutdown|smp_shutdown_nonboot_cpus", "label": "a", "reason": "irqs-off call to smp_shutdown_nonboot_cpus, confirmed in QEMU by riscv_kexec_shutdown_verify_20261102; still present at the end version"},
+  {"issue": "CTX|sleep|console_lock|might_sleep", "label": "b", "reason": "console_unblank does not take console_lock when oops_in_progress is set, and bust_spinlocks(1) sets it first (same as ctx_rules_riscv_20261103 flags 1-2)"},
+  {"issue": "CTX|noinstr|cpu_relax|called from noinstr/__cpuidle", "label": "c", "reason": "static inline called from noinstr code while x86 uses __always_inline; still static inline at the end version, impact not established"},
+  {"issue": "CTX|noinstr|arch_cpu_idle|called from noinstr/__cpuidle", "label": "a", "reason": "arch_cpu_idle is called from the __cpuidle default_idle_call outside instrumentation and is not noinstr, while arm64, x86 and loongarch mark it; fixed later by 8a48ea87ce89 (A068, 2024-03, outside the evaluation window)"}
+ ],
+ "summary": {"true_hits": 0, "issues": 4, "a": 2, "b": 1, "c": 1}
+}

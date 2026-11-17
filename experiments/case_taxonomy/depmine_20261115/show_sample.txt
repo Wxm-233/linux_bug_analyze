@@ -1,0 +1,4396 @@
+====================================================================================================
+[1] 721a73e30c9e  forms=A  mm/sparse-vmemmap: fix DAX vmemmap accounting with optimization
+-- matches:
+   A A1 mm/sparse-vmemmap.c I=vmemmap_can_optimize E=None func=None | if (!vmemmap_can_optimize(altmap, pgmap))
+-- message:
+   mm/sparse-vmemmap: fix DAX vmemmap accounting with optimization
+   
+   When vmemmap optimization is enabled for DAX, the nr_memmap_pages counter
+   in /proc/vmstat is incorrect.  The current code always accounts for the
+   full, non-optimized vmemmap size, but vmemmap optimization reduces the
+   actual number of vmemmap pages by reusing tail pages.  This causes the
+   system to overcount vmemmap usage, leading to inaccurate page statistics
+   in /proc/vmstat.
+   
+   Fix this by introducing section_nr_vmemmap_pages(), which returns the
+   exact vmemmap page count for a given pfn range based on whether
+   optimization is in effect.
+   
+   Fixes: 15995a352474 ("mm: report per-page metadata information")
+-- hunk mm/sparse-vmemmap.c:
+   @@ -642,45 +642,71 @@ void offline_mem_sections(unsigned long start_pfn, unsigned long end_pfn)
+    	for (pfn = start_pfn; pfn < end_pfn; pfn += PAGES_PER_SECTION) {
+    		unsigned long section_nr = pfn_to_section_nr(pfn);
+    		struct mem_section *ms = __nr_to_section(section_nr);
+    
+    		ms->section_mem_map &= ~SECTION_IS_ONLINE;
+    	}
+    }
+    
+   +static int __meminit section_nr_vmemmap_pages(unsigned long pfn, unsigned long nr_pages,
+   +		struct vmem_altmap *altmap, struct dev_pagemap *pgmap)
+   +{
+   +	const unsigned int order = pgmap ? pgmap->vmemmap_shift : 0;
+   +	const unsigned long pages_per_compound = 1UL << order;
+   +
+   +	VM_WARN_ON_ONCE(!IS_ALIGNED(pfn | nr_pages, PAGES_PER_SUBSECTION));
+   +	VM_WARN_ON_ONCE(nr_pages > PAGES_PER_SECTION);
+   +
+   +	if (!vmemmap_can_optimize(altmap, pgmap))
+   +		return DIV_ROUND_UP(nr_pages * sizeof(struct page), PAGE_SIZE);
+   +
+   +	if (order < PFN_SECTION_SHIFT) {
+   +		VM_WARN_ON_ONCE(!IS_ALIGNED(pfn | nr_pages, pages_per_compound));
+   +		return VMEMMAP_RESERVE_NR * nr_pages / pages_per_compound;
+   +	}
+   +
+   +	VM_WARN_ON_ONCE(!IS_ALIGNED(pfn | nr_pages, PAGES_PER_SECTION));
+   +
+   +	if (IS_ALIGNED(pfn, pages_per_compound))
+   +		return VMEMMAP_RESERVE_NR;
+   +
+   +	return 0;
+   +}
+   +
+    static struct page * __meminit populate_section_memmap(unsigned long pfn,
+    		unsigned long nr_pages, int nid, struct vmem_altmap *altmap,
+    		struct dev_pagemap *pgmap)
+    {
+    	struct page *page = __populate_section_memmap(pfn, nr_pages, nid, altmap,
+    						      pgmap);
+    
+   -	memmap_pages_add(DIV_ROUND_UP(nr_pages * sizeof(struct page), PAGE_SIZE));
+   +	memmap_pages_add(section_nr_vmemmap_pages(pfn, nr_pages, altmap, pgmap));
+    
+    	return page;
+   …
+====================================================================================================
+[2] 099dd6878b9b  forms=A  mm/swap: fix pte_same_as_swp() not removing uffd-wp bit when compare
+-- matches:
+   A A1 include/linux/swapops.h I=pte_swp_soft_dirty E=None func=None | if (pte_swp_soft_dirty(pte))
+   A A2 include/linux/swapops.h I=pte_swp_clear_soft_dirty E=None func=None | pte = pte_swp_clear_soft_dirty(pte);
+-- message:
+   mm/swap: fix pte_same_as_swp() not removing uffd-wp bit when compare
+   
+   I found it by pure code review, that pte_same_as_swp() of unuse_vma()
+   didn't take uffd-wp bit into account when comparing ptes.
+   pte_same_as_swp() returning false negative could cause failure to
+   swapoff swap ptes that was wr-protected by userfaultfd.
+   
+   Fixes: f45ec5ff16a7 ("userfaultfd: wp: support swap and page migration")
+-- hunk include/linux/swapops.h:
+   @@ -18,16 +18,26 @@
+     * remaining bits.  Although `type' itself needs only five bits, we allow for
+     * shmem/tmpfs to shift it all up a further two bits: see swp_to_radix_entry().
+     *
+     * swp_entry_t's are *never* stored anywhere in their arch-dependent format.
+     */
+    #define SWP_TYPE_SHIFT	(BITS_PER_XA_VALUE - MAX_SWAPFILES_SHIFT)
+    #define SWP_OFFSET_MASK	((1UL << SWP_TYPE_SHIFT) - 1)
+    
+   +/* Clear all flags but only keep swp_entry_t related information */
+   +static inline pte_t pte_swp_clear_flags(pte_t pte)
+   +{
+   +	if (pte_swp_soft_dirty(pte))
+   +		pte = pte_swp_clear_soft_dirty(pte);
+   +	if (pte_swp_uffd_wp(pte))
+   +		pte = pte_swp_clear_uffd_wp(pte);
+   +	return pte;
+   +}
+   +
+    /*
+     * Store a type+offset into a swp_entry_t in an arch-independent format
+     */
+    static inline swp_entry_t swp_entry(unsigned long type, pgoff_t offset)
+    {
+    	swp_entry_t ret;
+    
+    	ret.val = (type << SWP_TYPE_SHIFT) | (offset & SWP_OFFSET_MASK);
+-- hunk include/linux/swapops.h:
+   @@ -61,20 +71,17 @@ static inline int is_swap_pte(pte_t pte)
+    /*
+     * Convert the arch-dependent pte representation of a swp_entry_t into an
+     * arch-independent swp_entry_t.
+     */
+    static inline swp_entry_t pte_to_swp_entry(pte_t pte)
+    {
+    	swp_entry_t arch_entry;
+    
+   -	if (pte_swp_soft_dirty(pte))
+   -		pte = pte_swp_clear_soft_dirty(pte);
+   -	if (pte_swp_uffd_wp(pte))
+   -		pte = pte_swp_clear_uffd_wp(pte);
+   +	pte = pte_swp_clear_flags(pte);
+    	arch_entry = __pte_to_swp_entry(pte);
+    	return swp_entry(__swp_type(arch_entry), __swp_offset(arch_entry));
+    }
+    
+    /*
+     * Convert the arch-independent representation of a swp_entry_t into the
+     * arch-dependent pte representation.
+     */
+====================================================================================================
+[3] bd1f2b2ace84  forms=A  mm/rmap: handle device-exclusive entries correctly in page_vma_mkclean_one()
+-- matches:
+   A A1 mm/rmap.c I=pte_present E=None func=None | if (!pte_present(entry))
+-- message:
+   mm/rmap: handle device-exclusive entries correctly in page_vma_mkclean_one()
+   
+   Ever since commit b756a3b5e7ea ("mm: device exclusive memory access") we
+   can return with a device-exclusive entry from page_vma_mapped_walk().
+   
+   page_vma_mkclean_one() is not prepared for that, so teach it about these
+   PFN swap PTEs.  Note that device-private entries are so far not applicable
+   on that path, as we expect ZONE_DEVICE pages so far only in migration code
+   when it comes to the RMAP.
+   
+   Note that we could currently only run into this case with device-exclusive
+   entries on THPs.  We still adjust the mapcount on conversion to
+   device-exclusive; this makes the rmap walk abort early for small folios,
+   because we'll always have !folio_mapped() with a single device-exclusive
+   entry.  We'll adjust the mapcount logic once all page_vma_mapped_walk()
+   users can properly handle device-exclusive entries.
+   
+   Fixes: b756a3b5e7ea ("mm: device exclusive memory access")
+-- hunk mm/rmap.c:
+   @@ -1039,16 +1039,24 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
+    	while (page_vma_mapped_walk(pvmw)) {
+    		int ret = 0;
+    
+    		address = pvmw->address;
+    		if (pvmw->pte) {
+    			pte_t *pte = pvmw->pte;
+    			pte_t entry = ptep_get(pte);
+    
+   +			/*
+   +			 * PFN swap PTEs, such as device-exclusive ones, that
+   +			 * actually map pages are clean and not writable from a
+   +			 * CPU perspective. The MMU notifier takes care of any
+   +			 * device aspects.
+   +			 */
+   +			if (!pte_present(entry))
+   +				continue;
+    			if (!pte_dirty(entry) && !pte_write(entry))
+    				continue;
+    
+    			flush_cache_page(vma, address, pte_pfn(entry));
+    			entry = ptep_clear_flush(vma, address, pte);
+    			entry = pte_wrprotect(entry);
+    			entry = pte_mkclean(entry);
+    			set_pte_at(vma->vm_mm, address, pte, entry);
+====================================================================================================
+[4] fac35ba763ed  forms=A  mm/hugetlb: fix races when looking up a CONT-PTE/PMD size hugetlb page
+-- matches:
+   A A2 mm/hugetlb.c I=huge_pte_offset E=None func=None | ptep = huge_pte_offset(mm, address, huge_page_size(h));
+-- message:
+   mm/hugetlb: fix races when looking up a CONT-PTE/PMD size hugetlb page
+   
+   On some architectures (like ARM64), it can support CONT-PTE/PMD size
+   hugetlb, which means it can support not only PMD/PUD size hugetlb (2M and
+   1G), but also CONT-PTE/PMD size(64K and 32M) if a 4K page size specified.
+   
+   So when looking up a CONT-PTE size hugetlb page by follow_page(), it will
+   use pte_offset_map_lock() to get the pte entry lock for the CONT-PTE size
+   hugetlb in follow_page_pte().  However this pte entry lock is incorrect
+   for the CONT-PTE size hugetlb, since we should use huge_pte_lock() to get
+   the correct lock, which is mm->page_table_lock.
+   
+   That means the pte entry of the CONT-PTE size hugetlb under current pte
+   lock is unstable in follow_page_pte(), we can continue to migrate or
+   poison the pte entry of the CONT-PTE size hugetlb, which can cause some
+   potential race issues, even though they are under the 'pte lock'.
+   
+   For example, suppose thread A is trying to look up a CONT-PTE size hugetlb
+   page by move_pages() syscall under the lock, however antoher thread B can
+   migrate the CONT-PTE hugetlb page at the same time, which will cause
+   thread A to get an incorrect page, if thread A also wants to do page
+   migration, then data inconsistency error occurs.
+   
+   Moreover we have the same issue for CONT-PMD size hugetlb in
+   follow_huge_pmd().
+   
+   To fix above issues, rename the follow_huge_pmd() as follow_huge_pmd_pte()
+   to handle PMD and PTE level size hugetlb, which uses huge_pte_lock() to
+   get the correct pte entry lock to make the pte entry stable.
+   
+   Mike said:
+   
+   Support for CONT_PMD/_PTE was added with bb9dd3df8ee9 ("arm64: hugetlb:
+   refactor find_num_contig()").  Patch series "Support for contiguous pte
+   hugepages", v4.  However, I do not believe these code paths were
+   executed until migration support was added with 5480280d3f2d ("arm64/mm:
+   enable HugeTLB migration for contiguous bit HugeTLB pages") I would go
+   with 5480280d3f2d for the Fixes: targe.
+   
+   Fixes: 5480280d3f2d ("arm64/mm: enable HugeTLB migration for contiguous bit HugeTLB pages")
+-- hunk mm/hugetlb.c:
+   @@ -6941,58 +6941,57 @@ struct page * __weak
+    follow_huge_pd(struct vm_area_struct *vma,
+    	       unsigned long address, hugepd_t hpd, int flags, int pdshift)
+    {
+    	WARN(1, "hugepd follow called with no support for hugepage directory format\n");
+    	return NULL;
+    }
+    
+    struct page * __weak
+   -follow_huge_pmd(struct mm_struct *mm, unsigned long address,
+   -		pmd_t *pmd, int flags)
+   +follow_huge_pmd_pte(struct vm_area_struct *vma, unsigned long address, int flags)
+    {
+   +	struct hstate *h = hstate_vma(vma);
+   +	struct mm_struct *mm = vma->vm_mm;
+    	struct page *page = NULL;
+    	spinlock_t *ptl;
+   -	pte_t pte;
+   +	pte_t *ptep, pte;
+    
+    	/*
+    	 * FOLL_PIN is not supported for follow_page(). Ordinary GUP goes via
+    	 * follow_hugetlb_page().
+    	 */
+    	if (WARN_ON_ONCE(flags & FOLL_PIN))
+    		return NULL;
+    
+    retry:
+   -	ptl = pmd_lockptr(mm, pmd);
+   -	spin_lock(ptl);
+   -	/*
+   -	 * make sure that the address range covered by this pmd is not
+   -	 * unmapped from other threads.
+   -	 */
+   -	if (!pmd_huge(*pmd))
+   -		goto out;
+   -	pte = huge_ptep_get((pte_t *)pmd);
+   +	ptep = huge_pte_offset(mm, address, huge_page_size(h));
+   +	if (!ptep)
+   +		return NULL;
+   +
+   +	ptl = huge_pte_lock(h, mm, ptep);
+   +	pte = huge_ptep_get(ptep);
+    	if (pte_present(pte)) {
+   -		page = pmd_page(*pmd) + ((address & ~PMD_MASK) >> PAGE_SHIFT);
+   …
+====================================================================================================
+[5] 44c6cb9fe988  forms=A  KVM: guest_memfd: Allow mmap() on guest_memfd for x86 VMs with private memory
+-- matches:
+   A A1 include/linux/kvm_host.h I=kvm_arch_supports_gmem_init_shared E=None func=None | if (!kvm || kvm_arch_supports_gmem_init_shared(kvm))
+-- message:
+   KVM: guest_memfd: Allow mmap() on guest_memfd for x86 VMs with private memory
+   
+   Allow mmap() on guest_memfd instances for x86 VMs with private memory as
+   the need to track private vs. shared state in the guest_memfd instance is
+   only pertinent to INIT_SHARED.  Doing mmap() on private memory isn't
+   terrible useful (yet!), but it's now possible, and will be desirable when
+   guest_memfd gains support for other VMA-based syscalls, e.g. mbind() to
+   set NUMA policy.
+   
+   Lift the restriction now, before MMAP support is officially released, so
+   that KVM doesn't need to add another capability to enumerate support for
+   mmap() on private memory.
+   
+   Fixes: 3d3a04fad25a ("KVM: Allow and advertise support for host mmap() on guest_memfd files")
+-- hunk include/linux/kvm_host.h:
+   @@ -724,17 +724,27 @@ static inline int kvm_arch_vcpu_memslots_id(struct kvm_vcpu *vcpu)
+    #ifndef CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES
+    static inline bool kvm_arch_has_private_mem(struct kvm *kvm)
+    {
+    	return false;
+    }
+    #endif
+    
+    #ifdef CONFIG_KVM_GUEST_MEMFD
+   -bool kvm_arch_supports_gmem_mmap(struct kvm *kvm);
+   +bool kvm_arch_supports_gmem_init_shared(struct kvm *kvm);
+   +
+   +static inline u64 kvm_gmem_get_supported_flags(struct kvm *kvm)
+   +{
+   +	u64 flags = GUEST_MEMFD_FLAG_MMAP;
+   +
+   +	if (!kvm || kvm_arch_supports_gmem_init_shared(kvm))
+   +		flags |= GUEST_MEMFD_FLAG_INIT_SHARED;
+   +
+   +	return flags;
+   +}
+    #endif
+    
+    #ifndef kvm_arch_has_readonly_mem
+    static inline bool kvm_arch_has_readonly_mem(struct kvm *kvm)
+    {
+    	return IS_ENABLED(CONFIG_HAVE_KVM_READONLY_MEM);
+    }
+    #endif
+====================================================================================================
+[6] 8d60902f16e2  forms=A  ACPI: property: Polish ignoring bad data nodes
+-- matches:
+   A A1 drivers/acpi/mipi-disco-img.c I=isdigit E=None func=None | if (!(isdigit(path[0]) && path[1] == '.'))
+   A A1 drivers/acpi/mipi-disco-img.c I=isdigit E=None func=None | if (path && isdigit(path[0]) && !path[1]) {
+-- message:
+   ACPI: property: Polish ignoring bad data nodes
+   
+   Clean up ignoring data nodes in mipi-disco-img.c: use { } initialiser, fix
+   a kernel-doc warning and use isdigit().
+   
+   Fixes: 5bd4edbbf920 ("ACPI: property: Ignore bad graph port nodes on Dell XPS 9315")
+-- hunk drivers/acpi/mipi-disco-img.c:
+   @@ -773,22 +773,22 @@ bool acpi_graph_ignore_port(acpi_handle handle)
+    	if (!orig_path)
+    		return false;
+    	path = strnext(orig_path, "IPU");
+    	if (!path)
+    		path = strnext(orig_path, "LNK");
+    	if (!path)
+    		goto out_free;
+    
+   -	if (!(path[0] >= '0' && path[0] <= '9' && path[1] == '.'))
+   +	if (!(isdigit(path[0]) && path[1] == '.'))
+    		goto out_free;
+    
+    	/* Check if the node has a "PRT" prefix. */
+    	path = strnext(path, "PRT");
+   -	if (path && path[0] >= '0' && path[0] <= '9' && !path[1]) {
+   +	if (path && isdigit(path[0]) && !path[1]) {
+    		acpi_handle_debug(handle, "ignoring data node\n");
+    
+    		kfree(orig_path);
+    		return true;
+    	}
+    
+    out_free:
+    	kfree(orig_path);
+====================================================================================================
+[7] 4a3591287fb7  forms=A  entry: Fix seccomp bypass after ptrace with TSYNC
+-- matches:
+   A A2 include/linux/entry-common.h I=current_thread_info E=None func=None | work = READ_ONCE(current_thread_info()->syscall_work);
+-- message:
+   entry: Fix seccomp bypass after ptrace with TSYNC
+   
+   Sashiko review pointed out the following issue.
+   
+   If a thread is stopped in syscall_trace_enter() for ptrace, another
+   thread can install a seccomp filter with SECCOMP_FILTER_FLAG_TSYNC
+   (e.g., via seccomp_attach_filter()). This will successfully set
+   SYSCALL_WORK_SECCOMP on the stopped thread, but syscall_trace_enter()
+   evaluates a cached 'work' variable sampled on entry. Consequently,
+   the subsequent check for SYSCALL_WORK_SECCOMP misses the newly
+   assigned flag, and the filter is silently bypassed.
+   
+   This race condition could allow an unprivileged process to execute
+   a prohibited system call (e.g., execve) that the newly installed filter
+   was intended to block, especially since the tracer might have modified
+   the system call number during the ptrace stop.
+   
+   Fix this by re-reading the syscall_work flags after ptrace handling,
+   so that any new SYSCALL_WORK_SECCOMP flag set by another thread via
+   TSYNC during the ptrace stop is observed before the subsequent
+   seccomp check.
+   
+   Fixes: 142781e108b1 ("entry: Provide generic syscall entry functionality")
+-- hunk include/linux/entry-common.h:
+   @@ -92,16 +92,19 @@ static __always_inline long syscall_trace_enter(struct pt_regs *regs, unsigned l
+    	if (work & SYSCALL_WORK_SYSCALL_RSEQ_SLICE)
+    		rseq_syscall_enter_work(syscall);
+    
+    	/* Handle ptrace */
+    	if (work & (SYSCALL_WORK_SYSCALL_TRACE | SYSCALL_WORK_SYSCALL_EMU)) {
+    		if (!arch_ptrace_report_syscall_permit_entry(regs) ||
+    		    (work & SYSCALL_WORK_SYSCALL_EMU))
+    			return -1L;
+   +
+   +		/* ptrace might have changed work flags */
+   +		work = READ_ONCE(current_thread_info()->syscall_work);
+    	}
+    
+    	/* Do seccomp after ptrace, to catch any tracer changes. */
+    	if (work & SYSCALL_WORK_SECCOMP) {
+    		if (!__seccomp_permit_syscall())
+    			return -1L;
+    	}
+    
+====================================================================================================
+[8] ad1ac596e8a8  forms=A  mm/migration: fix potential pte_unmap on an not mapped pte
+-- matches:
+   A A2 mm/migrate.c I=huge_ptep_get E=None func=None | pte = huge_ptep_get(ptep);
+-- message:
+   mm/migration: fix potential pte_unmap on an not mapped pte
+   
+   __migration_entry_wait and migration_entry_wait_on_locked assume pte is
+   always mapped from caller.  But this is not the case when it's called from
+   migration_entry_wait_huge and follow_huge_pmd.  Add a hugetlbfs variant
+   that calls hugetlb_migration_entry_wait(ptep == NULL) to fix this issue.
+   
+   Fixes: 30dad30922cc ("mm: migration: add migrate_entry_wait_huge()")
+-- hunk mm/migrate.c:
+   @@ -310,23 +310,38 @@ void __migration_entry_wait(struct mm_struct *mm, pte_t *ptep,
+    void migration_entry_wait(struct mm_struct *mm, pmd_t *pmd,
+    				unsigned long address)
+    {
+    	spinlock_t *ptl = pte_lockptr(mm, pmd);
+    	pte_t *ptep = pte_offset_map(pmd, address);
+    	__migration_entry_wait(mm, ptep, ptl);
+    }
+    
+   -void migration_entry_wait_huge(struct vm_area_struct *vma,
+   -		struct mm_struct *mm, pte_t *pte)
+   +#ifdef CONFIG_HUGETLB_PAGE
+   +void __migration_entry_wait_huge(pte_t *ptep, spinlock_t *ptl)
+    {
+   -	spinlock_t *ptl = huge_pte_lockptr(hstate_vma(vma), mm, pte);
+   -	__migration_entry_wait(mm, pte, ptl);
+   +	pte_t pte;
+   +
+   +	spin_lock(ptl);
+   +	pte = huge_ptep_get(ptep);
+   +
+   +	if (unlikely(!is_hugetlb_entry_migration(pte)))
+   +		spin_unlock(ptl);
+   +	else
+   +		migration_entry_wait_on_locked(pte_to_swp_entry(pte), NULL, ptl);
+    }
+    
+   +void migration_entry_wait_huge(struct vm_area_struct *vma, pte_t *pte)
+   +{
+   +	spinlock_t *ptl = huge_pte_lockptr(hstate_vma(vma), vma->vm_mm, pte);
+   +
+   +	__migration_entry_wait_huge(pte, ptl);
+   +}
+   +#endif
+   +
+    #ifdef CONFIG_ARCH_ENABLE_THP_MIGRATION
+    void pmd_migration_entry_wait(struct mm_struct *mm, pmd_t *pmd)
+    {
+    	spinlock_t *ptl;
+    
+    	ptl = pmd_lock(mm, pmd);
+    	if (!is_pmd_migration_entry(*pmd))
+    		goto unlock;
+====================================================================================================
+[9] fed15f1345dc  forms=A  mm/hugetlb: pre-allocate pgtable pages for uffd wr-protects
+-- matches:
+   A A2 mm/hugetlb.c I=huge_pte_alloc E=None func=None | ptep = huge_pte_alloc(mm, vma, address, psize);
+-- message:
+   mm/hugetlb: pre-allocate pgtable pages for uffd wr-protects
+   
+   Userfaultfd-wp uses pte markers to mark wr-protected pages for both shmem
+   and hugetlb.  Shmem has pre-allocation ready for markers, but hugetlb path
+   was overlooked.
+   
+   Doing so by calling huge_pte_alloc() if the initial pgtable walk fails to
+   find the huge ptep.  It's possible that huge_pte_alloc() can fail with
+   high memory pressure, in that case stop the loop immediately and fail
+   silently.  This is not the most ideal solution but it matches with what we
+   do with shmem meanwhile it avoids the splat in dmesg.
+   
+   Fixes: 60dfaad65aa9 ("mm/hugetlb: allow uffd wr-protect none ptes")
+-- hunk mm/hugetlb.c:
+   @@ -6655,18 +6655,27 @@ unsigned long hugetlb_change_protection(struct vm_area_struct *vma,
+    	mmu_notifier_invalidate_range_start(&range);
+    	hugetlb_vma_lock_write(vma);
+    	i_mmap_lock_write(vma->vm_file->f_mapping);
+    	last_addr_mask = hugetlb_mask_last_page(h);
+    	for (; address < end; address += psize) {
+    		spinlock_t *ptl;
+    		ptep = huge_pte_offset(mm, address, psize);
+    		if (!ptep) {
+   -			address |= last_addr_mask;
+   -			continue;
+   +			if (!uffd_wp) {
+   +				address |= last_addr_mask;
+   +				continue;
+   +			}
+   +			/*
+   +			 * Userfaultfd wr-protect requires pgtable
+   +			 * pre-allocations to install pte markers.
+   +			 */
+   +			ptep = huge_pte_alloc(mm, vma, address, psize);
+   +			if (!ptep)
+   +				break;
+    		}
+    		ptl = huge_pte_lock(h, mm, ptep);
+    		if (huge_pmd_unshare(mm, vma, address, ptep)) {
+    			/*
+    			 * When uffd-wp is enabled on the vma, unshare
+    			 * shouldn't happen at all.  Warn about it if it
+    			 * happened due to some reason.
+    			 */
+====================================================================================================
+[10] 4d936f10ff80  forms=A  irqchip/sifive-plic: Probe plic driver early for Allwinner D1 platform
+-- matches:
+   A A2 drivers/irqchip/irq-sifive-plic.c I=of_iomap E=None func=None | regs = of_iomap(to_of_node(fwnode), 0);
+-- message:
+   irqchip/sifive-plic: Probe plic driver early for Allwinner D1 platform
+   
+   The latest Linux RISC-V no longer boots on the Allwinner D1 platform
+   because the sun4i_timer driver fails to get an interrupt from PLIC due to
+   the recent conversion of the PLIC to a platform driver. Converting the
+   sun4i timer to a platform driver does not work either because the D1 does
+   not have a SBI timer available so early boot hangs. See the 'Closes:'
+   link for deeper analysis.
+   
+   The real fix requires enabling the SBI time extension in the platform
+   firmware (OpenSBI) and convert sun4i_timer into platform driver.
+   Unfortunately, the real fix involves changing multiple places and can't be
+   achieved in a short duration and aside of that requires users to update
+   firmware.
+   
+   As a work-around, retrofit PLIC probing such that the PLIC is probed early
+   only for the Allwinner D1 platform and probed as a regular platform driver
+   for rest of the RISC-V platforms. In the process, partially revert some of
+   the previous changes because the PLIC device pointer is not available in
+   all probing paths.
+   
+   Fixes: e306a894bd51 ("irqchip/sifive-plic: Chain to parent IRQ after handlers are ready")
+   Fixes: 8ec99b033147 ("irqchip/sifive-plic: Convert PLIC driver into a platform driver")
+-- hunk drivers/irqchip/irq-sifive-plic.c:
+   @@ -403,130 +404,136 @@ static int plic_dying_cpu(unsigned int cpu)
+    static int plic_starting_cpu(unsigned int cpu)
+    {
+    	struct plic_handler *handler = this_cpu_ptr(&plic_handlers);
+    
+    	if (plic_parent_irq)
+    		enable_percpu_irq(plic_parent_irq,
+    				  irq_get_trigger_type(plic_parent_irq));
+    	else
+   -		dev_warn(handler->priv->dev, "cpu%d: parent irq not available\n", cpu);
+   +		pr_warn("%pfwP: cpu%d: parent irq not available\n",
+   +			handler->priv->fwnode, cpu);
+    	plic_set_threshold(handler, PLIC_ENABLE_THRESHOLD);
+    
+    	return 0;
+    }
+    
+    static const struct of_device_id plic_match[] = {
+    	{ .compatible = "sifive,plic-1.0.0" },
+    	{ .compatible = "riscv,plic0" },
+    	{ .compatible = "andestech,nceplic100",
+    	  .data = (const void *)BIT(PLIC_QUIRK_EDGE_INTERRUPT) },
+    	{ .compatible = "thead,c900-plic",
+    	  .data = (const void *)BIT(PLIC_QUIRK_EDGE_INTERRUPT) },
+    	{}
+    };
+    
+   -static int plic_parse_nr_irqs_and_contexts(struct platform_device *pdev,
+   +static int plic_parse_nr_irqs_and_contexts(struct fwnode_handle *fwnode,
+    					   u32 *nr_irqs, u32 *nr_contexts)
+    {
+   -	struct device *dev = &pdev->dev;
+    	int rc;
+    
+    	/*
+    	 * Currently, only OF fwnode is supported so extend this
+    	 * function for ACPI support.
+    	 */
+   -	if (!is_of_node(dev->fwnode))
+   +	if (!is_of_node(fwnode))
+    		return -EINVAL;
+    
+   -	rc = of_property_read_u32(to_of_node(dev->fwnode), "riscv,ndev", nr_irqs);
+   +	rc = of_property_read_u32(to_of_node(fwnode), "riscv,ndev", nr_irqs);
+    	if (rc) {
+   …
+====================================================================================================
+[11] 26e7888a0c89  forms=A  mm/memory: fix PMD/PUD checks in follow_pfnmap_start()
+-- matches:
+   A A1 mm/memory.c I=pud_present E=None func=None | if (!pud_present(pud))
+   A A1 mm/memory.c I=pud_present E=None func=None | if (unlikely(!pud_present(pud))) {
+   A A1 mm/memory.c I=pmd_present E=None func=None | if (!pmd_present(pmd))
+   A A1 mm/memory.c I=pmd_present E=None func=None | if (unlikely(!pmd_present(pmd))) {
+-- message:
+   mm/memory: fix PMD/PUD checks in follow_pfnmap_start()
+   
+   follow_pfnmap_start() suffers from two problems:
+   
+   (1) We are not re-fetching the pmd/pud after taking the PTL
+   
+   Therefore, we are not properly stabilizing what the lock actually
+   protects.  If there is concurrent zapping, we would indicate to the
+   caller that we found an entry, however, that entry might already have
+   been invalidated, or contain a different PFN after taking the lock.
+   
+   Properly use pmdp_get() / pudp_get() after taking the lock.
+   
+   (2) pmd_leaf() / pud_leaf() are not well defined on non-present entries
+   
+   pmd_leaf()/pud_leaf() could wrongly trigger on non-present entries.
+   
+   There is no real guarantee that pmd_leaf()/pud_leaf() returns something
+   reasonable on non-present entries.  Most architectures indeed either
+   perform a present check or make it work by smart use of flags.
+   
+   However, for example loongarch checks the _PAGE_HUGE flag in pmd_leaf(),
+   and always sets the _PAGE_HUGE flag in __swp_entry_to_pmd().  Whereby
+   pmd_trans_huge() explicitly checks pmd_present(), pmd_leaf() does not do
+   that.
+   
+   Let's check pmd_present()/pud_present() before assuming "the is a present
+   PMD leaf" when spotting pmd_leaf()/pud_leaf(), like other page table
+   handling code that traverses user page tables does.
+   
+   Given that non-present PMD entries are likely rare in VM_IO|VM_PFNMAP, (1)
+   is likely more relevant than (2).  It is questionable how often (1) would
+   actually trigger, but let's CC stable to be sure.
+   
+   This was found by code inspection.
+   
+   Fixes: 6da8e9634bb7 ("mm: new follow_pfnmap API")
+-- hunk mm/memory.c:
+   @@ -6819,35 +6819,47 @@ int follow_pfnmap_start(struct follow_pfnmap_args *args)
+    
+    	p4dp = p4d_offset(pgdp, address);
+    	p4d = p4dp_get(p4dp);
+    	if (p4d_none(p4d) || unlikely(p4d_bad(p4d)))
+    		goto out;
+    
+    	pudp = pud_offset(p4dp, address);
+    	pud = pudp_get(pudp);
+   -	if (pud_none(pud))
+   +	if (!pud_present(pud))
+    		goto out;
+    	if (pud_leaf(pud)) {
+    		lock = pud_lock(mm, pudp);
+   -		if (!unlikely(pud_leaf(pud))) {
+   +		pud = pudp_get(pudp);
+   +
+   +		if (unlikely(!pud_present(pud))) {
+   +			spin_unlock(lock);
+   +			goto out;
+   +		} else if (unlikely(!pud_leaf(pud))) {
+    			spin_unlock(lock);
+    			goto retry;
+    		}
+    		pfnmap_args_setup(args, lock, NULL, pud_pgprot(pud),
+    				  pud_pfn(pud), PUD_MASK, pud_write(pud),
+    				  pud_special(pud));
+    		return 0;
+    	}
+    
+    	pmdp = pmd_offset(pudp, address);
+    	pmd = pmdp_get_lockless(pmdp);
+   +	if (!pmd_present(pmd))
+   +		goto out;
+    	if (pmd_leaf(pmd)) {
+    		lock = pmd_lock(mm, pmdp);
+   -		if (!unlikely(pmd_leaf(pmd))) {
+   +		pmd = pmdp_get(pmdp);
+   +
+   +		if (unlikely(!pmd_present(pmd))) {
+   +			spin_unlock(lock);
+   +			goto out;
+   +		} else if (unlikely(!pmd_leaf(pmd))) {
+    			spin_unlock(lock);
+    			goto retry;
+   …
+====================================================================================================
+[12] 0f6925b3e8da  forms=A  virtio_net: Do not pull payload in skb->head
+-- matches:
+   A A2 include/linux/virtio_net.h I=max_t E=None func=None | u32 needed = start + max_t(u32, thlen, off + sizeof(__sum16));
+-- message:
+   virtio_net: Do not pull payload in skb->head
+   
+   Xuan Zhuo reported that commit 3226b158e67c ("net: avoid 32 x truesize
+   under-estimation for tiny skbs") brought  a ~10% performance drop.
+   
+   The reason for the performance drop was that GRO was forced
+   to chain sk_buff (using skb_shinfo(skb)->frag_list), which
+   uses more memory but also cause packet consumers to go over
+   a lot of overhead handling all the tiny skbs.
+   
+   It turns out that virtio_net page_to_skb() has a wrong strategy :
+   It allocates skbs with GOOD_COPY_LEN (128) bytes in skb->head, then
+   copies 128 bytes from the page, before feeding the packet to GRO stack.
+   
+   This was suboptimal before commit 3226b158e67c ("net: avoid 32 x truesize
+   under-estimation for tiny skbs") because GRO was using 2 frags per MSS,
+   meaning we were not packing MSS with 100% efficiency.
+   
+   Fix is to pull only the ethernet header in page_to_skb()
+   
+   Then, we change virtio_net_hdr_to_skb() to pull the missing
+   headers, instead of assuming they were already pulled by callers.
+   
+   This fixes the performance regression, but could also allow virtio_net
+   to accept packets with more than 128bytes of headers.
+   
+   Many thanks to Xuan Zhuo for his report, and his tests/help.
+   
+   Fixes: 3226b158e67c ("net: avoid 32 x truesize under-estimation for tiny skbs")
+-- hunk include/linux/virtio_net.h:
+   @@ -60,24 +60,28 @@ static inline int virtio_net_hdr_to_skb(struct sk_buff *skb,
+    
+    		if (hdr->gso_size == 0)
+    			return -EINVAL;
+    	}
+    
+    	skb_reset_mac_header(skb);
+    
+    	if (hdr->flags & VIRTIO_NET_HDR_F_NEEDS_CSUM) {
+   -		u16 start = __virtio16_to_cpu(little_endian, hdr->csum_start);
+   -		u16 off = __virtio16_to_cpu(little_endian, hdr->csum_offset);
+   +		u32 start = __virtio16_to_cpu(little_endian, hdr->csum_start);
+   +		u32 off = __virtio16_to_cpu(little_endian, hdr->csum_offset);
+   +		u32 needed = start + max_t(u32, thlen, off + sizeof(__sum16));
+   +
+   +		if (!pskb_may_pull(skb, needed))
+   +			return -EINVAL;
+    
+    		if (!skb_partial_csum_set(skb, start, off))
+    			return -EINVAL;
+    
+    		p_off = skb_transport_offset(skb) + thlen;
+   -		if (p_off > skb_headlen(skb))
+   +		if (!pskb_may_pull(skb, p_off))
+    			return -EINVAL;
+    	} else {
+    		/* gso packets without NEEDS_CSUM do not set transport_offset.
+    		 * probe and drop if does not match one of the above types.
+    		 */
+    		if (gso_type && skb->network_header) {
+    			struct flow_keys_basic keys;
+    
+====================================================================================================
+[13] 5cd474e57368  forms=A  arm64: sdei: abort running SDEI handlers during crash
+-- matches:
+   A A1 drivers/firmware/arm_sdei.c I=__this_cpu_read E=None func=None | if (__this_cpu_read(sdei_active_critical_event)) {
+   A A1 drivers/firmware/arm_sdei.c I=__this_cpu_read E=None func=None | if (__this_cpu_read(sdei_active_normal_event)) {
+-- message:
+   arm64: sdei: abort running SDEI handlers during crash
+   
+   Interrupts are blocked in SDEI context, per the SDEI spec: "The client
+   interrupts cannot preempt the event handler." If we crashed in the SDEI
+   handler-running context (as with ACPI's AGDI) then we need to clean up the
+   SDEI state before proceeding to the crash kernel so that the crash kernel
+   can have working interrupts.
+   
+   Track the active SDEI handler per-cpu so that we can COMPLETE_AND_RESUME
+   the handler, discarding the interrupted context.
+   
+   Fixes: f5df26961853 ("arm64: kernel: Add arch-specific SDEI entry code and CPU masking")
+-- hunk drivers/firmware/arm_sdei.c:
+   @@ -1090,8 +1090,27 @@ int sdei_event_handler(struct pt_regs *regs,
+    	err = arg->callback(event_num, regs, arg->callback_arg);
+    	if (err)
+    		pr_err_ratelimited("event %u on CPU %u failed with error: %d\n",
+    				   event_num, smp_processor_id(), err);
+    
+    	return err;
+    }
+    NOKPROBE_SYMBOL(sdei_event_handler);
+   +
+   +void sdei_handler_abort(void)
+   +{
+   +	/*
+   +	 * If the crash happened in an SDEI event handler then we need to
+   +	 * finish the handler with the firmware so that we can have working
+   +	 * interrupts in the crash kernel.
+   +	 */
+   +	if (__this_cpu_read(sdei_active_critical_event)) {
+   +	        pr_warn("still in SDEI critical event context, attempting to finish handler.\n");
+   +	        __sdei_handler_abort();
+   +	        __this_cpu_write(sdei_active_critical_event, NULL);
+   +	}
+   +	if (__this_cpu_read(sdei_active_normal_event)) {
+   +	        pr_warn("still in SDEI normal event context, attempting to finish handler.\n");
+   +	        __sdei_handler_abort();
+   +	        __this_cpu_write(sdei_active_normal_event, NULL);
+   +	}
+   +}
+====================================================================================================
+[14] ce732a7520b0  forms=A  x86: kmsan: handle CPU entry area
+-- matches:
+   A A2 mm/kmsan/shadow.c I=arch_kmsan_get_meta_or_null E=None func=None | ret = arch_kmsan_get_meta_or_null(address, is_origin);
+-- message:
+   x86: kmsan: handle CPU entry area
+   
+   Among other data, CPU entry area holds exception stacks, so addresses from
+   this area can be passed to kmsan_get_metadata().
+   
+   This previously led to kmsan_get_metadata() returning NULL, which in turn
+   resulted in a warning that triggered further attempts to call
+   kmsan_get_metadata() in the exception context, which quickly exhausted the
+   exception stack.
+   
+   This patch allocates shadow and origin for the CPU entry area on x86 and
+   introduces arch_kmsan_get_meta_or_null(), which performs arch-specific
+   metadata mapping.
+   
+   Fixes: 21d723a7c1409 ("kmsan: add KMSAN runtime core")
+-- hunk mm/kmsan/shadow.c:
+   @@ -121,26 +120,31 @@ struct shadow_origin_ptr kmsan_get_shadow_origin_ptr(void *address, u64 size,
+     * none. The caller must check the return value for being non-NULL if needed.
+     * The return value of this function should not depend on whether we're in the
+     * runtime or not.
+     */
+    void *kmsan_get_metadata(void *address, bool is_origin)
+    {
+    	u64 addr = (u64)address, pad, off;
+    	struct page *page;
+   +	void *ret;
+    
+    	if (is_origin && !IS_ALIGNED(addr, KMSAN_ORIGIN_SIZE)) {
+    		pad = addr % KMSAN_ORIGIN_SIZE;
+    		addr -= pad;
+    	}
+    	address = (void *)addr;
+    	if (kmsan_internal_is_vmalloc_addr(address) ||
+    	    kmsan_internal_is_module_addr(address))
+    		return (void *)vmalloc_meta(address, is_origin);
+    
+   +	ret = arch_kmsan_get_meta_or_null(address, is_origin);
+   +	if (ret)
+   +		return ret;
+   +
+    	page = virt_to_page_or_null(address);
+    	if (!page)
+    		return NULL;
+    	if (!page_has_metadata(page))
+    		return NULL;
+    	off = addr % PAGE_SIZE;
+    
+    	return (is_origin ? origin_ptr_for(page) : shadow_ptr_for(page)) + off;
+====================================================================================================
+[15] 4d4b6d66db63  forms=A  mm,unmap: avoid flushing TLB in batch if PTE is inaccessible
+-- matches:
+   A A1 mm/rmap.c I=pte_accessible E=None func=None | if (!pte_accessible(mm, pteval))
+-- message:
+   mm,unmap: avoid flushing TLB in batch if PTE is inaccessible
+   
+   0Day/LKP reported a performance regression for commit 7e12beb8ca2a
+   ("migrate_pages: batch flushing TLB").  In the commit, the TLB flushing
+   during page migration is batched.  So, in try_to_migrate_one(),
+   ptep_clear_flush() is replaced with set_tlb_ubc_flush_pending().  In
+   further investigation, it is found that the TLB flushing can be avoided in
+   ptep_clear_flush() if the PTE is inaccessible.  In fact, we can optimize
+   in similar way for the batched TLB flushing too to improve the
+   performance.
+   
+   So in this patch, we check pte_accessible() before
+   set_tlb_ubc_flush_pending() in try_to_unmap/migrate_one().  Tests show
+   that the benchmark score of the anon-cow-rand-mt test case of
+   vm-scalability test suite can improve up to 2.1% with the patch on a Intel
+   server machine.  The TLB flushing IPI can reduce up to 44.3%.
+   
+   Fixes: 7e12beb8ca2a ("migrate_pages: batch flushing TLB")
+-- hunk mm/rmap.c:
+   @@ -637,20 +637,24 @@ void try_to_unmap_flush_dirty(void)
+     * Bits 16-30 of mm->tlb_flush_batched bit record flushed generations.
+     */
+    #define TLB_FLUSH_BATCH_FLUSHED_SHIFT	16
+    #define TLB_FLUSH_BATCH_PENDING_MASK			\
+    	((1 << (TLB_FLUSH_BATCH_FLUSHED_SHIFT - 1)) - 1)
+    #define TLB_FLUSH_BATCH_PENDING_LARGE			\
+    	(TLB_FLUSH_BATCH_PENDING_MASK / 2)
+    
+   -static void set_tlb_ubc_flush_pending(struct mm_struct *mm, bool writable)
+   +static void set_tlb_ubc_flush_pending(struct mm_struct *mm, pte_t pteval)
+    {
+    	struct tlbflush_unmap_batch *tlb_ubc = &current->tlb_ubc;
+    	int batch;
+   +	bool writable = pte_dirty(pteval);
+   +
+   +	if (!pte_accessible(mm, pteval))
+   +		return;
+    
+    	arch_tlbbatch_add_mm(&tlb_ubc->arch, mm);
+    	tlb_ubc->flush_required = true;
+    
+    	/*
+    	 * Ensure compiler does not re-order the setting of tlb_flush_batched
+    	 * before the PTE is cleared.
+    	 */
+====================================================================================================
+[16] 3faa3ebc89c1  forms=A  mm/page_idle: handle device-exclusive entries correctly in page_idle_clear_pte_refs_one()
+-- matches:
+   A A1 mm/page_idle.c I=pte_present E=None func=None | if (likely(pte_present(ptep_get(pvmw.pte))))
+   A A1 mm/page_idle.c I=ptep_get E=None func=None | if (likely(pte_present(ptep_get(pvmw.pte))))
+-- message:
+   mm/page_idle: handle device-exclusive entries correctly in page_idle_clear_pte_refs_one()
+   
+   Ever since commit b756a3b5e7ea ("mm: device exclusive memory access") we
+   can return with a device-exclusive entry from page_vma_mapped_walk().
+   
+   page_idle_clear_pte_refs_one() is not prepared for that, so let's teach it
+   what to do with these PFN swap PTEs.  Note that device-private entries are
+   so far not applicable on that path, as page_idle_get_folio() filters out
+   non-lru folios.
+   
+   Should we just skip PFN swap PTEs completely?  Possible, but it seems
+   straight forward to just handle them correctly.
+   
+   Note that we could currently only run into this case with device-exclusive
+   entries on THPs.  We still adjust the mapcount on conversion to
+   device-exclusive; this makes the rmap walk abort early for small folios,
+   because we'll always have !folio_mapped() with a single device-exclusive
+   entry.  We'll adjust the mapcount logic once all page_vma_mapped_walk()
+   users can properly handle device-exclusive entries.
+   
+   Fixes: b756a3b5e7ea ("mm: device exclusive memory access")
+-- hunk mm/page_idle.c:
+   @@ -57,19 +57,24 @@ static bool page_idle_clear_pte_refs_one(struct folio *folio,
+    	bool referenced = false;
+    
+    	while (page_vma_mapped_walk(&pvmw)) {
+    		addr = pvmw.address;
+    		if (pvmw.pte) {
+    			/*
+    			 * For PTE-mapped THP, one sub page is referenced,
+    			 * the whole THP is referenced.
+   +			 *
+   +			 * PFN swap PTEs, such as device-exclusive ones, that
+   +			 * actually map pages are "old" from a CPU perspective.
+   +			 * The MMU notifier takes care of any device aspects.
+    			 */
+   -			if (ptep_clear_young_notify(vma, addr, pvmw.pte))
+   -				referenced = true;
+   +			if (likely(pte_present(ptep_get(pvmw.pte))))
+   +				referenced |= ptep_test_and_clear_young(vma, addr, pvmw.pte);
+   +			referenced |= mmu_notifier_clear_young(vma->vm_mm, addr, addr + PAGE_SIZE);
+    		} else if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE)) {
+    			if (pmdp_clear_young_notify(vma, addr, pvmw.pmd))
+    				referenced = true;
+    		} else {
+    			/* unexpected pmd-mapped page? */
+    			WARN_ON_ONCE(1);
+    		}
+    	}
+====================================================================================================
+[17] 22061a1ffabd  forms=A  mm/thp: unmap_mapping_page() to fix THP truncate_cleanup_page()
+-- matches:
+   A A1 mm/memory.c I=pmd_none E=None func=None | if (details && details->single_page && 			   PageTransCompound(details->single_page) && 			   next - addr == HPAGE_PMD_S
+-- message:
+   mm/thp: unmap_mapping_page() to fix THP truncate_cleanup_page()
+   
+   There is a race between THP unmapping and truncation, when truncate sees
+   pmd_none() and skips the entry, after munmap's zap_huge_pmd() cleared
+   it, but before its page_remove_rmap() gets to decrement
+   compound_mapcount: generating false "BUG: Bad page cache" reports that
+   the page is still mapped when deleted.  This commit fixes that, but not
+   in the way I hoped.
+   
+   The first attempt used try_to_unmap(page, TTU_SYNC|TTU_IGNORE_MLOCK)
+   instead of unmap_mapping_range() in truncate_cleanup_page(): it has
+   often been an annoyance that we usually call unmap_mapping_range() with
+   no pages locked, but there apply it to a single locked page.
+   try_to_unmap() looks more suitable for a single locked page.
+   
+   However, try_to_unmap_one() contains a VM_BUG_ON_PAGE(!pvmw.pte,page):
+   it is used to insert THP migration entries, but not used to unmap THPs.
+   Copy zap_huge_pmd() and add THP handling now? Perhaps, but their TLB
+   needs are different, I'm too ignorant of the DAX cases, and couldn't
+   decide how far to go for anon+swap.  Set that aside.
+   
+   The second attempt took a different tack: make no change in truncate.c,
+   but modify zap_huge_pmd() to insert an invalidated huge pmd instead of
+   clearing it initially, then pmd_clear() between page_remove_rmap() and
+   unlocking at the end.  Nice.  But powerpc blows that approach out of the
+   water, with its serialize_against_pte_lookup(), and interesting pgtable
+   usage.  It would need serious help to get working on powerpc (with a
+   minor optimization issue on s390 too).  Set that aside.
+   
+   Just add an "if (page_mapped(page)) synchronize_rcu();" or other such
+   delay, after unmapping in truncate_cleanup_page()? Perhaps, but though
+   that's likely to reduce or eliminate the number of incidents, it would
+   give less assurance of whether we had identified the problem correctly.
+   
+   This successful iteration introduces "unmap_mapping_page(page)" instead
+   of try_to_unmap(), and goes the usual unmap_mapping_range_tree() route,
+   with an addition to details.  Then zap_pmd_range() watches for this
+   case, and does spin_unlock(pmd_lock) if so - just like
+   page_vma_mapped_walk() now does in the PVMW_SYNC case.  Not pretty, but
+   safe.
+   …
+====================================================================================================
+[18] dae8dda341d2  forms=A  tracing: Fix subbuf resize races with trace_pipe_raw readers
+-- matches:
+   A A2 kernel/trace/ring_buffer.c I=min_t E=None func=None | len = min_t(size_t, len, rb_read_page_capacity(data_page));
+-- message:
+   tracing: Fix subbuf resize races with trace_pipe_raw readers
+   
+   Concurrent subbuffer resizes may crash trace_pipe_raw readers or leak
+   uninitialized memory to userspace due to stale size values.
+   
+   Modify ring_buffer_alloc_read_page() to handle the resizing of an
+   existing buffer_data_read_page if necessary and add a new
+   ring_buffer_read_page_size(). This new function enables ring-buffer
+   buffer_data_read_page users to not call the racy
+   ring_buffer_subbuf_size_get(). This makes the spare_size member of
+   ftrace_buffer_info redundant.
+   
+   Finally, handle buffer_data_read_page/reader_page order discrepancy in
+   ring_buffer_read_page(). On a mismatch simply copy manually the data to
+   the buffer_data_read_page.
+   
+   Fixes: bce761d75745 ("ring-buffer: Read and write to ring buffers with custom sub buffer size")
+-- hunk kernel/trace/ring_buffer.c:
+   @@ -7159,44 +7195,45 @@ int ring_buffer_read_page(struct trace_buffer *buffer,
+    
+    	if (!data_page || !data_page->data)
+    		return -1;
+    
+    	dpage = data_page->data;
+    	if (!dpage)
+    		return -1;
+    
+   -	guard(raw_spinlock_irqsave)(&cpu_buffer->reader_lock);
+   +	len = min_t(size_t, len, rb_read_page_capacity(data_page));
+    
+   -	if (data_page->order != cpu_buffer->reader_page->order)
+   -		return -1;
+   +	guard(raw_spinlock_irqsave)(&cpu_buffer->reader_lock);
+    
+    	reader = rb_get_reader_page(cpu_buffer);
+    	if (!reader)
+    		return -1;
+    
+    	event = rb_reader_event(cpu_buffer);
+    
+    	read = reader->read;
+    	commit = rb_page_commit(reader);
+    	size = rb_page_size(reader);
+    
+    	/* Check if any events were dropped */
+    	missed_events = cpu_buffer->lost_events;
+    
+   -	/*
+   -	 * If this page has been partially read or
+   -	 * if len is not big enough to read the rest of the page or
+   -	 * a writer is still on the page, then
+   -	 * we must copy the data from the page to the buffer.
+   -	 * Otherwise, we can simply swap the page with the one passed in.
+   -	 */
+   +	 /*
+   +	  * It is not possible to swap the reader page if:
+   +	  *   - It has been partially read
+   +	  *   - len is not big enough to read it entirely
+   +	  *   - A writer is still on it
+   +	  *   - The ring buffer is static
+   +	  *   - The order doesn't match
+   +	  */
+    	if (read || (len < (size - read)) ||
+   …
+====================================================================================================
+[19] c5e1a1eb9279  forms=A  iommu/amd: Simplify and Consolidate Virtual APIC (AVIC) Enablement
+-- matches:
+   A A2 drivers/iommu/amd/init.c I=readl E=None func=None | status = readl(iommu->mmio_base + MMIO_STATUS_OFFSET);
+   A A2 drivers/iommu/amd/init.c I=readl E=None func=None | status = readl(iommu->mmio_base + MMIO_STATUS_OFFSET);
+-- message:
+   iommu/amd: Simplify and Consolidate Virtual APIC (AVIC) Enablement
+   
+   Currently, enabling AVIC requires individually detect and enable GAM and
+   GALOG features on each IOMMU, which is difficult to keep track on
+   multi-IOMMU system, where the features needs to be enabled system-wide.
+   
+   In addition, these features do not need to be enabled in early stage.
+   It can be delayed until after amd_iommu_init_pci().
+   
+   Therefore, consolidate logic for detecting and enabling IOMMU GAM and
+   GALOG features into a helper function, enable_iommus_vapic(), which uses
+   the check_feature_on_all_iommus() helper function to ensure system-wide
+   support of the features before enabling them, and postpone until after
+   amd_iommu_init_pci().
+   
+   The new function also check and clean up feature enablement residue from
+   previous boot (e.g. in case of booting into kdump kernel), which triggers
+   a WARN_ON (shown below) introduced by the commit a8d4a37d1bb9 ("iommu/amd:
+   Restore GA log/tail pointer on host resume") in iommu_ga_log_enable().
+   
+   [    7.731955] ------------[ cut here ]------------
+   [    7.736575] WARNING: CPU: 0 PID: 1 at drivers/iommu/amd/init.c:829 iommu_ga_log_enable.isra.0+0x16f/0x190
+   [    7.746135] Modules linked in:
+   [    7.749193] CPU: 0 PID: 1 Comm: swapper/0 Tainted: G        W        --------  ---  5.19.0-0.rc7.53.eln120.x86_64 #1
+   [    7.759706] Hardware name: Dell Inc. PowerEdge R7525/04D5GJ, BIOS 2.1.6 03/09/2021
+   [    7.767274] RIP: 0010:iommu_ga_log_enable.isra.0+0x16f/0x190
+   [    7.772931] Code: 20 20 00 00 8b 00 f6 c4 01 74 da 48 8b 44 24 08 65 48 2b 04 25 28 00 00 00 75 13 48 83 c4 10 5b 5d e9 f5 00 72 00 0f 0b eb e1 <0f> 0b eb dd e8 f8 66 42 00 48 8b 15 f1 85 53 01 e9 29 ff ff ff 48
+   [    7.791679] RSP: 0018:ffffc90000107d20 EFLAGS: 00010206
+   [    7.796905] RAX: ffffc90000780000 RBX: 0000000000000100 RCX: ffffc90000780000
+   [    7.804038] RDX: 0000000000000001 RSI: ffffc90000780000 RDI: ffff8880451f9800
+   [    7.811170] RBP: ffff8880451f9800 R08: ffffffffffffffff R09: 0000000000000000
+   [    7.818303] R10: 0000000000000000 R11: 0000000000000000 R12: 0008000000000000
+   [    7.825435] R13: ffff8880462ea900 R14: 0000000000000021 R15: 0000000000000000
+   [    7.832572] FS:  0000000000000000(0000) GS:ffff888054a00000(0000) knlGS:0000000000000000
+   [    7.840657] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+   [    7.846400] CR2: ffff888054dff000 CR3: 0000000053210000 CR4: 0000000000350eb0
+   [    7.853533] Call Trace:
+   [    7.855979]  <TASK>
+   [    7.858085]  amd_iommu_enable_interrupts+0x180/0x270
+   [    7.863051]  ? iommu_setup+0x271/0x271
+   …
+-- hunk drivers/iommu/amd/init.c:
+   @@ -903,21 +903,16 @@ static int iommu_ga_log_enable(struct amd_iommu *iommu)
+    {
+    #ifdef CONFIG_IRQ_REMAP
+    	u32 status, i;
+    	u64 entry;
+    
+    	if (!iommu->ga_log)
+    		return -EINVAL;
+    
+   -	/* Check if already running */
+   -	status = readl(iommu->mmio_base + MMIO_STATUS_OFFSET);
+   -	if (WARN_ON(status & (MMIO_STATUS_GALOG_RUN_MASK)))
+   -		return 0;
+   -
+    	entry = iommu_virt_to_phys(iommu->ga_log) | GA_LOG_SIZE_512;
+    	memcpy_toio(iommu->mmio_base + MMIO_GA_LOG_BASE_OFFSET,
+    		    &entry, sizeof(entry));
+    	entry = (iommu_virt_to_phys(iommu->ga_log_tail) &
+    		 (BIT_ULL(52)-1)) & ~7ULL;
+    	memcpy_toio(iommu->mmio_base + MMIO_GA_LOG_TAIL_OFFSET,
+    		    &entry, sizeof(entry));
+    	writel(0x00, iommu->mmio_base + MMIO_GA_HEAD_OFFSET);
+-- hunk drivers/iommu/amd/init.c:
+   @@ -2754,45 +2738,85 @@ static void early_enable_iommus(void)
+    			iommu_enable_command_buffer(iommu);
+    			iommu_enable_event_buffer(iommu);
+    			iommu_enable_ga(iommu);
+    			iommu_enable_xt(iommu);
+    			iommu_set_device_table(iommu);
+    			iommu_flush_all_caches(iommu);
+    		}
+    	}
+   -
+   -#ifdef CONFIG_IRQ_REMAP
+   -	/*
+   -	 * Note: We have already checked GASup from IVRS table.
+   -	 *       Now, we need to make sure that GAMSup is set.
+   -	 */
+   -	if (AMD_IOMMU_GUEST_IR_VAPIC(amd_iommu_guest_ir) &&
+   -	    !check_feature_on_all_iommus(FEATURE_GAM_VAPIC))
+   -		amd_iommu_guest_ir = AMD_IOMMU_GUEST_IR_LEGACY_GA;
+   -
+   -	if (AMD_IOMMU_GUEST_IR_VAPIC(amd_iommu_guest_ir))
+   -		amd_iommu_irq_ops.capability |= (1 << IRQ_POSTING_CAP);
+   -#endif
+    }
+    
+    static void enable_iommus_v2(void)
+    {
+    	struct amd_iommu *iommu;
+    
+    	for_each_iommu(iommu) {
+    		iommu_enable_ppr_log(iommu);
+    		iommu_enable_gt(iommu);
+    	}
+    }
+    
+   +static void enable_iommus_vapic(void)
+   +{
+   +#ifdef CONFIG_IRQ_REMAP
+   +	u32 status, i;
+   +	struct amd_iommu *iommu;
+   +
+   +	for_each_iommu(iommu) {
+   +		/*
+   +		 * Disable GALog if already running. It could have been enabled
+   +		 * in the previous boot before kdump.
+   +		 */
+   …
+====================================================================================================
+[20] 43e7f189769c  forms=A  mm/huge_memory: use correct flags for device private PMD entry
+-- matches:
+   A A2 mm/huge_memory.c I=pmd_swp_soft_dirty E=None func=None | softdirty = pmd_swp_soft_dirty(pmdval);
+-- message:
+   mm/huge_memory: use correct flags for device private PMD entry
+   
+   Commit 65edfda6f3f2 ("mm/rmap: extend rmap and migration support
+   device-private entries") updated set_pmd_migration_entry() to use
+   pmdp_huge_get_and_clear() in the softleaf case, but made no further
+   adjustments to the function itself.
+   
+   Therefore this function continues to incorrectly use pmd_write(),
+   pmd_soft_dirty() and pmd_uffd_wp() to determine whether the installed
+   migration entry should be marked writable, softdirty or uffd-wp
+   respectively.
+   
+   Whilst all are incorrect, the most problematic of these is pmd_write(), as
+   this can lead to corrupted rmap state.
+   
+   On x86-64 _PAGE_SWP_SOFT_DIRTY is aliased to _PAGE_RW.  So calling
+   pmd_write() on a softleaf will return the softdirty state encoded in the
+   entry, assuming CONFIG_MEM_SOFT_DIRTY was enabled.
+   
+   This was observed when running the hmm.hmm_device_private.anon_write_child
+   selftest:
+   
+   1. The test faults in a range then migrates it such that a device-private
+      THP range is established.
+   
+   2. The parent then migrates it to a device-private writable PMD entry whose
+      folio is entirely AnonExclusive with entire_mapcount=1, softdirty set
+      (accidentally correct write state).
+   
+   3. The parent forks and the PMD entries are set to device-private read only
+      entries, entire_mapcount=2, softdirty still set.
+   
+   4. [BUG] The child writes to the range then migrates to RAM - intending to
+      install non-writable migration entries - but replacing parent and child
+      PMD mappings with WRITABLE entries due to misinterpreting the softdirty
+      bit.
+   
+   5. In remove_migration_pmd(), if !softleaf_is_migration_read(entry) we
+      set the RMAP_EXCLUSIVE flag when calling folio_add_anon_rmap_pmd() for
+      both parent and child, which are therefore AnonExclusive.
+   …
+-- hunk mm/huge_memory.c:
+   @@ -4978,55 +4978,76 @@ late_initcall(split_huge_pages_debugfs);
+    #ifdef CONFIG_ARCH_ENABLE_THP_MIGRATION
+    int set_pmd_migration_entry(struct page_vma_mapped_walk *pvmw,
+    		struct page *page)
+    {
+    	struct folio *folio = page_folio(page);
+    	struct vm_area_struct *vma = pvmw->vma;
+    	struct mm_struct *mm = vma->vm_mm;
+    	unsigned long address = pvmw->address;
+   -	bool anon_exclusive;
+   +	bool anon_exclusive, present, writable, softdirty, uffd_wp;
+    	pmd_t pmdval;
+    	swp_entry_t entry;
+    	pmd_t pmdswp;
+    
+    	if (!(pvmw->pmd && !pvmw->pte))
+    		return 0;
+    
+   -	flush_cache_range(vma, address, address + HPAGE_PMD_SIZE);
+   -	if (unlikely(!pmd_present(*pvmw->pmd)))
+   -		pmdval = pmdp_huge_get_and_clear(vma->vm_mm, address, pvmw->pmd);
+   -	else
+   +	present = pmd_present(*pvmw->pmd);
+   +	if (likely(present)) {
+   +		flush_cache_range(vma, address, address + HPAGE_PMD_SIZE);
+   +
+    		pmdval = pmdp_invalidate(vma, address, pvmw->pmd);
+    
+   +		writable = pmd_write(pmdval);
+   +		softdirty = pmd_soft_dirty(pmdval);
+   +		uffd_wp = pmd_uffd_wp(pmdval);
+   +	} else {
+   +		softleaf_t old_entry;
+   +
+   +		pmdval = pmdp_huge_get_and_clear(vma->vm_mm, address, pvmw->pmd);
+   +		old_entry = softleaf_from_pmd(pmdval);
+   +
+   +		writable = softleaf_is_device_private_write(old_entry);
+   +		softdirty = pmd_swp_soft_dirty(pmdval);
+   +		uffd_wp = pmd_swp_uffd_wp(pmdval);
+   +	}
+   +
+    	/* See folio_try_share_anon_rmap_pmd(): invalidate PMD first. */
+    	anon_exclusive = folio_test_anon(folio) && PageAnonExclusive(page);
+    	if (anon_exclusive && folio_try_share_anon_rmap_pmd(folio, page)) {
+   …
+====================================================================================================
+[21] 92424801261d  forms=B  bpf: Fix reg_set_min_max corruption of fake_reg
+-- matches:
+   B  kernel/bpf/verifier.c I=['verbose'] E=memset func=None | memset(src_reg, 0, sizeof(*src_reg));
+-- message:
+   bpf: Fix reg_set_min_max corruption of fake_reg
+   
+   Juan reported that after doing some changes to buzzer [0] and implementing
+   a new fuzzing strategy guided by coverage, they noticed the following in
+   one of the probes:
+   
+     [...]
+     13: (79) r6 = *(u64 *)(r0 +0)         ; R0=map_value(ks=4,vs=8) R6_w=scalar()
+     14: (b7) r0 = 0                       ; R0_w=0
+     15: (b4) w0 = -1                      ; R0_w=0xffffffff
+     16: (74) w0 >>= 1                     ; R0_w=0x7fffffff
+     17: (5c) w6 &= w0                     ; R0_w=0x7fffffff R6_w=scalar(smin=smin32=0,smax=umax=umax32=0x7fffffff,var_off=(0x0; 0x7fffffff))
+     18: (44) w6 |= 2                      ; R6_w=scalar(smin=umin=smin32=umin32=2,smax=umax=umax32=0x7fffffff,var_off=(0x2; 0x7ffffffd))
+     19: (56) if w6 != 0x7ffffffd goto pc+1
+     REG INVARIANTS VIOLATION (true_reg2): range bounds violation u64=[0x7fffffff, 0x7ffffffd] s64=[0x7fffffff, 0x7ffffffd] u32=[0x7fffffff, 0x7ffffffd] s32=[0x7fffffff, 0x7ffffffd] var_off=(0x7fffffff, 0x0)
+     REG INVARIANTS VIOLATION (false_reg1): range bounds violation u64=[0x7fffffff, 0x7ffffffd] s64=[0x7fffffff, 0x7ffffffd] u32=[0x7fffffff, 0x7ffffffd] s32=[0x7fffffff, 0x7ffffffd] var_off=(0x7fffffff, 0x0)
+     REG INVARIANTS VIOLATION (false_reg2): const tnum out of sync with range bounds u64=[0x0, 0xffffffffffffffff] s64=[0x8000000000000000, 0x7fffffffffffffff] u32=[0x0, 0xffffffff] s32=[0x80000000, 0x7fffffff] var_off=(0x7fffffff, 0x0)
+     19: R6_w=0x7fffffff
+     20: (95) exit
+   
+     from 19 to 21: R0=0x7fffffff R6=scalar(smin=umin=smin32=umin32=2,smax=umax=smax32=umax32=0x7ffffffe,var_off=(0x2; 0x7ffffffd)) R7=map_ptr(ks=4,vs=8) R9=ctx() R10=fp0 fp-24=map_ptr(ks=4,vs=8) fp-40=mmmmmmmm
+     21: R0=0x7fffffff R6=scalar(smin=umin=smin32=umin32=2,smax=umax=smax32=umax32=0x7ffffffe,var_off=(0x2; 0x7ffffffd)) R7=map_ptr(ks=4,vs=8) R9=ctx() R10=fp0 fp-24=map_ptr(ks=4,vs=8) fp-40=mmmmmmmm
+     21: (14) w6 -= 2147483632             ; R6_w=scalar(smin=umin=umin32=2,smax=umax=0xffffffff,smin32=0x80000012,smax32=14,var_off=(0x2; 0xfffffffd))
+     22: (76) if w6 s>= 0xe goto pc+1      ; R6_w=scalar(smin=umin=umin32=2,smax=umax=0xffffffff,smin32=0x80000012,smax32=13,var_off=(0x2; 0xfffffffd))
+     23: (95) exit
+   
+     from 22 to 24: R0=0x7fffffff R6_w=14 R7=map_ptr(ks=4,vs=8) R9=ctx() R10=fp0 fp-24=map_ptr(ks=4,vs=8) fp-40=mmmmmmmm
+     24: R0=0x7fffffff R6_w=14 R7=map_ptr(ks=4,vs=8) R9=ctx() R10=fp0 fp-24=map_ptr(ks=4,vs=8) fp-40=mmmmmmmm
+     24: (14) w6 -= 14                     ; R6_w=0
+     [...]
+   
+   What can be seen here is a register invariant violation on line 19. After
+   the binary-or in line 18, the verifier knows that bit 2 is set but knows
+   nothing about the rest of the content which was loaded from a map value,
+   meaning, range is [2,0x7fffffff] with var_off=(0x2; 0x7ffffffd). When in
+   line 19 the verifier analyzes the branch, it splits the register states
+   in reg_set_min_max() into the registers of the true branch (true_reg1,
+   true_reg2) and the registers of the false branch (false_reg1, false_reg2).
+   
+   Since the test is w6 != 0x7ffffffd, the src_reg is a known constant.
+   …
+-- hunk kernel/bpf/verifier.c:
+   @@ -15174,17 +15173,18 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
+    				insn->src_reg);
+    			return -EACCES;
+    		}
+    	} else {
+    		if (insn->src_reg != BPF_REG_0) {
+    			verbose(env, "BPF_JMP/JMP32 uses reserved fields\n");
+    			return -EINVAL;
+    		}
+   -		src_reg = &fake_reg;
+   +		src_reg = &env->fake_reg[0];
+   +		memset(src_reg, 0, sizeof(*src_reg));
+    		src_reg->type = SCALAR_VALUE;
+    		__mark_reg_known(src_reg, insn->imm);
+    	}
+    
+    	is_jmp32 = BPF_CLASS(insn->code) == BPF_JMP32;
+    	pred = is_branch_taken(dst_reg, src_reg, opcode, is_jmp32);
+    	if (pred >= 0) {
+    		/* If we get here with a dst_reg pointer type it is because
+====================================================================================================
+[22] 0a744cceebd0  forms=B  firmware: qcom: scm: Fix missing read barrier in qcom_scm_is_available()
+-- matches:
+   B  drivers/firmware/qcom/qcom_scm.c I=['clk_set_rate'] E=smp_load_acquire func=None | /* Paired with smp_load_acquire() in qcom_scm_is_available(). */
+-- message:
+   firmware: qcom: scm: Fix missing read barrier in qcom_scm_is_available()
+   
+   Commit 2e4955167ec5 ("firmware: qcom: scm: Fix __scm and waitq
+   completion variable initialization") introduced a write barrier in probe
+   function to store global '__scm' variable.  It also claimed that it
+   added a read barrier, because as we all known barriers are paired (see
+   memory-barriers.txt: "Note that write barriers should normally be paired
+   with read or address-dependency barriers"), however it did not really
+   add it.
+   
+   The offending commit used READ_ONCE() to access '__scm' global which is
+   not a barrier.
+   
+   The barrier is needed so the store to '__scm' will be properly visible.
+   This is most likely not fatal in current driver design, because missing
+   read barrier would mean qcom_scm_is_available() callers will access old
+   value, NULL.  Driver does not support unbinding and does not correctly
+   handle probe failures, thus there is no risk of stale or old pointer in
+   '__scm' variable.
+   
+   However for code correctness, readability and to be sure that we did not
+   mess up something in this tricky topic of SMP barriers, add a read
+   barrier for accessing '__scm'.  Change also comment from useless/obvious
+   what does barrier do, to what is expected: which other parts of the code
+   are involved here.
+   
+   Fixes: 2e4955167ec5 ("firmware: qcom: scm: Fix __scm and waitq completion variable initialization")
+-- hunk drivers/firmware/qcom/qcom_scm.c:
+   @@ -2024,17 +2025,17 @@ static int qcom_scm_probe(struct platform_device *pdev)
+    	if (ret)
+    		return ret;
+    
+    	/* vote for max clk rate for highest performance */
+    	ret = clk_set_rate(scm->core_clk, INT_MAX);
+    	if (ret)
+    		return ret;
+    
+   -	/* Let all above stores be available after this */
+   +	/* Paired with smp_load_acquire() in qcom_scm_is_available(). */
+    	smp_store_release(&__scm, scm);
+    
+    	irq = platform_get_irq_optional(pdev, 0);
+    	if (irq < 0) {
+    		if (irq != -ENXIO)
+    			return irq;
+    	} else {
+    		ret = devm_request_threaded_irq(__scm->dev, irq, NULL, qcom_scm_irq_handler,
+====================================================================================================
+[23] dde30854bddf  forms=B  mm/debug_vm_pgtable: clear page table entries at destroy_args()
+-- matches:
+   B  mm/debug_vm_pgtable.c I=['pmd_clear', 'pte_free'] E=pud_clear func=None | pud_clear(args->pudp);
+   B  mm/debug_vm_pgtable.c I=['pmd_free', 'pud_clear'] E=p4d_clear func=None | p4d_clear(args->p4dp);
+-- message:
+   mm/debug_vm_pgtable: clear page table entries at destroy_args()
+   
+   The mm/debug_vm_pagetable test allocates manually page table entries for
+   the tests it runs, using also its manually allocated mm_struct.  That in
+   itself is ok, but when it exits, at destroy_args() it fails to clear those
+   entries with the *_clear functions.
+   
+   The problem is that leaves stale entries.  If another process allocates an
+   mm_struct with a pgd at the same address, it may end up running into the
+   stale entry.  This is happening in practice on a debug kernel with
+   CONFIG_DEBUG_VM_PGTABLE=y, for example this is the output with some extra
+   debugging I added (it prints a warning trace if pgtables_bytes goes
+   negative, in addition to the warning at check_mm() function):
+   
+   [    2.539353] debug_vm_pgtable: [get_random_vaddr         ]: random_vaddr is 0x7ea247140000
+   [    2.539366] kmem_cache info
+   [    2.539374] kmem_cachep 0x000000002ce82385 - freelist 0x0000000000000000 - offset 0x508
+   [    2.539447] debug_vm_pgtable: [init_args                ]: args->mm is 0x000000002267cc9e
+   (...)
+   [    2.552800] WARNING: CPU: 5 PID: 116 at include/linux/mm.h:2841 free_pud_range+0x8bc/0x8d0
+   [    2.552816] Modules linked in:
+   [    2.552843] CPU: 5 UID: 0 PID: 116 Comm: modprobe Not tainted 6.12.0-105.debug_vm2.el10.ppc64le+debug #1 VOLUNTARY
+   [    2.552859] Hardware name: IBM,9009-41A POWER9 (architected) 0x4e0202 0xf000005 of:IBM,FW910.00 (VL910_062) hv:phyp pSeries
+   [    2.552872] NIP:  c0000000007eef3c LR: c0000000007eef30 CTR: c0000000003d8c90
+   [    2.552885] REGS: c0000000622e73b0 TRAP: 0700   Not tainted  (6.12.0-105.debug_vm2.el10.ppc64le+debug)
+   [    2.552899] MSR:  800000000282b033 <SF,VEC,VSX,EE,FP,ME,IR,DR,RI,LE>  CR: 24002822  XER: 0000000a
+   [    2.552954] CFAR: c0000000008f03f0 IRQMASK: 0
+   [    2.552954] GPR00: c0000000007eef30 c0000000622e7650 c000000002b1ac00 0000000000000001
+   [    2.552954] GPR04: 0000000000000008 0000000000000000 c0000000007eef30 ffffffffffffffff
+   [    2.552954] GPR08: 00000000ffff00f5 0000000000000001 0000000000000048 0000000000004000
+   [    2.552954] GPR12: 00000003fa440000 c000000017ffa300 c0000000051d9f80 ffffffffffffffdb
+   [    2.552954] GPR16: 0000000000000000 0000000000000008 000000000000000a 60000000000000e0
+   [    2.552954] GPR20: 4080000000000000 c0000000113af038 00007fffcf130000 0000700000000000
+   [    2.552954] GPR24: c000000062a6a000 0000000000000001 8000000062a68000 0000000000000001
+   [    2.552954] GPR28: 000000000000000a c000000062ebc600 0000000000002000 c000000062ebc760
+   [    2.553170] NIP [c0000000007eef3c] free_pud_range+0x8bc/0x8d0
+   [    2.553185] LR [c0000000007eef30] free_pud_range+0x8b0/0x8d0
+   [    2.553199] Call Trace:
+   [    2.553207] [c0000000622e7650] [c0000000007eef30] free_pud_range+0x8b0/0x8d0 (unreliable)
+   [    2.553229] [c0000000622e7750] [c0000000007f40b4] free_pgd_range+0x284/0x3b0
+   …
+-- hunk mm/debug_vm_pgtable.c:
+   @@ -985,39 +985,44 @@ static void __init destroy_args(struct pgtable_debug_args *args)
+    		page = pfn_to_page(args->pte_pfn);
+    		__free_page(page);
+    
+    		args->pte_pfn = ULONG_MAX;
+    	}
+    
+    	/* Free page table entries */
+    	if (args->start_ptep) {
+   +		pmd_clear(args->pmdp);
+    		pte_free(args->mm, args->start_ptep);
+    		mm_dec_nr_ptes(args->mm);
+    	}
+    
+    	if (args->start_pmdp) {
+   +		pud_clear(args->pudp);
+    		pmd_free(args->mm, args->start_pmdp);
+    		mm_dec_nr_pmds(args->mm);
+    	}
+    
+    	if (args->start_pudp) {
+   +		p4d_clear(args->p4dp);
+    		pud_free(args->mm, args->start_pudp);
+    		mm_dec_nr_puds(args->mm);
+    	}
+    
+   -	if (args->start_p4dp)
+   +	if (args->start_p4dp) {
+   +		pgd_clear(args->pgdp);
+    		p4d_free(args->mm, args->start_p4dp);
+   +	}
+    
+    	/* Free vma and mm struct */
+    	if (args->vma)
+    		vm_area_free(args->vma);
+    
+    	if (args->mm)
+   -		mmdrop(args->mm);
+   +		mmput(args->mm);
+    }
+    
+    static struct page * __init
+    debug_vm_pgtable_alloc_huge_page(struct pgtable_debug_args *args, int order)
+    {
+    	struct page *page = NULL;
+   …
+====================================================================================================
+[24] 5c5f0468d172  forms=B  mm/vmalloc: fix data race in show_numa_info()
+-- matches:
+   B  mm/vmalloc.c I=['smp_wmb'] E=smp_rmb func=None | smp_rmb();
+-- message:
+   mm/vmalloc: fix data race in show_numa_info()
+   
+   The following data-race was found in show_numa_info():
+   
+   ==================================================================
+   BUG: KCSAN: data-race in vmalloc_info_show / vmalloc_info_show
+   
+   read to 0xffff88800971fe30 of 4 bytes by task 8289 on cpu 0:
+    show_numa_info mm/vmalloc.c:4936 [inline]
+    vmalloc_info_show+0x5a8/0x7e0 mm/vmalloc.c:5016
+    seq_read_iter+0x373/0xb40 fs/seq_file.c:230
+    proc_reg_read_iter+0x11e/0x170 fs/proc/inode.c:299
+   ....
+   
+   write to 0xffff88800971fe30 of 4 bytes by task 8287 on cpu 1:
+    show_numa_info mm/vmalloc.c:4934 [inline]
+    vmalloc_info_show+0x38f/0x7e0 mm/vmalloc.c:5016
+    seq_read_iter+0x373/0xb40 fs/seq_file.c:230
+    proc_reg_read_iter+0x11e/0x170 fs/proc/inode.c:299
+   ....
+   
+   value changed: 0x0000008f -> 0x00000000
+   ==================================================================
+   
+   According to this report,there is a read/write data-race because
+   m->private is accessible to multiple CPUs.  To fix this, instead of
+   allocating the heap in proc_vmalloc_init() and passing the heap address to
+   m->private, vmalloc_info_show() should allocate the heap.
+   
+   Fixes: 8e1d743f2c26 ("mm: vmalloc: support multiple nodes in vmallocinfo")
+-- hunk mm/vmalloc.c:
+   @@ -4934,38 +4934,39 @@ bool vmalloc_dump_obj(void *object)
+    	pr_cont(" %u-page vmalloc region starting at %#lx allocated at %pS\n",
+    		nr_pages, addr, caller);
+    
+    	return true;
+    }
+    #endif
+    
+    #ifdef CONFIG_PROC_FS
+   -static void show_numa_info(struct seq_file *m, struct vm_struct *v)
+   -{
+   -	if (IS_ENABLED(CONFIG_NUMA)) {
+   -		unsigned int nr, *counters = m->private;
+   -		unsigned int step = 1U << vm_area_page_order(v);
+    
+   -		if (!counters)
+   -			return;
+   +/*
+   + * Print number of pages allocated on each memory node.
+   + *
+   + * This function can only be called if CONFIG_NUMA is enabled
+   + * and VM_UNINITIALIZED bit in v->flags is disabled.
+   + */
+   +static void show_numa_info(struct seq_file *m, struct vm_struct *v,
+   +				 unsigned int *counters)
+   +{
+   +	unsigned int nr;
+   +	unsigned int step = 1U << vm_area_page_order(v);
+    
+   -		if (v->flags & VM_UNINITIALIZED)
+   -			return;
+   -		/* Pair with smp_wmb() in clear_vm_uninitialized_flag() */
+   -		smp_rmb();
+   +	if (!counters)
+   +		return;
+    
+   -		memset(counters, 0, nr_node_ids * sizeof(unsigned int));
+   +	memset(counters, 0, nr_node_ids * sizeof(unsigned int));
+    
+   -		for (nr = 0; nr < v->nr_pages; nr += step)
+   -			counters[page_to_nid(v->pages[nr])] += step;
+   -		for_each_node_state(nr, N_HIGH_MEMORY)
+   -			if (counters[nr])
+   -				seq_printf(m, " N%u=%u", nr, counters[nr]);
+   -	}
+   …
+-- hunk mm/vmalloc.c:
+   @@ -4979,30 +4980,39 @@ static void show_purge_info(struct seq_file *m)
+    	}
+    }
+    
+    static int vmalloc_info_show(struct seq_file *m, void *p)
+    {
+    	struct vmap_node *vn;
+    	struct vmap_area *va;
+    	struct vm_struct *v;
+   +	unsigned int *counters;
+   +
+   +	if (IS_ENABLED(CONFIG_NUMA))
+   +		counters = kmalloc(nr_node_ids * sizeof(unsigned int), GFP_KERNEL);
+    
+    	for_each_vmap_node(vn) {
+    		spin_lock(&vn->busy.lock);
+    		list_for_each_entry(va, &vn->busy.head, list) {
+    			if (!va->vm) {
+    				if (va->flags & VMAP_RAM)
+    					seq_printf(m, "0x%pK-0x%pK %7ld vm_map_ram\n",
+    						(void *)va->va_start, (void *)va->va_end,
+    						va_size(va));
+    
+    				continue;
+    			}
+    
+    			v = va->vm;
+   +			if (v->flags & VM_UNINITIALIZED)
+   +				continue;
+   +
+   +			/* Pair with smp_wmb() in clear_vm_uninitialized_flag() */
+   +			smp_rmb();
+    
+    			seq_printf(m, "0x%pK-0x%pK %7ld",
+    				v->addr, v->addr + v->size, v->size);
+    
+    			if (v->caller)
+    				seq_printf(m, " %pS", v->caller);
+    
+    			if (v->nr_pages)
+====================================================================================================
+[25] a0fcaaed0c46  forms=B  ring-buffer: Fix race between reset page and reading page
+-- matches:
+   B  kernel/trace/ring_buffer.c I=['udelay'] E=smp_rmb func=None | smp_rmb();
+-- message:
+   ring-buffer: Fix race between reset page and reading page
+   
+   The ring buffer is broken up into sub buffers (currently of page size).
+   Each sub buffer has a pointer to its "tail" (the last event written to the
+   sub buffer). When a new event is requested, the tail is locally
+   incremented to cover the size of the new event. This is done in a way that
+   there is no need for locking.
+   
+   If the tail goes past the end of the sub buffer, the process of moving to
+   the next sub buffer takes place. After setting the current sub buffer to
+   the next one, the previous one that had the tail go passed the end of the
+   sub buffer needs to be reset back to the original tail location (before
+   the new event was requested) and the rest of the sub buffer needs to be
+   "padded".
+   
+   The race happens when a reader takes control of the sub buffer. As readers
+   do a "swap" of sub buffers from the ring buffer to get exclusive access to
+   the sub buffer, it replaces the "head" sub buffer with an empty sub buffer
+   that goes back into the writable portion of the ring buffer. This swap can
+   happen as soon as the writer moves to the next sub buffer and before it
+   updates the last sub buffer with padding.
+   
+   Because the sub buffer can be released to the reader while the writer is
+   still updating the padding, it is possible for the reader to see the event
+   that goes past the end of the sub buffer. This can cause obvious issues.
+   
+   To fix this, add a few memory barriers so that the reader definitely sees
+   the updates to the sub buffer, and also waits until the writer has put
+   back the "tail" of the sub buffer back to the last event that was written
+   on it.
+   
+   To be paranoid, it will only spin for 1 second, otherwise it will
+   warn and shutdown the ring buffer code. 1 second should be enough as
+   the writer does have preemption disabled. If the writer doesn't move
+   within 1 second (with preemption disabled) something is horribly
+   wrong. No interrupt should last 1 second!
+   
+   
+   Fixes: c7b0930857e22 ("ring-buffer: prevent adding write in discarded area")
+-- hunk kernel/trace/ring_buffer.c:
+   @@ -4622,16 +4628,43 @@ rb_get_reader_page(struct ring_buffer_per_cpu *cpu_buffer)
+     out:
+    	/* Update the read_stamp on the first event */
+    	if (reader && reader->read == 0)
+    		cpu_buffer->read_stamp = reader->page->time_stamp;
+    
+    	arch_spin_unlock(&cpu_buffer->lock);
+    	local_irq_restore(flags);
+    
+   +	/*
+   +	 * The writer has preempt disable, wait for it. But not forever
+   +	 * Although, 1 second is pretty much "forever"
+   +	 */
+   +#define USECS_WAIT	1000000
+   +        for (nr_loops = 0; nr_loops < USECS_WAIT; nr_loops++) {
+   +		/* If the write is past the end of page, a writer is still updating it */
+   +		if (likely(!reader || rb_page_write(reader) <= BUF_PAGE_SIZE))
+   +			break;
+   +
+   +		udelay(1);
+   +
+   +		/* Get the latest version of the reader write value */
+   +		smp_rmb();
+   +	}
+   +
+   +	/* The writer is not moving forward? Something is wrong */
+   +	if (RB_WARN_ON(cpu_buffer, nr_loops == USECS_WAIT))
+   +		reader = NULL;
+   +
+   +	/*
+   +	 * Make sure we see any padding after the write update
+   +	 * (see rb_reset_tail())
+   +	 */
+   +	smp_rmb();
+   +
+   +
+    	return reader;
+    }
+    
+    static void rb_advance_reader(struct ring_buffer_per_cpu *cpu_buffer)
+    {
+    	struct ring_buffer_event *event;
+    	struct buffer_page *reader;
+    	unsigned length;
+====================================================================================================
+[26] 6455b6163d8c  forms=B  ring-buffer: Fix race while reader and writer are on the same page
+-- matches:
+   B  kernel/trace/ring_buffer.c I=['barrier'] E=smp_wmb func=None | smp_wmb();
+-- message:
+   ring-buffer: Fix race while reader and writer are on the same page
+   
+   When user reads file 'trace_pipe', kernel keeps printing following logs
+   that warn at "cpu_buffer->reader_page->read > rb_page_size(reader)" in
+   rb_get_reader_page(). It just looks like there's an infinite loop in
+   tracing_read_pipe(). This problem occurs several times on arm64 platform
+   when testing v5.10 and below.
+   
+     Call trace:
+      rb_get_reader_page+0x248/0x1300
+      rb_buffer_peek+0x34/0x160
+      ring_buffer_peek+0xbc/0x224
+      peek_next_entry+0x98/0xbc
+      __find_next_entry+0xc4/0x1c0
+      trace_find_next_entry_inc+0x30/0x94
+      tracing_read_pipe+0x198/0x304
+      vfs_read+0xb4/0x1e0
+      ksys_read+0x74/0x100
+      __arm64_sys_read+0x24/0x30
+      el0_svc_common.constprop.0+0x7c/0x1bc
+      do_el0_svc+0x2c/0x94
+      el0_svc+0x20/0x30
+      el0_sync_handler+0xb0/0xb4
+      el0_sync+0x160/0x180
+   
+   Then I dump the vmcore and look into the problematic per_cpu ring_buffer,
+   I found that tail_page/commit_page/reader_page are on the same page while
+   reader_page->read is obviously abnormal:
+     tail_page == commit_page == reader_page == {
+       .write = 0x100d20,
+       .read = 0x8f9f4805,  // Far greater than 0xd20, obviously abnormal!!!
+       .entries = 0x10004c,
+       .real_end = 0x0,
+       .page = {
+         .time_stamp = 0x857257416af0,
+         .commit = 0xd20,  // This page hasn't been full filled.
+         // .data[0...0xd20] seems normal.
+       }
+    }
+   
+   …
+-- hunk kernel/trace/ring_buffer.c:
+   @@ -3093,25 +3093,31 @@ rb_set_commit_to_write(struct ring_buffer_per_cpu *cpu_buffer)
+    	max_count = cpu_buffer->nr_pages * 100;
+    
+    	while (cpu_buffer->commit_page != READ_ONCE(cpu_buffer->tail_page)) {
+    		if (RB_WARN_ON(cpu_buffer, !(--max_count)))
+    			return;
+    		if (RB_WARN_ON(cpu_buffer,
+    			       rb_is_reader_page(cpu_buffer->tail_page)))
+    			return;
+   +		/*
+   +		 * No need for a memory barrier here, as the update
+   +		 * of the tail_page did it for this page.
+   +		 */
+    		local_set(&cpu_buffer->commit_page->page->commit,
+    			  rb_page_write(cpu_buffer->commit_page));
+    		rb_inc_page(&cpu_buffer->commit_page);
+    		/* add barrier to keep gcc from optimizing too much */
+    		barrier();
+    	}
+    	while (rb_commit_index(cpu_buffer) !=
+    	       rb_page_write(cpu_buffer->commit_page)) {
+    
+   +		/* Make sure the readers see the content of what is committed. */
+   +		smp_wmb();
+    		local_set(&cpu_buffer->commit_page->page->commit,
+    			  rb_page_write(cpu_buffer->commit_page));
+    		RB_WARN_ON(cpu_buffer,
+    			   local_read(&cpu_buffer->commit_page->page->commit) &
+    			   ~RB_WRITE_MASK);
+    		barrier();
+    	}
+    
+====================================================================================================
+[27] c0474a606ecb  forms=B  iommu/vt-d: Invalidate PASID cache when root/context entry changed
+-- matches:
+   B  drivers/iommu/intel/iommu.c I=['flush_context'] E=flush_iotlb func=None | iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+-- message:
+   iommu/vt-d: Invalidate PASID cache when root/context entry changed
+   
+   When the Intel IOMMU is operating in the scalable mode, some information
+   from the root and context table may be used to tag entries in the PASID
+   cache. Software should invalidate the PASID-cache when changing root or
+   context table entries.
+   
+   Fixes: 7373a8cc38197 ("iommu/vt-d: Setup context and enable RID2PASID support")
+-- hunk drivers/iommu/intel/iommu.c:
+   @@ -1342,16 +1342,21 @@ static void iommu_set_root_entry(struct intel_iommu *iommu)
+    
+    	writel(iommu->gcmd | DMA_GCMD_SRTP, iommu->reg + DMAR_GCMD_REG);
+    
+    	/* Make sure hardware complete it */
+    	IOMMU_WAIT_OP(iommu, DMAR_GSTS_REG,
+    		      readl, (sts & DMA_GSTS_RTPS), sts);
+    
+    	raw_spin_unlock_irqrestore(&iommu->register_lock, flag);
+   +
+   +	iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
+   +	if (sm_supported(iommu))
+   +		qi_flush_pasid_cache(iommu, 0, QI_PC_GLOBAL, 0);
+   +	iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+    }
+    
+    void iommu_flush_write_buffer(struct intel_iommu *iommu)
+    {
+    	u32 val;
+    	unsigned long flag;
+    
+    	if (!rwbf_quirk && !cap_rwbf(iommu->cap))
+-- hunk drivers/iommu/intel/iommu.c:
+   @@ -3273,18 +3282,16 @@ static int __init init_dmars(void)
+    	 * flush_context function will loop forever and the boot hangs.
+    	 */
+    	for_each_active_iommu(iommu, drhd) {
+    		iommu_flush_write_buffer(iommu);
+    #ifdef CONFIG_INTEL_IOMMU_SVM
+    		register_pasid_allocator(iommu);
+    #endif
+    		iommu_set_root_entry(iommu);
+   -		iommu->flush.flush_context(iommu, 0, 0, 0, DMA_CCMD_GLOBAL_INVL);
+   -		iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+    	}
+    
+    #ifdef CONFIG_INTEL_IOMMU_BROKEN_GFX_WA
+    	dmar_map_gfx = 0;
+    #endif
+    
+    	if (!dmar_map_gfx)
+    		iommu_identity_mapping |= IDENTMAP_GFX;
+-- hunk drivers/iommu/intel/iommu.c:
+   @@ -3464,22 +3471,17 @@ static int init_iommu_hw(void)
+    			 * this device
+    			 */
+    			if (force_on)
+    				iommu_disable_protect_mem_regions(iommu);
+    			continue;
+    		}
+    
+    		iommu_flush_write_buffer(iommu);
+   -
+    		iommu_set_root_entry(iommu);
+   -
+   -		iommu->flush.flush_context(iommu, 0, 0, 0,
+   -					   DMA_CCMD_GLOBAL_INVL);
+   -		iommu->flush.flush_iotlb(iommu, 0, 0, 0, DMA_TLB_GLOBAL_FLUSH);
+    		iommu_enable_translation(iommu);
+    		iommu_disable_protect_mem_regions(iommu);
+    	}
+    
+    	return 0;
+    }
+    
+    static void iommu_flush_all(void)
+====================================================================================================
+[28] 65529295607f  forms=B  mm/rmap: handle device-exclusive entries correctly in try_to_unmap_one()
+-- matches:
+   A A1 mm/rmap.c I=pte_present E=None func=None | if (likely(pte_present(pteval))) {
+   A A1 mm/rmap.c I=pte_dirty E=None func=None | if (pte_dirty(pteval))
+   A A1 mm/rmap.c I=pte_present E=None func=None | if (likely(pte_present(pteval))) {
+   A A1 mm/rmap.c I=pte_present E=None func=None | if (likely(pte_present(pteval)) && pte_unused(pteval) && 			   !userfaultfd_armed(vma)) {
+   B  mm/rmap.c I=['pte_dirty', 'ptep_clear_flush'] E=pte_clear func=None | pte_clear(mm, address, pvmw.pte);
+-- message:
+   mm/rmap: handle device-exclusive entries correctly in try_to_unmap_one()
+   
+   Ever since commit b756a3b5e7ea ("mm: device exclusive memory access") we
+   can return with a device-exclusive entry from page_vma_mapped_walk().
+   
+   try_to_unmap_one() is not prepared for that, so teach it about these PFN
+   swap PTEs.  Note that device-private entries are so far not applicable on
+   that path, as we expect ZONE_DEVICE pages so far only in migration code
+   when it comes to the RMAP.
+   
+   Note that we could currently only run into this case with device-exclusive
+   entries on THPs.  We still adjust the mapcount on conversion to
+   device-exclusive; this makes the rmap walk abort early for small folios,
+   because we'll always have !folio_mapped() with a single device-exclusive
+   entry.  We'll adjust the mapcount logic once all page_vma_mapped_walk()
+   users can properly handle device-exclusive entries.
+   
+   Further note that try_to_unmap() calls MMU notifiers and holds the folio
+   lock, so any device-exclusive users should be properly prepared for a
+   device-exclusive PTE to "vanish".
+   
+   Fixes: b756a3b5e7ea ("mm: device exclusive memory access")
+-- hunk mm/rmap.c:
+   @@ -1717,17 +1717,28 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+    				page_vma_mapped_walk_restart(&pvmw);
+    				continue;
+    			}
+    		}
+    
+    		/* Unexpected PMD-mapped THP? */
+    		VM_BUG_ON_FOLIO(!pvmw.pte, folio);
+    
+   -		pfn = pte_pfn(ptep_get(pvmw.pte));
+   +		/*
+   +		 * Handle PFN swap PTEs, such as device-exclusive ones, that
+   +		 * actually map pages.
+   +		 */
+   +		pteval = ptep_get(pvmw.pte);
+   +		if (likely(pte_present(pteval))) {
+   +			pfn = pte_pfn(pteval);
+   +		} else {
+   +			pfn = swp_offset_pfn(pte_to_swp_entry(pteval));
+   +			VM_WARN_ON_FOLIO(folio_test_hugetlb(folio), folio);
+   +		}
+   +
+    		subpage = folio_page(folio, pfn - folio_pfn(folio));
+    		address = pvmw.address;
+    		anon_exclusive = folio_test_anon(folio) &&
+    				 PageAnonExclusive(subpage);
+    
+    		if (folio_test_hugetlb(folio)) {
+    			bool anon = folio_test_anon(folio);
+    
+-- hunk mm/rmap.c:
+   @@ -1773,17 +1784,19 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+    					 * actual page and drop map count
+    					 * to zero.
+    					 */
+    					goto walk_done;
+    				}
+    				hugetlb_vma_unlock_write(vma);
+    			}
+    			pteval = huge_ptep_clear_flush(vma, address, pvmw.pte);
+   -		} else {
+   +			if (pte_dirty(pteval))
+   +				folio_mark_dirty(folio);
+   +		} else if (likely(pte_present(pteval))) {
+    			flush_cache_page(vma, address, pfn);
+    			/* Nuke the page table entry. */
+    			if (should_defer_flush(mm, flags)) {
+    				/*
+    				 * We clear the PTE but do not flush so potentially
+    				 * a remote CPU could still be writing to the folio.
+    				 * If the entry was previously clean then the
+    				 * architecture must guarantee that a clear->dirty
+-- hunk mm/rmap.c:
+   @@ -1791,44 +1804,44 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+    				 * and traps if the PTE is unmapped.
+    				 */
+    				pteval = ptep_get_and_clear(mm, address, pvmw.pte);
+    
+    				set_tlb_ubc_flush_pending(mm, pteval, address);
+    			} else {
+    				pteval = ptep_clear_flush(vma, address, pvmw.pte);
+    			}
+   +			if (pte_dirty(pteval))
+   +				folio_mark_dirty(folio);
+   +		} else {
+   +			pte_clear(mm, address, pvmw.pte);
+    		}
+    
+    		/*
+    		 * Now the pte is cleared. If this pte was uffd-wp armed,
+    		 * we may want to replace a none pte with a marker pte if
+    		 * it's file-backed, so we don't lose the tracking info.
+    		 */
+    		pte_install_uffd_wp_if_needed(vma, address, pvmw.pte, pteval);
+    
+   -		/* Set the dirty flag on the folio now the pte is gone. */
+   -		if (pte_dirty(pteval))
+   -			folio_mark_dirty(folio);
+   -
+    		/* Update high watermark before we lower rss */
+    		update_hiwater_rss(mm);
+    
+    		if (PageHWPoison(subpage) && (flags & TTU_HWPOISON)) {
+    			pteval = swp_entry_to_pte(make_hwpoison_entry(subpage));
+    			if (folio_test_hugetlb(folio)) {
+    				hugetlb_count_sub(folio_nr_pages(folio), mm);
+    				set_huge_pte_at(mm, address, pvmw.pte, pteval,
+    						hsz);
+    			} else {
+    				dec_mm_counter(mm, mm_counter(folio));
+    				set_pte_at(mm, address, pvmw.pte, pteval);
+    			}
+   -
+   -		} else if (pte_unused(pteval) && !userfaultfd_armed(vma)) {
+   +		} else if (likely(pte_present(pteval)) && pte_unused(pteval) &&
+   +			   !userfaultfd_armed(vma)) {
+    			/*
+    			 * The guest indicated that the page content is of no
+   …
+====================================================================================================
+[29] cb0f01beb166  forms=B  mm/mprotect: fix dax pud handlings
+-- matches:
+   A A2 mm/huge_memory.c I=pud_modify E=None func=None | entry = pud_modify(oldpud, newprot);
+   A A1 mm/mprotect.c I=pud_none E=None func=None | if (pud_none(pud))
+   A A1 mm/mprotect.c I=pud_leaf E=None func=None | if (pud_leaf(pud)) {
+   B  mm/huge_memory.c I=['pud_modify', 'pudp_invalidate'] E=set_pud_at func=None | set_pud_at(mm, addr, pudp, entry);
+   B  mm/huge_memory.c I=['pud_modify', 'pudp_invalidate', 'set_pud_at'] E=tlb_flush_pud_range func=None | tlb_flush_pud_range(tlb, addr, HPAGE_PUD_SIZE);
+-- message:
+   mm/mprotect: fix dax pud handlings
+   
+   This is only relevant to the two archs that support PUD dax, aka, x86_64
+   and ppc64.  PUD THPs do not yet exist elsewhere, and hugetlb PUDs do not
+   count in this case.
+   
+   DAX have had PUD mappings for years, but change protection path never
+   worked.  When the path is triggered in any form (a simple test program
+   would be: call mprotect() on a 1G dev_dax mapping), the kernel will report
+   "bad pud".  This patch should fix that.
+   
+   The new change_huge_pud() tries to keep everything simple.  For example,
+   it doesn't optimize write bit as that will need even more PUD helpers. 
+   It's not too bad anyway to have one more write fault in the worst case
+   once for 1G range; may be a bigger thing for each PAGE_SIZE, though. 
+   Neither does it support userfault-wp bits, as there isn't such PUD
+   mappings that is supported; file mappings always need a split there.
+   
+   The same to TLB shootdown: the pmd path (which was for x86 only) has the
+   trick of using _ad() version of pmdp_invalidate*() which can avoid one
+   redundant TLB, but let's also leave that for later.  Again, the larger the
+   mapping, the smaller of such effect.
+   
+   There's some difference on handling "retry" for change_huge_pud() (where
+   it can return 0): it isn't like change_huge_pmd(), as the pmd version is
+   safe with all conditions handled in change_pte_range() later, thanks to
+   Hugh's new pte_offset_map_lock().  In short, change_pte_range() is simply
+   smarter.  For that, change_pud_range() will need proper retry if it races
+   with something else when a huge PUD changed from under us.
+   
+   The last thing to mention is currently the PUD path ignores the huge pte
+   numa counter (NUMA_HUGE_PTE_UPDATES), not only because DAX is not
+   applicable to NUMA, but also that it's ambiguous on its own to decide how
+   to account pud in this case.  In one earlier version of this patchset I
+   proposed to remove the counter as it doesn't even look right to do the
+   accounting as of now [1], but then a further discussion suggests we can
+   leave that for later, as that doesn't block this series if we choose to
+   ignore that counter.  That's what this patch does, by ignoring it.
+   
+   When at it, touch up the comment in pgtable_split_needed() to make it
+   …
+-- hunk mm/huge_memory.c:
+   @@ -2099,16 +2099,63 @@ int change_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
+    
+    	if (huge_pmd_needs_flush(oldpmd, entry))
+    		tlb_flush_pmd_range(tlb, addr, HPAGE_PMD_SIZE);
+    unlock:
+    	spin_unlock(ptl);
+    	return ret;
+    }
+    
+   +/*
+   + * Returns:
+   + *
+   + * - 0: if pud leaf changed from under us
+   + * - 1: if pud can be skipped
+   + * - HPAGE_PUD_NR: if pud was successfully processed
+   + */
+   +#ifdef CONFIG_HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+   +int change_huge_pud(struct mmu_gather *tlb, struct vm_area_struct *vma,
+   +		    pud_t *pudp, unsigned long addr, pgprot_t newprot,
+   +		    unsigned long cp_flags)
+   +{
+   +	struct mm_struct *mm = vma->vm_mm;
+   +	pud_t oldpud, entry;
+   +	spinlock_t *ptl;
+   +
+   +	tlb_change_page_size(tlb, HPAGE_PUD_SIZE);
+   +
+   +	/* NUMA balancing doesn't apply to dax */
+   +	if (cp_flags & MM_CP_PROT_NUMA)
+   +		return 1;
+   +
+   +	/*
+   +	 * Huge entries on userfault-wp only works with anonymous, while we
+   +	 * don't have anonymous PUDs yet.
+   +	 */
+   +	if (WARN_ON_ONCE(cp_flags & MM_CP_UFFD_WP_ALL))
+   +		return 1;
+   +
+   +	ptl = __pud_trans_huge_lock(pudp, vma);
+   +	if (!ptl)
+   +		return 0;
+   +
+   +	/*
+   +	 * Can't clear PUD or it can race with concurrent zapping.  See
+   +	 * change_huge_pmd().
+   …
+-- hunk mm/mprotect.c:
+   @@ -425,41 +426,63 @@ static inline long change_pmd_range(struct mmu_gather *tlb,
+    	return pages;
+    }
+    
+    static inline long change_pud_range(struct mmu_gather *tlb,
+    		struct vm_area_struct *vma, p4d_t *p4d, unsigned long addr,
+    		unsigned long end, pgprot_t newprot, unsigned long cp_flags)
+    {
+    	struct mmu_notifier_range range;
+   -	pud_t *pud;
+   +	pud_t *pudp, pud;
+    	unsigned long next;
+    	long pages = 0, ret;
+    
+    	range.start = 0;
+    
+   -	pud = pud_offset(p4d, addr);
+   +	pudp = pud_offset(p4d, addr);
+    	do {
+   +again:
+    		next = pud_addr_end(addr, end);
+   -		ret = change_prepare(vma, pud, pmd, addr, cp_flags);
+   +		ret = change_prepare(vma, pudp, pmd, addr, cp_flags);
+    		if (ret) {
+    			pages = ret;
+    			break;
+    		}
+   -		if (pud_none_or_clear_bad(pud))
+   +
+   +		pud = READ_ONCE(*pudp);
+   +		if (pud_none(pud))
+    			continue;
+   +
+    		if (!range.start) {
+    			mmu_notifier_range_init(&range,
+    						MMU_NOTIFY_PROTECTION_VMA, 0,
+    						vma->vm_mm, addr, end);
+    			mmu_notifier_invalidate_range_start(&range);
+    		}
+   -		pages += change_pmd_range(tlb, vma, pud, addr, next, newprot,
+   +
+   +		if (pud_leaf(pud)) {
+   +			if ((next - addr != PUD_SIZE) ||
+   +			    pgtable_split_needed(vma, cp_flags)) {
+   +				__split_huge_pud(vma, pudp, addr);
+   …
+====================================================================================================
+[30] a4a118f2eead  forms=B  hugetlbfs: flush TLBs correctly after huge_pmd_unshare
+-- matches:
+   B  mm/hugetlb.c I=['huge_pte_offset'] E=tlb_flush_pmd_range func=None | tlb_flush_pmd_range(tlb, address & PUD_MASK, PUD_SIZE);
+-- message:
+   hugetlbfs: flush TLBs correctly after huge_pmd_unshare
+   
+   When __unmap_hugepage_range() calls to huge_pmd_unshare() succeed, a TLB
+   flush is missing.  This TLB flush must be performed before releasing the
+   i_mmap_rwsem, in order to prevent an unshared PMDs page from being
+   released and reused before the TLB flush took place.
+   
+   Arguably, a comprehensive solution would use mmu_gather interface to
+   batch the TLB flushes and the PMDs page release, however it is not an
+   easy solution: (1) try_to_unmap_one() and try_to_migrate_one() also call
+   huge_pmd_unshare() and they cannot use the mmu_gather interface; and (2)
+   deferring the release of the page reference for the PMDs page until
+   after i_mmap_rwsem is dropeed can confuse huge_pmd_unshare() into
+   thinking PMDs are shared when they are not.
+   
+   Fix __unmap_hugepage_range() by adding the missing TLB flush, and
+   forcing a flush when unshare is successful.
+   
+   Fixes: 24669e58477e ("hugetlb: use mmu_gather instead of a temporary linked list for accumulating pages)" # 3.6
+-- hunk mm/hugetlb.c:
+   @@ -4962,20 +4963,18 @@ static void __unmap_hugepage_range(struct mmu_gather *tlb, struct vm_area_struct
+    	for (; address < end; address += sz) {
+    		ptep = huge_pte_offset(mm, address, sz);
+    		if (!ptep)
+    			continue;
+    
+    		ptl = huge_pte_lock(h, mm, ptep);
+    		if (huge_pmd_unshare(mm, vma, &address, ptep)) {
+    			spin_unlock(ptl);
+   -			/*
+   -			 * We just unmapped a page of PMDs by clearing a PUD.
+   -			 * The caller's TLB flush range should cover this area.
+   -			 */
+   +			tlb_flush_pmd_range(tlb, address & PUD_MASK, PUD_SIZE);
+   +			force_flush = true;
+    			continue;
+    		}
+    
+    		pte = huge_ptep_get(ptep);
+    		if (huge_pte_none(pte)) {
+    			spin_unlock(ptl);
+    			continue;
+    		}
+====================================================================================================
+[31] 175e476b8cdf  forms=B  netfilter: x_tables: Use correct memory barriers.
+-- matches:
+   B  include/linux/netfilter/x_tables.h I=['__this_cpu_read'] E=smp_mb func=None | smp_mb();
+-- message:
+   netfilter: x_tables: Use correct memory barriers.
+   
+   When a new table value was assigned, it was followed by a write memory
+   barrier. This ensured that all writes before this point would complete
+   before any writes after this point. However, to determine whether the
+   rules are unused, the sequence counter is read. To ensure that all
+   writes have been done before these reads, a full memory barrier is
+   needed, not just a write memory barrier. The same argument applies when
+   incrementing the counter, before the rules are read.
+   
+   Changing to using smp_mb() instead of smp_wmb() fixes the kernel panic
+   reported in cc00bcaa5899 (which is still present), while still
+   maintaining the same speed of replacing tables.
+   
+   The smb_mb() barriers potentially slow the packet path, however testing
+   has shown no measurable change in performance on a 4-core MIPS64
+   platform.
+   
+   Fixes: 7f5c6d4f665b ("netfilter: get rid of atomic ops in fast path")
+-- hunk include/linux/netfilter/x_tables.h:
+   @@ -371,17 +371,17 @@ static inline unsigned int xt_write_recseq_begin(void)
+    	addend = (__this_cpu_read(xt_recseq.sequence) + 1) & 1;
+    
+    	/*
+    	 * This is kind of a write_seqcount_begin(), but addend is 0 or 1
+    	 * We dont check addend value to avoid a test and conditional jump,
+    	 * since addend is most likely 1
+    	 */
+    	__this_cpu_add(xt_recseq.sequence, addend);
+   -	smp_wmb();
+   +	smp_mb();
+    
+    	return addend;
+    }
+    
+    /**
+     * xt_write_recseq_end - end of a write section
+     * @addend: return value from previous xt_write_recseq_begin()
+     *
+====================================================================================================
+[32] faeb2831b517  forms=B  mm: set folio swapbacked iff folios are dirty in try_to_unmap_one
+-- matches:
+   B  mm/rmap.c I=['smp_rmb'] E=set_pte_at func=None | set_pte_at(mm, address, pvmw.pte, pteval);
+-- message:
+   mm: set folio swapbacked iff folios are dirty in try_to_unmap_one
+   
+   Patch series "mm: batched unmap lazyfree large folios during reclamation",
+   v4.
+   
+   Commit 735ecdfaf4e8 ("mm/vmscan: avoid split lazyfree THP during
+   shrink_folio_list()") prevents the splitting of MADV_FREE'd THP in
+   madvise.c.  
+   
+   However, those folios are still added to the deferred_split list in
+   try_to_unmap_one() because we are unmapping PTEs and removing rmap entries
+   one by one.
+   
+   Firstly, this has rendered the following counter somewhat confusing,
+   /sys/kernel/mm/transparent_hugepage/hugepages-size/stats/split_deferred
+   The split_deferred counter was originally designed to track operations
+   such as partial unmap or madvise of large folios.  However, in practice,
+   most split_deferred cases arise from memory reclamation of aligned
+   lazyfree mTHPs as observed by Tangquan.  This discrepancy has made the
+   split_deferred counter highly misleading.
+   
+   Secondly, this approach is slow because it requires iterating through each
+   PTE and removing the rmap one by one for a large folio.  In fact, all PTEs
+   of a pte-mapped large folio should be unmapped at once, and the entire
+   folio should be removed from the rmap as a whole.
+   
+   Thirdly, it also increases the risk of a race condition where lazyfree
+   folios are incorrectly set back to swapbacked, as a speculative folio_get
+   may occur in the shrinker's callback.
+   
+   deferred_split_scan() might call folio_try_get(folio) since we have added
+   the folio to split_deferred list while removing rmap for the 1st subpage,
+   and while we are scanning the 2nd to nr_pages PTEs of this folio in
+   try_to_unmap_one(), the entire mTHP could be transitioned back to
+   swap-backed because the reference count is incremented, which can make
+   "ref_count == 1 + map_count" within try_to_unmap_one() false.
+   
+      /*
+       * The only page refs must be one from isolation
+       * plus the rmap(s) (dropped by discard:).
+   …
+-- hunk mm/rmap.c:
+   @@ -1958,44 +1958,39 @@ static bool try_to_unmap_one(struct folio *folio, struct vm_area_struct *vma,
+    				map_count = folio_mapcount(folio);
+    
+    				/*
+    				 * Order reads for page refcount and dirty flag
+    				 * (see comments in __remove_mapping()).
+    				 */
+    				smp_rmb();
+    
+   -				/*
+   -				 * The only page refs must be one from isolation
+   -				 * plus the rmap(s) (dropped by discard:).
+   -				 */
+   -				if (ref_count == 1 + map_count &&
+   -				    (!folio_test_dirty(folio) ||
+   -				     /*
+   -				      * Unlike MADV_FREE mappings, VM_DROPPABLE
+   -				      * ones can be dropped even if they've
+   -				      * been dirtied.
+   -				      */
+   -				     (vma->vm_flags & VM_DROPPABLE))) {
+   -					dec_mm_counter(mm, MM_ANONPAGES);
+   -					goto discard;
+   -				}
+   -
+   -				/*
+   -				 * If the folio was redirtied, it cannot be
+   -				 * discarded. Remap the page to page table.
+   -				 */
+   -				set_pte_at(mm, address, pvmw.pte, pteval);
+   -				/*
+   -				 * Unlike MADV_FREE mappings, VM_DROPPABLE ones
+   -				 * never get swap backed on failure to drop.
+   -				 */
+   -				if (!(vma->vm_flags & VM_DROPPABLE))
+   +				if (folio_test_dirty(folio) && !(vma->vm_flags & VM_DROPPABLE)) {
+   +					/*
+   +					 * redirtied either using the page table or a previously
+   +					 * obtained GUP reference.
+   +					 */
+   +					set_pte_at(mm, address, pvmw.pte, pteval);
+    					folio_set_swapbacked(folio);
+   -				goto walk_abort;
+   +					goto walk_abort;
+   +				} else if (ref_count != 1 + map_count) {
+   …
+====================================================================================================
+[33] 382e6e177bc1  forms=B  irqchip/gic-v3: Workaround inconsistent PMR setting on NMI entry
+-- matches:
+   A A1 drivers/irqchip/irq-gic-v3.c I=interrupts_enabled E=None func=None | if (gic_supports_nmi() && unlikely(!interrupts_enabled(regs))) {
+   B  drivers/irqchip/irq-gic-v3.c I=['gic_pmr_mask_irqs', 'gic_read_pmr'] E=isb func=None | isb();
+-- message:
+   irqchip/gic-v3: Workaround inconsistent PMR setting on NMI entry
+   
+   The arm64 entry code suffers from an annoying issue on taking
+   a NMI, as it sets PMR to a value that actually allows IRQs
+   to be acknowledged. This is done for consistency with other parts
+   of the code, and is in the process of being fixed. This shouldn't
+   be a problem, as we are not enabling interrupts whilst in NMI
+   context.
+   
+   However, in the infortunate scenario that we took a spurious NMI
+   (retired before the read of IAR) *and* that there is an IRQ pending
+   at the same time, we'll ack the IRQ in NMI context. Too bad.
+   
+   In order to avoid deadlocks while running something like perf,
+   teach the GICv3 driver about this situation: if we were in
+   a context where no interrupt should have fired, transiently
+   set PMR to a value that only allows NMIs before acking the pending
+   interrupt, and restore the original value after that.
+   
+   This papers over the core issue for the time being, and makes
+   NMIs great again. Sort of.
+   
+   Fixes: 4d6a38da8e79e94c ("arm64: entry: always set GIC_PRIO_PSR_I_SET during entry")
+-- hunk drivers/irqchip/irq-gic-v3.c:
+   @@ -637,21 +637,55 @@ static inline void gic_handle_nmi(u32 irqnr, struct pt_regs *regs)
+    	err = handle_domain_nmi(gic_data.domain, irqnr, regs);
+    	if (err)
+    		gic_deactivate_unhandled(irqnr);
+    
+    	if (irqs_enabled)
+    		nmi_exit();
+    }
+    
+   +static u32 do_read_iar(struct pt_regs *regs)
+   +{
+   +	u32 iar;
+   +
+   +	if (gic_supports_nmi() && unlikely(!interrupts_enabled(regs))) {
+   +		u64 pmr;
+   +
+   +		/*
+   +		 * We were in a context with IRQs disabled. However, the
+   +		 * entry code has set PMR to a value that allows any
+   +		 * interrupt to be acknowledged, and not just NMIs. This can
+   +		 * lead to surprising effects if the NMI has been retired in
+   +		 * the meantime, and that there is an IRQ pending. The IRQ
+   +		 * would then be taken in NMI context, something that nobody
+   +		 * wants to debug twice.
+   +		 *
+   +		 * Until we sort this, drop PMR again to a level that will
+   +		 * actually only allow NMIs before reading IAR, and then
+   +		 * restore it to what it was.
+   +		 */
+   +		pmr = gic_read_pmr();
+   +		gic_pmr_mask_irqs();
+   +		isb();
+   +
+   +		iar = gic_read_iar();
+   +
+   +		gic_write_pmr(pmr);
+   +	} else {
+   +		iar = gic_read_iar();
+   +	}
+   +
+   +	return iar;
+   +}
+   +
+    static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
+    {
+   …
+====================================================================================================
+[34] 8c5b3a8adad2  forms=B  mm/debug_vm_pgtable: fix corrupted page flag
+-- matches:
+   B  mm/debug_vm_pgtable.c I=['pfn_pte', 'set_pte_at'] E=flush_dcache_page func=None | flush_dcache_page(page);
+   B  mm/debug_vm_pgtable.c I=['pfn_pte', 'pte_mkclean', 'pte_none', 'pte_wrprotect', 'ptep_get', 'ptep_get_and_clear', 'set_pte_at'] E=flush_dcache_page func=None | flush_dcache_page(page);
+   B  mm/debug_vm_pgtable.c I=['pfn_pte', 'pte_dirty', 'pte_mkyoung', 'pte_none', 'pte_write', 'ptep_get', 'ptep_get_and_clear_full', 'set_pte_at'] E=flush_dcache_page func=None | flush_dcache_page(page);
+   B  mm/debug_vm_pgtable.c I=['has_transparent_hugepage'] E=flush_dcache_page func=None | * flush_dcache_page() is called after set_pmd_at() to clear
+-- message:
+   mm/debug_vm_pgtable: fix corrupted page flag
+   
+   In page table entry modifying tests, set_xxx_at() are used to populate
+   the page table entries. On ARM64, PG_arch_1 (PG_dcache_clean) flag is
+   set to the target page flag if execution permission is given. The logic
+   exits since commit 4f04d8f00545 ("arm64: MMU definitions"). The page
+   flag is kept when the page is free'd to buddy's free area list. However,
+   it will trigger page checking failure when it's pulled from the buddy's
+   free area list, as the following warning messages indicate.
+   
+      BUG: Bad page state in process memhog  pfn:08000
+      page:0000000015c0a628 refcount:0 mapcount:0 \
+           mapping:0000000000000000 index:0x1 pfn:0x8000
+      flags: 0x7ffff8000000800(arch_1|node=0|zone=0|lastcpupid=0xfffff)
+      raw: 07ffff8000000800 dead000000000100 dead000000000122 0000000000000000
+      raw: 0000000000000001 0000000000000000 00000000ffffffff 0000000000000000
+      page dumped because: PAGE_FLAGS_CHECK_AT_PREP flag(s) set
+   
+   This fixes the issue by clearing PG_arch_1 through flush_dcache_page()
+   after set_xxx_at() is called. For architectures other than ARM64, the
+   unexpected overhead of cache flushing is acceptable.
+   
+   Fixes: a5c3b9ffb0f4 ("mm/debug_vm_pgtable: add tests validating advanced arch page table helpers")
+-- hunk mm/debug_vm_pgtable.c:
+   @@ -114,52 +116,63 @@ static void __init pte_basic_tests(struct pgtable_debug_args *args, int idx)
+    	WARN_ON(pte_dirty(pte_mkclean(pte_mkdirty(pte))));
+    	WARN_ON(pte_write(pte_wrprotect(pte_mkwrite(pte))));
+    	WARN_ON(pte_dirty(pte_wrprotect(pte_mkclean(pte))));
+    	WARN_ON(!pte_dirty(pte_wrprotect(pte_mkdirty(pte))));
+    }
+    
+    static void __init pte_advanced_tests(struct pgtable_debug_args *args)
+    {
+   +	struct page *page;
+    	pte_t pte;
+    
+    	/*
+    	 * Architectures optimize set_pte_at by avoiding TLB flush.
+    	 * This requires set_pte_at to be not used to update an
+    	 * existing pte entry. Clear pte before we do set_pte_at
+   +	 *
+   +	 * flush_dcache_page() is called after set_pte_at() to clear
+   +	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+   +	 * when it's released and page allocation check will fail when
+   +	 * the page is allocated again. For architectures other than ARM64,
+   +	 * the unexpected overhead of cache flushing is acceptable.
+    	 */
+   -	if (args->pte_pfn == ULONG_MAX)
+   +	page = (args->pte_pfn != ULONG_MAX) ? pfn_to_page(args->pte_pfn) : NULL;
+   +	if (!page)
+    		return;
+    
+    	pr_debug("Validating PTE advanced\n");
+    	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+   +	flush_dcache_page(page);
+    	ptep_set_wrprotect(args->mm, args->vaddr, args->ptep);
+    	pte = ptep_get(args->ptep);
+    	WARN_ON(pte_write(pte));
+    	ptep_get_and_clear(args->mm, args->vaddr, args->ptep);
+    	pte = ptep_get(args->ptep);
+    	WARN_ON(!pte_none(pte));
+    
+    	pte = pfn_pte(args->pte_pfn, args->page_prot);
+    	pte = pte_wrprotect(pte);
+    	pte = pte_mkclean(pte);
+    	set_pte_at(args->mm, args->vaddr, args->ptep, pte);
+   +	flush_dcache_page(page);
+    	pte = pte_mkwrite(pte);
+   …
+-- hunk mm/debug_vm_pgtable.c:
+   @@ -208,56 +221,68 @@ static void __init pmd_basic_tests(struct pgtable_debug_args *args, int idx)
+    	 * A huge page does not point to next level page table
+    	 * entry. Hence this must qualify as pmd_bad().
+    	 */
+    	WARN_ON(!pmd_bad(pmd_mkhuge(pmd)));
+    }
+    
+    static void __init pmd_advanced_tests(struct pgtable_debug_args *args)
+    {
+   +	struct page *page;
+    	pmd_t pmd;
+    	unsigned long vaddr = args->vaddr;
+    
+    	if (!has_transparent_hugepage())
+    		return;
+    
+   -	if (args->pmd_pfn == ULONG_MAX)
+   +	page = (args->pmd_pfn != ULONG_MAX) ? pfn_to_page(args->pmd_pfn) : NULL;
+   +	if (!page)
+    		return;
+    
+   +	/*
+   +	 * flush_dcache_page() is called after set_pmd_at() to clear
+   +	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+   +	 * when it's released and page allocation check will fail when
+   +	 * the page is allocated again. For architectures other than ARM64,
+   +	 * the unexpected overhead of cache flushing is acceptable.
+   +	 */
+    	pr_debug("Validating PMD advanced\n");
+    	/* Align the address wrt HPAGE_PMD_SIZE */
+    	vaddr &= HPAGE_PMD_MASK;
+    
+    	pgtable_trans_huge_deposit(args->mm, args->pmdp, args->start_ptep);
+    
+    	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+    	set_pmd_at(args->mm, vaddr, args->pmdp, pmd);
+   +	flush_dcache_page(page);
+    	pmdp_set_wrprotect(args->mm, vaddr, args->pmdp);
+    	pmd = READ_ONCE(*args->pmdp);
+    	WARN_ON(pmd_write(pmd));
+    	pmdp_huge_get_and_clear(args->mm, vaddr, args->pmdp);
+    	pmd = READ_ONCE(*args->pmdp);
+    	WARN_ON(!pmd_none(pmd));
+    
+    	pmd = pfn_pmd(args->pmd_pfn, args->page_prot);
+   …
+-- hunk mm/debug_vm_pgtable.c:
+   @@ -334,59 +359,71 @@ static void __init pud_basic_tests(struct pgtable_debug_args *args, int idx)
+    	 * A huge page does not point to next level page table
+    	 * entry. Hence this must qualify as pud_bad().
+    	 */
+    	WARN_ON(!pud_bad(pud_mkhuge(pud)));
+    }
+    
+    static void __init pud_advanced_tests(struct pgtable_debug_args *args)
+    {
+   +	struct page *page;
+    	unsigned long vaddr = args->vaddr;
+    	pud_t pud;
+    
+    	if (!has_transparent_hugepage())
+    		return;
+    
+   -	if (args->pud_pfn == ULONG_MAX)
+   +	page = (args->pud_pfn != ULONG_MAX) ? pfn_to_page(args->pud_pfn) : NULL;
+   +	if (!page)
+    		return;
+    
+   +	/*
+   +	 * flush_dcache_page() is called after set_pud_at() to clear
+   +	 * PG_arch_1 for the page on ARM64. The page flag isn't cleared
+   +	 * when it's released and page allocation check will fail when
+   +	 * the page is allocated again. For architectures other than ARM64,
+   +	 * the unexpected overhead of cache flushing is acceptable.
+   +	 */
+    	pr_debug("Validating PUD advanced\n");
+    	/* Align the address wrt HPAGE_PUD_SIZE */
+    	vaddr &= HPAGE_PUD_MASK;
+    
+    	pud = pfn_pud(args->pud_pfn, args->page_prot);
+    	set_pud_at(args->mm, vaddr, args->pudp, pud);
+   +	flush_dcache_page(page);
+    	pudp_set_wrprotect(args->mm, vaddr, args->pudp);
+    	pud = READ_ONCE(*args->pudp);
+    	WARN_ON(pud_write(pud));
+    
+    #ifndef __PAGETABLE_PMD_FOLDED
+    	pudp_huge_get_and_clear(args->mm, vaddr, args->pudp);
+    	pud = READ_ONCE(*args->pudp);
+    	WARN_ON(!pud_none(pud));
+    #endif /* __PAGETABLE_PMD_FOLDED */
+    	pud = pfn_pud(args->pud_pfn, args->page_prot);
+   …
+====================================================================================================
+[35] 9add2cc22de6  forms=B  mm/migrate_device: fix cache flush when replacing huge zero PMD
+-- matches:
+   B  mm/migrate_device.c I=['pte_free'] E=flush_cache_range func=None | flush_cache_range(vma, addr, addr + HPAGE_PMD_SIZE);
+-- message:
+   mm/migrate_device: fix cache flush when replacing huge zero PMD
+   
+   migrate_vma_insert_huge_pmd_page() calls flush_cache_page() before
+   replacing an existing huge zero PMD.  However, the third argument to
+   flush_cache_page() is a PFN, while addr + HPAGE_PMD_SIZE is an end virtual
+   address.
+   
+   More importantly, the mapping being invalidated is PMD-sized rather than
+   PAGE_SIZE-sized.  Flush the whole PMD range with flush_cache_range(),
+   matching other huge PMD invalidation paths.
+   
+   There is no userspace-visible effect today.  The architectures that
+   currently enable ARCH_ENABLE_THP_MIGRATION use no-op implementations of
+   flush_cache_page()/flush_cache_range().  32-bit ARM has non-trivial
+   implementations, but does not enable ARCH_ENABLE_THP_MIGRATION.
+   
+   So this appears to be a latent API misuse rather than a currently
+   observable bug, and I don't think a stable backport is necessary.
+   
+   Fixes: a30b48bf1b24 ("mm/migrate_device: implement THP migration of zone device pages")
+-- hunk mm/migrate_device.c:
+   @@ -877,17 +877,17 @@ static int migrate_vma_insert_huge_pmd_page(struct migrate_vma *migrate,
+    	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+    	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
+    	if (!folio_is_zone_device(folio))
+    		folio_add_lru_vma(folio, vma);
+    	folio_get(folio);
+    
+    	if (flush) {
+    		pte_free(vma->vm_mm, pgtable);
+   -		flush_cache_page(vma, addr, addr + HPAGE_PMD_SIZE);
+   +		flush_cache_range(vma, addr, addr + HPAGE_PMD_SIZE);
+    		pmdp_invalidate(vma, addr, pmdp);
+    	} else {
+    		pgtable_trans_huge_deposit(vma->vm_mm, pmdp, pgtable);
+    		mm_inc_nr_ptes(vma->vm_mm);
+    	}
+    	set_pmd_at(vma->vm_mm, addr, pmdp, entry);
+    	update_mmu_cache_pmd(vma, addr, pmdp);
+    
+====================================================================================================
+[36] 19b482c29b6f  forms=B  mm: shmem: fix missing cache flush in shmem_mfill_atomic_pte()
+-- matches:
+   B  mm/shmem.c I=['flush_dcache_page'] E=clear_user_highpage func=None | clear_user_highpage(page, dst_addr);
+-- message:
+   mm: shmem: fix missing cache flush in shmem_mfill_atomic_pte()
+   
+   userfaultfd calls shmem_mfill_atomic_pte() which does not do any cache
+   flushing for the target page.  Then the target page will be mapped to
+   the user space with a different address (user address), which might have
+   an alias issue with the kernel address used to copy the data from the
+   user to.  Insert flush_dcache_page() in non-zero-page case.  And replace
+   clear_highpage() with clear_user_highpage() which already considers the
+   cache maintenance.
+   
+   Fixes: 8d1039634206 ("userfaultfd: shmem: add shmem_mfill_zeropage_pte for userfaultfd support")
+   Fixes: 4c27fe4c4c84 ("userfaultfd: shmem: add shmem_mcopy_atomic_pte for userfaultfd support")
+-- hunk mm/shmem.c:
+   @@ -2359,18 +2359,20 @@ int shmem_mfill_atomic_pte(struct mm_struct *dst_mm,
+    
+    			/* fallback to copy_from_user outside mmap_lock */
+    			if (unlikely(ret)) {
+    				*pagep = page;
+    				ret = -ENOENT;
+    				/* don't free the page */
+    				goto out_unacct_blocks;
+    			}
+   +
+   +			flush_dcache_page(page);
+    		} else {		/* ZEROPAGE */
+   -			clear_highpage(page);
+   +			clear_user_highpage(page, dst_addr);
+    		}
+    	} else {
+    		page = *pagep;
+    		*pagep = NULL;
+    	}
+    
+    	VM_BUG_ON(PageLocked(page));
+    	VM_BUG_ON(PageSwapBacked(page));
+====================================================================================================
+[37] 194b3348bdbb  forms=B  iommu/vt-d: Fix PASID directory pointer coherency
+-- matches:
+   B  drivers/iommu/intel/pasid.c I=['virt_to_phys'] E=clflush_cache_range func=None | clflush_cache_range(entries, VTD_PAGE_SIZE);
+   B  drivers/iommu/intel/pasid.c I=['virt_to_phys'] E=clflush_cache_range func=None | clflush_cache_range(&dir[dir_index].val, sizeof(*dir));
+-- message:
+   iommu/vt-d: Fix PASID directory pointer coherency
+   
+   On platforms that do not support IOMMU Extended capability bit 0
+   Page-walk Coherency, CPU caches are not snooped when IOMMU is accessing
+   any translation structures. IOMMU access goes only directly to
+   memory. Intel IOMMU code was missing a flush for the PASID table
+   directory that resulted in the unrecoverable fault as shown below.
+   
+   This patch adds clflush calls whenever allocating and updating
+   a PASID table directory to ensure cache coherency.
+   
+   On the reverse direction, there's no need to clflush the PASID directory
+   pointer when we deactivate a context entry in that IOMMU hardware will
+   not see the old PASID directory pointer after we clear the context entry.
+   PASID directory entries are also never freed once allocated.
+   
+    DMAR: DRHD: handling fault status reg 3
+    DMAR: [DMA Read NO_PASID] Request device [00:0d.2] fault addr 0x1026a4000
+          [fault reason 0x51] SM: Present bit in Directory Entry is clear
+    DMAR: Dump dmar1 table entries for IOVA 0x1026a4000
+    DMAR: scalable mode root entry: hi 0x0000000102448001, low 0x0000000101b3e001
+    DMAR: context entry: hi 0x0000000000000000, low 0x0000000101b4d401
+    DMAR: pasid dir entry: 0x0000000101b4e001
+    DMAR: pasid table entry[0]: 0x0000000000000109
+    DMAR: pasid table entry[1]: 0x0000000000000001
+    DMAR: pasid table entry[2]: 0x0000000000000000
+    DMAR: pasid table entry[3]: 0x0000000000000000
+    DMAR: pasid table entry[4]: 0x0000000000000000
+    DMAR: pasid table entry[5]: 0x0000000000000000
+    DMAR: pasid table entry[6]: 0x0000000000000000
+    DMAR: pasid table entry[7]: 0x0000000000000000
+    DMAR: PTE not present at level 4
+   
+   Fixes: 0bbeb01a4faf ("iommu/vt-d: Manage scalalble mode PASID tables")
+-- hunk drivers/iommu/intel/pasid.c:
+   @@ -210,16 +213,20 @@ static struct pasid_entry *intel_pasid_get_entry(struct device *dev, u32 pasid)
+    		 * clear. However, this entry might be populated by others
+    		 * while we are preparing it. Use theirs with a retry.
+    		 */
+    		if (cmpxchg64(&dir[dir_index].val, 0ULL,
+    			      (u64)virt_to_phys(entries) | PASID_PTE_PRESENT)) {
+    			free_pgtable_page(entries);
+    			goto retry;
+    		}
+   +		if (!ecap_coherent(info->iommu->ecap)) {
+   +			clflush_cache_range(entries, VTD_PAGE_SIZE);
+   +			clflush_cache_range(&dir[dir_index].val, sizeof(*dir));
+   +		}
+    	}
+    
+    	return &entries[index];
+    }
+    
+    /*
+     * Interfaces for PASID table entry manipulation:
+     */
+====================================================================================================
+[38] 0cef0bb836e3  forms=B  mm: clear uffd-wp PTE/PMD state on mremap()
+-- matches:
+   A A1 mm/huge_memory.c I=pmd_present E=None func=None | if (pmd_present(pmd))
+   A A1 mm/hugetlb.c I=pte_present E=None func=None | if (pte_present(pte))
+   A A1 mm/mremap.c I=pte_present E=None func=None | if (pte_present(pte))
+   B  mm/mremap.c I=['move_pte', 'pte_present'] E=pte_clear func=None | pte_clear(mm, new_addr, new_pte);
+-- message:
+   mm: clear uffd-wp PTE/PMD state on mremap()
+   
+   When mremap()ing a memory region previously registered with userfaultfd as
+   write-protected but without UFFD_FEATURE_EVENT_REMAP, an inconsistency in
+   flag clearing leads to a mismatch between the vma flags (which have
+   uffd-wp cleared) and the pte/pmd flags (which do not have uffd-wp
+   cleared).  This mismatch causes a subsequent mprotect(PROT_WRITE) to
+   trigger a warning in page_table_check_pte_flags() due to setting the pte
+   to writable while uffd-wp is still set.
+   
+   Fix this by always explicitly clearing the uffd-wp pte/pmd flags on any
+   such mremap() so that the values are consistent with the existing clearing
+   of VM_UFFD_WP.  Be careful to clear the logical flag regardless of its
+   physical form; a PTE bit, a swap PTE bit, or a PTE marker.  Cover PTE,
+   huge PMD and hugetlb paths.
+   
+   Fixes: 63b2d4174c4a ("userfaultfd: wp: add the writeprotect API to userfaultfd ioctl")
+-- hunk mm/huge_memory.c:
+   @@ -2201,16 +2201,26 @@ static pmd_t move_soft_dirty_pmd(pmd_t pmd)
+    	if (unlikely(is_pmd_migration_entry(pmd)))
+    		pmd = pmd_swp_mksoft_dirty(pmd);
+    	else if (pmd_present(pmd))
+    		pmd = pmd_mksoft_dirty(pmd);
+    #endif
+    	return pmd;
+    }
+    
+   +static pmd_t clear_uffd_wp_pmd(pmd_t pmd)
+   +{
+   +	if (pmd_present(pmd))
+   +		pmd = pmd_clear_uffd_wp(pmd);
+   +	else if (is_swap_pmd(pmd))
+   +		pmd = pmd_swp_clear_uffd_wp(pmd);
+   +
+   +	return pmd;
+   +}
+   +
+    bool move_huge_pmd(struct vm_area_struct *vma, unsigned long old_addr,
+    		  unsigned long new_addr, pmd_t *old_pmd, pmd_t *new_pmd)
+    {
+    	spinlock_t *old_ptl, *new_ptl;
+    	pmd_t pmd;
+    	struct mm_struct *mm = vma->vm_mm;
+    	bool force_flush = false;
+    
+-- hunk mm/hugetlb.c:
+   @@ -5397,33 +5397,45 @@ int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
+    
+    	return ret;
+    }
+    
+    static void move_huge_pte(struct vm_area_struct *vma, unsigned long old_addr,
+    			  unsigned long new_addr, pte_t *src_pte, pte_t *dst_pte,
+    			  unsigned long sz)
+    {
+   +	bool need_clear_uffd_wp = vma_has_uffd_without_event_remap(vma);
+    	struct hstate *h = hstate_vma(vma);
+    	struct mm_struct *mm = vma->vm_mm;
+    	spinlock_t *src_ptl, *dst_ptl;
+    	pte_t pte;
+    
+    	dst_ptl = huge_pte_lock(h, mm, dst_pte);
+    	src_ptl = huge_pte_lockptr(h, mm, src_pte);
+    
+    	/*
+    	 * We don't have to worry about the ordering of src and dst ptlocks
+    	 * because exclusive mmap_lock (or the i_mmap_lock) prevents deadlock.
+    	 */
+    	if (src_ptl != dst_ptl)
+    		spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+    
+    	pte = huge_ptep_get_and_clear(mm, old_addr, src_pte);
+   -	set_huge_pte_at(mm, new_addr, dst_pte, pte, sz);
+   +
+   +	if (need_clear_uffd_wp && pte_marker_uffd_wp(pte))
+   +		huge_pte_clear(mm, new_addr, dst_pte, sz);
+   +	else {
+   +		if (need_clear_uffd_wp) {
+   +			if (pte_present(pte))
+   +				pte = huge_pte_clear_uffd_wp(pte);
+   +			else if (is_swap_pte(pte))
+   +				pte = pte_swp_clear_uffd_wp(pte);
+   +		}
+   +		set_huge_pte_at(mm, new_addr, dst_pte, pte, sz);
+   +	}
+    
+    	if (src_ptl != dst_ptl)
+    		spin_unlock(src_ptl);
+    	spin_unlock(dst_ptl);
+    }
+    
+   …
+-- hunk mm/mremap.c:
+   @@ -211,17 +212,28 @@ static int move_ptes(struct vm_area_struct *vma, pmd_t *old_pmd,
+    		 * make sure the physical page stays valid until
+    		 * the TLB entry for the old mapping has been
+    		 * flushed.
+    		 */
+    		if (pte_present(pte))
+    			force_flush = true;
+    		pte = move_pte(pte, old_addr, new_addr);
+    		pte = move_soft_dirty_pte(pte);
+   -		set_pte_at(mm, new_addr, new_pte, pte);
+   +
+   +		if (need_clear_uffd_wp && pte_marker_uffd_wp(pte))
+   +			pte_clear(mm, new_addr, new_pte);
+   +		else {
+   +			if (need_clear_uffd_wp) {
+   +				if (pte_present(pte))
+   +					pte = pte_clear_uffd_wp(pte);
+   +				else if (is_swap_pte(pte))
+   +					pte = pte_swp_clear_uffd_wp(pte);
+   +			}
+   +			set_pte_at(mm, new_addr, new_pte, pte);
+   +		}
+    	}
+    
+    	arch_leave_lazy_mmu_mode();
+    	if (force_flush)
+    		flush_tlb_range(vma, old_end - len, old_end);
+    	if (new_ptl != old_ptl)
+    		spin_unlock(new_ptl);
+    	pte_unmap(new_pte - 1);
+====================================================================================================
+[39] 8ce720d5bd91  forms=B  mm/hugetlb: fix excessive IPI broadcasts when unsharing PMD tables using mmu_gather
+-- matches:
+   B  mm/hugetlb.c I=['huge_pte_alloc'] E=tlb_flush_mmu_tlbonly func=None | tlb_flush_mmu_tlbonly(&tlb);
+-- message:
+   mm/hugetlb: fix excessive IPI broadcasts when unsharing PMD tables using mmu_gather
+   
+   As reported, ever since commit 1013af4f585f ("mm/hugetlb: fix
+   huge_pmd_unshare() vs GUP-fast race") we can end up in some situations
+   where we perform so many IPI broadcasts when unsharing hugetlb PMD page
+   tables that it severely regresses some workloads.
+   
+   In particular, when we fork()+exit(), or when we munmap() a large
+   area backed by many shared PMD tables, we perform one IPI broadcast per
+   unshared PMD table.
+   
+   There are two optimizations to be had:
+   
+   (1) When we process (unshare) multiple such PMD tables, such as during
+       exit(), it is sufficient to send a single IPI broadcast (as long as
+       we respect locking rules) instead of one per PMD table.
+   
+       Locking prevents that any of these PMD tables could get reused before
+       we drop the lock.
+   
+   (2) When we are not the last sharer (> 2 users including us), there is
+       no need to send the IPI broadcast. The shared PMD tables cannot
+       become exclusive (fully unshared) before an IPI will be broadcasted
+       by the last sharer.
+   
+       Concurrent GUP-fast could walk into a PMD table just before we
+       unshared it. It could then succeed in grabbing a page from the
+       shared page table even after munmap() etc succeeded (and supressed
+       an IPI). But there is not difference compared to GUP-fast just
+       sleeping for a while after grabbing the page and re-enabling IRQs.
+   
+       Most importantly, GUP-fast will never walk into page tables that are
+       no-longer shared, because the last sharer will issue an IPI
+       broadcast.
+   
+       (if ever required, checking whether the PUD changed in GUP-fast
+        after grabbing the page like we do in the PTE case could handle
+        this)
+   
+   So let's rework PMD sharing TLB flushing + IPI sync to use the mmu_gather
+   …
+-- hunk mm/hugetlb.c:
+   @@ -5107,63 +5107,64 @@ int move_hugetlb_page_tables(struct vm_area_struct *vma,
+    	struct hstate *h = hstate_vma(vma);
+    	struct address_space *mapping = vma->vm_file->f_mapping;
+    	unsigned long sz = huge_page_size(h);
+    	struct mm_struct *mm = vma->vm_mm;
+    	unsigned long old_end = old_addr + len;
+    	unsigned long last_addr_mask;
+    	pte_t *src_pte, *dst_pte;
+    	struct mmu_notifier_range range;
+   -	bool shared_pmd = false;
+   +	struct mmu_gather tlb;
+    
+    	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm, old_addr,
+    				old_end);
+    	adjust_range_if_pmd_sharing_possible(vma, &range.start, &range.end);
+    	/*
+    	 * In case of shared PMDs, we should cover the maximum possible
+    	 * range.
+    	 */
+    	flush_cache_range(vma, range.start, range.end);
+   +	tlb_gather_mmu_vma(&tlb, vma);
+    
+    	mmu_notifier_invalidate_range_start(&range);
+    	last_addr_mask = hugetlb_mask_last_page(h);
+    	/* Prevent race with file truncation */
+    	hugetlb_vma_lock_write(vma);
+    	i_mmap_lock_write(mapping);
+    	for (; old_addr < old_end; old_addr += sz, new_addr += sz) {
+    		src_pte = hugetlb_walk(vma, old_addr, sz);
+    		if (!src_pte) {
+    			old_addr |= last_addr_mask;
+    			new_addr |= last_addr_mask;
+    			continue;
+    		}
+    		if (huge_pte_none(huge_ptep_get(mm, old_addr, src_pte)))
+    			continue;
+    
+   -		if (huge_pmd_unshare(mm, vma, old_addr, src_pte)) {
+   -			shared_pmd = true;
+   +		if (huge_pmd_unshare(&tlb, vma, old_addr, src_pte)) {
+    			old_addr |= last_addr_mask;
+    			new_addr |= last_addr_mask;
+    			continue;
+    		}
+    
+   …
+-- hunk mm/hugetlb.c:
+   @@ -6533,42 +6524,37 @@ long hugetlb_change_protection(struct vm_area_struct *vma,
+    			pte = huge_pte_modify(old_pte, newprot);
+    			pte = arch_make_huge_pte(pte, shift, vma->vm_flags);
+    			if (uffd_wp)
+    				pte = huge_pte_mkuffd_wp(pte);
+    			else if (uffd_wp_resolve)
+    				pte = huge_pte_clear_uffd_wp(pte);
+    			huge_ptep_modify_prot_commit(vma, address, ptep, old_pte, pte);
+    			pages++;
+   +			tlb_remove_huge_tlb_entry(h, &tlb, ptep, address);
+    		}
+    
+    next:
+    		spin_unlock(ptl);
+    		cond_resched();
+    	}
+   -	/*
+   -	 * There is nothing protecting a previously-shared page table that we
+   -	 * unshared through huge_pmd_unshare() from getting freed after we
+   -	 * release i_mmap_rwsem, so flush the TLB now. If huge_pmd_unshare()
+   -	 * succeeded, flush the range corresponding to the pud.
+   -	 */
+   -	if (shared_pmd)
+   -		flush_hugetlb_tlb_range(vma, range.start, range.end);
+   -	else
+   -		flush_hugetlb_tlb_range(vma, start, end);
+   +
+   +	tlb_flush_mmu_tlbonly(&tlb);
+   +	huge_pmd_unshare_flush(&tlb, vma);
+    	/*
+    	 * No need to call mmu_notifier_arch_invalidate_secondary_tlbs() we are
+    	 * downgrading page table protection not changing it to point to a new
+    	 * page.
+    	 *
+    	 * See Documentation/mm/mmu_notifier.rst
+    	 */
+    	i_mmap_unlock_write(vma->vm_file->f_mapping);
+    	hugetlb_vma_unlock_write(vma);
+    	mmu_notifier_invalidate_range_end(&range);
+   +	tlb_finish_mmu(&tlb);
+    
+    	return pages > 0 ? (pages << h->order) : pages;
+    }
+    
+    /*
+   …
+====================================================================================================
+[40] 7f9c9b607dc2  forms=B  mm: rmap: fix cache flush on THP pages
+-- matches:
+   B  mm/rmap.c I=['pmd_dirty', 'pmd_write'] E=flush_cache_range func=None | flush_cache_range(vma, address,
+-- message:
+   mm: rmap: fix cache flush on THP pages
+   
+   Patch series "Fix some bugs related to ramp and dax", v7.
+   
+   Patch 1-2 fix a cache flush bug, because subsequent patches depend on
+   those on those changes, there are placed in this series.  Patch 3-4 are
+   preparation for fixing a dax bug in patch 5.  Patch 6 is code cleanup
+   since the previous patch removes the usage of follow_invalidate_pte().
+   
+   
+   This patch (of 6):
+   
+   The flush_cache_page() only remove a PAGE_SIZE sized range from the cache.
+   However, it does not cover the full pages in a THP except a head page. 
+   Replace it with flush_cache_range() to fix this issue.  At least, no
+   problems were found due to this.  Maybe because the architectures that
+   have virtual indexed caches is less.
+   
+   Fixes: f27176cfc363 ("mm: convert page_mkclean_one() to use page_vma_mapped_walk()")
+-- hunk mm/rmap.c:
+   @@ -965,17 +965,18 @@ static bool page_mkclean_one(struct folio *folio, struct vm_area_struct *vma,
+    		} else {
+    #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+    			pmd_t *pmd = pvmw.pmd;
+    			pmd_t entry;
+    
+    			if (!pmd_dirty(*pmd) && !pmd_write(*pmd))
+    				continue;
+    
+   -			flush_cache_page(vma, address, folio_pfn(folio));
+   +			flush_cache_range(vma, address,
+   +					  address + HPAGE_PMD_SIZE);
+    			entry = pmdp_invalidate(vma, address, pmd);
+    			entry = pmd_wrprotect(entry);
+    			entry = pmd_mkclean(entry);
+    			set_pmd_at(vma->vm_mm, address, pmd, entry);
+    			ret = 1;
+    #else
+    			/* unexpected pmd-mapped folio? */
+    			WARN_ON_ONCE(1);
+====================================================================================================
+[41] 8cfe148a7136  forms=C  kvm/arm64: rework guest entry logic
+-- matches:
+   C  arch/arm64/kvm/arm.c I=None E=isb func=kvm_arch_vcpu_ioctl_run | isb();
+-- message:
+   kvm/arm64: rework guest entry logic
+   
+   In kvm_arch_vcpu_ioctl_run() we enter an RCU extended quiescent state
+   (EQS) by calling guest_enter_irqoff(), and unmasked IRQs prior to
+   exiting the EQS by calling guest_exit(). As the IRQ entry code will not
+   wake RCU in this case, we may run the core IRQ code and IRQ handler
+   without RCU watching, leading to various potential problems.
+   
+   Additionally, we do not inform lockdep or tracing that interrupts will
+   be enabled during guest execution, which caan lead to misleading traces
+   and warnings that interrupts have been enabled for overly-long periods.
+   
+   This patch fixes these issues by using the new timing and context
+   entry/exit helpers to ensure that interrupts are handled during guest
+   vtime but with RCU watching, with a sequence:
+   
+   	guest_timing_enter_irqoff();
+   
+   	guest_state_enter_irqoff();
+   	< run the vcpu >
+   	guest_state_exit_irqoff();
+   
+   	< take any pending IRQs >
+   
+   	guest_timing_exit_irqoff();
+   
+   Since instrumentation may make use of RCU, we must also ensure that no
+   instrumented code is run during the EQS. I've split out the critical
+   section into a new kvm_arm_enter_exit_vcpu() helper which is marked
+   noinstr.
+   
+   Fixes: 1b3d546daf85ed2b ("arm/arm64: KVM: Properly account for guest CPU time")
+-- hunk arch/arm64/kvm/arm.c:
+   @@ -906,36 +924,33 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
+    		 * timer virtual interrupt state.
+    		 */
+    		if (static_branch_unlikely(&userspace_irqchip_in_use))
+    			kvm_timer_sync_user(vcpu);
+    
+    		kvm_arch_vcpu_ctxsync_fp(vcpu);
+    
+    		/*
+   -		 * We may have taken a host interrupt in HYP mode (ie
+   -		 * while executing the guest). This interrupt is still
+   -		 * pending, as we haven't serviced it yet!
+   +		 * We must ensure that any pending interrupts are taken before
+   +		 * we exit guest timing so that timer ticks are accounted as
+   +		 * guest time. Transiently unmask interrupts so that any
+   +		 * pending interrupts are taken.
+    		 *
+   -		 * We're now back in SVC mode, with interrupts
+   -		 * disabled.  Enabling the interrupts now will have
+   -		 * the effect of taking the interrupt again, in SVC
+   -		 * mode this time.
+   +		 * Per ARM DDI 0487G.b section D1.13.4, an ISB (or other
+   +		 * context synchronization event) is necessary to ensure that
+   +		 * pending interrupts are taken.
+    		 */
+    		local_irq_enable();
+   +		isb();
+   +		local_irq_disable();
+   +
+   +		guest_timing_exit_irqoff();
+   +
+   +		local_irq_enable();
+    
+   -		/*
+   -		 * We do local_irq_enable() before calling guest_exit() so
+   -		 * that if a timer interrupt hits while running the guest we
+   -		 * account that tick as being spent in the guest.  We enable
+   -		 * preemption after calling guest_exit() so that if we get
+   -		 * preempted we make sure ticks after that is not counted as
+   -		 * guest time.
+   -		 */
+   -		guest_exit();
+    		trace_kvm_exit(ret, kvm_vcpu_trap_get_class(vcpu), *vcpu_pc(vcpu));
+    
+    		/* Exit types that need handling before we can be preempted */
+   …
+====================================================================================================
+[42] 1037d186edfc  forms=C  openrisc: Implement fixmap to fix earlycon
+-- matches:
+   C  arch/openrisc/mm/init.c I=None E=set_pte_at func=map_page | set_pte_at(&init_mm, va, pte, pfn_pte(pa >> PAGE_SHIFT, prot));
+   C  arch/openrisc/mm/init.c I=None E=pte_clear func=map_page | pte_clear(&init_mm, va, pte);
+   C  arch/openrisc/mm/init.c I=None E=local_flush_tlb_page func=map_page | local_flush_tlb_page(NULL, va);
+-- message:
+   openrisc: Implement fixmap to fix earlycon
+   
+   With commit 53c98e35dcbc ("openrisc: mm: remove unneeded early ioremap
+   code") it was commented that early ioremap was not used in OpenRISC.  I
+   acked this but was wrong, earlycon was using it.  Earlycon setup now
+   fails with the below trace:
+   
+       Kernel command line: earlycon
+       ------------[ cut here ]------------
+       WARNING: CPU: 0 PID: 0 at mm/ioremap.c:23
+       generic_ioremap_prot+0x118/0x130
+       Modules linked in:
+       CPU: 0 UID: 0 PID: 0 Comm: swapper Not tainted
+       6.11.0-rc5-00001-gce02fd891c38-dirty #141
+       Call trace:
+       [<(ptrval)>] dump_stack_lvl+0x7c/0x9c
+       [<(ptrval)>] dump_stack+0x1c/0x2c
+       [<(ptrval)>] __warn+0xb4/0x108
+       [<(ptrval)>] ? generic_ioremap_prot+0x118/0x130
+       [<(ptrval)>] warn_slowpath_fmt+0x60/0x98
+       [<(ptrval)>] generic_ioremap_prot+0x118/0x130
+       [<(ptrval)>] ioremap_prot+0x20/0x30
+       [<(ptrval)>] of_setup_earlycon+0xd4/0x2e0
+       [<(ptrval)>] early_init_dt_scan_chosen_stdout+0x18c/0x1c8
+       [<(ptrval)>] param_setup_earlycon+0x3c/0x60
+       [<(ptrval)>] do_early_param+0xb0/0x118
+       [<(ptrval)>] parse_args+0x184/0x4b8
+       [<(ptrval)>] ? start_kernel+0x0/0x78c
+       [<(ptrval)>] parse_early_options+0x40/0x50
+       [<(ptrval)>] ? do_early_param+0x0/0x118
+       [<(ptrval)>] parse_early_param+0x48/0x68
+       [<(ptrval)>] ? start_kernel+0x318/0x78c
+       [<(ptrval)>] ? start_kernel+0x0/0x78c
+       ---[ end trace 0000000000000000 ]---
+   
+   To fix this we could either implement early_ioremap again or implement
+   fixmap.  In this patch we choose the later option of implementing basic
+   fixmap support.
+   
+   While fixing this we also remove the old FIX_IOREMAP slots that were
+   …
+-- hunk arch/openrisc/mm/init.c:
+   @@ -202,16 +202,53 @@ void __init mem_init(void)
+    	/* this will put all low memory onto the freelists */
+    	memblock_free_all();
+    
+    	printk("mem_init_done ...........................................\n");
+    	mem_init_done = 1;
+    	return;
+    }
+    
+   +static int __init map_page(unsigned long va, phys_addr_t pa, pgprot_t prot)
+   +{
+   +	p4d_t *p4d;
+   +	pud_t *pud;
+   +	pmd_t *pmd;
+   +	pte_t *pte;
+   +
+   +	p4d = p4d_offset(pgd_offset_k(va), va);
+   +	pud = pud_offset(p4d, va);
+   +	pmd = pmd_offset(pud, va);
+   +	pte = pte_alloc_kernel(pmd, va);
+   +
+   +	if (pte == NULL)
+   +		return -ENOMEM;
+   +
+   +	if (pgprot_val(prot))
+   +		set_pte_at(&init_mm, va, pte, pfn_pte(pa >> PAGE_SHIFT, prot));
+   +	else
+   +		pte_clear(&init_mm, va, pte);
+   +
+   +	local_flush_tlb_page(NULL, va);
+   +	return 0;
+   +}
+   +
+   +void __init __set_fixmap(enum fixed_addresses idx,
+   +			 phys_addr_t phys, pgprot_t prot)
+   +{
+   +	unsigned long address = __fix_to_virt(idx);
+   +
+   +	if (idx >= __end_of_fixed_addresses) {
+   +		BUG();
+   +		return;
+   +	}
+   +
+   +	map_page(address, phys, prot);
+   +}
+   …
+====================================================================================================
+[43] e19d4ebc536d  forms=C  alpha: add full ioread64/iowrite64 implementation
+-- matches:
+   C  arch/alpha/include/asm/io.h I=None E=mb func=ioread64 | mb();
+   C  arch/alpha/include/asm/io.h I=None E=mb func=ioread64 | mb();
+   C  arch/alpha/include/asm/io.h I=None E=mb func=iowrite64 | mb();
+   C  arch/alpha/kernel/io.c I=None E=mb func=ioread64 | mb();
+-- message:
+   alpha: add full ioread64/iowrite64 implementation
+   
+   The previous patch introduced ioread64/iowrite64 declarations, but
+   this means we no longer get the io-64-nonatomic variant, and
+   run into a long error when someone actually wants to use these:
+   
+   ERROR: modpost: "ioread64" [drivers/net/ethernet/freescale/enetc/fsl-enetc.ko] undefined!
+   
+   Add the (hopefully) correct implementation for each machine type,
+   based on the 32-bit accessor. Since the 32-bit return type does
+   not work for ioread64(), change the internal implementation to use
+   the correct width consistently, but leave the external interface
+   to match the asm-generic/iomap.h header that uses 32-bit or 64-bit
+   return values.
+   
+   Fixes: 7e772dad9913 ("alpha: Use generic <asm-generic/io.h>")
+-- hunk arch/alpha/include/asm/io.h:
+   @@ -395,35 +397,52 @@ extern inline unsigned int ioread32(const void __iomem *addr)
+    {
+    	unsigned int ret;
+    	mb();
+    	ret = IO_CONCAT(__IO_PREFIX,ioread32)(addr);
+    	mb();
+    	return ret;
+    }
+    
+   +extern inline u64 ioread64(const void __iomem *addr)
+   +{
+   +	unsigned int ret;
+   +	mb();
+   +	ret = IO_CONCAT(__IO_PREFIX,ioread64)(addr);
+   +	mb();
+   +	return ret;
+   +}
+   +
+    extern inline void iowrite32(u32 b, void __iomem *addr)
+    {
+    	mb();
+    	IO_CONCAT(__IO_PREFIX, iowrite32)(b, addr);
+    }
+    
+   +extern inline void iowrite64(u64 b, void __iomem *addr)
+   +{
+   +	mb();
+   +	IO_CONCAT(__IO_PREFIX, iowrite64)(b, addr);
+   +}
+   +
+    extern inline u32 inl(unsigned long port)
+    {
+    	return ioread32(ioport_map(port, 4));
+    }
+    
+    extern inline void outl(u32 b, unsigned long port)
+    {
+    	iowrite32(b, ioport_map(port, 4));
+    }
+    #endif
+    
+    #define ioread32 ioread32
+   +#define ioread64 ioread64
+    #define iowrite32 iowrite32
+   +#define iowrite64 iowrite64
+   …
+-- hunk arch/alpha/kernel/io.c:
+   @@ -36,16 +36,25 @@ unsigned int ioread32(const void __iomem *addr)
+    {
+    	unsigned int ret;
+    	mb();
+    	ret = IO_CONCAT(__IO_PREFIX,ioread32)(addr);
+    	mb();
+    	return ret;
+    }
+    
+   +u64 ioread64(const void __iomem *addr)
+   +{
+   +	unsigned int ret;
+   +	mb();
+   +	ret = IO_CONCAT(__IO_PREFIX,ioread64)(addr);
+   +	mb();
+   +	return ret;
+   +}
+   +
+    void iowrite8(u8 b, void __iomem *addr)
+    {
+    	mb();
+    	IO_CONCAT(__IO_PREFIX,iowrite8)(b, addr);
+    }
+    
+    void iowrite16(u16 b, void __iomem *addr)
+    {
+-- hunk arch/alpha/kernel/io.c:
+   @@ -54,22 +63,30 @@ void iowrite16(u16 b, void __iomem *addr)
+    }
+    
+    void iowrite32(u32 b, void __iomem *addr)
+    {
+    	mb();
+    	IO_CONCAT(__IO_PREFIX,iowrite32)(b, addr);
+    }
+    
+   +void iowrite64(u64 b, void __iomem *addr)
+   +{
+   +	mb();
+   +	IO_CONCAT(__IO_PREFIX,iowrite64)(b, addr);
+   +}
+   +
+    EXPORT_SYMBOL(ioread8);
+    EXPORT_SYMBOL(ioread16);
+    EXPORT_SYMBOL(ioread32);
+   +EXPORT_SYMBOL(ioread64);
+    EXPORT_SYMBOL(iowrite8);
+    EXPORT_SYMBOL(iowrite16);
+    EXPORT_SYMBOL(iowrite32);
+   +EXPORT_SYMBOL(iowrite64);
+    
+    u8 inb(unsigned long port)
+    {
+    	return ioread8(ioport_map(port, 1));
+    }
+    
+    u16 inw(unsigned long port)
+    {
+====================================================================================================
+[44] 58661a30f1bc  forms=C  riscv: Flush the instruction cache during SMP bringup
+-- matches:
+   C  arch/riscv/kernel/smpboot.c I=None E=local_flush_icache_all func=smp_callin | local_flush_icache_all();
+   C  arch/riscv/kernel/smpboot.c I=None E=local_flush_icache_all func=smp_callin | local_flush_icache_all();
+-- message:
+   riscv: Flush the instruction cache during SMP bringup
+   
+   Instruction cache flush IPIs are sent only to CPUs in cpu_online_mask,
+   so they will not target a CPU until it calls set_cpu_online() earlier in
+   smp_callin(). As a result, if instruction memory is modified between the
+   CPU coming out of reset and that point, then its instruction cache may
+   contain stale data. Therefore, the instruction cache must be flushed
+   after the set_cpu_online() synchronization point.
+   
+   Fixes: 08f051eda33b ("RISC-V: Flush I$ when making a dirty page executable")
+-- hunk arch/riscv/kernel/smpboot.c:
+   @@ -229,19 +229,20 @@ asmlinkage __visible void smp_callin(void)
+    	if (has_vector()) {
+    		if (riscv_v_setup_vsize())
+    			elf_hwcap &= ~COMPAT_HWCAP_ISA_V;
+    	}
+    
+    	riscv_user_isa_enable();
+    
+    	/*
+   -	 * Remote TLB flushes are ignored while the CPU is offline, so emit
+   -	 * a local TLB flush right now just in case.
+   +	 * Remote cache and TLB flushes are ignored while the CPU is offline,
+   +	 * so flush them both right now just in case.
+    	 */
+   +	local_flush_icache_all();
+    	local_flush_tlb_all();
+    	complete(&cpu_running);
+    	/*
+    	 * Disable preemption before enabling interrupts, so we don't try to
+    	 * schedule a CPU that hasn't actually started yet.
+    	 */
+    	local_irq_enable();
+    	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+====================================================================================================
+[45] b1b93cb7e794  forms=C  powerpc/nohash: Fix __ptep_set_access_flags() and ptep_set_wrprotect()
+-- matches:
+   C  arch/powerpc/include/asm/nohash/32/pte-8xx.h I=None E=flush_tlb_page func=__ptep_set_access_flags | flush_tlb_page(vma, address);
+-- message:
+   powerpc/nohash: Fix __ptep_set_access_flags() and ptep_set_wrprotect()
+   
+   Commit 26973fa5ac0e ("powerpc/mm: use pte helpers in generic code")
+   changed those two functions to use pte helpers to determine which
+   bits to clear and which bits to set.
+   
+   This change was based on the assumption that bits to be set/cleared
+   are always the same and can be determined by applying the pte
+   manipulation helpers on __pte(0).
+   
+   But on platforms like book3e, the bits depend on whether the page
+   is a user page or not.
+   
+   For the time being it more or less works because of _PAGE_EXEC being
+   used for user pages only and exec right being set at all time on
+   kernel page. But following patch will clean that and output of
+   pte_mkexec() will depend on the page being a user or kernel page.
+   
+   Instead of trying to make an even more complicated helper where bits
+   would become dependent on the final pte value, come back to a more
+   static situation like before commit 26973fa5ac0e ("powerpc/mm: use
+   pte helpers in generic code"), by introducing an 8xx specific
+   version of __ptep_set_access_flags() and ptep_set_wrprotect().
+   
+   Fixes: 26973fa5ac0e ("powerpc/mm: use pte helpers in generic code")
+-- hunk arch/powerpc/include/asm/nohash/32/pte-8xx.h:
+   @@ -131,16 +131,38 @@ static inline pte_t pte_mkuser(pte_t pte)
+    
+    static inline pte_t pte_mkhuge(pte_t pte)
+    {
+    	return __pte(pte_val(pte) | _PAGE_SPS | _PAGE_HUGE);
+    }
+    
+    #define pte_mkhuge pte_mkhuge
+    
+   +static inline pte_basic_t pte_update(struct mm_struct *mm, unsigned long addr, pte_t *p,
+   +				     unsigned long clr, unsigned long set, int huge);
+   +
+   +static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+   +{
+   +	pte_update(mm, addr, ptep, 0, _PAGE_RO, 0);
+   +}
+   +#define ptep_set_wrprotect ptep_set_wrprotect
+   +
+   +static inline void __ptep_set_access_flags(struct vm_area_struct *vma, pte_t *ptep,
+   +					   pte_t entry, unsigned long address, int psize)
+   +{
+   +	unsigned long set = pte_val(entry) & (_PAGE_DIRTY | _PAGE_ACCESSED | _PAGE_EXEC);
+   +	unsigned long clr = ~pte_val(entry) & _PAGE_RO;
+   +	int huge = psize > mmu_virtual_psize ? 1 : 0;
+   +
+   +	pte_update(vma->vm_mm, address, ptep, clr, set, huge);
+   +
+   +	flush_tlb_page(vma, address);
+   +}
+   +#define __ptep_set_access_flags __ptep_set_access_flags
+   +
+    static inline unsigned long pgd_leaf_size(pgd_t pgd)
+    {
+    	if (pgd_val(pgd) & _PMD_PAGE_8M)
+    		return SZ_8M;
+    	return SZ_4M;
+    }
+    
+    #define pgd_leaf_size pgd_leaf_size
+====================================================================================================
+[46] 5b0870931371  forms=C  KVM: arm64: Fix host's ZCR_EL2 restore on nVHE
+-- matches:
+   C  arch/arm64/kvm/hyp/nvhe/hyp-main.c I=None E=isb func=handle_trap | isb();
+-- message:
+   KVM: arm64: Fix host's ZCR_EL2 restore on nVHE
+   
+   We re-enter the EL1 host with CPTR_EL2.TZ set in order to
+   be able to lazily restore ZCR_EL2 when required.
+   
+   However, the same CPTR_EL2 configuration also leads to trapping
+   when ZCR_EL2 is accessed from EL2. Duh!
+   
+   Clear CPTR_EL2.TZ *before* writing to ZCR_EL2.
+   
+   Fixes: beed09067b42 ("KVM: arm64: Trap host SVE accesses when the FPSIMD state is dirty")
+-- hunk arch/arm64/kvm/hyp/nvhe/hyp-main.c:
+   @@ -173,15 +173,16 @@ void handle_trap(struct kvm_cpu_context *host_ctxt)
+    	switch (ESR_ELx_EC(esr)) {
+    	case ESR_ELx_EC_HVC64:
+    		handle_host_hcall(host_ctxt);
+    		break;
+    	case ESR_ELx_EC_SMC64:
+    		handle_host_smc(host_ctxt);
+    		break;
+    	case ESR_ELx_EC_SVE:
+   -		sve_cond_update_zcr_vq(ZCR_ELx_LEN_MASK, SYS_ZCR_EL2);
+    		sysreg_clear_set(cptr_el2, CPTR_EL2_TZ, 0);
+   +		isb();
+   +		sve_cond_update_zcr_vq(ZCR_ELx_LEN_MASK, SYS_ZCR_EL2);
+    		break;
+    	default:
+    		hyp_panic();
+    	}
+    }
+====================================================================================================
+[47] ea64baacbc36  forms=C  arm64/signal: Flush FPSIMD register state when disabling streaming mode
+-- matches:
+   C  arch/arm64/kernel/signal.c I=None E=memset func=setup_return | memset(&current->thread.uw.fpsimd_state, 0,
+-- message:
+   arm64/signal: Flush FPSIMD register state when disabling streaming mode
+   
+   When handling a signal delivered to a context with streaming mode enabled
+   we will disable streaming mode for the signal handler, when doing so we
+   should also flush the saved FPSIMD register state like exiting streaming
+   mode in the hardware would do so that if that state is reloaded we get the
+   same behaviour. Without this we will reload whatever the last FPSIMD state
+   that was saved for the task was.
+   
+   Fixes: 40a8e87bb328 ("arm64/sme: Disable ZA and streaming mode when handling signals")
+-- hunk arch/arm64/kernel/signal.c:
+   @@ -921,16 +921,26 @@ static void setup_return(struct pt_regs *regs, struct k_sigaction *ka,
+    		regs->pstate |= PSR_BTYPE_C;
+    	}
+    
+    	/* TCO (Tag Check Override) always cleared for signal handlers */
+    	regs->pstate &= ~PSR_TCO_BIT;
+    
+    	/* Signal handlers are invoked with ZA and streaming mode disabled */
+    	if (system_supports_sme()) {
+   +		/*
+   +		 * If we were in streaming mode the saved register
+   +		 * state was SVE but we will exit SM and use the
+   +		 * FPSIMD register state - flush the saved FPSIMD
+   +		 * register state in case it gets loaded.
+   +		 */
+   +		if (current->thread.svcr & SVCR_SM_MASK)
+   +			memset(&current->thread.uw.fpsimd_state, 0,
+   +			       sizeof(current->thread.uw.fpsimd_state));
+   +
+    		current->thread.svcr &= ~(SVCR_ZA_MASK |
+    					  SVCR_SM_MASK);
+    		sme_smstop();
+    	}
+    
+    	if (ka->sa.sa_flags & SA_RESTORER)
+    		sigtramp = ka->sa.sa_restorer;
+    	else
+====================================================================================================
+[48] f0293cd1f4fc  forms=C  riscv: mm: Implement pmdp_collapse_flush for THP
+-- matches:
+   C  arch/riscv/mm/pgtable.c I=None E=flush_tlb_mm func=pmdp_collapse_flush | flush_tlb_mm(vma->vm_mm);
+-- message:
+   riscv: mm: Implement pmdp_collapse_flush for THP
+   
+   When THP is enabled, 4K pages are collapsed into a single huge
+   page using the generic pmdp_collapse_flush() which will further
+   use flush_tlb_range() to shoot-down stale TLB entries. Unfortunately,
+   the generic pmdp_collapse_flush() only invalidates cached leaf PTEs
+   using address specific SFENCEs which results in repetitive (or
+   unpredictable) page faults on RISC-V implementations which cache
+   non-leaf PTEs.
+   
+   Provide a RISC-V specific pmdp_collapse_flush() which ensures both
+   cached leaf and non-leaf PTEs are invalidated by using non-address
+   specific SFENCEs as recommended by the RISC-V privileged specification.
+   
+   Fixes: e88b333142e4 ("riscv: mm: add THP support on 64-bit")
+-- hunk arch/riscv/mm/pgtable.c:
+   @@ -76,8 +76,28 @@ int pmd_free_pte_page(pmd_t *pmd, unsigned long addr)
+    	pmd_clear(pmd);
+    
+    	flush_tlb_kernel_range(addr, addr + PMD_SIZE);
+    	pte_free_kernel(NULL, pte);
+    	return 1;
+    }
+    
+    #endif /* CONFIG_HAVE_ARCH_HUGE_VMAP */
+   +#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   +pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
+   +					unsigned long address, pmd_t *pmdp)
+   +{
+   +	pmd_t pmd = pmdp_huge_get_and_clear(vma->vm_mm, address, pmdp);
+   +
+   +	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
+   +	VM_BUG_ON(pmd_trans_huge(*pmdp));
+   +	/*
+   +	 * When leaf PTE entries (regular pages) are collapsed into a leaf
+   +	 * PMD entry (huge page), a valid non-leaf PTE is converted into a
+   +	 * valid leaf PTE at the level 1 page table.  Since the sfence.vma
+   +	 * forms that specify an address only apply to leaf PTEs, we need a
+   +	 * global flush here.  collapse_huge_page() assumes these flushes are
+   +	 * eager, so just do the fence here.
+   +	 */
+   +	flush_tlb_mm(vma->vm_mm);
+   +	return pmd;
+   +}
+   +#endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+====================================================================================================
+[49] b7795074a046  forms=C  parisc: Optimize per-pagetable spinlocks
+-- matches:
+   C  arch/parisc/include/asm/pgalloc.h I=None E=memset func=pgd_alloc | memset(pgd, 0, PAGE_SIZE << PGD_ORDER);
+   C  arch/parisc/include/asm/pgalloc.h I=None E=memset func=pmd_alloc_one | memset ((void *)pmd, 0, PAGE_SIZE << PMD_ORDER);
+   C  arch/parisc/include/asm/pgtable.h I=None E=set_pte_at func=ptep_test_and_clear_young | set_pte_at(vma->vm_mm, addr, ptep, pte_mkold(pte));
+   C  arch/parisc/include/asm/pgtable.h I=None E=set_pte_at func=ptep_get_and_clear | set_pte_at(mm, addr, ptep, __pte(0));
+-- message:
+   parisc: Optimize per-pagetable spinlocks
+   
+   On parisc a spinlock is stored in the next page behind the pgd which
+   protects against parallel accesses to the pgd. That's why one additional
+   page (PGD_ALLOC_ORDER) is allocated for the pgd.
+   
+   Matthew Wilcox suggested that we instead should use a pointer in the
+   struct page table for this spinlock and noted, that the comments for the
+   PGD_ORDER and PMD_ORDER defines were wrong.
+   
+   Both suggestions are addressed with this patch. Instead of having an own
+   spinlock to protect the pgd, we now switch to use the existing
+   page_table_lock.  Additionally, beside loading the pgd into cr25 in
+   switch_mm_irqs_off(), the physical address of this lock is loaded into
+   cr28 (tr4), so that we can avoid implementing a complicated lookup in
+   assembly for this lock in the TLB fault handlers.
+   
+   The existing Hybrid L2/L3 page table scheme (where the pmd is adjacent
+   to the pgd) has been dropped with this patch.
+   
+   Remove the locking in set_pte() and the huge-page pte functions too.
+   They trigger a spinlock recursion on 32bit machines and seem unnecessary.
+   
+   Fixes: b37d1c1898b2 ("parisc: Use per-pagetable spinlock")
+-- hunk arch/parisc/include/asm/pgalloc.h:
+   @@ -10,105 +10,65 @@
+    
+    #include <asm/cache.h>
+    
+    #define __HAVE_ARCH_PMD_ALLOC_ONE
+    #define __HAVE_ARCH_PMD_FREE
+    #define __HAVE_ARCH_PGD_FREE
+    #include <asm-generic/pgalloc.h>
+    
+   -/* Allocate the top level pgd (page directory)
+   - *
+   - * Here (for 64 bit kernels) we implement a Hybrid L2/L3 scheme: we
+   - * allocate the first pmd adjacent to the pgd.  This means that we can
+   - * subtract a constant offset to get to it.  The pmd and pgd sizes are
+   - * arranged so that a single pmd covers 4GB (giving a full 64-bit
+   - * process access to 8TB) so our lookups are effectively L2 for the
+   - * first 4GB of the kernel (i.e. for all ILP32 processes and all the
+   - * kernel for machines with under 4GB of memory) */
+   +/* Allocate the top level pgd (page directory) */
+    static inline pgd_t *pgd_alloc(struct mm_struct *mm)
+    {
+   -	pgd_t *pgd = (pgd_t *)__get_free_pages(GFP_KERNEL,
+   -					       PGD_ALLOC_ORDER);
+   -	pgd_t *actual_pgd = pgd;
+   +	pgd_t *pgd;
+    
+   -	if (likely(pgd != NULL)) {
+   -		memset(pgd, 0, PAGE_SIZE<<PGD_ALLOC_ORDER);
+   -#if CONFIG_PGTABLE_LEVELS == 3
+   -		actual_pgd += PTRS_PER_PGD;
+   -		/* Populate first pmd with allocated memory.  We mark it
+   -		 * with PxD_FLAG_ATTACHED as a signal to the system that this
+   -		 * pmd entry may not be cleared. */
+   -		set_pgd(actual_pgd, __pgd((PxD_FLAG_PRESENT |
+   -				        PxD_FLAG_VALID |
+   -					PxD_FLAG_ATTACHED)
+   -			+ (__u32)(__pa((unsigned long)pgd) >> PxD_VALUE_SHIFT)));
+   -		/* The first pmd entry also is marked with PxD_FLAG_ATTACHED as
+   -		 * a signal that this pmd may not be freed */
+   -		set_pgd(pgd, __pgd(PxD_FLAG_ATTACHED));
+   -#endif
+   -	}
+   -	spin_lock_init(pgd_spinlock(actual_pgd));
+   -	return actual_pgd;
+   +	pgd = (pgd_t *) __get_free_pages(GFP_KERNEL, PGD_ORDER);
+   …
+-- hunk arch/parisc/include/asm/pgtable.h:
+   @@ -451,67 +420,45 @@ extern void update_mmu_cache(struct vm_area_struct *, unsigned long, pte_t *);
+    #define __swp_offset(x)                   ( (((x).val >> 6) &  0x7) | \
+    					  (((x).val >> 8) & ~0x7) )
+    #define __swp_entry(type, offset)         ((swp_entry_t) { (type) | \
+    					    ((offset &  0x7) << 6) | \
+    					    ((offset & ~0x7) << 8) })
+    #define __pte_to_swp_entry(pte)		((swp_entry_t) { pte_val(pte) })
+    #define __swp_entry_to_pte(x)		((pte_t) { (x).val })
+    
+   -
+   -static inline spinlock_t *pgd_spinlock(pgd_t *pgd)
+   -{
+   -	if (unlikely(pgd == swapper_pg_dir))
+   -		return &pa_swapper_pg_lock;
+   -	return (spinlock_t *)((char *)pgd + (PAGE_SIZE << (PGD_ALLOC_ORDER - 1)));
+   -}
+   -
+   -
+    static inline int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long addr, pte_t *ptep)
+    {
+    	pte_t pte;
+   -	unsigned long flags;
+    
+    	if (!pte_young(*ptep))
+    		return 0;
+    
+   -	spin_lock_irqsave(pgd_spinlock(vma->vm_mm->pgd), flags);
+    	pte = *ptep;
+    	if (!pte_young(pte)) {
+   -		spin_unlock_irqrestore(pgd_spinlock(vma->vm_mm->pgd), flags);
+    		return 0;
+    	}
+   -	set_pte(ptep, pte_mkold(pte));
+   -	purge_tlb_entries(vma->vm_mm, addr);
+   -	spin_unlock_irqrestore(pgd_spinlock(vma->vm_mm->pgd), flags);
+   +	set_pte_at(vma->vm_mm, addr, ptep, pte_mkold(pte));
+    	return 1;
+    }
+    
+    struct mm_struct;
+    static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+    {
+    	pte_t old_pte;
+   -	unsigned long flags;
+    
+   …
+====================================================================================================
+[50] b7d9d2e3a8ab  forms=C  arm64: mm: __ptep_set_access_flags must hint correct TTL
+-- matches:
+   C  arch/arm64/mm/fault.c I=None E=__flush_tlb_range func=__ptep_set_access_flags | __flush_tlb_range(vma, address, address + pgsize, pgsize, level,
+-- message:
+   arm64: mm: __ptep_set_access_flags must hint correct TTL
+   
+   It has been reported that since commit 752a0d1d483e9 ("arm64: mm:
+   Provide level hint for flush_tlb_page()"), the arm64
+   check_hugetlb_options selftest has been locking up while running "Check
+   child hugetlb memory with private mapping, sync error mode and mmap
+   memory".
+   
+   This is due to hugetlb (and THP) helpers casting their PMD/PUD entries
+   to PTE and calling __ptep_set_access_flags(), which issues a
+   __flush_tlb_page(). Now that this is hinted for level 3, in this case,
+   the TLB entry does not get evicted and we end up in a spurious fault
+   loop.
+   
+   Fix this by creating a __ptep_set_access_flags_anysz() function which
+   takes the pgsize of the entry. It can then add the appropriate hint. The
+   "_anysz" approach is the established pattern for problems of this class.
+   
+   Fixes: 752a0d1d483e ("arm64: mm: Provide level hint for flush_tlb_page()")
+-- hunk arch/arm64/mm/fault.c:
+   @@ -233,18 +234,37 @@ int __ptep_set_access_flags(struct vm_area_struct *vma,
+    		pteval = cmpxchg_relaxed(&pte_val(*ptep), old_pteval, pteval);
+    	} while (pteval != old_pteval);
+    
+    	/*
+    	 * Invalidate the local stale read-only entry.  Remote stale entries
+    	 * may still cause page faults and be invalidated via
+    	 * flush_tlb_fix_spurious_fault().
+    	 */
+   -	if (dirty)
+   -		__flush_tlb_page(vma, address, TLBF_NOBROADCAST);
+   +	if (dirty) {
+   +		switch (pgsize) {
+   +		case PAGE_SIZE:
+   +			level = 3;
+   +			break;
+   +		case PMD_SIZE:
+   +			level = 2;
+   +			break;
+   +#ifndef __PAGETABLE_PMD_FOLDED
+   +		case PUD_SIZE:
+   +			level = 1;
+   +			break;
+   +#endif
+   +		default:
+   +			level = TLBI_TTL_UNKNOWN;
+   +			WARN_ON(1);
+   +		}
+   +
+   +		__flush_tlb_range(vma, address, address + pgsize, pgsize, level,
+   +				  TLBF_NOWALKCACHE | TLBF_NOBROADCAST);
+   +	}
+    	return 1;
+    }
+    
+    static bool is_el1_instruction_abort(unsigned long esr)
+    {
+    	return ESR_ELx_EC(esr) == ESR_ELx_EC_IABT_CUR;
+    }
+    
+====================================================================================================
+[51] 7e1864332fbc  forms=C  riscv: fix race when vmap stack overflow
+-- matches:
+   C  arch/riscv/kernel/traps.c I=None E=smp_store_release func=handle_bad_stack | smp_store_release(&spin_shadow_stack, 0);
+-- message:
+   riscv: fix race when vmap stack overflow
+   
+   Currently, when detecting vmap stack overflow, riscv firstly switches
+   to the so called shadow stack, then use this shadow stack to call the
+   get_overflow_stack() to get the overflow stack. However, there's
+   a race here if two or more harts use the same shadow stack at the same
+   time.
+   
+   To solve this race, we introduce spin_shadow_stack atomic var, which
+   will be swap between its own address and 0 in atomic way, when the
+   var is set, it means the shadow_stack is being used; when the var
+   is cleared, it means the shadow_stack isn't being used.
+   
+   Fixes: 31da94c25aea ("riscv: add VMAP_STACK overflow detection")
+   [Palmer: Add AQ to the swap, and also some comments.]
+-- hunk arch/riscv/kernel/traps.c:
+   @@ -208,21 +208,39 @@ static DEFINE_PER_CPU(unsigned long [OVERFLOW_STACK_SIZE/sizeof(long)],
+     */
+    long shadow_stack[SHADOW_OVERFLOW_STACK_SIZE/sizeof(long)];
+    asmlinkage unsigned long get_overflow_stack(void)
+    {
+    	return (unsigned long)this_cpu_ptr(overflow_stack) +
+    		OVERFLOW_STACK_SIZE;
+    }
+    
+   +/*
+   + * A pseudo spinlock to protect the shadow stack from being used by multiple
+   + * harts concurrently.  This isn't a real spinlock because the lock side must
+   + * be taken without a valid stack and only a single register, it's only taken
+   + * while in the process of panicing anyway so the performance and error
+   + * checking a proper spinlock gives us doesn't matter.
+   + */
+   +unsigned long spin_shadow_stack;
+   +
+    asmlinkage void handle_bad_stack(struct pt_regs *regs)
+    {
+    	unsigned long tsk_stk = (unsigned long)current->stack;
+    	unsigned long ovf_stk = (unsigned long)this_cpu_ptr(overflow_stack);
+    
+   +	/*
+   +	 * We're done with the shadow stack by this point, as we're on the
+   +	 * overflow stack.  Tell any other concurrent overflowing harts that
+   +	 * they can proceed with panicing by releasing the pseudo-spinlock.
+   +	 *
+   +	 * This pairs with an amoswap.aq in handle_kernel_stack_overflow.
+   +	 */
+   +	smp_store_release(&spin_shadow_stack, 0);
+   +
+    	console_verbose();
+    
+    	pr_emerg("Insufficient stack space to handle exception!\n");
+    	pr_emerg("Task stack:     [0x%016lx..0x%016lx]\n",
+    			tsk_stk, tsk_stk + THREAD_SIZE);
+    	pr_emerg("Overflow stack: [0x%016lx..0x%016lx]\n",
+    			ovf_stk, ovf_stk + OVERFLOW_STACK_SIZE);
+    
+====================================================================================================
+[52] 8d736482749f  forms=C  riscv: add icache flush for nommu sigreturn trampoline
+-- matches:
+   C  arch/riscv/kernel/signal.c I=None E=flush_icache_range func=setup_rt_frame | flush_icache_range(addr, addr + sizeof(frame->sigreturn_code));
+-- message:
+   riscv: add icache flush for nommu sigreturn trampoline
+   
+   In a NOMMU kernel, sigreturn trampolines are generated on the user
+   stack by setup_rt_frame. Currently, these trampolines are not instruction
+   fenced, thus their visibility to ifetch is not guaranteed.
+   
+   This patch adds a flush_icache_range in setup_rt_frame to fix this
+   problem.
+   
+   Fixes: 6bd33e1ece52 ("riscv: add nommu support")
+-- hunk arch/riscv/kernel/signal.c:
+   @@ -204,17 +206,22 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
+    #else
+    	/*
+    	 * For the nommu case we don't have a VDSO.  Instead we push two
+    	 * instructions to call the rt_sigreturn syscall onto the user stack.
+    	 */
+    	if (copy_to_user(&frame->sigreturn_code, __user_rt_sigreturn,
+    			 sizeof(frame->sigreturn_code)))
+    		return -EFAULT;
+   -	regs->ra = (unsigned long)&frame->sigreturn_code;
+   +
+   +	addr = (unsigned long)&frame->sigreturn_code;
+   +	/* Make sure the two instructions are pushed to icache. */
+   +	flush_icache_range(addr, addr + sizeof(frame->sigreturn_code));
+   +
+   +	regs->ra = addr;
+    #endif /* CONFIG_MMU */
+    
+    	/*
+    	 * Set up registers for signal handler.
+    	 * Registers that we don't modify keep the value they had from
+    	 * user-space at the time we took the signal.
+    	 * We always pass siginfo and mcontext, regardless of SA_SIGINFO,
+    	 * since some things rely on this (e.g. glibc's debug/segfault.c).
+====================================================================================================
+[53] 496e0f706b8a  forms=C  KVM: s390: Fix unlikely NULL gmap dereference
+-- matches:
+   C  arch/s390/kvm/kvm-s390.c I=None E=smp_load_acquire func=kvm_arch_vcpu_postcreate | /* Pairs with smp_load_acquire() in kvm_arch_vcpu_ioctl_run() and kvm_arch_vcpu_ioctl() */
+   C  arch/s390/kvm/kvm-s390.c I=None E=smp_store_release func=kvm_arch_vcpu_postcreate | smp_store_release(&vcpu->arch.initialized, true);
+   C  arch/s390/kvm/kvm-s390.c I=None E=smp_store_release func=kvm_arch_vcpu_ioctl_run | /* Pairs with smp_store_release() in kvm_arch_vcpu_postcreate() */
+   C  arch/s390/kvm/kvm-s390.c I=None E=smp_load_acquire func=kvm_arch_vcpu_ioctl_run | if (!smp_load_acquire(&vcpu->arch.initialized))
+-- message:
+   KVM: s390: Fix unlikely NULL gmap dereference
+   
+   When creating a new vCPU, kvm_vm_ioctl_create_vcpu() will call
+   kvm_arch_vcpu_postcreate() after the file descriptor for the new vCPU
+   has been created. The new file descriptor has not been returned yet,
+   but a malicious userspace program could try to guess it.
+   
+   If a malicious userspace program manages to start the newly created vCPU
+   before kvm_arch_vcpu_postcreate() is called, __vcpu_run() will try to
+   dereference vcpu->arch.gmap and trigger a NULL pointer dereference.
+   
+   Fix this by adding a new field to struct kvm_vcpu_arch to keep track of
+   the initialization status of the vCPU. Refuse to run a vCPU that is not
+   fully initialized.
+   
+   Fixes: dafd032a15f8 ("KVM: s390: move vcpu specific initalization to a later point")
+   Fixes: e38c884df921 ("KVM: s390: Switch to new gmap")
+-- hunk arch/s390/kvm/kvm-s390.c:
+   @@ -3608,16 +3608,19 @@ void kvm_arch_vcpu_postcreate(struct kvm_vcpu *vcpu)
+    	mutex_unlock(&vcpu->kvm->lock);
+    	if (!kvm_is_ucontrol(vcpu->kvm)) {
+    		vcpu->arch.gmap = vcpu->kvm->arch.gmap;
+    		sca_add_vcpu(vcpu);
+    	}
+    	if (test_kvm_facility(vcpu->kvm, 74) || vcpu->kvm->arch.user_instr0 ||
+    	    vcpu->kvm->arch.user_operexec)
+    		vcpu->arch.sie_block->ictl |= ICTL_OPEREXC;
+   +
+   +	/* Pairs with smp_load_acquire() in kvm_arch_vcpu_ioctl_run() and kvm_arch_vcpu_ioctl() */
+   +	smp_store_release(&vcpu->arch.initialized, true);
+    }
+    
+    static bool kvm_has_pckmo_subfunc(struct kvm *kvm, unsigned long nr)
+    {
+    	if (test_bit_inv(nr, (unsigned long *)&kvm->arch.model.subfuncs.pckmo) &&
+    	    test_bit_inv(nr, (unsigned long *)&kvm_s390_available_subfunc.pckmo))
+    		return true;
+    	return false;
+-- hunk arch/s390/kvm/kvm-s390.c:
+   @@ -5034,16 +5037,20 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
+    
+    	if (!vcpu->wants_to_run)
+    		return -EINTR;
+    
+    	if (kvm_run->kvm_valid_regs & ~KVM_SYNC_S390_VALID_FIELDS ||
+    	    kvm_run->kvm_dirty_regs & ~KVM_SYNC_S390_VALID_FIELDS)
+    		return -EINVAL;
+    
+   +	/* Pairs with smp_store_release() in kvm_arch_vcpu_postcreate() */
+   +	if (!smp_load_acquire(&vcpu->arch.initialized))
+   +		return -EINVAL;
+   +
+    	vcpu_load(vcpu);
+    
+    	if (guestdbg_exit_pending(vcpu)) {
+    		kvm_s390_prepare_debug_exit(vcpu);
+    		rc = 0;
+    		goto out;
+    	}
+    
+-- hunk arch/s390/kvm/kvm-s390.c:
+   @@ -5518,16 +5525,20 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
+    			 unsigned int ioctl, unsigned long arg)
+    {
+    	struct kvm_vcpu *vcpu = filp->private_data;
+    	void __user *argp = (void __user *)arg;
+    	int idx;
+    	long r;
+    	u16 rc, rrc;
+    
+   +	/* Pairs with smp_store_release() in kvm_arch_vcpu_postcreate() */
+   +	if (!smp_load_acquire(&vcpu->arch.initialized))
+   +		return -EINVAL;
+   +
+    	vcpu_load(vcpu);
+    
+    	switch (ioctl) {
+    	case KVM_S390_STORE_STATUS:
+    		idx = srcu_read_lock(&vcpu->kvm->srcu);
+    		r = kvm_s390_store_status_unloaded(vcpu, arg);
+    		srcu_read_unlock(&vcpu->kvm->srcu, idx);
+    		break;
+====================================================================================================
+[54] b49f700668ff  forms=C  riscv: mm: fix regression due to update_mmu_cache change
+-- matches:
+   C  arch/riscv/include/asm/pgtable.h I=None E=local_flush_tlb_page func=update_mmu_cache | local_flush_tlb_page(address);
+-- message:
+   riscv: mm: fix regression due to update_mmu_cache change
+   
+   This is a partial revert of the commit 4bd1d80efb5a ("riscv: mm: notify
+   remote harts about mmu cache updates"). Original commit included two
+   loosely related changes serving the same purpose of fixing stale TLB
+   entries causing user-space application crash:
+   - introduce deferred per-ASID TLB flush for CPUs not running the task
+   - switch to per-ASID TLB flush on all CPUs running the task in update_mmu_cache
+   
+   According to report and discussion in [1], the second part caused a
+   regression on Renesas RZ/Five SoC. For now restore the old behavior
+   of the update_mmu_cache.
+   
+   [1] https://lore.kernel.org/linux-riscv/20220829205219.283543-1-geomatsi@gmail.com/
+   
+   Fixes: 4bd1d80efb5a ("riscv: mm: notify remote harts about mmu cache updates")
+-- hunk arch/riscv/include/asm/pgtable.h:
+   @@ -410,17 +410,17 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
+    {
+    	/*
+    	 * The kernel assumes that TLBs don't cache invalid entries, but
+    	 * in RISC-V, SFENCE.VMA specifies an ordering constraint, not a
+    	 * cache flush; it is necessary even after writing invalid entries.
+    	 * Relying on flush_tlb_fix_spurious_fault would suffice, but
+    	 * the extra traps reduce performance.  So, eagerly SFENCE.VMA.
+    	 */
+   -	flush_tlb_page(vma, address);
+   +	local_flush_tlb_page(address);
+    }
+    
+    #define __HAVE_ARCH_UPDATE_MMU_TLB
+    #define update_mmu_tlb update_mmu_cache
+    
+    static inline void update_mmu_cache_pmd(struct vm_area_struct *vma,
+    		unsigned long address, pmd_t *pmdp)
+    {
+====================================================================================================
+[55] 1665c027afb2  forms=C  powerpc/64s: Reconnect tlb_flush() to hash__tlb_flush()
+-- matches:
+   C  arch/powerpc/include/asm/book3s/64/tlbflush.h I=None E=hash__tlb_flush func=tlb_flush | return hash__tlb_flush(tlb);
+-- message:
+   powerpc/64s: Reconnect tlb_flush() to hash__tlb_flush()
+   
+   Commit baf1ed24b27d ("powerpc/mm: Remove empty hash__ functions")
+   removed some empty hash MMU flushing routines, but got a bit overeager
+   and also removed the call to hash__tlb_flush() from tlb_flush().
+   
+   In regular use this doesn't lead to any noticable breakage, which is a
+   little concerning. Presumably there are flushes happening via other
+   paths such as arch_leave_lazy_mmu_mode(), and/or a bit of luck.
+   
+   Fix it by reinstating the call to hash__tlb_flush().
+   
+   Fixes: baf1ed24b27d ("powerpc/mm: Remove empty hash__ functions")
+-- hunk arch/powerpc/include/asm/book3s/64/tlbflush.h:
+   @@ -92,16 +92,18 @@ static inline void local_flush_tlb_page_psize(struct mm_struct *mm,
+    	if (radix_enabled())
+    		radix__local_flush_tlb_page_psize(mm, vmaddr, psize);
+    }
+    
+    static inline void tlb_flush(struct mmu_gather *tlb)
+    {
+    	if (radix_enabled())
+    		radix__tlb_flush(tlb);
+   +
+   +	return hash__tlb_flush(tlb);
+    }
+    
+    #ifdef CONFIG_SMP
+    static inline void flush_tlb_mm(struct mm_struct *mm)
+    {
+    	if (radix_enabled())
+    		radix__flush_tlb_mm(mm);
+    }
+====================================================================================================
+[56] f64c723741c9  forms=C  bpf: Replace scratch PTE atomically when allocating arena pages
+-- matches:
+   C  arch/arm64/include/asm/pgtable.h I=None E=flush_tlb_kernel_range func=flush_tlb_before_set | flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+   A A1 kernel/bpf/arena.c I=ptep_try_set E=None func=None | while (!ptep_try_set(pte, pteval)) {
+   A A1 kernel/bpf/arena.c I=pte_none E=None func=None | if (pte_none(old))
+   A A1 kernel/bpf/arena.c I=pte_page E=None func=None | if (WARN_ON_ONCE(pte_page(old) != d->scratch_page))
+   A A1 kernel/bpf/arena.c I=pte_none E=None func=None | if (unlikely(!pte_none(ptep_get(pte))))
+   B  kernel/bpf/arena.c I=['pte_none', 'pte_page', 'ptep_get', 'ptep_try_set'] E=ptep_get_and_clear func=None | ptep_get_and_clear(&init_mm, addr, pte);
+   B  kernel/bpf/arena.c I=['pte_none', 'pte_page', 'ptep_get', 'ptep_get_and_clear', 'ptep_try_set'] E=flush_tlb_before_set func=None | flush_tlb_before_set(addr);
+-- message:
+   bpf: Replace scratch PTE atomically when allocating arena pages
+   
+   apply_range_set_cb() maps the pages for a new arena allocation and returned
+   -EBUSY when the target PTE was already populated. Kernel-fault recovery
+   leaves the per-arena scratch page in unallocated arena PTEs, so a later
+   bpf_arena_alloc_pages() over such a page hits that -EBUSY, and every
+   subsequent allocation of it fails the same way. Allocation must install the
+   real page over scratch instead.
+   
+   Overwriting the scratch PTE in place is a valid->valid change, which arm64
+   forbids without break-before-make. Route through an invalid entry instead:
+   ptep_try_set() fills only a none slot, so the PTE goes scratch->none->page.
+   On finding scratch, clear it and flush_tlb_before_set() before retrying. The
+   new flush_tlb_before_set() is a no-op except on arches like arm64 that need
+   the break-before-make TLB invalidate. The loop also copes with a concurrent
+   fault re-scratching the slot.
+   
+   Arches without ptep_try_set() never install the scratch page, so keep the
+   must-be-empty check and set_pte_at() for them.
+   
+   Fixes: dc11a4dba246 ("bpf: Recover arena kernel faults with scratch page")
+-- hunk arch/arm64/include/asm/pgtable.h:
+   @@ -1837,16 +1837,27 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+    static inline bool ptep_try_set(pte_t *ptep, pte_t new_pte)
+    {
+    	pteval_t old = 0;
+    
+    	return try_cmpxchg(&pte_val(*ptep), &old, pte_val(new_pte));
+    }
+    #define ptep_try_set ptep_try_set
+    
+   +/*
+   + * arm64 mandates break-before-make: a cleared kernel PTE must have its TLB
+   + * invalidated before a different page is installed in its place. The broadcast
+   + * TLBI is an instruction, not an IPI, so this is safe with interrupts disabled.
+   + */
+   +static inline void flush_tlb_before_set(unsigned long addr)
+   +{
+   +	flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+   +}
+   +#define flush_tlb_before_set flush_tlb_before_set
+   +
+    #define test_and_clear_young_ptes test_and_clear_young_ptes
+    static inline bool test_and_clear_young_ptes(struct vm_area_struct *vma,
+    		unsigned long addr, pte_t *ptep, unsigned int nr)
+    {
+    	if (likely(nr == 1 && !pte_cont(__ptep_get(ptep))))
+    		return __ptep_test_and_clear_young(vma, addr, ptep);
+    
+    	return contpte_test_and_clear_young_ptes(vma, addr, ptep, nr);
+-- hunk kernel/bpf/arena.c:
+   @@ -139,41 +139,67 @@ static int arena_map_get_next_key(struct bpf_map *map, void *key, void *next_key
+    
+    static long compute_pgoff(struct bpf_arena *arena, long uaddr)
+    {
+    	return (u32)(uaddr - (u32)arena->user_vm_start) >> PAGE_SHIFT;
+    }
+    
+    struct apply_range_data {
+    	struct page **pages;
+   +	struct page *scratch_page;
+    	int i;
+    };
+    
+    struct clear_range_data {
+    	struct llist_head *free_pages;
+    	struct page *scratch_page;
+    };
+    
+    static int apply_range_set_cb(pte_t *pte, unsigned long addr, void *data)
+    {
+    	struct apply_range_data *d = data;
+    	struct page *page;
+   +	pte_t pteval;
+    
+    	if (!data)
+    		return 0;
+   -	/* sanity check */
+   -	if (unlikely(!pte_none(ptep_get(pte))))
+   -		return -EBUSY;
+    
+    	page = d->pages[d->i];
+    	/* paranoia, similar to vmap_pages_pte_range() */
+    	if (WARN_ON_ONCE(!pfn_valid(page_to_pfn(page))))
+    		return -EINVAL;
+    
+   -	set_pte_at(&init_mm, addr, pte, mk_pte(page, PAGE_KERNEL));
+   +	pteval = mk_pte(page, PAGE_KERNEL);
+   +#ifdef ptep_try_set
+   +	/*
+   +	 * Kernel-fault recovery may have installed the scratch page here, and
+   +	 * some architectures (arm64) prohibit valid->valid PTE transitions.
+   +	 * Install atomically into a none slot. If scratch is present, clear it
+   +	 * and flush_tlb_before_set() (break-before-make) before retrying.
+   +	 */
+   +	while (!ptep_try_set(pte, pteval)) {
+   …
+====================================================================================================
+[57] 49c87f767774  forms=C  arm64: hugetlb: Fix huge_ptep_get_and_clear() for non-present ptes
+-- matches:
+   C  arch/arm64/mm/hugetlbpage.c I=None E=__ptep_get_and_clear func=get_clear_contig | pte = __ptep_get_and_clear(mm, addr, ptep);
+   C  arch/arm64/mm/hugetlbpage.c I=None E=__ptep_get_and_clear func=get_clear_contig | tmp_pte = __ptep_get_and_clear(mm, addr, ptep);
+-- message:
+   arm64: hugetlb: Fix huge_ptep_get_and_clear() for non-present ptes
+   
+   arm64 supports multiple huge_pte sizes. Some of the sizes are covered by
+   a single pte entry at a particular level (PMD_SIZE, PUD_SIZE), and some
+   are covered by multiple ptes at a particular level (CONT_PTE_SIZE,
+   CONT_PMD_SIZE). So the function has to figure out the size from the
+   huge_pte pointer. This was previously done by walking the pgtable to
+   determine the level and by using the PTE_CONT bit to determine the
+   number of ptes at the level.
+   
+   But the PTE_CONT bit is only valid when the pte is present. For
+   non-present pte values (e.g. markers, migration entries), the previous
+   implementation was therefore erroneously determining the size. There is
+   at least one known caller in core-mm, move_huge_pte(), which may call
+   huge_ptep_get_and_clear() for a non-present pte. So we must be robust to
+   this case. Additionally the "regular" ptep_get_and_clear() is robust to
+   being called for non-present ptes so it makes sense to follow the
+   behavior.
+   
+   Fix this by using the new sz parameter which is now provided to the
+   function. Additionally when clearing each pte in a contig range, don't
+   gather the access and dirty bits if the pte is not present.
+   
+   An alternative approach that would not require API changes would be to
+   store the PTE_CONT bit in a spare bit in the swap entry pte for the
+   non-present case. But it felt cleaner to follow other APIs' lead and
+   just pass in the size.
+   
+   As an aside, PTE_CONT is bit 52, which corresponds to bit 40 in the swap
+   entry offset field (layout of non-present pte). Since hugetlb is never
+   swapped to disk, this field will only be populated for markers, which
+   always set this bit to 0 and hwpoison swap entries, which set the offset
+   field to a PFN; So it would only ever be 1 for a 52-bit PVA system where
+   memory in that high half was poisoned (I think!). So in practice, this
+   bit would almost always be zero for non-present ptes and we would only
+   clear the first entry if it was actually a contiguous block. That's
+   probably a less severe symptom than if it was always interpreted as 1
+   and cleared out potentially-present neighboring PTEs.
+   
+   Fixes: 66b3923a1a0f ("arm64: hugetlb: add support for PTE contiguous bit")
+-- hunk arch/arm64/mm/hugetlbpage.c:
+   @@ -158,34 +151,33 @@ pte_t huge_ptep_get(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+     * This helper performs the break step.
+     */
+    static pte_t get_clear_contig(struct mm_struct *mm,
+    			     unsigned long addr,
+    			     pte_t *ptep,
+    			     unsigned long pgsize,
+    			     unsigned long ncontig)
+    {
+   -	pte_t orig_pte = __ptep_get(ptep);
+   -	unsigned long i;
+   -
+   -	for (i = 0; i < ncontig; i++, addr += pgsize, ptep++) {
+   -		pte_t pte = __ptep_get_and_clear(mm, addr, ptep);
+   -
+   -		/*
+   -		 * If HW_AFDBM is enabled, then the HW could turn on
+   -		 * the dirty or accessed bit for any page in the set,
+   -		 * so check them all.
+   -		 */
+   -		if (pte_dirty(pte))
+   -			orig_pte = pte_mkdirty(orig_pte);
+   -
+   -		if (pte_young(pte))
+   -			orig_pte = pte_mkyoung(orig_pte);
+   +	pte_t pte, tmp_pte;
+   +	bool present;
+   +
+   +	pte = __ptep_get_and_clear(mm, addr, ptep);
+   +	present = pte_present(pte);
+   +	while (--ncontig) {
+   +		ptep++;
+   +		addr += pgsize;
+   +		tmp_pte = __ptep_get_and_clear(mm, addr, ptep);
+   +		if (present) {
+   +			if (pte_dirty(tmp_pte))
+   +				pte = pte_mkdirty(pte);
+   +			if (pte_young(tmp_pte))
+   +				pte = pte_mkyoung(pte);
+   +		}
+    	}
+   -	return orig_pte;
+   +	return pte;
+    }
+    
+   …
+====================================================================================================
+[58] 835e5ac3f98e  forms=C  riscv: Fix huge_ptep_set_wrprotect when PTE is a NAPOT
+-- matches:
+   C  arch/riscv/mm/hugetlbpage.c I=None E=set_pte_at func=huge_ptep_set_wrprotect | set_pte_at(mm, addr, ptep, orig_pte);
+-- message:
+   riscv: Fix huge_ptep_set_wrprotect when PTE is a NAPOT
+   
+   We need to avoid inconsistencies across the PTEs that form a NAPOT
+   region, so when we write protect such a region, we should clear and flush
+   all the PTEs to make sure that any of those PTEs is not cached which would
+   result in such inconsistencies (arm64 does the same).
+   
+   Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+-- hunk arch/riscv/mm/hugetlbpage.c:
+   @@ -213,29 +213,33 @@ pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+    }
+    
+    void huge_ptep_set_wrprotect(struct mm_struct *mm,
+    			     unsigned long addr,
+    			     pte_t *ptep)
+    {
+    	pte_t pte = ptep_get(ptep);
+    	unsigned long order;
+   +	pte_t orig_pte;
+    	int i, pte_num;
+    
+    	if (!pte_napot(pte)) {
+    		ptep_set_wrprotect(mm, addr, ptep);
+    		return;
+    	}
+    
+    	order = napot_cont_order(pte);
+    	pte_num = napot_pte_num(order);
+    	ptep = huge_pte_offset(mm, addr, napot_cont_size(order));
+   +	orig_pte = get_clear_contig_flush(mm, addr, ptep, pte_num);
+   +
+   +	orig_pte = pte_wrprotect(orig_pte);
+    
+    	for (i = 0; i < pte_num; i++, addr += PAGE_SIZE, ptep++)
+   -		ptep_set_wrprotect(mm, addr, ptep);
+   +		set_pte_at(mm, addr, ptep, orig_pte);
+    }
+    
+    pte_t huge_ptep_clear_flush(struct vm_area_struct *vma,
+    			    unsigned long addr,
+    			    pte_t *ptep)
+    {
+    	pte_t pte = ptep_get(ptep);
+    	int pte_num;
+====================================================================================================
+[59] 410982303772  forms=C  arm64: hugetlb: Restore TLB invalidation for BBM on contiguous ptes
+-- matches:
+   C  arch/arm64/mm/hugetlbpage.c I=None E=flush_tlb_range func=get_clear_contig_flush | flush_tlb_range(&vma, addr, addr + (pgsize * ncontig));
+-- message:
+   arm64: hugetlb: Restore TLB invalidation for BBM on contiguous ptes
+   
+   Commit fb396bb459c1 ("arm64/hugetlb: Drop TLB flush from get_clear_flush()")
+   removed TLB invalidation from get_clear_flush() [now get_clear_contig()]
+   on the basis that the core TLB invalidation code is aware of hugetlb
+   mappings backed by contiguous page-table entries and will cover the
+   correct virtual address range.
+   
+   However, this change also resulted in the TLB invalidation being removed
+   from the "break" step in the break-before-make (BBM) sequence used
+   internally by huge_ptep_set_{access_flags,wrprotect}(), therefore
+   making the BBM sequence unsafe irrespective of later invalidation.
+   
+   Although the architecture is desperately unclear about how exactly
+   contiguous ptes should be updated in a live page-table, restore TLB
+   invalidation to our BBM sequence under the assumption that BBM is the
+   right thing to be doing in the first place.
+   
+   Fixes: fb396bb459c1 ("arm64/hugetlb: Drop TLB flush from get_clear_flush()")
+-- hunk arch/arm64/mm/hugetlbpage.c:
+   @@ -209,16 +209,29 @@ static pte_t get_clear_contig(struct mm_struct *mm,
+    			orig_pte = pte_mkdirty(orig_pte);
+    
+    		if (pte_young(pte))
+    			orig_pte = pte_mkyoung(orig_pte);
+    	}
+    	return orig_pte;
+    }
+    
+   +static pte_t get_clear_contig_flush(struct mm_struct *mm,
+   +				    unsigned long addr,
+   +				    pte_t *ptep,
+   +				    unsigned long pgsize,
+   +				    unsigned long ncontig)
+   +{
+   +	pte_t orig_pte = get_clear_contig(mm, addr, ptep, pgsize, ncontig);
+   +	struct vm_area_struct vma = TLB_FLUSH_VMA(mm, 0);
+   +
+   +	flush_tlb_range(&vma, addr, addr + (pgsize * ncontig));
+   +	return orig_pte;
+   +}
+   +
+    /*
+     * Changing some bits of contiguous entries requires us to follow a
+     * Break-Before-Make approach, breaking the whole contiguous set
+     * before we can change any entries. See ARM DDI 0487A.k_iss10775,
+     * "Misprogramming of the Contiguous bit", page D4-1762.
+     *
+     * This helper performs the break step for use cases where the
+     * original pte is not needed.
+====================================================================================================
+[60] 213aa670153e  forms=C  parisc: Delay write-protection until mark_rodata_ro() call
+-- matches:
+   C  arch/parisc/mm/init.c I=None E=flush_cache_all func=mark_rodata_ro | flush_cache_all();
+   C  arch/parisc/mm/init.c I=None E=flush_tlb_all func=mark_rodata_ro | flush_tlb_all();
+-- message:
+   parisc: Delay write-protection until mark_rodata_ro() call
+   
+   Do not write-protect the kernel read-only and __ro_after_init sections
+   earlier than before mark_rodata_ro() is called.  This fixes a boot issue on
+   parisc which is triggered by commit 91a1d97ef482 ("jump_label,module: Don't
+   alloc static_key_mod for __ro_after_init keys"). That commit may modify
+   static key contents in the __ro_after_init section at bootup, so this
+   section needs to be writable at least until mark_rodata_ro() is called.
+   
+   Fixes: 91a1d97ef482 ("jump_label,module: Don't alloc static_key_mod for __ro_after_init keys")
+-- hunk arch/parisc/mm/init.c:
+   @@ -488,21 +487,28 @@ void free_initmem(void)
+    	/* set up a new led state on systems shipped LED State panel */
+    	pdc_chassis_send_status(PDC_CHASSIS_DIRECT_BCOMPLETE);
+    }
+    
+    
+    #ifdef CONFIG_STRICT_KERNEL_RWX
+    void mark_rodata_ro(void)
+    {
+   -	/* rodata memory was already mapped with KERNEL_RO access rights by
+   -           pagetable_init() and map_pages(). No need to do additional stuff here */
+   -	unsigned long roai_size = __end_ro_after_init - __start_ro_after_init;
+   +	unsigned long start = (unsigned long) &__start_rodata;
+   +	unsigned long end = (unsigned long) &__end_rodata;
+   +
+   +	pr_info("Write protecting the kernel read-only data: %luk\n",
+   +	       (end - start) >> 10);
+   +
+   +	kernel_set_to_readonly = true;
+   +	map_pages(start, __pa(start), end - start, PAGE_KERNEL, 0);
+    
+   -	pr_info("Write protected read-only-after-init data: %luk\n", roai_size >> 10);
+   +	/* force the kernel to see the new page table entries */
+   +	flush_cache_all();
+   +	flush_tlb_all();
+    }
+    #endif
+    
+    
+    /*
+     * Just an arbitrary offset to serve as a "hole" between mapping areas
+     * (between top of physical memory and a potential pcxl dma mapping
+     * area, and below the vmalloc mapping area).

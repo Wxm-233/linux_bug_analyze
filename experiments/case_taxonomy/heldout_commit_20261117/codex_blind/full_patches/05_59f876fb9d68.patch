@@ -1,0 +1,76 @@
+commit 59f876fb9d68a4d8c20305d7a7a0daf4ee9478a8
+Author:     Kirill A. Shutemov <kirill@shutemov.name>
+AuthorDate: Thu Apr 6 10:25:29 2023 +0300
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Tue Apr 18 16:29:42 2023 -0700
+
+    mm: avoid passing 0 to __ffs()
+    
+    23baf831a32c ("mm, treewide: redefine MAX_ORDER sanely") results in
+    various boot failures (hang) on arm targets Debug messages reveal the
+    reason.
+    
+    ########### MAX_ORDER=10 start=0 __ffs(start)=-1 min()=10 min_t=-1
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    
+    If start==0, __ffs(start) returns 0xfffffff or (as int) -1, which min_t()
+    interprets as such, while min() apparently uses the returned unsigned long
+    value. Obviously a negative order isn't received well by the rest of the
+    code.
+    
+    [akpm@linux-foundation.org: fix comment, per Mike]
+      Link: https://lkml.kernel.org/r/ZDBa7HWZK69dKKzH@kernel.org
+    Link: https://lkml.kernel.org/r/20230406072529.vupqyrzqnhyozeyh@box.shutemov.name
+    Fixes: 23baf831a32c ("mm, treewide: redefine MAX_ORDER sanely")
+    Signed-off-by: "Kirill A. Shutemov" <kirill@shutemov.name>
+    Reported-by: Guenter Roeck <linux@roeck-us.net>
+      Link: https://lkml.kernel.org/r/9460377a-38aa-4f39-ad57-fb73725f92db@roeck-us.net
+    Reviewed-by: Mike Rapoport (IBM) <rppt@kernel.org>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/mm/memblock.c b/mm/memblock.c
+index 7911224b1ed3..3feafea06ab2 100644
+--- a/mm/memblock.c
++++ b/mm/memblock.c
+@@ -2043,7 +2043,16 @@ static void __init __free_pages_memory(unsigned long start, unsigned long end)
+ 	int order;
+ 
+ 	while (start < end) {
+-		order = min_t(int, MAX_ORDER, __ffs(start));
++		/*
++		 * Free the pages in the largest chunks alignment allows.
++		 *
++		 * __ffs() behaviour is undefined for 0. start == 0 is
++		 * MAX_ORDER-aligned, set order to MAX_ORDER for the case.
++		 */
++		if (start)
++			order = min_t(int, MAX_ORDER, __ffs(start));
++		else
++			order = MAX_ORDER;
+ 
+ 		while (start + (1UL << order) > end)
+ 			order--;
+diff --git a/mm/memory_hotplug.c b/mm/memory_hotplug.c
+index c8f0a8c2d049..8e0fa209d533 100644
+--- a/mm/memory_hotplug.c
++++ b/mm/memory_hotplug.c
+@@ -605,7 +605,18 @@ static void online_pages_range(unsigned long start_pfn, unsigned long nr_pages)
+ 	 * this and the first chunk to online will be pageblock_nr_pages.
+ 	 */
+ 	for (pfn = start_pfn; pfn < end_pfn;) {
+-		int order = min_t(int, MAX_ORDER, __ffs(pfn));
++		int order;
++
++		/*
++		 * Free to online pages in the largest chunks alignment allows.
++		 *
++		 * __ffs() behaviour is undefined for 0. start == 0 is
++		 * MAX_ORDER-aligned, Set order to MAX_ORDER for the case.
++		 */
++		if (pfn)
++			order = min_t(int, MAX_ORDER, __ffs(pfn));
++		else
++			order = MAX_ORDER;
+ 
+ 		(*online_page_callback)(pfn_to_page(pfn), order);
+ 		pfn += (1UL << order);

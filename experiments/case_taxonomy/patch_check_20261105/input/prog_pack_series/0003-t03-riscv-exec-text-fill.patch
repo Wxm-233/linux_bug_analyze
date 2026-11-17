@@ -1,0 +1,48 @@
+diff --git a/arch/riscv/include/asm/patch.h b/arch/riscv/include/asm/patch.h
+--- a/arch/riscv/include/asm/patch.h
++++ b/arch/riscv/include/asm/patch.h
+@@ -9,6 +9,7 @@
+ int patch_text_nosync(void *addr, const void *insns, size_t len);
+ int patch_text(void *addr, u32 *insns, int ninsns);
+ 
++int patch_text_set_nosync(void *addr, u8 c, size_t len);
+ extern int riscv_patch_in_stop_machine;
+ 
+ #endif /* _ASM_RISCV_PATCH_H */
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -13,6 +13,8 @@
+ #include <asm/fixmap.h>
+ #include <asm/ftrace.h>
+ #include <asm/patch.h>
++#include <linux/string.h>
++#include <linux/slab.h>
+ 
+ struct patch_insn {
+ 	void *addr;
+@@ -122,6 +124,24 @@
+ 	return ret;
+ }
+ NOKPROBE_SYMBOL(patch_text_nosync);
++int patch_text_set_nosync(void *addr, u8 c, size_t len)
++{
++	u8 *buf;
++	int ret;
++
++	if (len == 0)
++		return 0;
++
++	buf = kzalloc(len, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++
++	memset(buf, c, len);
++	ret = patch_text_nosync(addr, buf, len);
++	kfree(buf);
++	return ret;
++}
++NOKPROBE_SYMBOL(patch_text_set_nosync);
+ 
+ static int patch_text_cb(void *data)
+ {

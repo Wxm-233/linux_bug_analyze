@@ -1,0 +1,254 @@
+[3] d9807d60c145:arch/riscv/mm/init.c pattern=^int __meminit vmemmap_populate|^void __init misc_mem_init
+...
+1380: 	memblock_allow_resize();
+1381: }
+1382: 
+1383: void __init misc_mem_init(void)
+1384: {
+1385: 	early_memtest(min_low_pfn << PAGE_SHIFT, max_low_pfn << PAGE_SHIFT);
+1386: 	arch_numa_init();
+1387: 	sparse_init();
+1388: #ifdef CONFIG_SPARSEMEM_VMEMMAP
+1389: 	/* The entire VMEMMAP region has been populated. Flush TLB for this region */
+1390: 	local_flush_tlb_kernel_range(VMEMMAP_START, VMEMMAP_END);
+1391: #endif
+1392: 	zone_sizes_init();
+1393: 	arch_reserve_crashkernel();
+1394: 	memblock_dump_all();
+1395: }
+1396: 
+1397: #ifdef CONFIG_SPARSEMEM_VMEMMAP
+1398: void __meminit vmemmap_set_pmd(pmd_t *pmd, void *p, int node,
+1399: 			       unsigned long addr, unsigned long next)
+1400: {
+1401: 	pmd_set_huge(pmd, virt_to_phys(p), PAGE_KERNEL);
+1402: }
+1403: 
+1404: int __meminit vmemmap_check_pmd(pmd_t *pmdp, int node,
+1405: 				unsigned long addr, unsigned long next)
+1406: {
+1407: 	vmemmap_verify((pte_t *)pmdp, node, addr, next);
+1408: 	return 1;
+1409: }
+1410: 
+1411: int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
+1412: 			       struct vmem_altmap *altmap)
+1413: {
+1414: 	/*
+1415: 	 * Note that SPARSEMEM_VMEMMAP is only selected for rv64 and that we
+1416: 	 * can't use hugepage mappings for 2-level page table because in case of
+1417: 	 * memory hotplug, we are not able to update all the page tables with
+1418: 	 * the new PMDs.
+1419: 	 */
+1420: 	return vmemmap_populate_hugepages(start, end, node, NULL);
+1421: }
+1422: #endif
+1423: 
+1424: #if defined(CONFIG_MMU) && defined(CONFIG_64BIT)
+1425: /*
+1426:  * Pre-allocates page-table pages for a specific area in the kernel
+1427:  * page-table. Only the level which needs to be synchronized between
+1428:  * all page-tables is allocated because the synchronization can be
+1429:  * expensive.
+1430:  */
+1431: static void __init preallocate_pgd_pages_range(unsigned long start, unsigned long end,
+1432: 					       const char *area)
+1433: {
+1434: 	unsigned long addr;
+1435: 	const char *lvl;
+1436: 
+1437: 	for (addr = start; addr < end && addr >= start; addr = ALIGN(addr + 1, PGDIR_SIZE)) {
+
+[8] 8891b176d350:kernel/fork.c pattern=^static struct task_struct \*dup_task_struct
+...
+1112: static struct task_struct *dup_task_struct(struct task_struct *orig, int node)
+1113: {
+1114: 	struct task_struct *tsk;
+1115: 	int err;
+1116: 
+1117: 	if (node == NUMA_NO_NODE)
+1118: 		node = tsk_fork_get_node(orig);
+1119: 	tsk = alloc_task_struct_node(node);
+1120: 	if (!tsk)
+1121: 		return NULL;
+1122: 
+1123: 	err = arch_dup_task_struct(tsk, orig);
+1124: 	if (err)
+1125: 		goto free_tsk;
+1126: 
+1127: 	err = alloc_thread_stack_node(tsk, node);
+1128: 	if (err)
+1129: 		goto free_tsk;
+1130: 
+1131: #ifdef CONFIG_THREAD_INFO_IN_TASK
+1132: 	refcount_set(&tsk->stack_refcount, 1);
+1133: #endif
+1134: 	account_kernel_stack(tsk, 1);
+1135: 
+1136: 	err = scs_prepare(tsk, node);
+1137: 	if (err)
+1138: 		goto free_stack;
+1139: 
+1140: #ifdef CONFIG_SECCOMP
+1141: 	/*
+1142: 	 * We must handle setting up seccomp filters once we're under
+1143: 	 * the sighand lock in case orig has changed between now and
+1144: 	 * then. Until then, filter must be NULL to avoid messing up
+1145: 	 * the usage counts on the error path calling free_task.
+
+[17] af0c3f058662:arch/arm64/include/asm/memory.h pattern=^#define SECTION_SIZE_BITS
+(pattern not found; no source inference from this query)
+
+[21] d5dc200c3a3f:arch/arm64/include/asm/uaccess.h pattern=^#define __get_user_error
+...
+248: 
+249: #define __get_user_error(x, ptr, err)					\
+250: do {									\
+251: 	__label__ __gu_failed;						\
+252: 	__typeof__(*(ptr)) __user *__p = (ptr);				\
+253: 	might_fault();							\
+254: 	if (access_ok(__p, sizeof(*__p))) {				\
+255: 		__p = uaccess_mask_ptr(__p);				\
+256: 		__raw_get_user((x), __p, __gu_failed);			\
+257: 	} else {							\
+258: 	__gu_failed:							\
+259: 		(x) = (__force __typeof__(x))0; (err) = -EFAULT;	\
+260: 	}								\
+261: } while (0)
+262: 
+263: #define __get_user(x, ptr)						\
+264: ({									\
+265: 	int __gu_err = 0;						\
+266: 	__get_user_error((x), (ptr), __gu_err);				\
+267: 	__gu_err;							\
+268: })
+269: 
+
+[24] b3f78e749865:arch/x86/include/asm/pgtable.h pattern=set_pte_at\(
+...
+1018: 	native_pud_clear(pudp);
+1019: 	return res;
+1020: }
+1021: 
+1022: static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
+1023: 			      pte_t *ptep, pte_t pte)
+1024: {
+1025: 	page_table_check_pte_set(mm, addr, ptep, pte);
+1026: 	set_pte(ptep, pte);
+1027: }
+1028: 
+1029: static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
+1030: 			      pmd_t *pmdp, pmd_t pmd)
+1031: {
+1032: 	page_table_check_pmd_set(mm, addr, pmdp, pmd);
+1033: 	set_pmd(pmdp, pmd);
+1034: }
+1035: 
+1036: static inline void set_pud_at(struct mm_struct *mm, unsigned long addr,
+1037: 			      pud_t *pudp, pud_t pud)
+1038: {
+1039: 	page_table_check_pud_set(mm, addr, pudp, pud);
+1040: 	native_set_pud(pudp, pud);
+1041: }
+1042: 
+
+[50] eec76ea5a721:include/crypto/poly1305.h pattern=Context:|poly1305_blocks_arch|may_use_simd|poly1305_is_arch_optimized
+...
+61: void poly1305_init(struct poly1305_desc_ctx *desc,
+62: 		   const u8 key[POLY1305_KEY_SIZE]);
+63: void poly1305_update(struct poly1305_desc_ctx *desc,
+64: 		     const u8 *src, unsigned int nbytes);
+65: void poly1305_final(struct poly1305_desc_ctx *desc, u8 *digest);
+66: 
+67: #if IS_ENABLED(CONFIG_CRYPTO_ARCH_HAVE_LIB_POLY1305)
+68: bool poly1305_is_arch_optimized(void);
+69: #else
+70: static inline bool poly1305_is_arch_optimized(void)
+71: {
+72: 	return false;
+73: }
+74: #endif
+75: 
+76: #endif
+
+[50] eec76ea5a721:lib/crypto/poly1305.c pattern=poly1305_blocks_arch|may_use_simd
+...
+27: 		poly1305_block_init_arch(&desc->state, key);
+28: 	else
+29: 		poly1305_block_init_generic(&desc->state, key);
+30: }
+31: EXPORT_SYMBOL(poly1305_init);
+32: 
+33: static inline void poly1305_blocks(struct poly1305_block_state *state,
+34: 				   const u8 *src, unsigned int len)
+35: {
+36: 	if (IS_ENABLED(CONFIG_CRYPTO_ARCH_HAVE_LIB_POLY1305))
+37: 		poly1305_blocks_arch(state, src, len, 1);
+38: 	else
+39: 		poly1305_blocks_generic(state, src, len, 1);
+40: }
+41: 
+42: void poly1305_update(struct poly1305_desc_ctx *desc,
+43: 		     const u8 *src, unsigned int nbytes)
+44: {
+45: 	desc->buflen = BLOCK_HASH_UPDATE(poly1305_blocks, &desc->state,
+46: 					 src, nbytes, POLY1305_BLOCK_SIZE,
+47: 					 desc->buf, desc->buflen);
+48: }
+49: EXPORT_SYMBOL(poly1305_update);
+50: 
+51: void poly1305_final(struct poly1305_desc_ctx *desc, u8 *dst)
+52: {
+53: 	if (unlikely(desc->buflen)) {
+54: 		desc->buf[desc->buflen++] = 1;
+55: 		memset(desc->buf + desc->buflen, 0,
+56: 		       POLY1305_BLOCK_SIZE - desc->buflen);
+57: 		if (IS_ENABLED(CONFIG_CRYPTO_ARCH_HAVE_LIB_POLY1305))
+58: 			poly1305_blocks_arch(&desc->state, desc->buf,
+59: 					     POLY1305_BLOCK_SIZE, 0);
+60: 		else
+61: 			poly1305_blocks_generic(&desc->state, desc->buf,
+62: 						POLY1305_BLOCK_SIZE, 0);
+63: 	}
+64: 
+65: 	if (IS_ENABLED(CONFIG_CRYPTO_ARCH_HAVE_LIB_POLY1305))
+66: 		poly1305_emit_arch(&desc->state.h, dst, desc->s);
+67: 	else
+68: 		poly1305_emit_generic(&desc->state.h, dst, desc->s);
+69: 	*desc = (struct poly1305_desc_ctx){};
+70: }
+71: EXPORT_SYMBOL(poly1305_final);
+72: 
+73: MODULE_LICENSE("GPL");
+
+[54] 2d331a6ac481:arch/x86/kernel/acpi/boot.c pattern=acpi_get_override_irq
+...
+695: 		return 0;
+696: 	}
+697: 
+698: 	rc = acpi_get_override_irq(gsi, &trigger, &polarity);
+699: 	if (rc)
+700: 		return rc;
+701: 
+702: 	trigger = trigger ? ACPI_LEVEL_SENSITIVE : ACPI_EDGE_SENSITIVE;
+703: 	polarity = polarity ? ACPI_ACTIVE_LOW : ACPI_ACTIVE_HIGH;
+704: 	irq = acpi_register_gsi(NULL, gsi, trigger, polarity);
+705: 	if (irq < 0)
+706: 		return irq;
+707: 
+708: 	*irqp = irq;
+709: 	return 0;
+710: }
+711: EXPORT_SYMBOL_GPL(acpi_gsi_to_irq);
+712: 
+713: int acpi_isa_irq_to_gsi(unsigned isa_irq, u32 *gsi)
+714: {
+715: 	if (isa_irq < nr_legacy_irqs() &&
+716: 	    isa_irq_to_gsi[isa_irq] != INVALID_ACPI_IRQ) {
+717: 		*gsi = isa_irq_to_gsi[isa_irq];
+718: 		return 0;
+719: 	}
+720: 
+721: 	return -1;
+722: }
+

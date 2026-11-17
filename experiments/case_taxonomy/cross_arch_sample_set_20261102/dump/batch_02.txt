@@ -1,0 +1,1138 @@
+
+##### A050
+=== c21f01481860 A 2024-02-21 +1/-1
+riscv: mm: fix NOCACHE_THEAD does not set bit[61] correctly
+
+Previous commit dbfbda3bd6bf ("riscv: mm: update T-Head memory type
+definitions") from patch [1] missed a `<` for bit shifting, result in
+bit(61) does not set in _PAGE_NOCACHE_THEAD and leaves bit(0) set instead.
+This patch get this fixed.
+
+Fixes: dbfbda3bd6bf ("riscv: mm: update T-Head memory type definitions")
+functions: 
+fixes: dbfbda3bd6bf(riscv)
+diff --git a/arch/riscv/include/asm/pgtable-64.h b/arch/riscv/include/asm/pgtable-64.h
+index b42017d76924..b99bd66107a6 100644
+--- a/arch/riscv/include/asm/pgtable-64.h
++++ b/arch/riscv/include/asm/pgtable-64.h
+@@ -137,5 +137,5 @@ enum napot_cont_order {
+  */
+ #define _PAGE_PMA_THEAD		((1UL << 62) | (1UL << 61) | (1UL << 60))
+-#define _PAGE_NOCACHE_THEAD	((1UL < 61) | (1UL << 60))
++#define _PAGE_NOCACHE_THEAD	((1UL << 61) | (1UL << 60))
+ #define _PAGE_IO_THEAD		((1UL << 63) | (1UL << 60))
+ #define _PAGE_MTMASK_THEAD	(_PAGE_PMA_THEAD | _PAGE_IO_THEAD | (1UL << 59))
+
+##### A051
+=== d82f32202e0d A 2024-02-23 +15/-0
+RISC-V: Ignore V from the riscv,isa DT property on older T-Head CPUs
+
+Before attempting to support the pre-ratification version of vector
+found on older T-Head CPUs, disallow "v" in riscv,isa on these
+platforms. The deprecated property has no clear way to communicate
+the specific version of vector that is supported and much of the vendor
+provided software puts "v" in the isa string. riscv,isa-extensions
+should be used instead. This should not be too much of a burden for
+these systems, as the vendor shipped devicetrees and firmware do not
+work with a mainline kernel and will require updating.
+
+We can limit this restriction to only ignore v in riscv,isa on CPUs
+that report T-Head's vendor ID and a zero marchid. Newer T-Head CPUs
+that support the ratified version of vector should report non-zero
+marchid, according to Guo Ren [1].
+
+Fixes: dc6667a4e7e3 ("riscv: Extending cpufeature.c to detect V-extension")
+functions: arch/riscv/kernel/cpufeature.c:riscv_fill_hwcap_from_isa_string
+fixes: dc6667a4e7e3(riscv)
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index 89920f84d0a3..3a05af7be510 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -25,4 +25,5 @@
+ #include <asm/patch.h>
+ #include <asm/processor.h>
++#include <asm/sbi.h>
+ #include <asm/vector.h>
+ 
+@@ -539,4 +540,18 @@ static void __init riscv_fill_hwcap_from_isa_string(unsigned long *isa2hwcap)
+ 		}
+ 
++		/*
++		 * "V" in ISA strings is ambiguous in practice: it should mean
++		 * just the standard V-1.0 but vendors aren't well behaved.
++		 * Many vendors with T-Head CPU cores which implement the 0.7.1
++		 * version of the vector specification put "v" into their DTs.
++		 * CPU cores with the ratified spec will contain non-zero
++		 * marchid.
++		 */
++		if (acpi_disabled && riscv_cached_mvendorid(cpu) == THEAD_VENDOR_ID &&
++		    riscv_cached_marchid(cpu) == 0x0) {
++			this_hwcap &= ~isa2hwcap[RISCV_ISA_EXT_v];
++			clear_bit(RISCV_ISA_EXT_v, isainfo->isa);
++		}
++
+ 		/*
+ 		 * All "okay" hart should have same isa. Set HWCAP based on
+
+##### A052
+=== 6065e736f82c A 2024-02-26 +1/-1
+riscv: Fix TASK_SIZE on 64-bit NOMMU
+
+On NOMMU, userspace memory can come from anywhere in physical RAM. The
+current definition of TASK_SIZE is wrong if any RAM exists above 4G,
+causing spurious failures in the userspace access routines.
+
+Fixes: 6bd33e1ece52 ("riscv: add nommu support")
+Fixes: c3f896dcf1e4 ("mm: switch the test_vmalloc module to use __vmalloc_node")
+functions: 
+fixes: 6bd33e1ece52(riscv), c3f896dcf1e4(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 0c94260b5d0c..a564a39e5676 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -883,5 +883,5 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
+ #define PAGE_KERNEL		__pgprot(0)
+ #define swapper_pg_dir		NULL
+-#define TASK_SIZE		0xffffffffUL
++#define TASK_SIZE		_AC(-1, UL)
+ #define VMALLOC_START		_AC(0, UL)
+ #define VMALLOC_END		TASK_SIZE
+
+##### A053
+=== aea702dde7e9 A 2024-02-26 +2/-2
+riscv: Fix loading 64-bit NOMMU kernels past the start of RAM
+
+commit 3335068f8721 ("riscv: Use PUD/P4D/PGD pages for the linear
+mapping") added logic to allow using RAM below the kernel load address.
+However, this does not work for NOMMU, where PAGE_OFFSET is fixed to the
+kernel load address. Since that range of memory corresponds to PFNs
+below ARCH_PFN_OFFSET, mm initialization runs off the beginning of
+mem_map and corrupts adjacent kernel memory. Fix this by restoring the
+previous behavior for NOMMU kernels.
+
+Fixes: 3335068f8721 ("riscv: Use PUD/P4D/PGD pages for the linear mapping")
+functions: arch/riscv/mm/init.c:setup_bootmem
+fixes: 3335068f8721(riscv)
+diff --git a/arch/riscv/include/asm/page.h b/arch/riscv/include/asm/page.h
+index 57e887bfa34c..94b3d6930fc3 100644
+--- a/arch/riscv/include/asm/page.h
++++ b/arch/riscv/include/asm/page.h
+@@ -90,5 +90,5 @@ typedef struct page *pgtable_t;
+ #endif
+ 
+-#ifdef CONFIG_64BIT
++#if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
+ /*
+  * We override this value as its generic definition uses __pa too early in
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 32cad6a65ccd..b3e63dec3ab5 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -233,5 +233,5 @@ static void __init setup_bootmem(void)
+ 	 * did not know the start of DRAM before.
+ 	 */
+-	if (IS_ENABLED(CONFIG_64BIT))
++	if (IS_ENABLED(CONFIG_64BIT) && IS_ENABLED(CONFIG_MMU))
+ 		kernel_map.va_pa_offset = PAGE_OFFSET - phys_ram_base;
+ 
+
+##### A054
+=== 05ab803d1ad8 A 2024-02-27 +5/-0
+riscv: Save/restore envcfg CSR during CPU suspend
+
+The value of the [ms]envcfg CSR is lost when entering a nonretentive
+idle state, so the CSR must be rewritten when resuming the CPU.
+
+Fixes: 43c16d51a19b ("RISC-V: Enable cbo.zero in usermode")
+functions: arch/riscv/kernel/suspend.c:suspend_save_csrs, arch/riscv/kernel/suspend.c:suspend_restore_csrs
+fixes: 43c16d51a19b(riscv)
+diff --git a/arch/riscv/include/asm/suspend.h b/arch/riscv/include/asm/suspend.h
+index 02f87867389a..491296a335d0 100644
+--- a/arch/riscv/include/asm/suspend.h
++++ b/arch/riscv/include/asm/suspend.h
+@@ -15,4 +15,5 @@ struct suspend_context {
+ 	/* Saved and restored by high-level functions */
+ 	unsigned long scratch;
++	unsigned long envcfg;
+ 	unsigned long tvec;
+ 	unsigned long ie;
+diff --git a/arch/riscv/kernel/suspend.c b/arch/riscv/kernel/suspend.c
+index 239509367e42..299795341e8a 100644
+--- a/arch/riscv/kernel/suspend.c
++++ b/arch/riscv/kernel/suspend.c
+@@ -16,4 +16,6 @@ void suspend_save_csrs(struct suspend_context *context)
+ {
+ 	context->scratch = csr_read(CSR_SCRATCH);
++	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_XLINUXENVCFG))
++		context->envcfg = csr_read(CSR_ENVCFG);
+ 	context->tvec = csr_read(CSR_TVEC);
+ 	context->ie = csr_read(CSR_IE);
+@@ -37,4 +39,6 @@ void suspend_restore_csrs(struct suspend_context *context)
+ {
+ 	csr_write(CSR_SCRATCH, context->scratch);
++	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_XLINUXENVCFG))
++		csr_write(CSR_ENVCFG, context->envcfg);
+ 	csr_write(CSR_TVEC, context->tvec);
+ 	csr_write(CSR_IE, context->ie);
+
+##### A055
+=== 16ab4646c905 A 2024-02-27 +1/-60
+Revert "riscv: mm: support Svnapot in huge vmap"
+
+This reverts commit ce173474cf19fe7fbe8f0fc74e3c81ec9c3d9807.
+
+We cannot correctly deal with NAPOT mappings in vmalloc/vmap because if
+some part of a NAPOT mapping is unmapped, the remaining mapping is not
+updated accordingly. For example:
+
+ptr = vmalloc_huge(64 * 1024, GFP_KERNEL);
+vunmap_range((unsigned long)(ptr + PAGE_SIZE),
+	     (unsigned long)(ptr + 64 * 1024));
+
+leads to the following kernel page table dump:
+
+0xffff8f8000ef0000-0xffff8f8000ef1000    0x00000001033c0000         4K PTE N   ..     ..   D A G . . W R V
+
+Meaning the first entry which was not unmapped still has the N bit set,
+which, if accessed first and cached in the TLB, could allow access to the
+unmapped range.
+
+That's because the logic to break the NAPOT mapping does not exist and
+likely won't. Indeed, to break a NAPOT mapping, we first have to clear
+the whole mapping, flush the TLB and then set the new mapping ("break-
+before-make" equivalent). That works fine in userspace since we can handle
+any pagefault occurring on the remaining mapping but we can't handle a kernel
+pagefault on such mapping.
+
+So fix this by reverting the commit that introduced the vmap/vmalloc
+support.
+
+Fixes: ce173474cf19 ("riscv: mm: support Svnapot in huge vmap")
+functions: 
+fixes: ce173474cf19(riscv)
+ arch/riscv/include/asm/vmalloc.h | 61 +-----------------------------------------------------------
+ 1 file changed, 1 insertion(+), 60 deletions(-)
+diff --git a/arch/riscv/include/asm/vmalloc.h b/arch/riscv/include/asm/vmalloc.h
+index 924d01b56c9a..51f6dfe19745 100644
+--- a/arch/riscv/include/asm/vmalloc.h
++++ b/arch/riscv/include/asm/vmalloc.h
+@@ -20,64 +20,5 @@ static inline bool arch_vmap_pmd_supported(pgprot_t prot)
+ }
+ 
+-#ifdef CONFIG_RISCV_ISA_SVNAPOT
+-#include <linux/pgtable.h>
++#endif
+ 
+-#define arch_vmap_pte_range_map_size arch_vmap_pte_range_map_size
+-static inline unsigned long arch_vmap_pte_range_map_size(unsigned long addr, unsigned long end,
+-							 u64 pfn, unsigned int max_page_shift)
+-{
+-	unsigned long map_size = PAGE_SIZE;
+-	unsigned long size, order;
+-
+-	if (!has_svnapot())
+-		return map_size;
+-
+-	for_each_napot_order_rev(order) {
+-		if (napot_cont_shift(order) > max_page_shift)
+-			continue;
+-
+-		size = napot_cont_size(order);
+-		if (end - addr < size)
+-			continue;
+-
+-		if (!IS_ALIGNED(addr, size))
+-			continue;
+-
+-		if (!IS_ALIGNED(PFN_PHYS(pfn), size))
+-			continue;
+-
+-		map_size = size;
+-		break;
+-	}
+-
+-	return map_size;
+-}
+-
+-#define arch_vmap_pte_supported_shift arch_vmap_pte_supported_shift
+-static inline int arch_vmap_pte_supported_shift(unsigned long size)
+-{
+-	int shift = PAGE_SHIFT;
+-	unsigned long order;
+-
+-	if (!has_svnapot())
+-		return shift;
+-
+-	WARN_ON_ONCE(size >= PMD_SIZE);
+-
+-	for_each_napot_order_rev(order) {
+-		if (napot_cont_size(order) > size)
+-			continue;
+-
+-		if (!IS_ALIGNED(size, napot_cont_size(order)))
+-			continue;
+-
+... (10 more diff lines)
+
+##### A056
+=== 3fb3f7164edc A 2024-02-27 +3/-1
+riscv: Fix enabling cbo.zero when running in M-mode
+
+When the kernel is running in M-mode, the CBZE bit must be set in the
+menvcfg CSR, not in senvcfg.
+
+Fixes: 43c16d51a19b ("RISC-V: Enable cbo.zero in usermode")
+functions: arch/riscv/kernel/cpufeature.c:riscv_user_isa_enable
+fixes: 43c16d51a19b(riscv)
+diff --git a/arch/riscv/include/asm/csr.h b/arch/riscv/include/asm/csr.h
+index 510014051f5d..2468c55933cd 100644
+--- a/arch/riscv/include/asm/csr.h
++++ b/arch/riscv/include/asm/csr.h
+@@ -425,4 +425,5 @@
+ # define CSR_IE		CSR_MIE
+ # define CSR_TVEC	CSR_MTVEC
++# define CSR_ENVCFG	CSR_MENVCFG
+ # define CSR_SCRATCH	CSR_MSCRATCH
+ # define CSR_EPC	CSR_MEPC
+@@ -449,4 +450,5 @@
+ # define CSR_IE		CSR_SIE
+ # define CSR_TVEC	CSR_STVEC
++# define CSR_ENVCFG	CSR_SENVCFG
+ # define CSR_SCRATCH	CSR_SSCRATCH
+ # define CSR_EPC	CSR_SEPC
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index 89920f84d0a3..c5b13f7dd482 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -951,5 +951,5 @@ void riscv_user_isa_enable(void)
+ {
+ 	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_ZICBOZ))
+-		csr_set(CSR_SENVCFG, ENVCFG_CBZE);
++		csr_set(CSR_ENVCFG, ENVCFG_CBZE);
+ }
+ 
+
+##### A057
+=== e0fe5ab4192c A 2024-02-27 +4/-0
+riscv: Fix pte_leaf_size() for NAPOT
+
+pte_leaf_size() must be reimplemented to add support for NAPOT mappings.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+functions: 
+fixes: 82a1a1f3bfb6(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 0c94260b5d0c..89f5f1bd6e46 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -440,4 +440,8 @@ static inline pte_t pte_mkhuge(pte_t pte)
+ }
+ 
++#define pte_leaf_size(pte)	(pte_napot(pte) ?				\
++					napot_cont_size(napot_cont_order(pte)) :\
++					PAGE_SIZE)
++
+ #ifdef CONFIG_NUMA_BALANCING
+ /*
+
+##### A058
+=== a11dd49dcb93 A 2024-02-29 +1/-1
+riscv: Sparse-Memory/vmemmap out-of-bounds fix
+
+Offset vmemmap so that the first page of vmemmap will be mapped
+to the first page of physical memory in order to ensure that
+vmemmap’s bounds will be respected during
+pfn_to_page()/page_to_pfn() operations.
+The conversion macros will produce correct SV39/48/57 addresses
+for every possible/valid DRAM_BASE inside the physical memory limits.
+
+v2:Address Alex's comments
+
+Fixes: d95f1a542c3d ("RISC-V: Implement sparsemem")
+functions: 
+fixes: d95f1a542c3d(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 89f5f1bd6e46..6066822e7396 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -85,5 +85,5 @@
+  * is configured with CONFIG_SPARSEMEM_VMEMMAP enabled.
+  */
+-#define vmemmap		((struct page *)VMEMMAP_START)
++#define vmemmap		((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT))
+ 
+ #define PCI_IO_SIZE      SZ_16M
+
+##### A059
+=== 674bc0168e6b A 2024-03-01 +2/-2
+riscv: mm: Fix prototype to avoid discarding const
+
+__flush_tlb_range() does not modify the provided cpumask, so its cmask
+parameter can be pointer-to-const. This avoids the unsafe cast of
+cpu_online_mask.
+
+Fixes: 54d7431af73e ("riscv: Add support for BATCHED_UNMAP_TLB_FLUSH")
+functions: arch/riscv/mm/tlbflush.c:flush_tlb_kernel_range
+fixes: 54d7431af73e(riscv)
+diff --git a/arch/riscv/mm/tlbflush.c b/arch/riscv/mm/tlbflush.c
+index 893566e004b7..07d743f87b3f 100644
+--- a/arch/riscv/mm/tlbflush.c
++++ b/arch/riscv/mm/tlbflush.c
+@@ -100,5 +100,5 @@ static void __ipi_flush_tlb_range_asid(void *info)
+ }
+ 
+-static void __flush_tlb_range(struct cpumask *cmask, unsigned long asid,
++static void __flush_tlb_range(const struct cpumask *cmask, unsigned long asid,
+ 			      unsigned long start, unsigned long size,
+ 			      unsigned long stride)
+@@ -201,5 +201,5 @@ void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
+ void flush_tlb_kernel_range(unsigned long start, unsigned long end)
+ {
+-	__flush_tlb_range((struct cpumask *)cpu_online_mask, FLUSH_TLB_NO_ASID,
++	__flush_tlb_range(cpu_online_mask, FLUSH_TLB_NO_ASID,
+ 			  start, end - start, PAGE_SIZE);
+ }
+
+##### A060
+=== 2bb7e0c49302 A 2024-03-04 +2/-0
+riscv: Fix compilation error with FAST_GUP and rv32
+
+By surrounding the definition of pte_leaf_size() with a ifdef napot as
+it should have been.
+
+Fixes: e0fe5ab4192c ("riscv: Fix pte_leaf_size() for NAPOT")
+functions: 
+fixes: e0fe5ab4192c(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 89f5f1bd6e46..2fdf7c85066f 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -440,7 +440,9 @@ static inline pte_t pte_mkhuge(pte_t pte)
+ }
+ 
++#ifdef CONFIG_RISCV_ISA_SVNAPOT
+ #define pte_leaf_size(pte)	(pte_napot(pte) ?				\
+ 					napot_cont_size(napot_cont_order(pte)) :\
+ 					PAGE_SIZE)
++#endif
+ 
+ #ifdef CONFIG_NUMA_BALANCING
+
+##### A061
+=== 3dfbd2d26b64 A 2024-03-10 +0/-12
+riscv: Remove unused asm/signal.h file
+
+When riscv moved to common entry the definition and usage of
+do_work_pending was removed.  This unused header file remains.
+
+Remove the header file as it is not used.
+
+I have tested compiling the kernel with this patch applied and saw no
+issues.  Noticed when auditing how different ports handle signals
+related to saving FPU state.
+
+Fixes: f0bddf50586d ("riscv: entry: Convert to generic entry")
+functions: 
+fixes: f0bddf50586d(riscv)
+diff --git a/arch/riscv/include/asm/signal.h b/arch/riscv/include/asm/signal.h
+deleted file mode 100644
+index 956ae0a01bad..000000000000
+--- a/arch/riscv/include/asm/signal.h
++++ /dev/null
+@@ -1,12 +0,0 @@
+-/* SPDX-License-Identifier: GPL-2.0-only */
+-
+-#ifndef __ASM_SIGNAL_H
+-#define __ASM_SIGNAL_H
+-
+-#include <uapi/asm/signal.h>
+-#include <uapi/asm/ptrace.h>
+-
+-asmlinkage __visible
+-void do_work_pending(struct pt_regs *regs, unsigned long thread_info_flags);
+-
+-#endif
+
+##### A062
+=== a9ad73295cc1 A 2024-03-11 +39/-14
+riscv: Fix syscall wrapper for >word-size arguments
+
+The current syscall wrapper macros break 64-bit arguments on
+rv32 because they only guarantee the first N input registers are
+passed to syscalls that accept N arguments. According to the
+calling convention, values twice the word size reside in register
+pairs and as a result, syscall arguments don't always have a
+direct register mapping on rv32.
+
+Instead of using `__MAP(x,__SC_LONG,__VA_ARGS__)` to declare the
+type of the `__se(_compat)_sys_*` functions on rv32, change the
+function declarations to accept `ulong` arguments and alias them
+to the actual syscall implementations, similarly to the existing
+macros in include/linux/syscalls.h. This matches previous
+behavior and ensures registers are passed to syscalls as-is, no
+matter which argument types they expect.
+
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+functions: 
+fixes: 08d0ce30e0e4(riscv)
+ arch/riscv/include/asm/syscall_wrapper.h | 53 ++++++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 39 insertions(+), 14 deletions(-)
+diff --git a/arch/riscv/include/asm/syscall_wrapper.h b/arch/riscv/include/asm/syscall_wrapper.h
+index eeec04b7dae6..980094c2e976 100644
+--- a/arch/riscv/include/asm/syscall_wrapper.h
++++ b/arch/riscv/include/asm/syscall_wrapper.h
+@@ -13,9 +13,36 @@
+ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ 
+-#define SC_RISCV_REGS_TO_ARGS(x, ...)				\
+-	__MAP(x,__SC_ARGS					\
+-	      ,,regs->orig_a0,,regs->a1,,regs->a2		\
++#ifdef CONFIG_64BIT
++
++#define __SYSCALL_SE_DEFINEx(x, prefix, name, ...)					\
++	static long __se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
++	static long __se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
++
++#define SC_RISCV_REGS_TO_ARGS(x, ...)							\
++	__MAP(x,__SC_ARGS								\
++	      ,,regs->orig_a0,,regs->a1,,regs->a2					\
+ 	      ,,regs->a3,,regs->a4,,regs->a5,,regs->a6)
+ 
++#else
++/*
++ * Use type aliasing to ensure registers a0-a6 are correctly passed to the syscall
++ * implementation when >word-size arguments are used.
++ */
++#define __SYSCALL_SE_DEFINEx(x, prefix, name, ...)					\
++	__diag_push();									\
++	__diag_ignore(GCC, 8, "-Wattribute-alias",					\
++			"Type aliasing is used to sanitize syscall arguments");		\
++	static long __se_##prefix##name(ulong, ulong, ulong, ulong, ulong, ulong, 	\
++					ulong)						\
++			__attribute__((alias(__stringify(___se_##prefix##name))));	\
++	__diag_pop();									\
++	static long noinline ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));	\
++	static long ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
++
++#define SC_RISCV_REGS_TO_ARGS(x, ...) \
++	regs->orig_a0,regs->a1,regs->a2,regs->a3,regs->a4,regs->a5,regs->a6
++
++#endif /* CONFIG_64BIT */
++
+ #ifdef CONFIG_COMPAT
+ 
+@@ -23,13 +50,12 @@ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ 	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs);		\
+ 	ALLOW_ERROR_INJECTION(__riscv_compat_sys##name, ERRNO);				\
+-	static long __se_compat_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
+ 	static inline long __do_compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__));	\
+-	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs)		\
++	__SYSCALL_SE_DEFINEx(x, compat_sys, name, __VA_ARGS__)				\
+ 	{										\
+-		return __se_compat_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
++		return __do_compat_sys##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
+ 	}										\
+-	static long __se_compat_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__))		\
++	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs)		\
+ 	{										\
+-		return __do_compat_sys##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
++		return __se_compat_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
+... (24 more diff lines)
+
+##### A063
+=== d080a08b06b6 A 2024-03-11 +2/-2
+riscv: Fix spurious errors from __get/put_kernel_nofault
+
+These macros did not initialize __kr_err, so they could fail even if
+the access did not fault.
+
+Fixes: d464118cdc41 ("riscv: implement __get_kernel_nofault and __put_user_nofault")
+functions: 
+fixes: d464118cdc41(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index ec0cab9fbddd..72ec1d9bd3f3 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -320,5 +320,5 @@ unsigned long __must_check clear_user(void __user *to, unsigned long n)
+ #define __get_kernel_nofault(dst, src, type, err_label)			\
+ do {									\
+-	long __kr_err;							\
++	long __kr_err = 0;						\
+ 									\
+ 	__get_user_nocheck(*((type *)(dst)), (type *)(src), __kr_err);	\
+@@ -329,5 +329,5 @@ do {									\
+ #define __put_kernel_nofault(dst, src, type, err_label)			\
+ do {									\
+-	long __kr_err;							\
++	long __kr_err = 0;						\
+ 									\
+ 	__put_user_nocheck(*((type *)(src)), (type *)(dst), __kr_err);	\
+
+##### A064
+=== ad14f7ca9f0d A 2024-03-13 +1/-0
+riscv: hwprobe: do not produce frtace relocation
+
+Such relocation causes crash of android linker similar to one
+described in commit e05d57dcb8c7
+("riscv: Fixup __vdso_gettimeofday broke dynamic ftrace").
+
+Looks like this relocation is added by CONFIG_DYNAMIC_FTRACE which is
+disabled in the default android kernel.
+
+Before:
+
+readelf -rW arch/riscv/kernel/vdso/vdso.so:
+
+Relocation section '.rela.dyn' at offset 0xd00 contains 1 entry:
+    Offset             Info             Type
+0000000000000d20  0000000000000003 R_RISCV_RELATIVE
+
+objdump:
+0000000000000c86 <__vdso_riscv_hwprobe@@LINUX_4.15>:
+ c86:   0001                    nop
+ c88:   0001                    nop
+ c8a:   0001                    nop
+ c8c:   0001                    nop
+ c8e:   e211                    bnez    a2,c92 <__vdso_riscv_hwprobe...
+
+After:
+readelf -rW arch/riscv/kernel/vdso/vdso.so:
+
+There are no relocations in this file.
+
+objdump:
+0000000000000c86 <__vdso_riscv_hwprobe@@LINUX_4.15>:
+ c86:   e211                    bnez    a2,c8a <__vdso_riscv_hwprobe...
+ c88:   c6b9                    beqz    a3,cd6 <__vdso_riscv_hwprobe...
+ c8a:   e739                    bnez    a4,cd8 <__vdso_riscv_hwprobe...
+ c8c:   ffffd797                auipc   a5,0xffffd
+
+Also disable SCS since it also should not be available in vdso.
+
+Fixes: aa5af0aa90ba ("RISC-V: Add hwprobe vDSO function and data")
+functions: 
+fixes: aa5af0aa90ba(riscv)
+diff --git a/arch/riscv/kernel/vdso/Makefile b/arch/riscv/kernel/vdso/Makefile
+index 9b517fe1b8a8..272c431ac5b9 100644
+--- a/arch/riscv/kernel/vdso/Makefile
++++ b/arch/riscv/kernel/vdso/Makefile
+@@ -38,4 +38,5 @@ endif
+ # Disable -pg to prevent insert call site
+ CFLAGS_REMOVE_vgettimeofday.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS)
++CFLAGS_REMOVE_hwprobe.o = $(CC_FLAGS_FTRACE) $(CC_FLAGS_SCS)
+ 
+ # Disable profiling and instrumentation for VDSO code
+
+##### A065
+=== 443574b03387 A 2024-03-24 +16/-0
+riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi
+
+We encountered a failing case when running selftest in no_alu32 mode:
+
+The failure case is `kfunc_call/kfunc_call_test4` and its source code is
+like bellow:
+```
+long bpf_kfunc_call_test4(signed char a, short b, int c, long d) __ksym;
+int kfunc_call_test4(struct __sk_buff *skb)
+{
+	...
+	tmp = bpf_kfunc_call_test4(-3, -30, -200, -1000);
+	...
+}
+```
+
+And its corresponding asm code is:
+```
+0: r1 = -3
+1: r2 = -30
+2: r3 = 0xffffff38 # opcode: 18 03 00 00 38 ff ff ff 00 00 00 00 00 00 00 00
+4: r4 = -1000
+5: call bpf_kfunc_call_test4
+```
+
+insn 2 is parsed to ld_imm64 insn to emit 0x00000000ffffff38 imm, and
+converted to int type and then send to bpf_kfunc_call_test4. But since
+it is zero-extended in the bpf calling convention, riscv jit will
+directly treat it as an unsigned 32-bit int value, and then fails with
+the message "actual 4294966063 != expected -1234".
+
+The reason is the incompatibility between bpf and riscv abi, that is,
+bpf will do zero-extension on uint, but riscv64 requires sign-extension
+on int or uint. We can solve this problem by sign extending the 32-bit
+parameters in kfunc.
+
+The issue is related to [0], and thanks to Yonghong and Alexei.
+
+Fixes: d40c3847b485 ("riscv, bpf: Add kfunc support for RV64")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_emit_insn
+fixes: d40c3847b485(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index aac190085472..1adf2f39ce59 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1464,4 +1464,20 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 			return ret;
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *fm;
++			int idx;
++
++			fm = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!fm)
++				return -EINVAL;
++
++			for (idx = 0; idx < fm->nr_args; idx++) {
++				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
++
++				if (fm->arg_size[idx] == sizeof(int))
++					emit_sextw(reg, reg, ctx);
++			}
++		}
++
+ 		ret = emit_call(addr, fixed_addr, ctx);
+ 		if (ret)
+
+##### A066
+=== 58661a30f1bc A 2024-03-26 +4/-3
+riscv: Flush the instruction cache during SMP bringup
+
+Instruction cache flush IPIs are sent only to CPUs in cpu_online_mask,
+so they will not target a CPU until it calls set_cpu_online() earlier in
+smp_callin(). As a result, if instruction memory is modified between the
+CPU coming out of reset and that point, then its instruction cache may
+contain stale data. Therefore, the instruction cache must be flushed
+after the set_cpu_online() synchronization point.
+
+Fixes: 08f051eda33b ("RISC-V: Flush I$ when making a dirty page executable")
+functions: arch/riscv/kernel/smpboot.c:smp_callin
+fixes: 08f051eda33b(riscv)
+diff --git a/arch/riscv/kernel/smpboot.c b/arch/riscv/kernel/smpboot.c
+index d41090fc3203..4b3c50da48ba 100644
+--- a/arch/riscv/kernel/smpboot.c
++++ b/arch/riscv/kernel/smpboot.c
+@@ -27,5 +27,5 @@
+ #include <linux/sched/mm.h>
+ 
+-#include <asm/cpufeature.h>
++#include <asm/cacheflush.h>
+ #include <asm/cpu_ops.h>
+ #include <asm/irq.h>
+@@ -235,7 +235,8 @@ asmlinkage __visible void smp_callin(void)
+ 
+ 	/*
+-	 * Remote TLB flushes are ignored while the CPU is offline, so emit
+-	 * a local TLB flush right now just in case.
++	 * Remote cache and TLB flushes are ignored while the CPU is offline,
++	 * so flush them both right now just in case.
+ 	 */
++	local_flush_icache_all();
+ 	local_flush_tlb_all();
+ 	complete(&cpu_running);
+
+##### A067
+=== 653650c468be A 2024-03-26 +2/-1
+riscv: Mark __se_sys_* functions __used
+
+Clang doesn't think ___se_sys_* functions used even though they are
+aliased to __se_sys_*, resulting in -Wunused-function warnings when
+building rv32. For example:
+
+   mm/oom_kill.c:1195:1: warning: unused function '___se_sys_process_mrelease' [-Wunused-function]
+    1195 | SYSCALL_DEFINE2(process_mrelease, int, pidfd, unsigned int, flags)
+         | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   include/linux/syscalls.h:221:36: note: expanded from macro 'SYSCALL_DEFINE2'
+     221 | #define SYSCALL_DEFINE2(name, ...) SYSCALL_DEFINEx(2, _##name, __VA_ARGS__)
+         |                                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   include/linux/syscalls.h:231:2: note: expanded from macro 'SYSCALL_DEFINEx'
+     231 |         __SYSCALL_DEFINEx(x, sname, __VA_ARGS__)
+         |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   arch/riscv/include/asm/syscall_wrapper.h:81:2: note: expanded from macro '__SYSCALL_DEFINEx'
+      81 |         __SYSCALL_SE_DEFINEx(x, sys, name, __VA_ARGS__)                         \
+         |         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   arch/riscv/include/asm/syscall_wrapper.h:40:14: note: expanded from macro '__SYSCALL_SE_DEFINEx'
+      40 |         static long ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
+         |                     ^~~~~~~~~~~~~~~~~~~~
+   <scratch space>:30:1: note: expanded from here
+      30 | ___se_sys_process_mrelease
+         | ^~~~~~~~~~~~~~~~~~~~~~~~~~
+   1 warning generated.
+
+Mark the functions __used explicitly to fix the Clang warnings.
+
+Fixes: a9ad73295cc1 ("riscv: Fix syscall wrapper for >word-size arguments")
+functions: 
+fixes: a9ad73295cc1(riscv)
+diff --git a/arch/riscv/include/asm/syscall_wrapper.h b/arch/riscv/include/asm/syscall_wrapper.h
+index 980094c2e976..ac80216549ff 100644
+--- a/arch/riscv/include/asm/syscall_wrapper.h
++++ b/arch/riscv/include/asm/syscall_wrapper.h
+@@ -37,5 +37,6 @@ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ 			__attribute__((alias(__stringify(___se_##prefix##name))));	\
+ 	__diag_pop();									\
+-	static long noinline ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));	\
++	static long noinline ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))	\
++			__used;								\
+ 	static long ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
+ 
+
+##### A068
+=== 8a48ea87ce89 A 2024-03-26 +1/-1
+riscv: Fix warning by declaring arch_cpu_idle() as noinstr
+
+The following warning appears when using ftrace:
+
+[89855.443413] RCU not on for: arch_cpu_idle+0x0/0x1c
+[89855.445640] WARNING: CPU: 5 PID: 0 at include/linux/trace_recursion.h:162 arch_ftrace_ops_list_func+0x208/0x228
+[89855.445824] Modules linked in: xt_conntrack(E) nft_chain_nat(E) xt_MASQUERADE(E) nf_conntrack_netlink(E) xt_addrtype(E) nft_compat(E) nf_tables(E) nfnetlink(E) br_netfilter(E) cfg80211(E) nls_iso8859_1(E) ofpart(E) redboot(E) cmdlinepart(E) cfi_cmdset_0001(E) virtio_net(E) cfi_probe(E) cfi_util(E) 9pnet_virtio(E) gen_probe(E) net_failover(E) virtio_rng(E) failover(E) 9pnet(E) physmap(E) map_funcs(E) chipreg(E) mtd(E) uio_pdrv_genirq(E) uio(E) dm_multipath(E) scsi_dh_rdac(E) scsi_dh_emc(E) scsi_dh_alua(E) drm(E) efi_pstore(E) backlight(E) ip_tables(E) x_tables(E) raid10(E) raid456(E) async_raid6_recov(E) async_memcpy(E) async_pq(E) async_xor(E) xor(E) async_tx(E) raid6_pq(E) raid1(E) raid0(E) virtio_blk(E)
+[89855.451563] CPU: 5 PID: 0 Comm: swapper/5 Tainted: G            E      6.8.0-rc6ubuntu-defconfig #2
+[89855.451726] Hardware name: riscv-virtio,qemu (DT)
+[89855.451899] epc : arch_ftrace_ops_list_func+0x208/0x228
+[89855.452016]  ra : arch_ftrace_ops_list_func+0x208/0x228
+[89855.452119] epc : ffffffff8016b216 ra : ffffffff8016b216 sp : ffffaf808090fdb0
+[89855.452171]  gp : ffffffff827c7680 tp : ffffaf808089ad40 t0 : ffffffff800c0dd8
+[89855.452216]  t1 : 0000000000000001 t2 : 0000000000000000 s0 : ffffaf808090fe30
+[89855.452306]  s1 : 0000000000000000 a0 : 0000000000000026 a1 : ffffffff82cd6ac8
+[89855.452423]  a2 : ffffffff800458c8 a3 : ffffaf80b1870640 a4 : 0000000000000000
+[89855.452646]  a5 : 0000000000000000 a6 : 00000000ffffffff a7 : ffffffffffffffff
+[89855.452698]  s2 : ffffffff82766872 s3 : ffffffff80004caa s4 : ffffffff80ebea90
+[89855.452743]  s5 : ffffaf808089bd40 s6 : 8000000a00006e00 s7 : 0000000000000008
+[89855.452787]  s8 : 0000000000002000 s9 : 0000000080043700 s10: 0000000000000000
+[89855.452831]  s11: 0000000000000000 t3 : 0000000000100000 t4 : 0000000000000064
+[89855.452874]  t5 : 000000000000000c t6 : ffffaf80b182dbfc
+[89855.452929] status: 0000000200000100 badaddr: 0000000000000000 cause: 0000000000000003
+[89855.453053] [<ffffffff8016b216>] arch_ftrace_ops_list_func+0x208/0x228
+[89855.453191] [<ffffffff8000e082>] ftrace_call+0x8/0x22
+[89855.453265] [<ffffffff800a149c>] do_idle+0x24c/0x2ca
+[89855.453357] [<ffffffff8000da54>] return_to_handler+0x0/0x26
+[89855.453429] [<ffffffff8000b716>] smp_callin+0x92/0xb6
+[89855.453785] ---[ end trace 0000000000000000 ]---
+
+To fix this, mark arch_cpu_idle() as noinstr, like it is done in commit
+a9cbc1b471d2 ("s390/idle: mark arch_cpu_idle() noinstr").
+
+Fixes: cfbc4f81c9d0 ("riscv: Select ARCH_WANTS_NO_INSTR")
+functions: 
+fixes: cfbc4f81c9d0(riscv)
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index 92922dbd5b5c..6abeecbfc51d 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -38,5 +38,5 @@ EXPORT_SYMBOL(__stack_chk_guard);
+ extern asmlinkage void ret_from_fork(void);
+ 
+-void arch_cpu_idle(void)
++void noinstr arch_cpu_idle(void)
+ {
+ 	cpu_do_idle();
+
+##### A069
+=== a370c2419e46 A 2024-03-26 +8/-0
+riscv: Disable preemption when using patch_map()
+
+patch_map() uses fixmap mappings to circumvent the non-writability of
+the kernel text mapping.
+
+The __set_fixmap() function only flushes the current cpu tlb, it does
+not emit an IPI so we must make sure that while we use a fixmap mapping,
+the current task is not migrated on another cpu which could miss the
+newly introduced fixmap mapping.
+
+So in order to avoid any task migration, disable the preemption.
+
+Fixes: cad539baa48f ("riscv: implement a memset like function for text")
+Fixes: 0ff7c3b33127 ("riscv: Use text_mutex instead of patch_lock")
+functions: arch/riscv/kernel/patch.c:__patch_insn_set, arch/riscv/kernel/patch.c:__patch_insn_write
+fixes: cad539baa48f(riscv), 0ff7c3b33127(riscv)
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 37e87fdcf6a0..30e12b310cab 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -81,4 +81,6 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 	lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+@@ -93,4 +95,6 @@ static int __patch_insn_set(void *addr, u8 c, size_t len)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return 0;
+ }
+@@ -123,4 +127,6 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 		lockdep_assert_held(&text_mutex);
+ 
++	preempt_disable();
++
+ 	if (across_pages)
+ 		patch_map(addr + PAGE_SIZE, FIX_TEXT_POKE1);
+@@ -135,4 +141,6 @@ static int __patch_insn_write(void *addr, const void *insn, size_t len)
+ 		patch_unmap(FIX_TEXT_POKE1);
+ 
++	preempt_enable();
++
+ 	return ret;
+ }
+
+##### A070
+=== d14fa1fcf69d A 2024-03-27 +0/-3
+riscv: process: Fix kernel gp leakage
+
+childregs represents the registers which are active for the new thread
+in user context. For a kernel thread, childregs->gp is never used since
+the kernel gp is not touched by switch_to. For a user mode helper, the
+gp value can be observed in user space after execve or possibly by other
+means.
+
+[From the email thread]
+
+The /* Kernel thread */ comment is somewhat inaccurate in that it is also used
+for user_mode_helper threads, which exec a user process, e.g. /sbin/init or
+when /proc/sys/kernel/core_pattern is a pipe. Such threads do not have
+PF_KTHREAD set and are valid targets for ptrace etc. even before they exec.
+
+childregs is the *user* context during syscall execution and it is observable
+from userspace in at least five ways:
+
+1. kernel_execve does not currently clear integer registers, so the starting
+   register state for PID 1 and other user processes started by the kernel has
+   sp = user stack, gp = kernel __global_pointer$, all other integer registers
+   zeroed by the memset in the patch comment.
+
+   This is a bug in its own right, but I'm unwilling to bet that it is the only
+   way to exploit the issue addressed by this patch.
+
+2. ptrace(PTRACE_GETREGSET): you can PTRACE_ATTACH to a user_mode_helper thread
+   before it execs, but ptrace requires SIGSTOP to be delivered which can only
+   happen at user/kernel boundaries.
+
+3. /proc/*/task/*/syscall: this is perfectly happy to read pt_regs for
+   user_mode_helpers before the exec completes, but gp is not one of the
+   registers it returns.
+
+4. PERF_SAMPLE_REGS_USER: LOCKDOWN_PERF normally prevents access to kernel
+   addresses via PERF_SAMPLE_REGS_INTR, but due to this bug kernel addresses
+   are also exposed via PERF_SAMPLE_REGS_USER which is permitted under
+   LOCKDOWN_PERF. I have not attempted to write exploit code.
+
+5. Much of the tracing infrastructure allows access to user registers. I have
+   not attempted to determine which forms of tracing allow access to user
+functions: arch/riscv/kernel/process.c:copy_thread
+fixes: 7db91e57a0ac(riscv)
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index 6abeecbfc51d..e4bc61c4e58a 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -28,6 +28,4 @@
+ #include <asm/cpufeature.h>
+ 
+-register unsigned long gp_in_global __asm__("gp");
+-
+ #if defined(CONFIG_STACKPROTECTOR) && !defined(CONFIG_STACKPROTECTOR_PER_TASK)
+ #include <linux/stackprotector.h>
+@@ -208,5 +206,4 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
+ 		/* Kernel thread */
+ 		memset(childregs, 0, sizeof(struct pt_regs));
+-		childregs->gp = gp_in_global;
+ 		/* Supervisor/Machine, irqs on: */
+ 		childregs->status = SR_PP | SR_PIE;
+
+##### A071
+=== 5ea6764d9095 A 2024-04-09 +1/-1
+riscv: hwprobe: fix invalid sign extension for RISCV_HWPROBE_EXT_ZVFHMIN
+
+The current definition yields a negative 32bits signed value which
+result in a mask with is obviously incorrect. Replace it by using a
+1ULL bit shift value to obtain a single set bit mask.
+
+Fixes: 5dadda5e6a59 ("riscv: hwprobe: export Zvfh[min] ISA extensions")
+functions: 
+fixes: 5dadda5e6a59(riscv)
+diff --git a/arch/riscv/include/uapi/asm/hwprobe.h b/arch/riscv/include/uapi/asm/hwprobe.h
+index 9f2a8e3ff204..2902f68dc913 100644
+--- a/arch/riscv/include/uapi/asm/hwprobe.h
++++ b/arch/riscv/include/uapi/asm/hwprobe.h
+@@ -55,5 +55,5 @@ struct riscv_hwprobe {
+ #define		RISCV_HWPROBE_EXT_ZIHINTNTL	(1 << 29)
+ #define		RISCV_HWPROBE_EXT_ZVFH		(1 << 30)
+-#define		RISCV_HWPROBE_EXT_ZVFHMIN	(1 << 31)
++#define		RISCV_HWPROBE_EXT_ZVFHMIN	(1ULL << 31)
+ #define		RISCV_HWPROBE_EXT_ZFA		(1ULL << 32)
+ #define		RISCV_HWPROBE_EXT_ZTSO		(1ULL << 33)
+
+##### A072
+=== 2196c066f138 A 2024-04-20 +12/-8
+RISC-V: KVM: No need to exit to the user space if perf event failed
+
+Currently, we return a linux error code if creating a perf event failed
+in kvm. That shouldn't be necessary as guest can continue to operate
+without perf profiling or profiling with firmware counters.
+
+Return appropriate SBI error code to indicate that PMU configuration
+failed. An error message in kvm already describes the reason for failure.
+
+Fixes: 0cb74b65d2e5 ("RISC-V: KVM: Implement perf support without sampling")
+functions: arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_cfg_match, arch/riscv/kvm/vcpu_sbi_pmu.c:kvm_sbi_ext_pmu_handler
+fixes: 0cb74b65d2e5(riscv)
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index b5159ce4592d..2d9929bbc2c8 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -230,6 +230,7 @@ static int kvm_pmu_validate_counter_mask(struct kvm_pmu *kvpmu, unsigned long ct
+ }
+ 
+-static int kvm_pmu_create_perf_event(struct kvm_pmc *pmc, struct perf_event_attr *attr,
+-				     unsigned long flags, unsigned long eidx, unsigned long evtdata)
++static long kvm_pmu_create_perf_event(struct kvm_pmc *pmc, struct perf_event_attr *attr,
++				      unsigned long flags, unsigned long eidx,
++				      unsigned long evtdata)
+ {
+ 	struct perf_event *event;
+@@ -455,5 +456,6 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 				     struct kvm_vcpu_sbi_return *retdata)
+ {
+-	int ctr_idx, ret, sbiret = 0;
++	int ctr_idx, sbiret = 0;
++	long ret;
+ 	bool is_fevent;
+ 	unsigned long event_code;
+@@ -514,6 +516,8 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 	} else {
+ 		ret = kvm_pmu_create_perf_event(pmc, &attr, flags, eidx, evtdata);
+-		if (ret)
+-			return ret;
++		if (ret) {
++			sbiret = SBI_ERR_NOT_SUPPORTED;
++			goto out;
++		}
+ 	}
+ 
+diff --git a/arch/riscv/kvm/vcpu_sbi_pmu.c b/arch/riscv/kvm/vcpu_sbi_pmu.c
+index 7eca72df2cbd..e1633606c98b 100644
+--- a/arch/riscv/kvm/vcpu_sbi_pmu.c
++++ b/arch/riscv/kvm/vcpu_sbi_pmu.c
+@@ -43,7 +43,7 @@ static int kvm_sbi_ext_pmu_handler(struct kvm_vcpu *vcpu, struct kvm_run *run,
+ 		/*
+ 		 * This can fail if perf core framework fails to create an event.
+-		 * Forward the error to userspace because it's an error which
+-		 * happened within the host kernel. The other option would be
+-		 * to convert to an SBI error and forward to the guest.
++		 * No need to forward the error to userspace and exit the guest.
++		 * The operation can continue without profiling. Forward the
++		 * appropriate SBI error to the guest.
+ 		 */
+ 		ret = kvm_riscv_vcpu_pmu_ctr_cfg_match(vcpu, cp->a0, cp->a1,
+
+##### A073
+=== d1927f64e0e1 A 2024-04-20 +2/-2
+RISC-V: Fix the typo in Scountovf CSR name
+
+The counter overflow CSR name is "scountovf" not "sscountovf".
+
+Fix the csr name.
+
+Fixes: 4905ec2fb7e6 ("RISC-V: Add sscofpmf extension support")
+functions: 
+fixes: 4905ec2fb7e6(riscv)
+diff --git a/arch/riscv/include/asm/csr.h b/arch/riscv/include/asm/csr.h
+index 2468c55933cd..9d1b07932794 100644
+--- a/arch/riscv/include/asm/csr.h
++++ b/arch/riscv/include/asm/csr.h
+@@ -282,5 +282,5 @@
+ #define CSR_HPMCOUNTER31H	0xc9f
+ 
+-#define CSR_SSCOUNTOVF		0xda0
++#define CSR_SCOUNTOVF		0xda0
+ 
+ #define CSR_SSTATUS		0x100
+diff --git a/drivers/perf/riscv_pmu_sbi.c b/drivers/perf/riscv_pmu_sbi.c
+index 8cbe6e5f9c39..3e44d2fb8bf8 100644
+--- a/drivers/perf/riscv_pmu_sbi.c
++++ b/drivers/perf/riscv_pmu_sbi.c
+@@ -28,5 +28,5 @@
+ #define ALT_SBI_PMU_OVERFLOW(__ovl)					\
+ asm volatile(ALTERNATIVE_2(						\
+-	"csrr %0, " __stringify(CSR_SSCOUNTOVF),			\
++	"csrr %0, " __stringify(CSR_SCOUNTOVF),				\
+ 	"csrr %0, " __stringify(THEAD_C9XX_CSR_SCOUNTEROF),		\
+ 		THEAD_VENDOR_ID, ERRATA_THEAD_PMU,			\
+
+##### A074
+=== e482eab4d1eb A 2024-05-02 +44/-6
+riscv: cpufeature: Fix thead vector hwcap removal
+
+The riscv_cpuinfo struct that contains mvendorid and marchid is not
+populated until all harts are booted which happens after the DT parsing.
+Use the mvendorid/marchid from the boot hart to determine if the DT
+contains an invalid V.
+
+Fixes: d82f32202e0d ("RISC-V: Ignore V from the riscv,isa DT property on older T-Head CPUs")
+functions: arch/riscv/kernel/cpu.c:riscv_cpuinfo_starting, arch/riscv/kernel/cpufeature.c:riscv_fill_hwcap_from_isa_string
+fixes: d82f32202e0d(riscv)
+ arch/riscv/include/asm/sbi.h   |  2 ++
+ arch/riscv/kernel/cpu.c        | 40 ++++++++++++++++++++++++++++++++++++----
+ arch/riscv/kernel/cpufeature.c |  8 ++++++--
+ 3 files changed, 44 insertions(+), 6 deletions(-)
+diff --git a/arch/riscv/include/asm/sbi.h b/arch/riscv/include/asm/sbi.h
+index 6e68f8dff76b..0fab508a65b3 100644
+--- a/arch/riscv/include/asm/sbi.h
++++ b/arch/riscv/include/asm/sbi.h
+@@ -371,4 +371,6 @@ static inline void sbi_init(void) {}
+ #endif /* CONFIG_RISCV_SBI */
+ 
++unsigned long riscv_get_mvendorid(void);
++unsigned long riscv_get_marchid(void);
+ unsigned long riscv_cached_mvendorid(unsigned int cpu_id);
+ unsigned long riscv_cached_marchid(unsigned int cpu_id);
+diff --git a/arch/riscv/kernel/cpu.c b/arch/riscv/kernel/cpu.c
+index d11d6320fb0d..c1f3655238fd 100644
+--- a/arch/riscv/kernel/cpu.c
++++ b/arch/riscv/kernel/cpu.c
+@@ -140,4 +140,32 @@ int riscv_of_parent_hartid(struct device_node *node, unsigned long *hartid)
+ }
+ 
++unsigned long __init riscv_get_marchid(void)
++{
++	struct riscv_cpuinfo *ci = this_cpu_ptr(&riscv_cpuinfo);
++
++#if IS_ENABLED(CONFIG_RISCV_SBI)
++	ci->marchid = sbi_spec_is_0_1() ? 0 : sbi_get_marchid();
++#elif IS_ENABLED(CONFIG_RISCV_M_MODE)
++	ci->marchid = csr_read(CSR_MARCHID);
++#else
++	ci->marchid = 0;
++#endif
++	return ci->marchid;
++}
++
++unsigned long __init riscv_get_mvendorid(void)
++{
++	struct riscv_cpuinfo *ci = this_cpu_ptr(&riscv_cpuinfo);
++
++#if IS_ENABLED(CONFIG_RISCV_SBI)
++	ci->mvendorid = sbi_spec_is_0_1() ? 0 : sbi_get_mvendorid();
++#elif IS_ENABLED(CONFIG_RISCV_M_MODE)
++	ci->mvendorid = csr_read(CSR_MVENDORID);
++#else
++	ci->mvendorid = 0;
++#endif
++	return ci->mvendorid;
++}
++
+ DEFINE_PER_CPU(struct riscv_cpuinfo, riscv_cpuinfo);
+ 
+@@ -171,10 +199,14 @@ static int riscv_cpuinfo_starting(unsigned int cpu)
+ 
+ #if IS_ENABLED(CONFIG_RISCV_SBI)
+-	ci->mvendorid = sbi_spec_is_0_1() ? 0 : sbi_get_mvendorid();
+-	ci->marchid = sbi_spec_is_0_1() ? 0 : sbi_get_marchid();
++	if (!ci->mvendorid)
++		ci->mvendorid = sbi_spec_is_0_1() ? 0 : sbi_get_mvendorid();
++	if (!ci->marchid)
++		ci->marchid = sbi_spec_is_0_1() ? 0 : sbi_get_marchid();
+ 	ci->mimpid = sbi_spec_is_0_1() ? 0 : sbi_get_mimpid();
+ #elif IS_ENABLED(CONFIG_RISCV_M_MODE)
+-	ci->mvendorid = csr_read(CSR_MVENDORID);
+... (34 more diff lines)

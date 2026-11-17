@@ -1,0 +1,103 @@
+{
+ "_note": "p1dyn_20261115 criteria \u4e09: F1 = smaps_pmd_entry reads young/dirty only when present; F2 = folio_referenced_one skips young clearing on non-present ptes; amendment 1: riscv added, F1 precheck regex 'present &&'",
+ "F1": {
+  "x86_64": {
+   "edits": [
+    {
+     "file": "fs/proc/task_mmu.c",
+     "anchor": "\tsmaps_account(mss, page, true, pmd_young(*pmd), pmd_dirty(*pmd),",
+     "new": "\tsmaps_account(mss, page, true, present && pmd_young(*pmd) /* MUTANT F1 */, present && pmd_dirty(*pmd),",
+     "region_start": "static void smaps_pmd_entry("
+    }
+   ],
+   "precheck": {
+    "obj": "fs/proc/task_mmu.o",
+    "region_start": "static void smaps_pmd_entry(",
+    "regex": "present &&",
+    "absent": false
+   }
+  },
+  "arm64": {
+   "edits": [
+    {
+     "file": "fs/proc/task_mmu.c",
+     "anchor": "\tsmaps_account(mss, page, true, pmd_young(*pmd), pmd_dirty(*pmd),",
+     "new": "\tsmaps_account(mss, page, true, present && pmd_young(*pmd) /* MUTANT F1 */, present && pmd_dirty(*pmd),",
+     "region_start": "static void smaps_pmd_entry("
+    }
+   ],
+   "precheck": {
+    "obj": "fs/proc/task_mmu.o",
+    "region_start": "static void smaps_pmd_entry(",
+    "regex": "present &&",
+    "absent": false
+   }
+  },
+  "riscv": {
+   "edits": [
+    {
+     "file": "fs/proc/task_mmu.c",
+     "anchor": "\tsmaps_account(mss, page, true, pmd_young(*pmd), pmd_dirty(*pmd),",
+     "new": "\tsmaps_account(mss, page, true, present && pmd_young(*pmd) /* MUTANT F1 */, present && pmd_dirty(*pmd),",
+     "region_start": "static void smaps_pmd_entry("
+    }
+   ],
+   "precheck": {
+    "obj": "fs/proc/task_mmu.o",
+    "region_start": "static void smaps_pmd_entry(",
+    "regex": "present &&",
+    "absent": false
+   }
+  }
+ },
+ "F2": {
+  "x86_64": {
+   "edits": [
+    {
+     "file": "mm/rmap.c",
+     "anchor": "\t\t} else if (pvmw.pte) {\n\t\t\tif (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))",
+     "new": "\t\t} else if (pvmw.pte) {\n\t\t\tif (!pte_present(ptep_get(pvmw.pte))) /* MUTANT F2 */\n\t\t\t\treferenced++;\n\t\t\telse if (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))",
+     "region_start": "static bool folio_referenced_one("
+    }
+   ],
+   "precheck": {
+    "obj": "mm/rmap.o",
+    "region_start": "static bool folio_referenced_one(",
+    "regex": "pte_present\\(ptep_get\\(pvmw\\.pte\\)\\)",
+    "absent": false
+   }
+  },
+  "arm64": {
+   "edits": [
+    {
+     "file": "mm/rmap.c",
+     "anchor": "\t\t} else if (pvmw.pte) {\n\t\t\tif (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))",
+     "new": "\t\t} else if (pvmw.pte) {\n\t\t\tif (!pte_present(ptep_get(pvmw.pte))) /* MUTANT F2 */\n\t\t\t\treferenced++;\n\t\t\telse if (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))",
+     "region_start": "static bool folio_referenced_one("
+    }
+   ],
+   "precheck": {
+    "obj": "mm/rmap.o",
+    "region_start": "static bool folio_referenced_one(",
+    "regex": "pte_present\\(ptep_get\\(pvmw\\.pte\\)\\)",
+    "absent": false
+   }
+  },
+  "riscv": {
+   "edits": [
+    {
+     "file": "mm/rmap.c",
+     "anchor": "\t\t} else if (pvmw.pte) {\n\t\t\tif (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))",
+     "new": "\t\t} else if (pvmw.pte) {\n\t\t\tif (!pte_present(ptep_get(pvmw.pte))) /* MUTANT F2 */\n\t\t\t\treferenced++;\n\t\t\telse if (clear_flush_young_ptes_notify(vma, address, pvmw.pte, nr))",
+     "region_start": "static bool folio_referenced_one("
+    }
+   ],
+   "precheck": {
+    "obj": "mm/rmap.o",
+    "region_start": "static bool folio_referenced_one(",
+    "regex": "pte_present\\(ptep_get\\(pvmw\\.pte\\)\\)",
+    "absent": false
+   }
+  }
+ }
+}

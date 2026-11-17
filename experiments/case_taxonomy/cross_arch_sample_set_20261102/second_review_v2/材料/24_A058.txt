@@ -1,0 +1,34 @@
+########## 第24条  编号 A058  提交 a11dd49dcb93  日期 2024-02-29
+
+【提交说明】
+riscv: Sparse-Memory/vmemmap out-of-bounds fix
+
+Offset vmemmap so that the first page of vmemmap will be mapped
+to the first page of physical memory in order to ensure that
+vmemmap’s bounds will be respected during
+pfn_to_page()/page_to_pfn() operations.
+The conversion macros will produce correct SV39/48/57 addresses
+for every possible/valid DRAM_BASE inside the physical memory limits.
+
+v2:Address Alex's comments
+
+Fixes: d95f1a542c3d ("RISC-V: Implement sparsemem")
+
+【改动统计】
+ arch/riscv/include/asm/pgtable.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 89f5f1bd6e46..6066822e7396 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -84,7 +84,7 @@
+  * Define vmemmap for pfn_to_page & page_to_pfn calls. Needed if kernel
+  * is configured with CONFIG_SPARSEMEM_VMEMMAP enabled.
+  */
+-#define vmemmap		((struct page *)VMEMMAP_START)
++#define vmemmap		((struct page *)VMEMMAP_START - (phys_ram_base >> PAGE_SHIFT))
+ 
+ #define PCI_IO_SIZE      SZ_16M
+ #define PCI_IO_END       VMEMMAP_START

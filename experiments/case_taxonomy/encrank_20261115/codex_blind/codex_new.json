@@ -1,0 +1,158 @@
+[
+  {
+    "k": 1,
+    "loc": "mm/memory.c:1787",
+    "verdict": "不可能",
+    "why": "zap_pte_range 持有 PTE 锁，do_zap_pte_range 在 1962 行确认 pte_present 后才进入 zap_present_ptes，再调用本函数。get_and_clear_full_ptes 返回清除前的 present PTE 并汇总访问位，不会把清除后留在页表中的空项或交换项传给这里的 pte_young。"
+  },
+  {
+    "k": 2,
+    "loc": "mm/hugetlb_vmemmap.c:76",
+    "verdict": "不可能",
+    "why": "唯一调用者 vmemmap_pmd_entry 处理的是 walk_kernel_page_table_range 遍历的 init_mm 中的 vmemmap 映射，先识别已有的大页映射，再交给本函数拆分。这里在 init_mm.page_table_lock 下复查大页是否已被另一次拆分转换为页表，不存在把这段内核元数据映射换成交换、迁移或 device-private PMD 的路径。"
+  },
+  {
+    "k": 3,
+    "loc": "mm/hugetlb_vmemmap.c:110",
+    "verdict": "不可能",
+    "why": "vmemmap_remap_range 在 162～164 行通过 walk_kernel_page_table_range 遍历内核 vmemmap，当前回调也用 init_mm 的页表锁。vmemmap 的 PMD 按构造是内核大页映射或指向 PTE 页表的目录项，不承载编码表所列的非 present 软件项，不能把用户页迁移时的 PMD 编码套到这里。"
+  },
+  {
+    "k": 4,
+    "loc": "mm/kasan/shadow.c:207",
+    "verdict": "不可能",
+    "why": "shadow_mapped 使用 pgd_offset_k，调用者 kasan_mem_notifier 查询的是内存上线地址对应的 KASAN shadow。该 shadow 来自启动映射或 242～246 行以 PAGE_KERNEL 建立的 vmalloc 映射，空目录项已在 204～206 行排除，不会出现用户页的交换、迁移、设备或 uffd 标记项。"
+  },
+  {
+    "k": 5,
+    "loc": "mm/memory.c:3507",
+    "verdict": "不可能",
+    "why": "对两个标出架构追查 apply_to_page_range/apply_to_existing_page_range 的现有调用者，能到达的是 init_mm 的内核映射，例如 powerpc 的 change_memory_attr；使用用户 mm 的 i915、SGX 和 Xen 路径受各自架构配置限制，不能在这两个架构上提供用户迁移 PMD。create=true 时也可能检查新建的空 PMD，但 powerpc 的零项和 loongarch 的页对齐 invalid_pte_table 均没有叶子位，不会产生表中软件项导致的误判。"
+  },
+  {
+    "k": 6,
+    "loc": "mm/migrate_device.c:1023",
+    "verdict": "可能",
+    "why": "例如 test_hmm 的 HMM_DMIRROR_MIGRATE_TO_DEV 经 dmirror_migrate_to_device→migrate_vma_setup 收集空 PMD 范围内的单页空洞后，另一个线程可把同一范围通过 migrate_vma_insert_huge_pmd_page 装成 device-private PMD；前一线程再经 migrate_vma_pages→__migrate_device_pages→migrate_vma_insert_page 用非 compound 目标插页，会到达此行。loongarch 的该软件 PMD 含 _PAGE_HUGE，powerpc 含 _PAGE_PTE，故 pmd_trans_huge 为假而 pmd_leaf 返回 1，按题设编码表口径发生误分类，随后 goto abort 清掉 MIGRATE_PFN_MIGRATE。这个后果是放弃插页；地址此时已被另一线程占用，尚未证明该保守退出构成功能错误或数据损坏。"
+  },
+  {
+    "k": 7,
+    "loc": "mm/page_table_check.c:281",
+    "verdict": "不可能",
+    "why": "现有的两个调用点均在 khugepaged.c（2049、2210 行），传入 pmdp_collapse_flush 返回的原 PTE 页表目录项，并随后用同一个快照释放该页表。它是从受锁保护、已成功映射的 PTE 页表拆下来的 present PMD，而不是被拆除后槽位中的空项、迁移项或设备项。"
+  },
+  {
+    "k": 8,
+    "loc": "mm/pagewalk.c:169",
+    "verdict": "不可能",
+    "why": "这一分支只在没有 VMA 时执行：现有入口是内核页表遍历和 ptdump 的调试遍历，标出架构的实际调用没有提供含迁移或设备项的用户 mm（powerpc 的 ptdump 使用 init_mm）。此外此处只用 pmd_leaf || !pmd_present 决定跳过，非 present 项即使被 leaf 判为 1，跳过结果也与后面的显式 present 检查一致。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/ptdump.c:112",
+    "verdict": "不可能",
+    "why": "ptdump_walk_pgd 可以服务不同 mm，不能仅凭其通用名称推定安全，但标出架构中 powerpc 的两个调用点（arch/powerpc/mm/ptdump/ptdump.c:352、392）均明确传入 init_mm，loongarch 没有对应的用户 mm 调用路径。当前能转储任意进程页表的是 x86 路径，而 x86 不在本条 pmd_leaf 的读错架构集合里。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/sparse-vmemmap.c:397",
+    "verdict": "不可能",
+    "why": "调用者 vmemmap_populate_hugepages 在 430 行先区分空 PMD，只在已有 vmemmap 映射时调用 vmemmap_check_pmd；这些内核元数据映射不换出，也不安装用户迁移或设备 PMD。另需注意 powerpc 有 arch/powerpc/mm/book3s64/radix_pgtable.c:990 的强定义，报告标记的 __weak 函数并非该架构实际执行的实现。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/vmalloc.c:864",
+    "verdict": "不可能",
+    "why": "vmalloc_to_page 从 pgd_offset_k 开始，只查 vmalloc/module 地址的内核页表，862 行已排除空 PMD。即使底层物理页另有用户别名，也不会使这份内核映射变成用户别名中的交换、迁移或设备软件项，因此不能触发表中的非 present 编码误读。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/huge_memory.c:2454",
+    "verdict": "不可能",
+    "why": "调用者 zap_huge_pmd 在 2531 行令 is_present=pmd_present(orig_pmd)，并把同一个 orig_pmd 和该布尔值传入本函数。当前行的 is_present && pmd_young 具有短路语义，非 present 的迁移或设备 PMD 不会执行这次 pmd_young 调用。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/huge_memory.c:3185",
+    "verdict": "不可能",
+    "why": "这是非匿名 VMA 的分支，3165 行取得清除前的 PMD 后，先在 3172～3179 行排除特殊 PFN 映射、迁移项和巨大零页，只有剩余的 present 文件页映射会执行 pmd_young。当前文件页的 COW 在 wp_huge_pmd 中先拆 PMD 后按 PTE 处理，设备私有内存只接收匿名页且空洞 PMD 插入也要求匿名 VMA，不能在这里补出一个遗漏的 device-private 文件 PMD 路径。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/huge_memory.c:3289",
+    "verdict": "不可能",
+    "why": "持有 PMD 锁的上文已在 3209、3225 行分别分流迁移项和 device-private 项，本行处于剩余的 present THP 分支。pmdp_invalidate 替换页表槽位，但返回的是替换前的旧 PMD；通用实现及 arm64、s390 的交换实现都保持这一语义，所以 old_pmd 不是刚写入的失效值。"
+  },
+  {
+    "k": 15,
+    "loc": "mm/gup.c:2879",
+    "verdict": "不可能",
+    "why": "2854 行的 pte_access_permitted 已过滤同一份局部 PTE：x86 要求 _PAGE_PRESENT 和用户位，powerpc 先检查 pte_present，arm 要求 L_PTE_PRESENT，s390 使用包含 pte_present 的通用实现。后续还有 PMD/PTE 快照一致性复查，2879 行读取的仍是这一份已通过检查的局部值，不会因页表随后变化而改成软件项。"
+  },
+  {
+    "k": 16,
+    "loc": "mm/mapping_dirty_helpers.c:40",
+    "verdict": "不可能",
+    "why": "通用 PTE walker 本身不替回调过滤非 present 项，但当前 wp_shared_mapping_range 的实际调用者只有 vmwgfx，遍历的是 TTM 设备 address_space 的共享映射；ttm_bo_mmap_obj 设置 VM_PFNMAP|VM_IO 并拒绝 COW，这里不是可换出或按普通 rmap 迁移的匿名/文件页映射。该驱动只允许 x86 或 arm64 配置，表中其余 pte_write 读错架构不可达，而 x86 的空 PTE 也不会使 pte_write 返回 1。"
+  },
+  {
+    "k": 17,
+    "loc": "mm/memory.c:1175",
+    "verdict": "不可能",
+    "why": "copy_pte_range 持有源、目标 PTE 锁，1377～1399 行先处理非 present 项，只有原本 present 或 device-exclusive 已恢复为 present 的 PTE 才传给 copy_present_ptes→__copy_present_ptes。1175 行读取的是传值参数，且发生在本函数的保护属性重写之前，不会拿到仍为 device-exclusive 或交换编码的项。"
+  },
+  {
+    "k": 18,
+    "loc": "mm/page_table_check.c:223",
+    "verdict": "不可能",
+    "why": "223 行受前一行 pte_user_accessible_page 的条件支配：x86 明确要求 _PAGE_PRESENT，powerpc 要求 pte_present&&pte_user，s390 要求 pte_present，随后才会求值 pte_write。非 present 项虽然可以传进 __page_table_check_ptes_set，却不能到达本条标记的调用；arm32 也没有提供本检查所需的可用架构路径。"
+  },
+  {
+    "k": 19,
+    "loc": "mm/rmap.c:2627",
+    "verdict": "不可能",
+    "why": "标记行只在 HugeTLB 分支执行，而 try_to_migrate_one 的 page_vma_mapped_walk 未设置 PVMW_MIGRATION，后者在 huge_pte_lock 下通过 check_pte 排除迁移等软件项。普通设备软件项只属于非 HugeTLB 的相关映射；huge_ptep_clear_flush 返回受锁保护的原 present HugeTLB 项，函数之后才创建迁移项。"
+  },
+  {
+    "k": 20,
+    "loc": "mm/khugepaged.c:676",
+    "verdict": "不可能",
+    "why": "两个调用点均已检查同一份 pteval：隔离路径在 713～716 行对非 present 项退出，扫描路径在 1663～1679 行对非 present 项跳过。调用 folio_pte_referenced 时传入的是已检查的局部快照，不能因为被调函数里没有重复检查，就认定会把交换或迁移编码交给 pte_young。"
+  },
+  {
+    "k": 21,
+    "loc": "mm/debug_vm_pgtable.c:98",
+    "verdict": "不可能",
+    "why": "测试入口遍历 VM_NONE 到 VM_SHARED|VM_READ|VM_WRITE|VM_EXEC 的保护组合，每次都在 82～83 行用 vm_get_page_prot 和固定 PFN 重新构造普通映射 PTE，不读取运行中的软件项。PAGE_NONE 在这里仍属于 Linux 的逻辑 present 映射；嵌套的 mkold/mkyoung 只是在这个构造值上测试访问位变换。"
+  },
+  {
+    "k": 22,
+    "loc": "mm/debug_vm_pgtable.c:101",
+    "verdict": "不可能",
+    "why": "与同函数 98 行一样，pte 来源是 pfn_pte(fixed_pte_pfn, vm_get_page_prot(idx))，并未用交换、迁移、设备或标记项的构造接口。101 行检验 mkyoung 后再 mkold 是否清除了访问位，局部 PTE 也没有被前面的测试赋值改写为非 present 软件编码。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/memory.c:3718",
+    "verdict": "不可能",
+    "why": "__wp_page_copy_user 只由 wp_page_copy 调用，沿 do_wp_page 的常规入口，handle_pte_fault 已检查 pte_present(orig_pte)，交换缺页转入该路径时也已用 mk_pte 构造并安装新的 present PTE、更新 orig_pte。此处即使因复制而暂时释放页表锁，读取的仍是 vmf 中保存的 present 快照，后续重新取得锁还会用 pte_same 核对现场。"
+  },
+  {
+    "k": 24,
+    "loc": "mm/gup.c:2857",
+    "verdict": "不可能",
+    "why": "前面的 pte_access_permitted 在 RISC-V 和 s390 上使用通用实现，其首项条件就是 pte_present(pte)，失败立即跳到 pte_unmap。pte_special 读取同一个未被改写的局部快照，迁移、交换或设备软件项不能绕过这个跨接口的 present 保证。"
+  },
+  {
+    "k": 25,
+    "loc": "mm/huge_memory.c:3290",
+    "verdict": "不可能",
+    "why": "3209～3257 行已把迁移项和 device-private 项送入使用 pmd_swp_soft_dirty 的各自分支，3290 行只处理剩余的 present 匿名 THP。powerpc 的 pmdp_invalidate 显式返回 old_pmd，s390 的 pmdp_xchg_direct 也返回交换前的值，因此这里的 pmd_soft_dirty 不会误读新写入槽位的失效或软件项编码。"
+  },
+  {
+    "k": 26,
+    "loc": "mm/memory.c:829",
+    "verdict": "不可能",
+    "why": "追查 vm_normal_page 及 vm_normal_folio 的现有调用者后，普通用户页路径均先分流 present 与软件项，例如 copy/zap、GUP、smaps、HMM、mlock、mprotect、迁移收集和 userfaultfd；mremap 的间接调用也受 move_ptes:286 的 pte_present 支配。缺页路径传入的是已检查或重新构造的 present PTE，get_gate_page 则处理固定的 gate 映射，未找到能在 RISC-V 或 s390 把仍为非 present 的软件项传给本次 pte_special 的调用路径。"
+  }
+]

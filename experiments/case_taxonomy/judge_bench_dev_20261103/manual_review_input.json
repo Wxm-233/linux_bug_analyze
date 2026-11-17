@@ -1,0 +1,295 @@
+[
+ {
+  "variant": "V0",
+  "id": "A288",
+  "target": {
+   "path": "arch/riscv/kernel/module.c",
+   "name": "module_alloc",
+   "start": 894,
+   "end": 899
+  },
+  "problem": "RISC-V 的 module_alloc 直接返回 __vmalloc_node_range 的结果，未在 KASAN 下调用 kasan_alloc_module_shadow 并在失败时 vfree。",
+  "lines": [
+   895,
+   896,
+   897,
+   898
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A288",
+  "target": {
+   "path": "arch/riscv/kernel/module.c",
+   "name": "module_alloc",
+   "start": 894,
+   "end": 899
+  },
+  "problem": "RISC-V module_alloc 未为 KASAN 调用 kasan_alloc_module_shadow，也未在 shadow 分配失败时 vfree 清理。",
+  "lines": [
+   895,
+   896,
+   897,
+   898
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A301",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "invoke_bpf_prog",
+   "start": 705,
+   "end": 765
+  },
+  "problem": "RISC-V 在条件跳过分支之后才把 bpf_trampoline_enter 的返回值保存到 S1，导致 enter 返回 0 时 exit 收到陈旧起始时间。",
+  "lines": [
+   730,
+   733,
+   752
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A301",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "invoke_bpf_prog",
+   "start": 705,
+   "end": 765
+  },
+  "problem": "invoke_bpf_prog 的条件跳转占位符 rv_nop 位于保存 bpf_trampoline_enter 返回值到 S1 之前；当 enter 返回 0 触发跳转时会跳过 line733，随后 line759 用未初始化的 S1 调用 bpf_trampoline_exit。",
+  "lines": [
+   728,
+   730,
+   733,
+   751,
+   752,
+   759
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A305",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "emit_atomic",
+   "start": 473,
+   "end": 553
+  },
+  "problem": "32 位 BPF_CMPXCHG 返回的旧值未按 eBPF 语义零扩展，rv_lr_w 的符号扩展高位会留在 r0。",
+  "lines": [
+   543
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A305",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "emit_atomic",
+   "start": 473,
+   "end": 553
+  },
+  "problem": "32 位 BPF_CMPXCHG 路径在 rv_lr_w 取回旧值后未对 r0 做 emit_zextw，返回旧值可能符号扩展而非零扩展。",
+  "lines": [
+   542,
+   550
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A313",
+  "target": {
+   "path": "arch/riscv/mm/fault.c",
+   "name": "mm_fault_error",
+   "start": 63,
+   "end": 85
+  },
+  "problem": "RISC-V 的 mm_fault_error 缺少 __kprobes 标记",
+  "lines": [
+   63
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A321",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "emit_atomic",
+   "start": 478,
+   "end": 560
+  },
+  "problem": "32 位 BPF_CMPXCHG 的旧值返回没有零扩展，R0 会保留 rv_lr_w 的符号扩展值。",
+  "lines": [
+   549,
+   558
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A321",
+  "target": {
+   "path": "arch/riscv/net/bpf_jit_comp64.c",
+   "name": "emit_atomic",
+   "start": 478,
+   "end": 560
+  },
+  "problem": "32 位 BPF_CMPXCHG 原子返回值未零扩展：RISC-V 用 rv_lr_w 将旧值符号扩展到 R0，CMPXCHG 路径在 fence 后缺少 emit_zextw(r0,r0,ctx)，导致 R0 高 32 位可能错误。",
+  "lines": [
+   549,
+   557,
+   558
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A327",
+  "target": {
+   "path": "arch/riscv/kernel/jump_label.c",
+   "name": "arch_jump_label_transform_queue",
+   "start": 20,
+   "end": 44
+  },
+  "problem": "RISC-V在jump label补丁后仅调用patch_insn_write，未调用patch_text_nosync或flush_icache_range，缺少指令缓存同步/IPI，可能继续执行旧指令。",
+  "lines": [
+   39,
+   40,
+   41
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A328",
+  "target": {
+   "path": "arch/riscv/kernel/setup.c",
+   "name": "parse_dtb",
+   "start": 228,
+   "end": 245
+  },
+  "problem": "调用 early_init_dt_scan 时用 __pa(dtb_early_va) 计算 DTB 物理地址，但 dtb_early_va 是早期 fixmap 映射，__pa 并不适用；应直接传入 DTB 的物理地址。",
+  "lines": [
+   230
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A344",
+  "target": {
+   "path": "arch/riscv/kernel/traps.c",
+   "name": "do_trap_misaligned",
+   "start": 220,
+   "end": 236
+  },
+  "problem": "缺少 instrumentation_begin()/instrumentation_end() 来包围实际陷阱处理逻辑",
+  "lines": [
+   228,
+   230
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A359",
+  "target": {
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_prepare_memory_region",
+   "start": 172,
+   "end": 261
+  },
+  "problem": "GPA 上界检查的等号处理错误：base_gfn + npages 是排他末端，等于 GPA 页数时仍合法，RISC-V 却拒绝了。",
+  "lines": [
+   186,
+   187,
+   188
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A359",
+  "target": {
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_prepare_memory_region",
+   "start": 172,
+   "end": 261
+  },
+  "problem": "D8 的 GPA 上限检查使用 >=，会把结束于 GPA 空间顶端的合法 memslot 也拒绝；应改为 >（或比较 base_gfn + npages - 1）。",
+  "lines": [
+   186,
+   187
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A379",
+  "target": {
+   "path": "arch/riscv/kernel/patch.c",
+   "name": "patch_map",
+   "start": 43,
+   "end": 58
+  },
+  "problem": "patch_map 对内核/exit text 仍通过 phys_to_page/page_to_phys 转换，未像 arm64 在映像文本分支直接使用 __pa_symbol 的物理地址，存在早期 page_to_phys 类问题。",
+  "lines": [
+   48,
+   56
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A387",
+  "target": {
+   "path": "arch/riscv/kvm/vcpu.c",
+   "name": "kvm_arch_vcpu_ioctl_set_guest_debug",
+   "start": 535,
+   "end": 542
+  },
+  "problem": "RISC-V 未先校验 dbg->control 中是否包含 KVM_GUESTDBG_VALID_MASK 之外的无效标志并返回 -EINVAL。",
+  "lines": [
+   536,
+   537
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A393",
+  "target": {
+   "path": "arch/riscv/kernel/machine_kexec.c",
+   "name": "machine_kexec_prepare",
+   "start": 32,
+   "end": 79
+  },
+  "problem": "非 crash kexec 路径缺少对卡在内核中的 CPU 的检查，应在处理镜像前调用 cpus_are_stuck_in_kernel() 并返回 -EBUSY。",
+  "lines": [
+   39
+  ]
+ },
+ {
+  "variant": "V0",
+  "id": "A398",
+  "target": {
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_prepare_memory_region",
+   "start": 262,
+   "end": 330
+  },
+  "problem": "GPA 上界检查存在 off-by-one：应允许 base_gfn + npages 等于 GPA 页数上限，当前用 >= 会错误拒绝恰好结束于末尾的合法内存区域。",
+  "lines": [
+   275
+  ]
+ },
+ {
+  "variant": "V1",
+  "id": "A398",
+  "target": {
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_prepare_memory_region",
+   "start": 262,
+   "end": 330
+  },
+  "problem": "RISC-V 的 GPA 上界检查使用 >=，会把恰好结束于可寻址 GPA 上界的 memslot 误判为越界。",
+  "lines": [
+   275,
+   276,
+   277
+  ]
+ }
+]

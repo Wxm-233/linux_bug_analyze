@@ -1,0 +1,12 @@
+{
+ "log_date": "2026-11-05",
+ "section": "## 11月5日 后续：RISC-V patch_map疑点经QEMU运行确认——关闭MODULES时BPF JIT全部失败（第三个经运行确认的RISC-V缺陷）\n\n验证patch_rules_v2_20261105/中模型审查带出的疑点（riscv_patchmap_bpf_verify_20261105/，判据先写定）。从df2908090cda用git archive构建三个内核（defconfig＋BPF_JIT）：observe（MODULES关，STRICT_MODULE_RWX随之关，EXECMEM开）、control（MODULES开、STRICT_MODULE_RWX开）、fixed（MODULES关，patch_map中IS_ENABLED(CONFIG_STRICT_MODULE_RWX)改为IS_ENABLED(CONFIG_EXECMEM)，同arm64修复b1480ed230ac）。QEMU riscv64 4核，/init加载3次最简socket filter并读jited_prog_len。结果：observe 3次加载成功但jited_prog_len均为0，每次报WARNING: arch/riscv/net/bpf_jit_core.c:156（WARN_ON(bpf_jit_binary_pack_finalize)），程序退回解释器；control与fixed均为34字节、无警告。按判据记“疑点成立”。原因：2c9e5d4a0082去掉BPF_JIT对MODULES的依赖后，RISC-V patch_map在STRICT_MODULE_RWX关闭时直接返回原地址，bpf_arch_text_copy写set_memory_rox后的只读pack失败；arm64已修，RISC-V未跟进（M8）。影响：BPF_JIT＋MODULES关闭（或手动关STRICT_MODULE_RWX）的RISC-V内核所有BPF程序不能JIT并报警告，panic_on_warn下崩溃，BPF_JIT_ALWAYS_ON下应加载失败（未运行）。修复一行，已运行确认有效。这是第二部分审查迁移补丁时带出的第一部分问题，也是第三个经运行确认的RISC-V缺陷。只在本地记录，未上报；本机仓库只到df2908090cda，之后上游是否已修未查。统计：模型调用0，构建3，新确认缺陷1，新疑点0。证据linux_bug_analyze/experiments/case_taxonomy/riscv_patchmap_bpf_verify_20261105/。",
+ "plan_replacements": [
+  [
+   "带出新疑点RISC-V patch_map在STRICT_MODULE_RWX关闭时直接写只读BPF pack（arm64已以b1480ed230ac修复，RISC-V未跟进），待QEMU以MODULES=n验证。",
+   "带出的RISC-V patch_map问题已经QEMU运行确认（riscv_patchmap_bpf_verify_20261105/）：MODULES关闭时BPF JIT全部失败并报WARNING，按arm64 b1480ed230ac改一行后正常，是第三个经运行确认的RISC-V缺陷，只在本地记录、未上报。"
+  ]
+ ],
+ "plan_row": "| 2026-11-05 | 验证RISC-V patch_map疑点 | QEMU确认：MODULES关闭时BPF JIT全部失败（jited_prog_len=0，WARNING×3），对照与修复版正常；linux_bug_analyze/experiments/case_taxonomy/riscv_patchmap_bpf_verify_20261105/ | 是否上报由用户决定；历史回放样本 |",
+ "order_paragraph": ""
+}

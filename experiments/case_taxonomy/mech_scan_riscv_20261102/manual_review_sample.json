@@ -1,0 +1,357 @@
+[
+ {
+  "module": "M1",
+  "dir": "M1_151",
+  "point": {
+   "module": "M1",
+   "name": "ioremap",
+   "default_path": "include/asm-generic/io.h",
+   "kind": "ifndef",
+   "overridden_by": [
+    "x86",
+    "loongarch"
+   ],
+   "ref_paths": {
+    "x86": [
+     "arch/x86/include/asm/io.h",
+     "arch/x86/mm/ioremap.c"
+    ],
+    "loongarch": [
+     "arch/loongarch/include/asm/io.h"
+    ]
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V使用Sv39/48/57页表进行地址转换，内核虚拟地址不等于物理地址，默认ioremap直接返回物理地址会访问错误或未映射地址。",
+  "fixed_after": null
+ },
+ {
+  "module": "M1",
+  "dir": "M1_152",
+  "point": {
+   "module": "M1",
+   "name": "ptep_get_lockless",
+   "default_path": "include/linux/pgtable.h",
+   "kind": "ifndef",
+   "overridden_by": [
+    "arm64"
+   ],
+   "ref_paths": {
+    "arm64": [
+     "arch/arm64/include/asm/pgtable.h"
+    ]
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V 的 NAPOT 也用多个页表项拼成大页，类似 arm64 contpte；默认实现只检查单个 PTE 的 low/high，不能保证 NAPOT 组的一致性，故该假设被破坏。",
+  "fixed_after": null
+ },
+ {
+  "module": "M1",
+  "dir": "M1_157",
+  "point": {
+   "module": "M1",
+   "name": "pud_offset_lockless",
+   "default_path": "include/linux/pgtable.h",
+   "kind": "ifndef",
+   "overridden_by": [
+    "arm64"
+   ],
+   "ref_paths": {
+    "arm64": [
+     "arch/arm64/include/asm/pgtable.h"
+    ]
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V 的 Sv39/48/57 运行时页表级数会折叠 p4d/pud，使默认把局部副本地址传给 pud_offset 的假设不成立。",
+  "fixed_after": null
+ },
+ {
+  "module": "M1",
+  "dir": "M1_193",
+  "point": {
+   "module": "M1",
+   "name": "kgdb_arch_set_breakpoint",
+   "default_path": "kernel/debug/debug_core.c",
+   "kind": "weak",
+   "overridden_by": [
+    "arm64",
+    "x86"
+   ],
+   "ref_paths": {
+    "arm64": [
+     "arch/arm64/kernel/kgdb.c"
+    ],
+    "x86": [
+     "arch/x86/kernel/kgdb.c"
+    ]
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V 的压缩指令可使断点位于 2 字节地址，而默认实现固定写 BREAK_INSTR_SIZE 字节的 EBREAK，可能覆盖后续 2 字节指令，使固定长度/对齐假设不成立。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_002",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/machine_kexec.c",
+   "name": "machine_shutdown",
+   "marks": [],
+   "irq_region": true,
+   "entry": false
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第113行在关中断区间调用 smp_shutdown_nonboot_cpus，该函数会获取CPU热插拔互斥锁并可能睡眠/调度，违反不可睡眠约束。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_040",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/stacktrace.c",
+   "name": "arch_stack_walk",
+   "marks": [
+    "noinstr"
+   ],
+   "irq_region": false,
+   "entry": false
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第163行调用的 walk_stackframe 未标 noinstr，可能执行 pr_err、回调等可被插桩或依赖已关闭机制的代码，违反 noinstr 约束。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_043",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/traps.c",
+   "name": "do_trap_load_misaligned",
+   "marks": [],
+   "irq_region": false,
+   "entry": true
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第206行在用户态异常入口上下文中调用 handle_misaligned_load，它可能通过 get_user 访问用户内存并缺页/睡眠，而该上下文不允许睡眠。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_044",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/traps.c",
+   "name": "do_trap_store_misaligned",
+   "marks": [],
+   "irq_region": false,
+   "entry": true
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "NMI分支中第235行调用handle_misaligned_store、第236行调用do_trap_error，二者未标记noinstr，可能被插桩并执行不安全操作。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_048",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/traps.c",
+   "name": "do_page_fault",
+   "marks": [
+    "noinstr"
+   ],
+   "irq_region": true,
+   "entry": false
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第362行在noinstr函数中调用非noinstr的handle_page_fault，可能被插桩且未用instrumentation_begin/end保护；该函数还可能睡眠/迁移。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_049",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/traps.c",
+   "name": "handle_riscv_irq",
+   "marks": [
+    "noinstr"
+   ],
+   "irq_region": false,
+   "entry": true
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第376行在 noinstr 函数中间接调用 handle_arch_irq，其目标通常是未标记 noinstr 的 IRQ chip handler，可能被插桩。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_052",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kernel/traps_misaligned.c",
+   "name": "handle_misaligned_load",
+   "marks": [],
+   "irq_region": false,
+   "entry": true
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第339行在可抢占的异常上下文中用 this_cpu_ptr 写 per-CPU 变量，未禁用抢占，可能迁移 CPU 写错 CPU 的状态。",
+  "fixed_after": null
+ },
+ {
+  "module": "M5",
+  "dir": "M5_054",
+  "point": {
+   "module": "M5",
+   "path": "arch/riscv/kvm/vcpu.c",
+   "name": "kvm_riscv_vcpu_enter_exit",
+   "marks": [
+    "noinstr"
+   ],
+   "irq_region": false,
+   "entry": false
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "第723和728行调用的状态交换函数未标注 noinstr，可能被插桩，违反 noinstr 不得调用可插桩函数的要求。",
+  "fixed_after": "b5060a4aa33d"
+ },
+ {
+  "module": "M8",
+  "dir": "M8_011",
+  "point": {
+   "module": "M8",
+   "path": "arch/riscv/net/bpf_jit_comp32.c",
+   "name": "emit_bpf_tail_call",
+   "arm64_path": "arch/arm64/net/bpf_jit_comp.c",
+   "riscv_last_change": "2024-06-03",
+   "arm64_fixes": [
+    {
+     "sha": "66ff4d61dc12",
+     "date": "2024-07-29"
+    }
+   ]
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V仍在emit_bpf_tail_call中直接用RV_REG_TCC做减一和越界检查，未像该arm64修复那样用tail_call_cnt_ptr在bpf2bpf子程序间共享tail call计数。",
+  "fixed_after": null
+ },
+ {
+  "module": "M8",
+  "dir": "M8_017",
+  "point": {
+   "module": "M8",
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_age_gfn",
+   "arm64_path": "arch/arm64/kvm/mmu.c",
+   "riscv_last_change": "2023-02-07",
+   "arm64_fixes": [
+    {
+     "sha": "df6556adf27b",
+     "date": "2023-07-12"
+    }
+   ]
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V 的 kvm_age_gfn() 仍假定范围恰为单个页/块并只查询单个 leaf entry，未处理未对齐 memslot 的大页范围，与 arm64 该修复针对的同一页老化要求相同。",
+  "fixed_after": null
+ },
+ {
+  "module": "M10",
+  "dir": "M10_009",
+  "point": {
+   "module": "M10",
+   "path": "arch/riscv/kernel/probes/uprobes.c",
+   "name": "arch_uprobe_abort_xol",
+   "missing": [
+    "user_disable_single_step"
+   ],
+   "refs": {
+    "arm64": "arch/arm64/kernel/probes/uprobes.c",
+    "x86": "arch/x86/kernel/uprobes.c",
+    "loongarch": "arch/loongarch/kernel/uprobes.c"
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V 的 arch_uprobe_pre_xol 会启用单步，abort 路径恢复 IP 后也必须禁用单步，否则单步状态会泄漏。",
+  "fixed_after": null
+ },
+ {
+  "module": "M10",
+  "dir": "M10_034",
+  "point": {
+   "module": "M10",
+   "path": "arch/riscv/kvm/mmu.c",
+   "name": "kvm_arch_commit_memory_region",
+   "missing": [
+    "kvm_dirty_log_manual_protect_and_init_set"
+   ],
+   "refs": {
+    "arm64": "arch/arm64/kvm/mmu.c",
+    "x86": "arch/x86/kvm/x86.c",
+    "loongarch": "arch/loongarch/kvm/mmu.c"
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "RISC-V 通过 KVM_GENERIC_DIRTYLOG_READ_PROTECT 支持手工脏日志保护，因此在 initial-all-set 时也必须跳过整段写保护。",
+  "fixed_after": null
+ },
+ {
+  "module": "M10",
+  "dir": "M10_063",
+  "point": {
+   "module": "M10",
+   "path": "arch/riscv/include/asm/ptrace.h",
+   "name": "regs_get_kernel_argument",
+   "missing": [
+    "regs_get_kernel_stack_nth"
+   ],
+   "refs": {
+    "arm64": "arch/arm64/include/asm/ptrace.h",
+    "x86": "arch/x86/include/asm/ptrace.h",
+    "loongarch": "arch/loongarch/include/asm/ptrace.h"
+   }
+  },
+  "answered": true,
+  "verdict": "yes",
+  "flag": true,
+  "why": "公共代码可请求最多10个参数，RISC-V ABI将第9个及以后参数放在栈上，应读取内核栈。",
+  "fixed_after": null
+ }
+]

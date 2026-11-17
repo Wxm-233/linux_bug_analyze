@@ -8,12 +8,23 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace as NS
 from unittest import TestCase
 
-from linux_bug_analyze.fast_screening import FastScreener, SharedBudget
+from linux_bug_analyze.fast_screening import FastScreener, SharedBudget, key_hunk_diff
 from linux_bug_analyze.models import CommitInfo
 from linux_bug_analyze.screening import StopRun
 from tests.test_screening import response
 
 class FastTests(TestCase):
+    def test_key_hunks_keep_all_changes_and_local_context(self):
+        diff=('diff --git a/a.c b/a.c\n--- a/a.c\n+++ b/a.c\n'
+              '@@ -1,7 +1,7 @@\n old_far\n old_near\n-old\n+new\n near_after\n'
+              ' far_after\n')
+        compact=key_hunk_diff(diff)
+        self.assertIn('-old\n+new\n',compact)
+        self.assertIn(' old_near\n',compact)
+        self.assertIn(' near_after\n',compact)
+        self.assertNotIn(' old_far\n',compact)
+        self.assertNotIn(' far_after\n',compact)
+
     def setUp(self):
         self.tmp=TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.path=Path(self.tmp.name)
@@ -33,6 +44,20 @@ class FastTests(TestCase):
         resumed=SharedBudget(self.path,3,200)
         with self.assertRaises(StopRun):resumed.reserve(1,'bbbb','compact')
         self.assertEqual(resumed.data['charged_tokens'],200)
+
+    def test_temporary_inflight_reservation_waits_for_reported_usage(self):
+        budget=SharedBudget(self.path,2,150)
+        first=budget.reserve(100,'aaaa','compact')
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            waiting=pool.submit(budget.reserve,100,'bbbb','compact')
+            time.sleep(0.05)
+            self.assertFalse(waiting.done())
+            budget.finish(first,30,status='success')
+            second=waiting.result(timeout=2)
+        self.assertEqual(budget.data['requests'],2)
+        self.assertFalse(budget.stopped.is_set())
+        budget.finish(second,30,status='success')
+        self.assertEqual(budget.data['charged_tokens'],60)
 
     def test_parallel_execution_dedup_and_cached_resume(self):
         barrier=threading.Barrier(2);calls=[]

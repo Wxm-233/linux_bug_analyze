@@ -1,0 +1,854 @@
+
+##### A100
+=== f652d0a4e13c LA2 2026-04-01 +11/-5
+ACPI: Centralize acpi_get_cpu_uid() declaration in include/linux/acpi.h
+
+Centralize acpi_get_cpu_uid() in include/linux/acpi.h (global scope) and
+remove arch-specific declarations from arm64/loongarch/riscv/x86
+asm/acpi.h. This unifies the interface across architectures and
+simplifies maintenance by eliminating duplicate prototypes.
+functions: 
+fixes: 
+ arch/arm64/include/asm/acpi.h     |  1 -
+ arch/loongarch/include/asm/acpi.h |  1 -
+ arch/riscv/include/asm/acpi.h     |  1 -
+ arch/x86/include/asm/acpi.h       |  2 --
+ include/linux/acpi.h              | 11 +++++++++++
+ 5 files changed, 11 insertions(+), 5 deletions(-)
+diff --git a/arch/arm64/include/asm/acpi.h b/arch/arm64/include/asm/acpi.h
+index 2219a3301e72..bdb0ecf95b5c 100644
+--- a/arch/arm64/include/asm/acpi.h
++++ b/arch/arm64/include/asm/acpi.h
+@@ -119,5 +119,4 @@ static inline u32 get_acpi_id_for_cpu(unsigned int cpu)
+ 	return	acpi_cpu_get_madt_gicc(cpu)->uid;
+ }
+-int acpi_get_cpu_uid(unsigned int cpu, u32 *uid);
+ int get_cpu_for_acpi_id(u32 uid);
+ 
+diff --git a/arch/loongarch/include/asm/acpi.h b/arch/loongarch/include/asm/acpi.h
+index 8bb101b4557e..7376840fa9f7 100644
+--- a/arch/loongarch/include/asm/acpi.h
++++ b/arch/loongarch/include/asm/acpi.h
+@@ -45,5 +45,4 @@ static inline u32 get_acpi_id_for_cpu(unsigned int cpu)
+ 	return acpi_core_pic[cpu_logical_map(cpu)].processor_id;
+ }
+-int acpi_get_cpu_uid(unsigned int cpu, u32 *uid);
+ 
+ #endif /* !CONFIG_ACPI */
+diff --git a/arch/riscv/include/asm/acpi.h b/arch/riscv/include/asm/acpi.h
+index f3520cc85af3..6e13695120bc 100644
+--- a/arch/riscv/include/asm/acpi.h
++++ b/arch/riscv/include/asm/acpi.h
+@@ -66,5 +66,4 @@ static inline u32 get_acpi_id_for_cpu(int cpu)
+ 	return acpi_cpu_get_madt_rintc(cpu)->uid;
+ }
+-int acpi_get_cpu_uid(unsigned int cpu, u32 *uid);
+ 
+ int acpi_get_riscv_isa(struct acpi_table_header *table,
+diff --git a/arch/x86/include/asm/acpi.h b/arch/x86/include/asm/acpi.h
+index 92b5c27c4fea..a03aa6f999d1 100644
+--- a/arch/x86/include/asm/acpi.h
++++ b/arch/x86/include/asm/acpi.h
+@@ -158,6 +158,4 @@ static inline bool acpi_has_cpu_in_madt(void)
+ }
+ 
+-int acpi_get_cpu_uid(unsigned int cpu, u32 *uid);
+-
+ #define ACPI_HAVE_ARCH_SET_ROOT_POINTER
+ static __always_inline void acpi_arch_set_root_pointer(u64 addr)
+diff --git a/include/linux/acpi.h b/include/linux/acpi.h
+index 4d2f0bed7a06..74a73f0e5944 100644
+--- a/include/linux/acpi.h
++++ b/include/linux/acpi.h
+@@ -325,4 +325,15 @@ int acpi_unmap_cpu(int cpu);
+ acpi_handle acpi_get_processor_handle(int cpu);
+ 
++/**
++ * acpi_get_cpu_uid() - Get ACPI Processor UID of from MADT table
++ * @cpu: Logical CPU number (0-based)
++ * @uid: Pointer to store ACPI Processor UID
++ *
++ * Return: 0 on success (ACPI Processor ID stored in *uid);
++ *         -EINVAL if CPU number is invalid or out of range;
++ *         -ENODEV if ACPI Processor UID for the CPU is not found.
++ */
++int acpi_get_cpu_uid(unsigned int cpu, u32 *uid);
++
+ #ifdef CONFIG_ACPI_HOTPLUG_IOAPIC
+... (1 more diff lines)
+
+##### A101
+=== 534768410598 LA2 2026-04-22 +9/-2
+LoongArch: BPF: Add the default case in emit_atomic() and rename it
+
+Like the other archs such as x86 and riscv, add the default case
+in emit_atomic() to print an error message for the invalid opcode
+and return -EINVAL, then make its return type as int.
+
+While at it, given that all of the instructions in emit_atomic()
+are only read-modify-write instructions, rename emit_atomic() to
+emit_atomic_rmw() to make it clear, because there will be a new
+function emit_atomic_ld_st() for load-acquire and store-release
+instructions in the later patch.
+functions: arch/loongarch/net/bpf_jit.c:emit_atomic, arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 9cb796e16379..fefda4050a20 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -345,5 +345,5 @@ static int emit_bpf_tail_call(struct jit_ctx *ctx, int insn)
+ }
+ 
+-static void emit_atomic(const struct bpf_insn *insn, struct jit_ctx *ctx)
++static int emit_atomic_rmw(const struct bpf_insn *insn, struct jit_ctx *ctx)
+ {
+ 	const u8 t1 = LOONGARCH_GPR_T1;
+@@ -449,5 +449,10 @@ static void emit_atomic(const struct bpf_insn *insn, struct jit_ctx *ctx)
+ 		}
+ 		break;
++	default:
++		pr_err_once("bpf-jit: invalid atomic read-modify-write opcode %02x\n", imm);
++		return -EINVAL;
+ 	}
++
++	return 0;
+ }
+ 
+@@ -1257,5 +1262,7 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 	case BPF_STX | BPF_ATOMIC | BPF_W:
+ 	case BPF_STX | BPF_ATOMIC | BPF_DW:
+-		emit_atomic(insn, ctx);
++		ret = emit_atomic_rmw(insn, ctx);
++		if (ret)
++			return ret;
+ 		break;
+ 
+
+##### A102
+=== e815df29b6a5 LA2 2026-04-23 +66/-10
+LoongArch: BPF: Add fsession support for trampolines
+
+Implement BPF_TRACE_FSESSION support in LoongArch BPF JIT. The logic
+here is almost identical to what has been done in RISC-V JIT.
+
+The key changes are:
+  - Allocate stack space for function meta and session cookies
+  - Introduce invoke_bpf() as a wrapper around invoke_bpf_prog() that
+    populates session cookies before each invocation
+  - Implement bpf_jit_supports_fsession() callback
+functions: arch/loongarch/net/bpf_jit.c:__arch_prepare_bpf_trampoline
+fixes: 
+ arch/loongarch/net/bpf_jit.c | 76 +++++++++++++++++++++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 66 insertions(+), 10 deletions(-)
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index a6c001583083..ec3c25b45882 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1738,4 +1738,27 @@ static int invoke_bpf_prog(struct jit_ctx *ctx, struct bpf_tramp_link *l,
+ }
+ 
++static int invoke_bpf(struct jit_ctx *ctx, struct bpf_tramp_links *tl,
++		      int args_off, int retval_off, int run_ctx_off,
++		      int func_meta_off, bool save_ret, u64 func_meta, int cookie_off)
++{
++	int i, cur_cookie = (cookie_off - args_off) / 8;
++
++	for (i = 0; i < tl->nr_links; i++) {
++		int err;
++
++		if (bpf_prog_calls_session_cookie(tl->links[i])) {
++			u64 meta = func_meta | ((u64)cur_cookie << BPF_TRAMP_COOKIE_INDEX_SHIFT);
++
++			emit_store_stack_imm64(ctx, LOONGARCH_GPR_T1, -func_meta_off, meta);
++			cur_cookie--;
++		}
++		err = invoke_bpf_prog(ctx, tl->links[i], args_off, retval_off, run_ctx_off, save_ret);
++		if (err)
++			return err;
++	}
++
++	return 0;
++}
++
+ void *arch_alloc_bpf_trampoline(unsigned int size)
+ {
+@@ -1789,6 +1812,8 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ {
+ 	int i, ret, save_ret;
++	int cookie_cnt, cookie_off;
+ 	int stack_size, args_off, stk_args_off, nr_arg_slots = 0;
+-	int retval_off, nregs_off, ip_off, run_ctx_off, sreg_off, tcc_ptr_off;
++	int retval_off, func_meta_off, ip_off, run_ctx_off, sreg_off, tcc_ptr_off;
++	unsigned long long func_meta;
+ 	bool is_struct_ops = flags & BPF_TRAMP_F_INDIRECT;
+ 	void *orig_call = func_addr;
+@@ -1814,8 +1839,12 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ 	 * FP - args_off     [ arg reg1          ]
+ 	 *
+-	 * FP - nregs_off    [ arg regs count    ]
++	 * FP - func_meta_off [ regs count, etc ]
+ 	 *
+ 	 * FP - ip_off       [ traced func       ] BPF_TRAMP_F_IP_ARG
+ 	 *
++	 *                   [ stack cookie N    ]
++	 *                   [ ...               ]
++	 * FP - cookie_off   [ stack cookie 1    ]
++	 *
+ 	 * FP - run_ctx_off  [ bpf_tramp_run_ctx ]
+ 	 *
+@@ -1860,7 +1889,7 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ 	args_off = stack_size;
+ 
+-	/* Room of trampoline frame to store args number */
+... (73 more diff lines)
+
+##### A103
+=== 68571a63f25e LA2 2026-06-25 +8/-0
+LoongArch: BPF: Inline bpf_get_smp_processor_id() helper
+
+The pointer to thread_info is always available in the $tp register, so
+the call to bpf_get_smp_processor_id() can be inlined into a single load
+instruction.
+
+(1) Here is the sample test.c:
+
+  #include <linux/bpf.h>
+  #include <bpf/bpf_helpers.h>
+
+  SEC("raw_tp/sys_enter")
+  int test_cpuid(void *ctx)
+  {
+	  return bpf_get_smp_processor_id();
+  }
+  char _license[] SEC("license") = "GPL";
+
+(2) Here are the test steps:
+
+  sudo yum install libbpf-devel kernel-devel bpftool
+  clang -target bpf -O2 -c test.c -o test.o
+  sudo sysctl -w net.core.bpf_jit_enable=1
+  sudo bpftool prog show name test_cpuid
+  sudo rm -f /sys/fs/bpf/test_cpuid
+  sudo bpftool prog load test.o /sys/fs/bpf/test_cpuid
+  ID=$(sudo bpftool prog show pinned /sys/fs/bpf/test_cpuid | grep -oE '^[0-9]+')
+  sudo bpftool prog dump jited id $ID
+
+(3) Here are the test results:
+
+Before: 6 instructions
+
+  ...
+  64:	lu12i.w	$t1, 1213
+  68:	ori	$t1, $t1, 1680
+  6c:	lu32i.d	$t1, 0
+  70:	lu52i.d	$t1, $t1, -1792
+  74:	jirl	$ra, $t1, 0
+  78:	move	$a5, $a0
+  ...
+functions: arch/loongarch/net/bpf_jit.c:build_insn, arch/loongarch/net/bpf_jit.c:bpf_jit_inlines_helper_call
+fixes: 
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 66e8c1d2d5cb..ad7e28375aa9 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -6,4 +6,5 @@
+  */
+ #include <linux/memory.h>
++#include <asm/asm-offsets.h>
+ #include "bpf_jit.h"
+ 
+@@ -1169,4 +1170,10 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 		}
+ 
++		/* Implement helper call to bpf_get_smp_processor_id() inline */
++		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
++			emit_insn(ctx, ldwu, regmap[BPF_REG_0], LOONGARCH_GPR_TP, TI_CPU);
++			break;
++		}
++
+ 		ret = bpf_jit_get_func_addr(ctx->prog, insn, extra_pass,
+ 					    &func_addr, &func_addr_fixed);
+@@ -2395,4 +2402,5 @@ bool bpf_jit_inlines_helper_call(s32 imm)
+ 	case BPF_FUNC_get_current_task:
+ 	case BPF_FUNC_get_current_task_btf:
++	case BPF_FUNC_get_smp_processor_id:
+ 		return true;
+ 	default:
+
+##### A104
+=== 7f5c21fcd7ab LA2 2026-06-25 +18/-0
+LoongArch: BPF: Inline bpf_get_current_task/_btf() helpers
+
+The pointer to task_struct is always available in the $tp register, so
+the calls to bpf_get_current_task() and bpf_get_current_task_btf() can
+be inlined into a single move instruction.
+
+(1) Here is the sample test.c:
+
+  #include <linux/bpf.h>
+  #include <bpf/bpf_helpers.h>
+
+  SEC("raw_tp/sys_enter")
+  long test_task(void *ctx)
+  {
+	  return (long)bpf_get_current_task();
+  }
+  char _license[] SEC("license") = "GPL";
+
+(2) Here are the test steps:
+
+  sudo yum install libbpf-devel kernel-devel bpftool
+  clang -target bpf -O2 -c test.c -o test.o
+  sudo sysctl -w net.core.bpf_jit_enable=1
+  sudo bpftool prog show name test_task
+  sudo rm -f /sys/fs/bpf/test_task
+  sudo bpftool prog load test.o /sys/fs/bpf/test_task
+  ID=$(sudo bpftool prog show pinned /sys/fs/bpf/test_task | grep -oE '^[0-9]+')
+  sudo bpftool prog dump jited id $ID
+
+(3) Here are the test results:
+
+Before: 6 instructions
+
+  ...
+  64:	lu12i.w	$t1, 1093
+  68:	ori	$t1, $t1, 3320
+  6c:	lu32i.d	$t1, 0
+  70:	lu52i.d	$t1, $t1, -1792
+  74:	jirl	$ra, $t1, 0
+  78:	move	$a5, $a0
+  ...
+functions: arch/loongarch/net/bpf_jit.c:build_insn, arch/loongarch/net/bpf_jit.c:bpf_jit_supports_subprog_tailcalls
+fixes: 
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 99294f930914..66e8c1d2d5cb 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1162,4 +1162,11 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 	/* function call */
+ 	case BPF_JMP | BPF_CALL:
++		/* Implement helper call to bpf_get_current_task/_btf() inline */
++		if (insn->src_reg == 0 && (insn->imm == BPF_FUNC_get_current_task ||
++					   insn->imm == BPF_FUNC_get_current_task_btf)) {
++			move_reg(ctx, regmap[BPF_REG_0], LOONGARCH_GPR_TP);
++			break;
++		}
++
+ 		ret = bpf_jit_get_func_addr(ctx->prog, insn, extra_pass,
+ 					    &func_addr, &func_addr_fixed);
+@@ -2382,2 +2389,13 @@ bool bpf_jit_supports_subprog_tailcalls(void)
+ 	return true;
+ }
++
++bool bpf_jit_inlines_helper_call(s32 imm)
++{
++	switch (imm) {
++	case BPF_FUNC_get_current_task:
++	case BPF_FUNC_get_current_task_btf:
++		return true;
++	default:
++		return false;
++	}
++}
+
+##### A105
+=== d547b1001755 LA2 2026-07-06 +38/-38
+mm: rename ARCH_ENABLE_THP_MIGRATION to ARCH_HAS_PMD_SOFTLEAVES
+
+CONFIG_ARCH_ENABLE_THP_MIGRATION gates PMD-level migration entries. 
+PMD-level device-private entries use the same migration mechanism and
+therefore require the same architecture support.
+
+Upcoming PMD-level swap entries can use the same PMD softleaf helpers
+without depending on page migration, so rename the architecture gate to
+CONFIG_ARCH_HAS_PMD_SOFTLEAVES.  This describes the PMD entry capability
+rather than one current user of it.
+
+This is a pure rename: the set of selecting architectures (x86, arm64,
+s390, riscv, loongarch, and powerpc on PPC_BOOK3S_64) and the gating
+semantics are unchanged.
+
+No functional change intended.
+functions: mm/debug_vm_pgtable.c:pmd_leaf_soft_dirty_tests, mm/migrate.c:remove_migration_pte, mm/migrate_device.c:migrate_vma_nr_pages, mm/rmap.c:try_to_migrate_one
+fixes: 
+ include/linux/huge_mm.h                      | 2 +-
+ include/linux/leafops.h                      | 8 ++++----
+ include/linux/pgtable.h                      | 2 +-
+ include/linux/swapops.h                      | 6 +++---
+ mm/Kconfig                                   | 2 +-
+ mm/debug_vm_pgtable.c                        | 8 ++++----
+ mm/hmm.c                                     | 4 ++--
+ mm/huge_memory.c                             | 2 +-
+ mm/migrate.c                                 | 4 ++--
+ mm/migrate_device.c                          | 6 +++---
+ mm/rmap.c                                    | 2 +-
+ 22 files changed, 38 insertions(+), 38 deletions(-)
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index b3afe0688919..e136e5abdb33 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -18,5 +18,5 @@ config ARM64
+ 	select ARCH_ENABLE_MEMORY_HOTPLUG
+ 	select ARCH_ENABLE_SPLIT_PMD_PTLOCK if PGTABLE_LEVELS > 2
+-	select ARCH_ENABLE_THP_MIGRATION if TRANSPARENT_HUGEPAGE
++	select ARCH_HAS_PMD_SOFTLEAVES if TRANSPARENT_HUGEPAGE
+ 	select ARCH_HAS_CACHE_LINE_SIZE
+ 	select ARCH_HAS_CC_PLATFORM
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index 27689c62bd25..ed1cc6dba780 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -1535,8 +1535,8 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
+ #define __swp_entry_to_pte(swp)	((pte_t) { (swp).val })
+ 
+-#ifdef CONFIG_ARCH_ENABLE_THP_MIGRATION
++#ifdef CONFIG_ARCH_HAS_PMD_SOFTLEAVES
+ #define __pmd_to_swp_entry(pmd)		((swp_entry_t) { pmd_val(pmd) })
+ #define __swp_entry_to_pmd(swp)		__pmd((swp).val)
+-#endif /* CONFIG_ARCH_ENABLE_THP_MIGRATION */
++#endif /* CONFIG_ARCH_HAS_PMD_SOFTLEAVES */
+ 
+ /*
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index d8d252325017..c6c611f44f3f 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -13,5 +13,5 @@ config LOONGARCH
+ 	select ARCH_DISABLE_KASAN_INLINE
+ 	select ARCH_ENABLE_MEMORY_HOTPLUG
+-	select ARCH_ENABLE_THP_MIGRATION if TRANSPARENT_HUGEPAGE
++	select ARCH_HAS_PMD_SOFTLEAVES if TRANSPARENT_HUGEPAGE
+ 	select ARCH_HAS_ACPI_TABLE_UPGRADE	if ACPI
+ 	select ARCH_HAS_CPU_FINALIZE_INIT
+diff --git a/arch/powerpc/include/asm/book3s/64/pgtable.h b/arch/powerpc/include/asm/book3s/64/pgtable.h
+index e67e64ac6e8c..800ff3cc5f71 100644
+--- a/arch/powerpc/include/asm/book3s/64/pgtable.h
++++ b/arch/powerpc/include/asm/book3s/64/pgtable.h
+@@ -1061,5 +1061,5 @@ static inline pte_t *pmdp_ptep(pmd_t *pmd)
+ #define pmd_clear_soft_dirty(pmd) pte_pmd(pte_clear_soft_dirty(pmd_pte(pmd)))
+ 
+-#ifdef CONFIG_ARCH_ENABLE_THP_MIGRATION
++#ifdef CONFIG_ARCH_HAS_PMD_SOFTLEAVES
+ #define pmd_swp_mksoft_dirty(pmd)	pte_pmd(pte_swp_mksoft_dirty(pmd_pte(pmd)))
+ #define pmd_swp_soft_dirty(pmd)		pte_swp_soft_dirty(pmd_pte(pmd))
+diff --git a/arch/powerpc/platforms/Kconfig.cputype b/arch/powerpc/platforms/Kconfig.cputype
+index bac02c83bb3e..9f6847b53e37 100644
+--- a/arch/powerpc/platforms/Kconfig.cputype
++++ b/arch/powerpc/platforms/Kconfig.cputype
+@@ -113,5 +113,5 @@ config PPC_THP
+        select HAVE_ARCH_TRANSPARENT_HUGEPAGE
+        select HAVE_ARCH_TRANSPARENT_HUGEPAGE_PUD
+-       select ARCH_ENABLE_THP_MIGRATION if TRANSPARENT_HUGEPAGE
++       select ARCH_HAS_PMD_SOFTLEAVES if TRANSPARENT_HUGEPAGE
+ 
+ choice
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+... (284 more diff lines)
+
+##### A106
+=== 05c033db7e9a LA2 2026-07-12 +88/-61
+entry, treewide: Make syscall_enter_from_user_mode[_work]() indicate syscall execution
+
+The return values of syscall_enter_from_user_mode[_work]() are
+non-intuitive. Both functions return the syscall number which should be
+invoked by the architecture specific syscall entry code. The returned
+number can be:
+
+  - the unmodified syscall number which was handed in by the caller
+
+  - a modified syscall number (ptrace, seccomp, trace/probe/bpf)
+
+That has an additional twist. If the return value is -1L then the caller is
+not allowed to modify the return value as that indicates that the modifying
+entity requests to abort the syscall and set the return value already. That
+can obviously not be differentiated from a syscall which handed in -1 as
+syscall number.
+
+The most trivial way to deal with that is:
+
+    set_return_value(regs, -ENOSYS);
+    nr = syscall_enter_from_user_mode(regs, nr);
+    if (valid(nr))
+    	handle_syscall(regs, nr);
+
+That's what LOONGARCH, RISCV, and X86 do. But PowerPC and S390 do not
+preset the return value, so when user space hands in -1 and there is
+nothing setting the return value in the entry work code, then the syscall
+is skipped but the return value is whatever random data has been in the
+return value register.
+
+Change the return values of syscall_enter_from_user_mode[_work]() to
+boolean and return false, when either ptrace or seccomp request to skip the
+syscall. If they return true, update the syscall number as it might have
+been changed.
+
+That results in slightly different behaviour of the architectures versus
+tracing.
+
+If the syscall tracepoint has probe/BPF attached, those might set the
+syscall number to -1 and also set the return value. PowerPC and S390 will
+then overwrite that value with -ENOSYS. The other architectures will just
+functions: arch/loongarch/kernel/syscall.c:do_syscall, arch/powerpc/kernel/syscall.c:system_call_exception, arch/riscv/kernel/traps.c:do_trap_ecall_u, arch/s390/kernel/syscall.c:__do_syscall, arch/x86/entry/syscall_32.c:do_int80_emulation, arch/x86/entry/syscall_32.c:DEFINE_FREDENTRY_RAW, arch/x86/entry/syscall_32.c:__do_fast_syscall_32, arch/x86/entry/syscall_64.c:do_syscall_64
+fixes: 
+ Documentation/core-api/entry.rst | 45 +++++++++++++++++++++++++++++++++++----------
+ arch/loongarch/kernel/syscall.c  | 14 +++++++-------
+ arch/powerpc/kernel/syscall.c    |  3 ++-
+ arch/riscv/kernel/traps.c        | 11 +++++------
+ arch/s390/kernel/syscall.c       |  7 +++++--
+ arch/x86/entry/syscall_32.c      | 25 ++++++++++++-------------
+ arch/x86/entry/syscall_64.c      | 12 ++++++------
+ include/linux/entry-common.h     | 32 ++++++++++++++++----------------
+ 8 files changed, 88 insertions(+), 61 deletions(-)
+diff --git a/Documentation/core-api/entry.rst b/Documentation/core-api/entry.rst
+index 44e9608038ea..79fdaed954d9 100644
+--- a/Documentation/core-api/entry.rst
++++ b/Documentation/core-api/entry.rst
+@@ -59,24 +59,49 @@ Syscalls
+ --------
+ 
+-Syscall-entry code starts in assembly code and calls out into low-level C code
+-after establishing low-level architecture-specific state and stack frames. This
+-low-level C code must not be instrumented. A typical syscall handling function
+-invoked from low-level assembly code looks like this:
++Syscall-entry code starts in assembly code and calls out into low-level C
++code after establishing low-level architecture-specific state and stack
++frames. This low-level C code must not be instrumented. The recommended
++syscall handling function invoked from low-level assembly code looks like
++this:
+ 
+ .. code-block:: c
+ 
+-  noinstr void syscall(struct pt_regs *regs, int nr)
++  noinstr void syscall(struct pt_regs *regs, long nr)
+   {
+ 	arch_syscall_enter(regs);
+-	nr = syscall_enter_from_user_mode_randomize_stack(regs, nr);
++	result_reg(regs) = -ENOSYS;
++	if (syscall_enter_from_user_mode_randomize_stack(regs, &nr)) {
++		instrumentation_begin();
++		if (valid(nr)
++			result_reg(regs) = invoke_syscall(regs, nr);
++		instrumentation_end();
++	}
++	syscall_exit_to_user_mode(regs);
++  }
+ 
+-	instrumentation_begin();
+-	if (!invoke_syscall(regs, nr) && nr != -1)
+-	 	result_reg(regs) = __sys_ni_syscall(regs);
+-	instrumentation_end();
++This is the most resilent variant as it has always a guaranteed valid
++return code. The alternative variant is:
+ 
++.. code-block:: c
++
++  noinstr void syscall(struct pt_regs *regs, long nr)
++  {
++	arch_syscall_enter(regs);
++	if (syscall_enter_from_user_mode_randomize_stack(regs, &nr)) {
++		instrumentation_begin();
++		if (valid(nr)
++			result_reg(regs) = invoke_syscall(regs, nr);
++		else
++			result_reg(regs) = -ENOSYS;
++		instrumentation_end();
++	}
+ 	syscall_exit_to_user_mode(regs);
+   }
+ 
++That works for most situations except when a probe/BPF attached to the
++syscall tracepoint sets an invalid syscall number e.g. -1 and also modifies
++the result register. So this variant will obviously overwrite the modified
+... (219 more diff lines)
+
+##### A107
+=== 8383e05af734 LA2 2026-07-13 +5/-21
+syscall_user_dispatch: Introduce ARCH_SUPPORTS_SYSCALL_USER_DISPATCH
+
+Currently, only x86 genuinely implements and supports Syscall User Dispatch
+(SUD).
+
+Multiple architectures provide a stub arch_syscall_is_vdso_sigreturn()
+returning 'false' simply to satisfy GENERIC_ENTRY compilation, which
+creates a false impression of feature support.
+
+Introduce ARCH_SUPPORTS_SYSCALL_USER_DISPATCH to decouple this mechanism
+from GENERIC_ENTRY. Select it exclusively on x86 and remove the redundant
+stub functions from other architectures.
+functions: 
+fixes: 
+ arch/Kconfig                         | 4 ++++
+ arch/loongarch/include/asm/syscall.h | 6 ------
+ arch/powerpc/include/asm/syscall.h   | 5 -----
+ arch/riscv/include/asm/syscall.h     | 5 -----
+ arch/s390/include/asm/syscall.h      | 5 -----
+ arch/x86/Kconfig                     | 1 +
+ 6 files changed, 5 insertions(+), 21 deletions(-)
+diff --git a/arch/Kconfig b/arch/Kconfig
+index d2dbed524f15..066263cc44fe 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -115,6 +115,10 @@ config GENERIC_ENTRY
+ 	select GENERIC_SYSCALL
+ 
++config ARCH_SUPPORTS_SYSCALL_USER_DISPATCH
++	bool
++
+ config SYSCALL_USER_DISPATCH
+ 	bool "Syscall User Dispatch"
++	depends on ARCH_SUPPORTS_SYSCALL_USER_DISPATCH
+ 	depends on GENERIC_ENTRY
+ 	default y
+diff --git a/arch/loongarch/include/asm/syscall.h b/arch/loongarch/include/asm/syscall.h
+index df8ea223c77b..d9275010f548 100644
+--- a/arch/loongarch/include/asm/syscall.h
++++ b/arch/loongarch/include/asm/syscall.h
+@@ -85,9 +85,3 @@ static inline int syscall_get_arch(struct task_struct *task)
+ #endif
+ }
+-
+-static inline bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs)
+-{
+-	return false;
+-}
+-
+ #endif	/* __ASM_LOONGARCH_SYSCALL_H */
+diff --git a/arch/powerpc/include/asm/syscall.h b/arch/powerpc/include/asm/syscall.h
+index 834fcc4f7b54..4b3c52ed6e9d 100644
+--- a/arch/powerpc/include/asm/syscall.h
++++ b/arch/powerpc/include/asm/syscall.h
+@@ -140,8 +140,3 @@ static inline int syscall_get_arch(struct task_struct *task)
+ 		return AUDIT_ARCH_PPC64;
+ }
+-
+-static inline bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs)
+-{
+-	return false;
+-}
+ #endif	/* _ASM_SYSCALL_H */
+diff --git a/arch/riscv/include/asm/syscall.h b/arch/riscv/include/asm/syscall.h
+index 8067e666a4ca..987c9a78806f 100644
+--- a/arch/riscv/include/asm/syscall.h
++++ b/arch/riscv/include/asm/syscall.h
+@@ -113,9 +113,4 @@ static inline void syscall_handler(struct pt_regs *regs, ulong syscall)
+ }
+ 
+-static inline bool arch_syscall_is_vdso_sigreturn(struct pt_regs *regs)
+-{
+-	return false;
+-}
+-
+ asmlinkage long sys_riscv_flush_icache(uintptr_t, uintptr_t, uintptr_t);
+ 
+diff --git a/arch/s390/include/asm/syscall.h b/arch/s390/include/asm/syscall.h
+index 4271e4169f45..5f310caad1fc 100644
+--- a/arch/s390/include/asm/syscall.h
++++ b/arch/s390/include/asm/syscall.h
+... (20 more diff lines)
+
+##### A108
+=== 73555fdab5e1 LA2 2026-07-23 +2/-1
+LoongArch: Fix oops during single-step debugging
+
+When entering KDB via a breakpoint and then performing single-step
+debugging, an oops is triggered. Now during single-step debugging,
+kdb_local() expects the reason to be KDB_REASON_SSTEP, but it is
+actually KDB_REASON_OOPS. In kdb_stub(), when determining the reason,
+the ex_vector for single-step should be 0, as already implemented on
+other architectures such as arm64 and riscv.
+
+Before the patch:
+[112]kdb> ss
+
+Entering kdb (current=0x900020009f520000, pid 10661) on
+processor 112 Oops: (null)
+due to oops @ 0x90000000005b57a4
+functions: arch/loongarch/kernel/kgdb.c:kgdb_loongarch_notify
+fixes: 
+diff --git a/arch/loongarch/kernel/kgdb.c b/arch/loongarch/kernel/kgdb.c
+index 17664a6043b1..e7b59f8a4b05 100644
+--- a/arch/loongarch/kernel/kgdb.c
++++ b/arch/loongarch/kernel/kgdb.c
+@@ -253,5 +253,6 @@ static int kgdb_loongarch_notify(struct notifier_block *self, unsigned long cmd,
+ 		kgdb_nmicallback(smp_processor_id(), regs);
+ 
+-	if (kgdb_handle_exception(args->trapnr, args->signr, cmd, regs))
++	if (kgdb_handle_exception(regs->csr_era == stepped_address ? 0 : args->trapnr,
++				  args->signr, cmd, regs))
+ 		return NOTIFY_DONE;
+ 
+
+##### A109
+=== 2677f97a67fd LA2 2026-08-17 +7/-0
+LoongArch: Add DIRECT_MAP_PHYSMEM_END definition
+
+get_free_mem_region() and mhp_get_pluggable_range() bound their search
+to DIRECT_MAP_PHYSMEM_END. LoongArch does not define it, so the fallback
+in include/linux/mm.h applies: under CONFIG_SPARSEMEM_VMEMMAP it is
+(1ULL << MAX_PHYSMEM_BITS) - 1, a compile-time constant that does not
+adapt to the CPU's physical address space bits (cpu_pabits, probed from
+CPUCFG1).
+
+The vmemmap window only covers physical space below 2^(cpu_pabits+1)
+(i.e. VMEMMAP_SIZE), so on CPUs with fewer physical address bits than
+MAX_PHYSMEM_BITS the fallback allows get_free_mem_region() to return
+a ZONE_DEVICE region outside the vmemmap window; vmemmap_populate() then
+wraps the memmap range around and maps it into low memory, silently
+corrupting the page tables. The same search also picked the top-of-
+address-space region that crashed memmap_init_zone_device() with amdkfd
+on Loongson-3C6000 in 6.16 [1]; the commit 2969b42c8f99 ("LoongArch/mm:
+align vmemmap to maximal folio size") keeps that region in bounds on
+current Loongson-3C6000 configs, but CPUs with smaller cpu_pabits (e.g.
+the Loongson-2K series) are still affected.
+
+Define DIRECT_MAP_PHYSMEM_END as the vmemmap-covered physical range,
+(1ULL << (cpu_pabits + 1)) - 1, capped at (1ULL << MAX_PHYSMEM_BITS) - 1
+under CONFIG_SPARSEMEM, similar to the commit f3336b48cf9d ("riscv: mm:
+Define DIRECT_MAP_PHYSMEM_END").
+
+[1] https://lore.kernel.org/amd-gfx/20250814032153.227285-1-jeffbai@aosc.io/
+functions: 
+fixes: 
+diff --git a/arch/loongarch/include/asm/pgtable.h b/arch/loongarch/include/asm/pgtable.h
+index 223528c04d73..59b37a824bab 100644
+--- a/arch/loongarch/include/asm/pgtable.h
++++ b/arch/loongarch/include/asm/pgtable.h
+@@ -126,4 +126,11 @@ struct vm_area_struct;
+ #endif
+ 
++/* Needed to limit get_free_mem_region() */
++#ifndef CONFIG_SPARSEMEM
++#define DIRECT_MAP_PHYSMEM_END ((1ULL << (cpu_pabits + 1)) - 1)
++#else
++#define DIRECT_MAP_PHYSMEM_END min((1ULL << (cpu_pabits + 1)) - 1, (1ULL << MAX_PHYSMEM_BITS) - 1)
++#endif
++
+ #define ptep_get(ptep) READ_ONCE(*(ptep))
+ #define pmdp_get(pmdp) READ_ONCE(*(pmdp))
+
+##### A110
+=== 4b5b0b79d1f8 LA2 2026-08-17 +2/-4
+LoongArch: Use generic cmp_int() instead of custom cmp_3way()
+
+Currently, the module-sections.c file defines a custom cmp_3way() macro
+to perform a three-way comparison. There is already a generic cmp_int()
+macro to do the same thing in linux/sort.h, thus remove the custom macro
+and use the generic interface. This is similar with commit 3e17a4b443bb
+("riscv: module: Use generic cmp_int() instead of custom cmp_3way()").
+functions: arch/loongarch/kernel/module-sections.c:compare_rela
+fixes: 
+diff --git a/arch/loongarch/kernel/module-sections.c b/arch/loongarch/kernel/module-sections.c
+index 9fa1c9814fcc..0259d9c7ea30 100644
+--- a/arch/loongarch/kernel/module-sections.c
++++ b/arch/loongarch/kernel/module-sections.c
+@@ -63,6 +63,4 @@ Elf_Addr module_emit_plt_entry(struct module *mod, Elf_Shdr *sechdrs, Elf_Addr v
+ }
+ 
+-#define cmp_3way(a, b)  ((a) < (b) ? -1 : (a) > (b))
+-
+ static int compare_rela(const void *x, const void *y)
+ {
+@@ -70,7 +68,7 @@ static int compare_rela(const void *x, const void *y)
+ 	const Elf_Rela *rela_x = x, *rela_y = y;
+ 
+-	ret = cmp_3way(rela_x->r_info, rela_y->r_info);
++	ret = cmp_int(rela_x->r_info, rela_y->r_info);
+ 	if (ret == 0)
+-		ret = cmp_3way(rela_x->r_addend, rela_y->r_addend);
++		ret = cmp_int(rela_x->r_addend, rela_y->r_addend);
+ 
+ 	return ret;
+
+##### A111
+=== 3a2c4d55e32a LA2 2026-09-02 +637/-726
+treewide: refresh kmalloc_obj() conversions
+
+This is another run of the Coccinelle script for converting kmalloc()
+family of allocations to kmalloc_obj() via the existing rules in
+scripts/coccinelle/api/kmalloc_objs.cocci
+
+This catches both the set of kmalloc() uses added since the first
+kmalloc_obj() conversions in v7.0 and adds a large group missed in the
+first pass due to Coccinelle not interacting well with the cleanup.h
+scoped_...() family of macros[1]. I worked around this with spatch's
+"--macro-file" argument to a file with all the scoped_...() macros mapped
+to Coccinelle's YACFE_ITERATOR[2] as that was the closest viable control
+flow indicator I could find.
+
+Build tested allmodconfig on x86, arm64, arm, loongarch, mips, powerpc,
+riscv, and s390 with no new warnings.
+functions: arch/arm64/crypto/aes-neonbs-glue.c:aesbs_setkey, arch/arm64/crypto/aes-neonbs-glue.c:aesbs_cbc_ctr_setkey, arch/arm64/kvm/nested.c:kvm_vcpu_init_nested, arch/loongarch/kvm/intc/dmsintc.c:kvm_dmsintc_create, arch/mips/bcm47xx/buttons.c:bcm47xx_buttons_add, arch/powerpc/sysdev/xive/common.c:xive_init_ipis, arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_event_info, arch/s390/kvm/s390/s390.c:kvm_s390_get_skeys, arch/s390/kvm/s390/s390.c:kvm_s390_set_skeys, drivers/accel/rocket/rocket_job.c:rocket_job_push, drivers/acpi/irq.c:acpi_add_prt_dep, drivers/acpi/irq.c:acpi_add_irq_dep
+fixes: 
+ sound/pci/ctxfi/ctsrc.c                                         |  4 +--
+ sound/pci/ctxfi/cttimer.c                                       |  2 +-
+ sound/pci/emu10k1/emufx.c                                       |  2 +-
+ sound/soc/codecs/simple-amplifier.c                             |  2 +-
+ sound/soc/generic/simple-card-utils.c                           |  2 +-
+ sound/soc/meson/gx-formatter.c                                  |  2 +-
+ sound/soc/qcom/qdsp6/q6afe.c                                    |  2 +-
+ sound/soc/sdca/sdca_functions.c                                 | 19 +++++------
+ sound/soc/sof/sof-client-probes-ipc4.c                          |  2 +-
+ sound/soc/sof/sof-client.c                                      |  2 +-
+ sound/sparc/amd7930.c                                           |  2 +-
+ 304 files changed, 637 insertions(+), 726 deletions(-)
+diff --git a/arch/arm64/crypto/aes-neonbs-glue.c b/arch/arm64/crypto/aes-neonbs-glue.c
+index 5bcbac979893..7cb1aede9a48 100644
+--- a/arch/arm64/crypto/aes-neonbs-glue.c
++++ b/arch/arm64/crypto/aes-neonbs-glue.c
+@@ -67,5 +67,5 @@ static int aesbs_setkey(struct crypto_skcipher *tfm, const u8 *in_key,
+ 	int err;
+ 
+-	rk = kmalloc(sizeof(*rk), GFP_KERNEL);
++	rk = kmalloc_obj(*rk);
+ 	if (!rk)
+ 		return -ENOMEM;
+@@ -129,5 +129,5 @@ static int aesbs_cbc_ctr_setkey(struct crypto_skcipher *tfm, const u8 *in_key,
+ 	int err;
+ 
+-	rk = kmalloc(sizeof(*rk), GFP_KERNEL);
++	rk = kmalloc_obj(*rk);
+ 	if (!rk)
+ 		return -ENOMEM;
+diff --git a/arch/arm64/kvm/nested.c b/arch/arm64/kvm/nested.c
+index 17123f0b6dab..3c4fc566eafc 100644
+--- a/arch/arm64/kvm/nested.c
++++ b/arch/arm64/kvm/nested.c
+@@ -94,5 +94,5 @@ int kvm_vcpu_init_nested(struct kvm_vcpu *vcpu)
+ 
+ 	if (num_mmus > kvm->arch.nested_mmus_size) {
+-		tmp = kvcalloc(num_mmus, sizeof(*tmp), GFP_KERNEL_ACCOUNT);
++		tmp = kvzalloc_objs(*tmp, num_mmus, GFP_KERNEL_ACCOUNT);
+ 		if (!tmp)
+ 			return -ENOMEM;
+diff --git a/arch/loongarch/kvm/intc/dmsintc.c b/arch/loongarch/kvm/intc/dmsintc.c
+index bb7285c49df3..5518cafada55 100644
+--- a/arch/loongarch/kvm/intc/dmsintc.c
++++ b/arch/loongarch/kvm/intc/dmsintc.c
+@@ -150,5 +150,5 @@ static int kvm_dmsintc_create(struct kvm_device *dev, u32 type)
+ 	}
+ 
+-	s = kzalloc(sizeof(struct loongarch_dmsintc), GFP_KERNEL);
++	s = kzalloc_obj(struct loongarch_dmsintc);
+ 	if (!s)
+ 		return -ENOMEM;
+diff --git a/arch/mips/bcm47xx/buttons.c b/arch/mips/bcm47xx/buttons.c
+index 151a4ee2803f..7bb338da8e42 100644
+--- a/arch/mips/bcm47xx/buttons.c
++++ b/arch/mips/bcm47xx/buttons.c
+@@ -524,5 +524,5 @@ bcm47xx_buttons_add(const struct bcm47xx_gpio_key *buttons, int nbuttons)
+ 	/* 1 node for gpio-keys device, 1 node for each button, 1 terminator */
+ 	const struct software_node **node_group __free(kfree) =
+-		kcalloc(1 + nbuttons + 1, sizeof(*node_group), GFP_KERNEL);
++		kzalloc_objs(*node_group, 1 + nbuttons + 1);
+ 	if (!node_group)
+ 		return -ENOMEM;
+@@ -530,5 +530,5 @@ bcm47xx_buttons_add(const struct bcm47xx_gpio_key *buttons, int nbuttons)
+ 	/* 1 code property, 1 gpio property, 1 terminator */
+ 	struct property_entry *props __free(kfree) =
+-		kcalloc(nbuttons * 3, sizeof(*props), GFP_KERNEL);
++		kzalloc_objs(*props, nbuttons * 3);
+ 	if (!props)
+ 		return -ENOMEM;
+@@ -536,10 +536,10 @@ bcm47xx_buttons_add(const struct bcm47xx_gpio_key *buttons, int nbuttons)
+ 	/* 1 node for gpio-keys device, 1 node for each button */
+... (5331 more diff lines)

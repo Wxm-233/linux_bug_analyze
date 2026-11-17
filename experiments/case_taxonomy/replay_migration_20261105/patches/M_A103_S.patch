@@ -1,0 +1,25 @@
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1,0 +1,0 @@ build_insn()
+ 	/* function call */
+ 	case BPF_JMP | BPF_CALL:
++		/* Inline bpf_get_smp_processor_id():
++		 * $tp holds current task_struct, thread_info is at offset 0,
++		 * so R0 = ((struct thread_info *)$tp)->cpu
++		 */
++		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
++			emit_insn(ctx, ldwu, regmap[BPF_REG_0], LOONGARCH_GPR_TP,
++				  offsetof(struct thread_info, cpu));
++			break;
++		}
++
+ 		mark_call(ctx);
+@@ bool bpf_jit_inlines_helper_call(s32 imm)  {
+ 	switch (imm) {
+ 	case BPF_FUNC_get_current_task:
+ 	case BPF_FUNC_get_current_task_btf:
++	case BPF_FUNC_get_smp_processor_id:
+ 		return true;
+ 	default:
+ 		return false;

@@ -1,0 +1,1265 @@
+
+##### A150
+=== 95c18b7ccdd1 A 2025-03-31 +2/-0
+riscv: Add norvc after .option arch in runtime const
+
+.option arch clobbers .option norvc. Prevent gas from emitting
+compressed instructions in the runtime const alternative blocks by
+setting .option norvc after .option arch. This issue starts appearing on
+gcc 15, which adds zca to the march.
+
+Reported by: Klara Modin <klarasmodin@gmail.com>
+Fixes: a44fb5722199 ("riscv: Add runtime constant support")
+functions: 
+fixes: a44fb5722199(riscv)
+diff --git a/arch/riscv/include/asm/runtime-const.h b/arch/riscv/include/asm/runtime-const.h
+index ea2e49c7149c..1ba0985a7ffe 100644
+--- a/arch/riscv/include/asm/runtime-const.h
++++ b/arch/riscv/include/asm/runtime-const.h
+@@ -57,4 +57,5 @@
+ 	".option push\n\t"					\
+ 	".option arch,+zba\n\t"					\
++	".option norvc\n\t"					\
+ 	"slli	%[__tmp],%[__tmp],32\n\t"			\
+ 	"add.uw %[__ret],%[__ret],%[__tmp]\n\t"			\
+@@ -66,4 +67,5 @@
+ 	".option push\n\t"					\
+ 	".option arch,+zbkb\n\t"				\
++	".option norvc\n\t"					\
+ 	"pack	%[__ret],%[__ret],%[__tmp]\n\t"			\
+ 	"nop\n\t"						\
+
+##### A151
+=== 8578b2f7e1fb A 2025-04-02 +5/-4
+riscv: Use kvmalloc_array on relocation_hashtable
+
+The number of relocations may be a huge value that is unallocatable
+by kmalloc. Use kvmalloc instead so that it does not fail.
+
+Fixes: 8fd6c5142395 ("riscv: Add remaining module relocations")
+functions: arch/riscv/kernel/module.c:process_accumulated_relocations, arch/riscv/kernel/module.c:initialize_relocation_hashtable
+fixes: 8fd6c5142395(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index 47d0ebeec93c..0ae34d79b87b 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -649,5 +649,5 @@ process_accumulated_relocations(struct module *me,
+ 	}
+ 
+-	kfree(*relocation_hashtable);
++	kvfree(*relocation_hashtable);
+ }
+ 
+@@ -753,7 +753,8 @@ initialize_relocation_hashtable(unsigned int num_relocations,
+ 	hashtable_size <<= should_double_size;
+ 
+-	*relocation_hashtable = kmalloc_array(hashtable_size,
+-					      sizeof(**relocation_hashtable),
+-					      GFP_KERNEL);
++	/* Number of relocations may be large, so kvmalloc it */
++	*relocation_hashtable = kvmalloc_array(hashtable_size,
++					       sizeof(**relocation_hashtable),
++					       GFP_KERNEL);
+ 	if (!*relocation_hashtable)
+ 		return 0;
+
+##### A152
+=== f8693f6dffcd A 2025-04-08 +28/-2
+riscv: ftrace: support fastcc in Clang for WITH_ARGS
+
+Some caller-saved registers which are not defined as function arguments
+in the ABI can still be passed as arguments when the kernel is compiled
+with Clang. As a result, we must save and restore those registers to
+prevent ftrace from clobbering them.
+
+- [1]: https://reviews.llvm.org/D68559
+
+Fixes: 7caa9765465f ("ftrace: riscv: move from REGS to ARGS")
+functions: arch/riscv/kernel/asm-offsets.c:asm_offsets
+fixes: 7caa9765465f(riscv)
+ arch/riscv/include/asm/ftrace.h |  7 +++++++
+ arch/riscv/kernel/asm-offsets.c |  7 +++++++
+ arch/riscv/kernel/mcount-dyn.S  | 16 ++++++++++++++--
+ 3 files changed, 28 insertions(+), 2 deletions(-)
+diff --git a/arch/riscv/include/asm/ftrace.h b/arch/riscv/include/asm/ftrace.h
+index d627f63ee289..d8b2138bd9c6 100644
+--- a/arch/riscv/include/asm/ftrace.h
++++ b/arch/riscv/include/asm/ftrace.h
+@@ -147,4 +147,11 @@ struct __arch_ftrace_regs {
+ 			unsigned long a6;
+ 			unsigned long a7;
++#ifdef CONFIG_CC_IS_CLANG
++			unsigned long t2;
++			unsigned long t3;
++			unsigned long t4;
++			unsigned long t5;
++			unsigned long t6;
++#endif
+ 		};
+ 	};
+diff --git a/arch/riscv/kernel/asm-offsets.c b/arch/riscv/kernel/asm-offsets.c
+index 16490755304e..7c43c8e26ae7 100644
+--- a/arch/riscv/kernel/asm-offsets.c
++++ b/arch/riscv/kernel/asm-offsets.c
+@@ -502,4 +502,11 @@ void asm_offsets(void)
+ 	DEFINE(FREGS_S0,	    offsetof(struct __arch_ftrace_regs, s0));
+ 	DEFINE(FREGS_T1,	    offsetof(struct __arch_ftrace_regs, t1));
++#ifdef CONFIG_CC_IS_CLANG
++	DEFINE(FREGS_T2,	    offsetof(struct __arch_ftrace_regs, t2));
++	DEFINE(FREGS_T3,	    offsetof(struct __arch_ftrace_regs, t3));
++	DEFINE(FREGS_T4,	    offsetof(struct __arch_ftrace_regs, t4));
++	DEFINE(FREGS_T5,	    offsetof(struct __arch_ftrace_regs, t5));
++	DEFINE(FREGS_T6,	    offsetof(struct __arch_ftrace_regs, t6));
++#endif
+ 	DEFINE(FREGS_A0,	    offsetof(struct __arch_ftrace_regs, a0));
+ 	DEFINE(FREGS_A1,	    offsetof(struct __arch_ftrace_regs, a1));
+diff --git a/arch/riscv/kernel/mcount-dyn.S b/arch/riscv/kernel/mcount-dyn.S
+index 745dd4c4a69c..e988bd26b28b 100644
+--- a/arch/riscv/kernel/mcount-dyn.S
++++ b/arch/riscv/kernel/mcount-dyn.S
+@@ -97,5 +97,11 @@
+ #endif
+ 	REG_S	x6,  FREGS_T1(sp)
+-
++#ifdef CONFIG_CC_IS_CLANG
++	REG_S	x7,  FREGS_T2(sp)
++	REG_S	x28, FREGS_T3(sp)
++	REG_S	x29, FREGS_T4(sp)
++	REG_S	x30, FREGS_T5(sp)
++	REG_S	x31, FREGS_T6(sp)
++#endif
+ 	// save the arguments
+ 	REG_S	x10, FREGS_A0(sp)
+@@ -116,5 +122,11 @@
+ #endif
+ 	REG_L	x6,  FREGS_T1(sp)
+-
++#ifdef CONFIG_CC_IS_CLANG
++	REG_L	x7,  FREGS_T2(sp)
++	REG_L	x28, FREGS_T3(sp)
++	REG_L	x29, FREGS_T4(sp)
++	REG_L	x30, FREGS_T5(sp)
++	REG_L	x31, FREGS_T6(sp)
++#endif
+... (2 more diff lines)
+
+##### A153
+=== 441016056010 A 2025-04-09 +21/-14
+riscv: Fix unaligned access info messages
+
+Ensure we only print messages about command line parameters when
+the parameters are actually in use. Also complain about the use
+of the vector parameter when vector support isn't available.
+
+Fixes: aecb09e091dc ("riscv: Add parameter for skipping access speed tests")
+functions: arch/riscv/kernel/unaligned_access_speed.c:check_unaligned_access_all_cpus
+fixes: aecb09e091dc(riscv)
+diff --git a/arch/riscv/kernel/unaligned_access_speed.c b/arch/riscv/kernel/unaligned_access_speed.c
+index 585d2dcf2dab..b8ba13819d05 100644
+--- a/arch/riscv/kernel/unaligned_access_speed.c
++++ b/arch/riscv/kernel/unaligned_access_speed.c
+@@ -440,12 +440,22 @@ static int __init check_unaligned_access_all_cpus(void)
+ 	int cpu;
+ 
+-	if (unaligned_scalar_speed_param == RISCV_HWPROBE_MISALIGNED_SCALAR_UNKNOWN &&
+-	    !check_unaligned_access_emulated_all_cpus()) {
+-		check_unaligned_access_speed_all_cpus();
+-	} else {
+-		pr_info("scalar unaligned access speed set to '%s' by command line\n",
+-			speed_str[unaligned_scalar_speed_param]);
++	if (unaligned_scalar_speed_param != RISCV_HWPROBE_MISALIGNED_SCALAR_UNKNOWN) {
++		pr_info("scalar unaligned access speed set to '%s' (%lu) by command line\n",
++			speed_str[unaligned_scalar_speed_param], unaligned_scalar_speed_param);
+ 		for_each_online_cpu(cpu)
+ 			per_cpu(misaligned_access_speed, cpu) = unaligned_scalar_speed_param;
++	} else if (!check_unaligned_access_emulated_all_cpus()) {
++		check_unaligned_access_speed_all_cpus();
++	}
++
++	if (unaligned_vector_speed_param != RISCV_HWPROBE_MISALIGNED_VECTOR_UNKNOWN) {
++		if (!has_vector() &&
++		    unaligned_vector_speed_param != RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED) {
++			pr_warn("vector support is not available, ignoring unaligned_vector_speed=%s\n",
++				speed_str[unaligned_vector_speed_param]);
++		} else {
++			pr_info("vector unaligned access speed set to '%s' (%lu) by command line\n",
++				speed_str[unaligned_vector_speed_param], unaligned_vector_speed_param);
++		}
+ 	}
+ 
+@@ -453,14 +463,11 @@ static int __init check_unaligned_access_all_cpus(void)
+ 		unaligned_vector_speed_param = RISCV_HWPROBE_MISALIGNED_VECTOR_UNSUPPORTED;
+ 
+-	if (unaligned_vector_speed_param == RISCV_HWPROBE_MISALIGNED_VECTOR_UNKNOWN &&
+-	    !check_vector_unaligned_access_emulated_all_cpus() &&
+-	    IS_ENABLED(CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS)) {
+-		kthread_run(vec_check_unaligned_access_speed_all_cpus,
+-			    NULL, "vec_check_unaligned_access_speed_all_cpus");
+-	} else {
+-		pr_info("vector unaligned access speed set to '%s' by command line\n",
+-			speed_str[unaligned_vector_speed_param]);
++	if (unaligned_vector_speed_param != RISCV_HWPROBE_MISALIGNED_VECTOR_UNKNOWN) {
+ 		for_each_online_cpu(cpu)
+ 			per_cpu(vector_misaligned_access, cpu) = unaligned_vector_speed_param;
++	} else if (!check_vector_unaligned_access_emulated_all_cpus() &&
++		   IS_ENABLED(CONFIG_RISCV_PROBE_VECTOR_UNALIGNED_ACCESS)) {
++		kthread_run(vec_check_unaligned_access_speed_all_cpus,
++			    NULL, "vec_check_unaligned_access_speed_all_cpus");
+ 	}
+ 
+
+##### A154
+=== adf53771a312 A 2025-04-09 +5/-2
+riscv: Avoid fortify warning in syscall_get_arguments()
+
+When building with CONFIG_FORTIFY_SOURCE=y and W=1, there is a warning
+because of the memcpy() in syscall_get_arguments():
+
+  In file included from include/linux/string.h:392,
+                   from include/linux/bitmap.h:13,
+                   from include/linux/cpumask.h:12,
+                   from arch/riscv/include/asm/processor.h:55,
+                   from include/linux/sched.h:13,
+                   from kernel/ptrace.c:13:
+  In function 'fortify_memcpy_chk',
+      inlined from 'syscall_get_arguments.isra' at arch/riscv/include/asm/syscall.h:66:2:
+  include/linux/fortify-string.h:580:25: error: call to '__read_overflow2_field' declared with attribute warning: detected read beyond size of field (2nd parameter); maybe use struct_group()? [-Werror=attribute-warning]
+    580 |                         __read_overflow2_field(q_size_field, size);
+        |                         ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  cc1: all warnings being treated as errors
+
+The fortified memcpy() routine enforces that the source is not overread
+and the destination is not overwritten if the size of either field and
+the size of the copy are known at compile time. The memcpy() in
+syscall_get_arguments() intentionally overreads from a1 to a5 in
+'struct pt_regs' but this is bigger than the size of a1.
+
+Normally, this could be solved by wrapping a1 through a5 with
+struct_group() but there was already a struct_group() applied to these
+members in commit bba547810c66 ("riscv: tracing: Fix
+__write_overflow_field in ftrace_partial_regs()").
+
+Just avoid memcpy() altogether and write the copying of args from regs
+manually, which clears up the warning at the expense of three extra
+lines of code.
+
+Fixes: e2c0cdfba7f6 ("RISC-V: User-facing API")
+functions: 
+fixes: e2c0cdfba7f6(riscv)
+diff --git a/arch/riscv/include/asm/syscall.h b/arch/riscv/include/asm/syscall.h
+index 121fff429dce..eceabf59ae48 100644
+--- a/arch/riscv/include/asm/syscall.h
++++ b/arch/riscv/include/asm/syscall.h
+@@ -63,6 +63,9 @@ static inline void syscall_get_arguments(struct task_struct *task,
+ {
+ 	args[0] = regs->orig_a0;
+-	args++;
+-	memcpy(args, &regs->a1, 5 * sizeof(args[0]));
++	args[1] = regs->a1;
++	args[2] = regs->a2;
++	args[3] = regs->a3;
++	args[4] = regs->a4;
++	args[5] = regs->a5;
+ }
+ 
+
+##### A155
+=== e94eb7ea6f20 A 2025-04-09 +35/-1
+riscv: Properly export reserved regions in /proc/iomem
+
+The /proc/iomem represents the kernel's memory map. Regions marked
+with "Reserved" tells the user that the range should not be tampered
+with. Kexec-tools, when using the older kexec_load syscall relies on
+the "Reserved" regions to build the memory segments, that will be the
+target of the new kexec'd kernel.
+
+The RISC-V port tries to expose all reserved regions to userland, but
+some regions were not properly exposed: Regions that resided in both
+the "regular" and reserved memory block, e.g. the EFI Memory Map. A
+missing entry could result in reserved memory being overwritten.
+
+It turns out, that arm64, and loongarch had a similar issue a while
+back:
+
+  commit d91680e687f4 ("arm64: Fix /proc/iomem for reserved but not memory regions")
+  commit 50d7ba36b916 ("arm64: export memblock_reserve()d regions via /proc/iomem")
+
+Similar to the other ports, resolve the issue by splitting the regions
+in an arch initcall, since we need a working allocator.
+
+Fixes: ffe0e5261268 ("RISC-V: Improve init_resources()")
+functions: arch/riscv/kernel/setup.c:init_resources
+fixes: ffe0e5261268(riscv)
+ arch/riscv/kernel/setup.c | 36 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 35 insertions(+), 1 deletion(-)
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index c174544eefc8..f7c9a1caa83e 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -67,4 +67,7 @@ static struct resource elfcorehdr_res = { .name = "ELF Core hdr", };
+ #endif
+ 
++static int num_standard_resources;
++static struct resource *standard_resources;
++
+ static int __init add_resource(struct resource *parent,
+ 				struct resource *res)
+@@ -140,5 +143,5 @@ static void __init init_resources(void)
+ 	struct resource *mem_res = NULL;
+ 	size_t mem_res_sz = 0;
+-	int num_resources = 0, res_idx = 0;
++	int num_resources = 0, res_idx = 0, non_resv_res = 0;
+ 	int ret = 0;
+ 
+@@ -194,4 +197,5 @@ static void __init init_resources(void)
+ 	for_each_mem_region(region) {
+ 		res = &mem_res[res_idx--];
++		non_resv_res++;
+ 
+ 		if (unlikely(memblock_is_nomap(region))) {
+@@ -211,4 +215,7 @@ static void __init init_resources(void)
+ 	}
+ 
++	num_standard_resources = non_resv_res;
++	standard_resources = &mem_res[res_idx + 1];
++
+ 	/* Clean-up any unused pre-allocated resources */
+ 	if (res_idx >= 0)
+@@ -222,4 +229,31 @@ static void __init init_resources(void)
+ }
+ 
++static int __init reserve_memblock_reserved_regions(void)
++{
++	u64 i, j;
++
++	for (i = 0; i < num_standard_resources; i++) {
++		struct resource *mem = &standard_resources[i];
++		phys_addr_t r_start, r_end, mem_size = resource_size(mem);
++
++		if (!memblock_is_region_reserved(mem->start, mem_size))
++			continue;
++
++		for_each_reserved_mem_range(j, &r_start, &r_end) {
++			resource_size_t start, end;
++
++			start = max(PFN_PHYS(PFN_DOWN(r_start)), mem->start);
++			end = min(PFN_PHYS(PFN_UP(r_end)) - 1, mem->end);
++
++			if (start > mem->end || end < mem->start)
++				continue;
++
++			reserve_region_with_split(mem, start, end, "Reserved");
++		}
++	}
++
+... (5 more diff lines)
+
+##### A156
+=== 3af4bec9c1db A 2025-04-11 +9/-8
+riscv: KGDB: Do not inline arch_kgdb_breakpoint()
+
+The arch_kgdb_breakpoint() function defines the kgdb_compiled_break
+symbol using inline assembly.
+
+There's a potential issue where the compiler might inline
+arch_kgdb_breakpoint(), which would then define the kgdb_compiled_break
+symbol multiple times, leading to fail to link vmlinux.o.
+
+This isn't merely a potential compilation problem. The intent here
+is to determine the global symbol address of kgdb_compiled_break,
+and if this function is inlined multiple times, it would logically
+be a grave error.
+
+Fixes: fe89bd2be866 ("riscv: Add KGDB support")
+functions: 
+fixes: fe89bd2be866(riscv)
+diff --git a/arch/riscv/include/asm/kgdb.h b/arch/riscv/include/asm/kgdb.h
+index 46677daf708b..cc11c4544cff 100644
+--- a/arch/riscv/include/asm/kgdb.h
++++ b/arch/riscv/include/asm/kgdb.h
+@@ -20,14 +20,7 @@
+ #ifndef	__ASSEMBLY__
+ 
++void arch_kgdb_breakpoint(void);
+ extern unsigned long kgdb_compiled_break;
+ 
+-static inline void arch_kgdb_breakpoint(void)
+-{
+-	asm(".global kgdb_compiled_break\n"
+-	    ".option norvc\n"
+-	    "kgdb_compiled_break: ebreak\n"
+-	    ".option rvc\n");
+-}
+-
+ #endif /* !__ASSEMBLY__ */
+ 
+diff --git a/arch/riscv/kernel/kgdb.c b/arch/riscv/kernel/kgdb.c
+index 2e0266ae6bd7..5d1ce8dacaf5 100644
+--- a/arch/riscv/kernel/kgdb.c
++++ b/arch/riscv/kernel/kgdb.c
+@@ -255,4 +255,12 @@ void kgdb_arch_set_pc(struct pt_regs *regs, unsigned long pc)
+ }
+ 
++noinline void arch_kgdb_breakpoint(void)
++{
++	asm(".global kgdb_compiled_break\n"
++	    ".option norvc\n"
++	    "kgdb_compiled_break: ebreak\n"
++	    ".option rvc\n");
++}
++
+ void kgdb_arch_handle_qxfer_pkt(char *remcom_in_buffer,
+ 				char *remcom_out_buffer)
+
+##### A157
+=== 550c2aa787d1 A 2025-04-11 +1/-3
+riscv: KGDB: Remove ".option norvc/.option rvc" for kgdb_compiled_break
+
+[ Quoting Samuel Holland: ]
+
+  This is a separate issue, but using ".option rvc" here is a bug.
+  It will unconditionally enable the C extension for the rest of
+  the file, even if the kernel is being built with CONFIG_RISCV_ISA_C=n.
+
+[ Quoting Palmer Dabbelt: ]
+
+  We're just looking at the address of kgdb_compiled_break, so it's
+  fine if it ends up as a c.ebreak.
+
+[ Quoting Alexandre Ghiti: ]
+
+  .option norvc is used to prevent the assembler from using compressed
+  instructions, but it's generally used when we need to ensure the
+  size of the instructions that are used, which is not the case here
+  as noted by Palmer since we only care about the address. So yes
+  it will work fine with C enabled :)
+
+So let's just remove them all.
+
+Fixes: fe89bd2be866 ("riscv: Add KGDB support")
+functions: arch/riscv/kernel/kgdb.c:arch_kgdb_breakpoint
+fixes: fe89bd2be866(riscv)
+diff --git a/arch/riscv/kernel/kgdb.c b/arch/riscv/kernel/kgdb.c
+index 5d1ce8dacaf5..9f3db3503dab 100644
+--- a/arch/riscv/kernel/kgdb.c
++++ b/arch/riscv/kernel/kgdb.c
+@@ -258,7 +258,5 @@ noinline void arch_kgdb_breakpoint(void)
+ {
+ 	asm(".global kgdb_compiled_break\n"
+-	    ".option norvc\n"
+-	    "kgdb_compiled_break: ebreak\n"
+-	    ".option rvc\n");
++	    "kgdb_compiled_break: ebreak\n");
+ }
+ 
+
+##### A158
+=== 61a74ad25462 A 2025-04-11 +2/-2
+riscv: misaligned: fix sleeping function called during misaligned access handling
+
+Use copy_from_user_nofault() and copy_to_user_nofault() instead of
+copy_from/to_user functions in the misaligned access trap handlers.
+
+The following bug report was found when executing misaligned memory
+accesses:
+
+BUG: sleeping function called from invalid context at ./include/linux/uaccess.h:162
+in_atomic(): 0, irqs_disabled(): 1, non_block: 0, pid: 115, name: two
+preempt_count: 0, expected: 0
+CPU: 0 UID: 0 PID: 115 Comm: two Not tainted 6.14.0-rc5 #24
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+ [<ffffffff800160ea>] dump_backtrace+0x1c/0x24
+ [<ffffffff80002304>] show_stack+0x28/0x34
+ [<ffffffff80010fae>] dump_stack_lvl+0x4a/0x68
+ [<ffffffff80010fe0>] dump_stack+0x14/0x1c
+ [<ffffffff8004e44e>] __might_resched+0xfa/0x104
+ [<ffffffff8004e496>] __might_sleep+0x3e/0x62
+ [<ffffffff801963c4>] __might_fault+0x1c/0x24
+ [<ffffffff80425352>] _copy_from_user+0x28/0xaa
+ [<ffffffff8000296c>] handle_misaligned_store+0x204/0x254
+ [<ffffffff809eae82>] do_trap_store_misaligned+0x24/0xee
+ [<ffffffff809f4f1a>] handle_exception+0x146/0x152
+
+Fixes: b686ecdeacf6 ("riscv: misaligned: Restrict user access to kernel memory")
+Fixes: 441381506ba7 ("riscv: misaligned: remove CONFIG_RISCV_M_MODE specific code")
+functions: arch/riscv/kernel/traps_misaligned.c:handle_scalar_misaligned_load, arch/riscv/kernel/traps_misaligned.c:handle_scalar_misaligned_store
+fixes: b686ecdeacf6(riscv), 441381506ba7(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 4354c87c0376..0173ed80818c 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -442,5 +442,5 @@ static int handle_scalar_misaligned_load(struct pt_regs *regs)
+ 	val.data_u64 = 0;
+ 	if (user_mode(regs)) {
+-		if (copy_from_user(&val, (u8 __user *)addr, len))
++		if (copy_from_user_nofault(&val, (u8 __user *)addr, len))
+ 			return -1;
+ 	} else {
+@@ -540,5 +540,5 @@ static int handle_scalar_misaligned_store(struct pt_regs *regs)
+ 
+ 	if (user_mode(regs)) {
+-		if (copy_to_user((u8 __user *)addr, &val, len))
++		if (copy_to_user_nofault((u8 __user *)addr, &val, len))
+ 			return -1;
+ 	} else {
+
+##### A159
+=== eb16b3727c05 A 2025-04-11 +17/-0
+riscv: misaligned: Add handling for ZCB instructions
+
+Add support for the Zcb extension's compressed half-word instructions
+(C.LHU, C.LH, and C.SH) in the RISC-V misaligned access trap handler.
+
+Fixes: 956d705dd279 ("riscv: Unaligned load/store handling for M_MODE")
+functions: arch/riscv/kernel/traps_misaligned.c:handle_scalar_misaligned_load, arch/riscv/kernel/traps_misaligned.c:handle_scalar_misaligned_store
+fixes: 956d705dd279(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 4354c87c0376..dde5d11dc1b5 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -89,4 +89,11 @@
+ #define INSN_MASK_C_FSWSP		0xe003
+ 
++#define INSN_MATCH_C_LHU		0x8400
++#define INSN_MASK_C_LHU			0xfc43
++#define INSN_MATCH_C_LH			0x8440
++#define INSN_MASK_C_LH			0xfc43
++#define INSN_MATCH_C_SH			0x8c00
++#define INSN_MASK_C_SH			0xfc43
++
+ #define INSN_LEN(insn)			((((insn) & 0x3) < 0x3) ? 2 : 4)
+ 
+@@ -432,4 +439,11 @@ static int handle_scalar_misaligned_load(struct pt_regs *regs)
+ 		len = 4;
+ #endif
++	} else if ((insn & INSN_MASK_C_LHU) == INSN_MATCH_C_LHU) {
++		len = 2;
++		insn = RVC_RS2S(insn) << SH_RD;
++	} else if ((insn & INSN_MASK_C_LH) == INSN_MATCH_C_LH) {
++		len = 2;
++		shift = 8 * (sizeof(ulong) - len);
++		insn = RVC_RS2S(insn) << SH_RD;
+ 	} else {
+ 		regs->epc = epc;
+@@ -531,4 +545,7 @@ static int handle_scalar_misaligned_store(struct pt_regs *regs)
+ 		val.data_ulong = GET_F32_RS2C(insn, regs);
+ #endif
++	} else if ((insn & INSN_MASK_C_SH) == INSN_MATCH_C_SH) {
++		len = 2;
++		val.data_ulong = GET_RS2S(insn, regs);
+ 	} else {
+ 		regs->epc = epc;
+
+##### A160
+=== 8821d26926ea A 2025-04-17 +25/-0
+crypto: lib/chacha - restore ability to remove modules
+
+Though the module_exit functions are now no-ops, they should still be
+defined, since otherwise the modules become unremovable.
+
+Fixes: 08820553f33a ("crypto: arm/chacha - remove the redundant skcipher algorithms")
+Fixes: 8c28abede16c ("crypto: arm64/chacha - remove the skcipher algorithms")
+Fixes: f7915484c020 ("crypto: powerpc/chacha - remove the skcipher algorithms")
+Fixes: ceba0eda8313 ("crypto: riscv/chacha - implement library instead of skcipher")
+Fixes: 632ab0978f08 ("crypto: x86/chacha - remove the skcipher algorithms")
+functions: 
+fixes: 08820553f33a(common), 8c28abede16c(common), f7915484c020(common), ceba0eda8313(riscv), 632ab0978f08(common)
+ arch/arm/crypto/chacha-glue.c           | 5 +++++
+ arch/arm64/crypto/chacha-neon-glue.c    | 5 +++++
+ arch/powerpc/crypto/chacha-p10-glue.c   | 5 +++++
+ arch/riscv/crypto/chacha-riscv64-glue.c | 5 +++++
+ arch/x86/crypto/chacha_glue.c           | 5 +++++
+ 5 files changed, 25 insertions(+)
+diff --git a/arch/arm/crypto/chacha-glue.c b/arch/arm/crypto/chacha-glue.c
+index 3a5c75c95d43..12afb40cf1ff 100644
+--- a/arch/arm/crypto/chacha-glue.c
++++ b/arch/arm/crypto/chacha-glue.c
+@@ -125,4 +125,9 @@ static int __init chacha_arm_mod_init(void)
+ arch_initcall(chacha_arm_mod_init);
+ 
++static void __exit chacha_arm_mod_exit(void)
++{
++}
++module_exit(chacha_arm_mod_exit);
++
+ MODULE_DESCRIPTION("ChaCha and HChaCha functions (ARM optimized)");
+ MODULE_AUTHOR("Ard Biesheuvel <ard.biesheuvel@linaro.org>");
+diff --git a/arch/arm64/crypto/chacha-neon-glue.c b/arch/arm64/crypto/chacha-neon-glue.c
+index a0c336b28402..14a2836eff61 100644
+--- a/arch/arm64/crypto/chacha-neon-glue.c
++++ b/arch/arm64/crypto/chacha-neon-glue.c
+@@ -107,4 +107,9 @@ static int __init chacha_simd_mod_init(void)
+ arch_initcall(chacha_simd_mod_init);
+ 
++static void __exit chacha_simd_mod_exit(void)
++{
++}
++module_exit(chacha_simd_mod_exit);
++
+ MODULE_DESCRIPTION("ChaCha and HChaCha functions (ARM64 optimized)");
+ MODULE_AUTHOR("Ard Biesheuvel <ard.biesheuvel@linaro.org>");
+diff --git a/arch/powerpc/crypto/chacha-p10-glue.c b/arch/powerpc/crypto/chacha-p10-glue.c
+index 9982929573ad..351ed409f9b2 100644
+--- a/arch/powerpc/crypto/chacha-p10-glue.c
++++ b/arch/powerpc/crypto/chacha-p10-glue.c
+@@ -90,4 +90,9 @@ static int __init chacha_p10_init(void)
+ arch_initcall(chacha_p10_init);
+ 
++static void __exit chacha_p10_exit(void)
++{
++}
++module_exit(chacha_p10_exit);
++
+ MODULE_DESCRIPTION("ChaCha stream cipher (P10 accelerated)");
+ MODULE_AUTHOR("Danny Tsen <dtsen@linux.ibm.com>");
+diff --git a/arch/riscv/crypto/chacha-riscv64-glue.c b/arch/riscv/crypto/chacha-riscv64-glue.c
+index ccaab0dea383..afc4e3be3cac 100644
+--- a/arch/riscv/crypto/chacha-riscv64-glue.c
++++ b/arch/riscv/crypto/chacha-riscv64-glue.c
+@@ -65,4 +65,9 @@ static int __init riscv64_chacha_mod_init(void)
+ arch_initcall(riscv64_chacha_mod_init);
+ 
++static void __exit riscv64_chacha_mod_exit(void)
++{
++}
++module_exit(riscv64_chacha_mod_exit);
++
+ MODULE_DESCRIPTION("ChaCha stream cipher (RISC-V optimized)");
+ MODULE_AUTHOR("Jerry Shih <jerry.shih@sifive.com>");
+diff --git a/arch/x86/crypto/chacha_glue.c b/arch/x86/crypto/chacha_glue.c
+index fcc14c006bde..59bf63c00072 100644
+--- a/arch/x86/crypto/chacha_glue.c
++++ b/arch/x86/crypto/chacha_glue.c
+... (10 more diff lines)
+
+##### A161
+=== 121f34341d39 A 2025-04-19 +10/-5
+riscv: Replace function-like macro by static inline function
+
+The flush_icache_range() function is implemented as a "function-like
+macro with unused parameters", which can result in "unused variables"
+warnings.
+
+Replace the macro with a static inline function, as advised by
+Documentation/process/coding-style.rst.
+
+Fixes: 08f051eda33b ("RISC-V: Flush I$ when making a dirty page executable")
+functions: 
+fixes: 08f051eda33b(riscv)
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+index 8de73f91bfa3..b59ffeb668d6 100644
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -35,9 +35,4 @@ static inline void flush_dcache_page(struct page *page)
+ }
+ 
+-/*
+- * RISC-V doesn't have an instruction to flush parts of the instruction cache,
+- * so instead we just flush the whole thing.
+- */
+-#define flush_icache_range(start, end) flush_icache_all()
+ #define flush_icache_user_page(vma, pg, addr, len)	\
+ do {							\
+@@ -79,4 +74,14 @@ void flush_icache_mm(struct mm_struct *mm, bool local);
+ #endif /* CONFIG_SMP */
+ 
++/*
++ * RISC-V doesn't have an instruction to flush parts of the instruction cache,
++ * so instead we just flush the whole thing.
++ */
++#define flush_icache_range flush_icache_range
++static inline void flush_icache_range(unsigned long start, unsigned long end)
++{
++	flush_icache_all();
++}
++
+ extern unsigned int riscv_cbom_block_size;
+ extern unsigned int riscv_cboz_block_size;
+
+##### A162
+=== 7d1d19a11cfb A 2025-04-19 +2/-8
+riscv: uprobes: Add missing fence.i after building the XOL buffer
+
+The XOL (execute out-of-line) buffer is used to single-step the
+replaced instruction(s) for uprobes. The RISC-V port was missing a
+proper fence.i (i$ flushing) after constructing the XOL buffer, which
+can result in incorrect execution of stale/broken instructions.
+
+This was found running the BPF selftests "test_progs:
+uprobe_autoattach, attach_probe" on the Spacemit K1/X60, where the
+uprobes tests randomly blew up.
+
+Fixes: 74784081aac8 ("riscv: Add uprobes supported")
+functions: arch/riscv/kernel/probes/uprobes.c:arch_uprobe_copy_ixol
+fixes: 74784081aac8(riscv)
+diff --git a/arch/riscv/kernel/probes/uprobes.c b/arch/riscv/kernel/probes/uprobes.c
+index 4b3dc8beaf77..cc15f7ca6cc1 100644
+--- a/arch/riscv/kernel/probes/uprobes.c
++++ b/arch/riscv/kernel/probes/uprobes.c
+@@ -168,4 +168,5 @@ void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+ 	void *kaddr = kmap_atomic(page);
+ 	void *dst = kaddr + (vaddr & ~PAGE_MASK);
++	unsigned long start = (unsigned long)dst;
+ 
+ 	memcpy(dst, src, len);
+@@ -177,12 +178,5 @@ void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+ 	}
+ 
++	flush_icache_range(start, start + len);
+ 	kunmap_atomic(kaddr);
+-
+-	/*
+-	 * We probably need flush_icache_user_page() but it needs vma.
+-	 * This should work on most of architectures by default. If
+-	 * architecture needs to do something different it can define
+-	 * its own version of the function.
+-	 */
+-	flush_dcache_page(page);
+ }
+
+##### A163
+=== bf0b4f15267c A 2025-04-24 +6/-6
+crypto: riscv - Use SYM_FUNC_START for functions only called directly
+
+After some recent changes to the RISC-V crypto code that turned some
+indirect function calls into direct ones, builds with CONFIG_CFI_CLANG
+fail with:
+
+  ld.lld: error: undefined symbol: __kcfi_typeid_sm3_transform_zvksh_zvkb
+  >>> referenced by arch/riscv/crypto/sm3-riscv64-zvksh-zvkb.o:(.text+0x2) in archive vmlinux.a
+
+  ld.lld: error: undefined symbol: __kcfi_typeid_sha512_transform_zvknhb_zvkb
+  >>> referenced by arch/riscv/crypto/sha512-riscv64-zvknhb-zvkb.o:(.text+0x2) in archive vmlinux.a
+
+  ld.lld: error: undefined symbol: __kcfi_typeid_sha256_transform_zvknha_or_zvknhb_zvkb
+  >>> referenced by arch/riscv/crypto/sha256-riscv64-zvknha_or_zvknhb-zvkb.o:(.text+0x2) in archive vmlinux.a
+
+As these functions are no longer indirectly called (i.e., have their
+address taken), the compiler will not emit __kcfi_typeid symbols for
+them but SYM_TYPED_FUNC_START expects these to exist at link time.
+
+Switch the definitions of these functions to use SYM_FUNC_START, as they
+no longer need kCFI type information since they are only called
+directly.
+
+Fixes: 1523eaed0ac5 ("crypto: riscv/sm3 - Use API partial block handling")
+Fixes: 561aab1104d8 ("crypto: riscv/sha512 - Use API partial block handling")
+Fixes: e6c5597badf2 ("crypto: riscv/sha256 - Use API partial block handling")
+functions: 
+fixes: 1523eaed0ac5(riscv), 561aab1104d8(riscv), e6c5597badf2(riscv)
+diff --git a/arch/riscv/crypto/sha256-riscv64-zvknha_or_zvknhb-zvkb.S b/arch/riscv/crypto/sha256-riscv64-zvknha_or_zvknhb-zvkb.S
+index 8ebcc17de4dc..f1f5779e4732 100644
+--- a/arch/riscv/crypto/sha256-riscv64-zvknha_or_zvknhb-zvkb.S
++++ b/arch/riscv/crypto/sha256-riscv64-zvknha_or_zvknhb-zvkb.S
+@@ -44,5 +44,5 @@
+ // - RISC-V Vector Cryptography Bit-manipulation extension ('Zvkb')
+ 
+-#include <linux/cfi_types.h>
++#include <linux/linkage.h>
+ 
+ .text
+@@ -109,5 +109,5 @@
+ // void sha256_transform_zvknha_or_zvknhb_zvkb(u32 state[8], const u8 *data,
+ //					       int num_blocks);
+-SYM_TYPED_FUNC_START(sha256_transform_zvknha_or_zvknhb_zvkb)
++SYM_FUNC_START(sha256_transform_zvknha_or_zvknhb_zvkb)
+ 
+ 	// Load the round constants into K0-K15.
+diff --git a/arch/riscv/crypto/sha512-riscv64-zvknhb-zvkb.S b/arch/riscv/crypto/sha512-riscv64-zvknhb-zvkb.S
+index 3a9ae210f915..89f4a10d12dd 100644
+--- a/arch/riscv/crypto/sha512-riscv64-zvknhb-zvkb.S
++++ b/arch/riscv/crypto/sha512-riscv64-zvknhb-zvkb.S
+@@ -44,5 +44,5 @@
+ // - RISC-V Vector Cryptography Bit-manipulation extension ('Zvkb')
+ 
+-#include <linux/cfi_types.h>
++#include <linux/linkage.h>
+ 
+ .text
+@@ -96,5 +96,5 @@
+ // void sha512_transform_zvknhb_zvkb(u64 state[8], const u8 *data,
+ //				     int num_blocks);
+-SYM_TYPED_FUNC_START(sha512_transform_zvknhb_zvkb)
++SYM_FUNC_START(sha512_transform_zvknhb_zvkb)
+ 
+ 	// Setup mask for the vmerge to replace the first word (idx==0) in
+diff --git a/arch/riscv/crypto/sm3-riscv64-zvksh-zvkb.S b/arch/riscv/crypto/sm3-riscv64-zvksh-zvkb.S
+index a2b65d961c04..4fe754846f65 100644
+--- a/arch/riscv/crypto/sm3-riscv64-zvksh-zvkb.S
++++ b/arch/riscv/crypto/sm3-riscv64-zvksh-zvkb.S
+@@ -44,5 +44,5 @@
+ // - RISC-V Vector Cryptography Bit-manipulation extension ('Zvkb')
+ 
+-#include <linux/cfi_types.h>
++#include <linux/linkage.h>
+ 
+ .text
+@@ -82,5 +82,5 @@
+ 
+ // void sm3_transform_zvksh_zvkb(u32 state[8], const u8 *data, int num_blocks);
+-SYM_TYPED_FUNC_START(sm3_transform_zvksh_zvkb)
++SYM_FUNC_START(sm3_transform_zvksh_zvkb)
+ 
+ 	// Load the state and endian-swap each 32-bit word.
+
+##### A164
+=== 4262bd0d9cc7 A 2025-05-23 +6/-6
+riscv: vector: Fix context save/restore with xtheadvector
+
+Previously only v0-v7 were correctly saved/restored,
+and the context of v8-v31 are damanged.
+Correctly save/restore v8-v31 to avoid breaking userspace.
+
+Fixes: d863910eabaf ("riscv: vector: Support xtheadvector save/restore")
+functions: 
+fixes: d863910eabaf(riscv)
+diff --git a/arch/riscv/include/asm/vector.h b/arch/riscv/include/asm/vector.h
+index 45c9b426fcc5..b61786d43c20 100644
+--- a/arch/riscv/include/asm/vector.h
++++ b/arch/riscv/include/asm/vector.h
+@@ -206,9 +206,9 @@ static inline void __riscv_v_vstate_save(struct __riscv_v_ext_state *save_to,
+ 			THEAD_VSB_V_V0T0
+ 			"add		t0, t0, t4\n\t"
+-			THEAD_VSB_V_V0T0
++			THEAD_VSB_V_V8T0
+ 			"add		t0, t0, t4\n\t"
+-			THEAD_VSB_V_V0T0
++			THEAD_VSB_V_V16T0
+ 			"add		t0, t0, t4\n\t"
+-			THEAD_VSB_V_V0T0
++			THEAD_VSB_V_V24T0
+ 			: : "r" (datap) : "memory", "t0", "t4");
+ 	} else {
+@@ -242,9 +242,9 @@ static inline void __riscv_v_vstate_restore(struct __riscv_v_ext_state *restore_
+ 			THEAD_VLB_V_V0T0
+ 			"add		t0, t0, t4\n\t"
+-			THEAD_VLB_V_V0T0
++			THEAD_VLB_V_V8T0
+ 			"add		t0, t0, t4\n\t"
+-			THEAD_VLB_V_V0T0
++			THEAD_VLB_V_V16T0
+ 			"add		t0, t0, t4\n\t"
+-			THEAD_VLB_V_V0T0
++			THEAD_VLB_V_V24T0
+ 			: : "r" (datap) : "memory", "t0", "t4");
+ 	} else {
+
+##### A165
+=== 8d90d9872eda A 2025-05-30 +1/-1
+riscv: fix runtime constant support for nommu kernels
+
+the `__runtime_fixup_32` function does not handle the case where `val` is
+zero correctly (as might occur when patching a nommu kernel and referring
+to a physical address below the 4GiB boundary whose upper 32 bits are all
+zero) because nothing in the existing logic prevents the code from taking
+the `else` branch of both nop-checks and emitting two `nop` instructions.
+
+This leaves random garbage in the register that is supposed to receive the
+upper 32 bits of the pointer instead of zero that when combined with the
+value for the lower 32 bits yields an invalid pointer and causes a kernel
+panic when that pointer is eventually accessed.
+
+The author clearly considered the fact that if the `lui` is converted into
+a `nop` that the second instruction needs to be adjusted to become an `li`
+instead of an `addi`, hence introducing the `addi_insn_mask` variable, but
+didn't follow that logic through fully to the case where the `else` branch
+executes. To fix it just adjust the logic to ensure that the second `else`
+branch is not taken if the first instruction will be patched to a `nop`.
+
+Fixes: a44fb5722199 ("riscv: Add runtime constant support")
+functions: 
+fixes: a44fb5722199(riscv)
+diff --git a/arch/riscv/include/asm/runtime-const.h b/arch/riscv/include/asm/runtime-const.h
+index 451fd76b8811..d766e2b9e6df 100644
+--- a/arch/riscv/include/asm/runtime-const.h
++++ b/arch/riscv/include/asm/runtime-const.h
+@@ -207,5 +207,5 @@ static inline void __runtime_fixup_32(__le16 *lui_parcel, __le16 *addi_parcel, u
+ 	}
+ 
+-	if (lower_immediate & 0x00000fff) {
++	if (lower_immediate & 0x00000fff || lui_insn == RISCV_INSN_NOP4) {
+ 		/* replace upper 12 bits of addi with lower 12 bits of val */
+ 		addi_insn &= addi_insn_mask;
+
+##### A166
+=== 265d6aba165c A 2025-06-02 +9/-8
+riscv: uaccess: Only restore the CSR_STATUS SUM bit
+
+During switch to csrs will OR the value of the register into the
+corresponding csr. In this case we're only interested in restoring the
+SUM bit not the entire register.
+
+Fixes: 788aa64c01f1 ("riscv: save the SR_SUM status over switches")
+functions: arch/riscv/kernel/asm-offsets.c:asm_offsets
+fixes: 788aa64c01f1(riscv)
+diff --git a/arch/riscv/include/asm/processor.h b/arch/riscv/include/asm/processor.h
+index 8111250f3c1b..24d3af4d3807 100644
+--- a/arch/riscv/include/asm/processor.h
++++ b/arch/riscv/include/asm/processor.h
+@@ -111,5 +111,5 @@ struct thread_struct {
+ 	unsigned long bad_cause;
+ 	unsigned long envcfg;
+-	unsigned long status;
++	unsigned long sum;
+ 	u32 riscv_v_flags;
+ 	u32 vstate_ctrl;
+diff --git a/arch/riscv/kernel/asm-offsets.c b/arch/riscv/kernel/asm-offsets.c
+index 9420ec6a50fd..6e8c0d6feae9 100644
+--- a/arch/riscv/kernel/asm-offsets.c
++++ b/arch/riscv/kernel/asm-offsets.c
+@@ -35,5 +35,5 @@ void asm_offsets(void)
+ 	OFFSET(TASK_THREAD_S10, task_struct, thread.s[10]);
+ 	OFFSET(TASK_THREAD_S11, task_struct, thread.s[11]);
+-	OFFSET(TASK_THREAD_STATUS, task_struct, thread.status);
++	OFFSET(TASK_THREAD_SUM, task_struct, thread.sum);
+ 
+ 	OFFSET(TASK_TI_CPU, task_struct, thread_info.cpu);
+@@ -348,6 +348,6 @@ void asm_offsets(void)
+ 		- offsetof(struct task_struct, thread.ra)
+ 	);
+-	DEFINE(TASK_THREAD_STATUS_RA,
+-		  offsetof(struct task_struct, thread.status)
++	DEFINE(TASK_THREAD_SUM_RA,
++		  offsetof(struct task_struct, thread.sum)
+ 		- offsetof(struct task_struct, thread.ra)
+ 	);
+diff --git a/arch/riscv/kernel/entry.S b/arch/riscv/kernel/entry.S
+index 00bd0de9faa2..a49e19ce3a97 100644
+--- a/arch/riscv/kernel/entry.S
++++ b/arch/riscv/kernel/entry.S
+@@ -400,12 +400,13 @@ SYM_FUNC_START(__switch_to)
+ 
+ 	/* save the user space access flag */
+-	li    s0, SR_SUM
+-	csrr  s1, CSR_STATUS
+-	REG_S s1, TASK_THREAD_STATUS_RA(a3)
++	csrr  s0, CSR_STATUS
++	REG_S s0, TASK_THREAD_SUM_RA(a3)
+ 
+ 	/* Save the kernel shadow call stack pointer */
+ 	scs_save_current
+ 	/* Restore context from next->thread */
+-	REG_L s0,  TASK_THREAD_STATUS_RA(a4)
++	REG_L s0,  TASK_THREAD_SUM_RA(a4)
++	li    s1,  SR_SUM
++	and   s0,  s0, s1
+ 	csrs  CSR_STATUS, s0
+ 	REG_L ra,  TASK_THREAD_RA_RA(a4)
+
+##### A167
+=== 2b9518684f85 A 2025-06-06 +1/-1
+RISC-V: vDSO: Correct inline assembly constraints in the getrandom syscall wrapper
+
+As recently pointed out by Thomas, if a register is forced for two
+different register variables, among them one is used as "+" (both input
+and output) and another is only used as input, Clang would treat the
+conflicting input parameters as undefined behaviour and optimize away
+the argument assignment.
+
+Instead use "=r" (only output) for the output parameter and "r" (only
+input) for the input parameter.
+While the example from the GCC documentation uses "0" for the input
+parameter, this is not necessary as confirmed by the GCC developers and "r"
+matches what the other architectures' vDSO implementations are using.
+
+[ alex: Update log to match v2 (Thomas) ]
+
+Fixes: ee0d03053e70 ("RISC-V: vDSO: Wire up getrandom() vDSO")
+functions: 
+fixes: ee0d03053e70(riscv)
+diff --git a/arch/riscv/include/asm/vdso/getrandom.h b/arch/riscv/include/asm/vdso/getrandom.h
+index 8dc92441702a..c6d66895c1f5 100644
+--- a/arch/riscv/include/asm/vdso/getrandom.h
++++ b/arch/riscv/include/asm/vdso/getrandom.h
+@@ -19,5 +19,5 @@ static __always_inline ssize_t getrandom_syscall(void *_buffer, size_t _len, uns
+ 
+ 	asm volatile ("ecall\n"
+-		      : "+r" (ret)
++		      : "=r" (ret)
+ 		      : "r" (nr), "r" (buffer), "r" (len), "r" (flags)
+ 		      : "memory");
+
+##### A168
+=== 2aa5801ada29 A 2025-06-10 +2/-1
+RISC-V: uaccess: Wrap the get_user_8 uaccess macro
+
+I must have lost this rebasing things during the merge window, I know I
+got it at some point but it's not here now.  Without this I get warnings
+along the lines of
+
+    include/linux/fs.h:3975:15: warning: label followed by a declaration is a C23 extension [-Wc23-extensions]
+     3975 |         if (unlikely(get_user(c, path)))
+          |                      ^
+    arch/riscv/include/asm/uaccess.h:274:3: note: expanded from macro 'get_user'
+      274 |                 __get_user((x), __p) :                          \
+          |                 ^
+    arch/riscv/include/asm/uaccess.h:244:2: note: expanded from macro '__get_user'
+      244 |         __get_user_error(__gu_val, __gu_ptr, __gu_err);         \
+          |         ^
+    arch/riscv/include/asm/uaccess.h:207:2: note: expanded from macro '__get_user_error'
+      207 |         __ge  LD [M]  net/802/psnap.ko
+    t_user_nocheck(x, ptr, __gu_failed);                        \
+          |         ^
+    arch/riscv/include/asm/uaccess.h:196:3: note: expanded from macro '__get_user_nocheck'
+      196 |                 __get_user_8((x), __gu_ptr, label);             \
+          |                 ^
+    arch/riscv/include/asm/uaccess.h:130:2: note: expanded from macro '__get_user_8'
+      130 |         u32 __user *__ptr = (u32 __user *)(ptr);                \
+          |         ^
+
+Fixes: f6bff7827a48 ("riscv: uaccess: use 'asm_goto_output' for get_user()")
+functions: 
+fixes: f6bff7827a48(riscv)
+diff --git a/arch/riscv/include/asm/uaccess.h b/arch/riscv/include/asm/uaccess.h
+index d472da4450e6..525e50db24f7 100644
+--- a/arch/riscv/include/asm/uaccess.h
++++ b/arch/riscv/include/asm/uaccess.h
+@@ -128,4 +128,5 @@ do {								\
+ #ifdef CONFIG_CC_HAS_ASM_GOTO_OUTPUT
+ #define __get_user_8(x, ptr, label)				\
++do {								\
+ 	u32 __user *__ptr = (u32 __user *)(ptr);		\
+ 	u32 __lo, __hi;						\
+@@ -142,5 +143,5 @@ do {								\
+ 	(x) = (__typeof__(x))((__typeof__((x) - (x)))(		\
+ 		(((u64)__hi << 32) | __lo)));			\
+-
++} while (0)
+ #else /* !CONFIG_CC_HAS_ASM_GOTO_OUTPUT */
+ #define __get_user_8(x, ptr, label)				\
+
+##### A169
+=== 6f49743af42c A 2025-06-12 +2/-1
+riscv: Require clang-17 or newer for kCFI
+
+After the combination of commit c217157bcd1d ("riscv: Implement
+HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS"), which starts using
+'-fpatchable-function-entry=M,N', and commit d0262e907e29 ("riscv:
+ftrace: support PREEMPT"), which allows CONFIG_DYNAMIC_FTRACE to be
+enabled by allmodconfig, allmodconfig builds with clang-16 begin
+crashing in the generic LLVM kCFI pass (see [1] for the stack trace).
+
+clang-17 avoids this crash by moving to target-specific lowering of the
+kCFI operand bundles [2]. Require clang-17 to select CONFIG_CFI_CLANG to
+avoid this crash.
+
+Fixes: c217157bcd1d ("riscv: Implement HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS")
+functions: 
+fixes: c217157bcd1d(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 36061f4732b7..d71ea0f4466f 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -64,5 +64,6 @@ config RISCV
+ 	select ARCH_STACKWALK
+ 	select ARCH_SUPPORTS_ATOMIC_RMW
+-	select ARCH_SUPPORTS_CFI_CLANG
++	# clang >= 17: https://github.com/llvm/llvm-project/commit/62fa708ceb027713b386c7e0efda994f8bdc27e2
++	select ARCH_SUPPORTS_CFI_CLANG if CLANG_VERSION >= 170000
+ 	select ARCH_SUPPORTS_DEBUG_PAGEALLOC if MMU
+ 	select ARCH_SUPPORTS_HUGE_PFNMAP if TRANSPARENT_HUGEPAGE
+
+##### A170
+=== c5136add3f9b A 2025-06-17 +1/-0
+riscv: export boot_cpu_hartid
+
+The mailbox controller driver for the Microchip Inter-processor
+Communication can be built as a module. It uses cpuid_to_hartid_map and
+commit 4783ce32b080 ("riscv: export __cpuid_to_hartid_map") enables that
+to work for SMP. However, cpuid_to_hartid_map uses boot_cpu_hartid on
+non-SMP kernels and this driver can be useful in such configurations[1].
+
+Export boot_cpu_hartid so the driver can be built as a module on non-SMP
+kernels as well.
+
+Fixes: e4b1d67e7141 ("mailbox: add Microchip IPC support")
+functions: 
+fixes: e4b1d67e7141(common)
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index f7c9a1caa83e..14888e5ea19a 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -51,4 +51,5 @@ atomic_t hart_lottery __section(".sdata")
+ ;
+ unsigned long boot_cpu_hartid;
++EXPORT_SYMBOL_GPL(boot_cpu_hartid);
+ 
+ /*
+
+##### A171
+=== 890ba5be6335 A 2025-06-19 +0/-1
+Revert "riscv: Define TASK_SIZE_MAX for __access_ok()"
+
+This reverts commit ad5643cf2f69 ("riscv: Define TASK_SIZE_MAX for
+__access_ok()").
+
+This commit changes TASK_SIZE_MAX to be LONG_MAX to optimize access_ok(),
+because the previous TASK_SIZE_MAX (default to TASK_SIZE) requires some
+computation.
+
+The reasoning was that all user addresses are less than LONG_MAX, and all
+kernel addresses are greater than LONG_MAX. Therefore access_ok() can
+filter kernel addresses.
+
+Addresses between TASK_SIZE and LONG_MAX are not valid user addresses, but
+access_ok() let them pass. That was thought to be okay, because they are
+not valid addresses at hardware level.
+
+Unfortunately, one case is missed: get_user_pages_fast() happily accepts
+addresses between TASK_SIZE and LONG_MAX. futex(), for instance, uses
+get_user_pages_fast(). This causes the problem reported by Robert [1].
+
+Therefore, revert this commit. TASK_SIZE_MAX is changed to the default:
+TASK_SIZE.
+
+This unfortunately reduces performance, because TASK_SIZE is more expensive
+to compute compared to LONG_MAX. But correctness first, we can think about
+optimization later, if required.
+
+Fixes: ad5643cf2f69 ("riscv: Define TASK_SIZE_MAX for __access_ok()")
+functions: 
+fixes: ad5643cf2f69(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index a11816bbf9e7..521a995741cd 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -1076,5 +1076,4 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
+ #ifdef CONFIG_64BIT
+ #define TASK_SIZE_64	(PGDIR_SIZE * PTRS_PER_PGD / 2)
+-#define TASK_SIZE_MAX	LONG_MAX
+ 
+ #ifdef CONFIG_COMPAT
+
+##### A172
+=== 2f73c62d4e13 A 2025-06-20 +2/-2
+Revert "riscv: misaligned: fix sleeping function called during misaligned access handling"
+
+This reverts commit 61a74ad25462 ("riscv: misaligned: fix sleeping function
+called during misaligned access handling"). The commit addresses a sleeping
+in atomic context problem, but it is not the correct fix as explained by
+Clément:
+
+"Using nofault would lead to failure to read from user memory that is paged
+out for instance. This is not really acceptable, we should handle user
+misaligned access even at an address that would generate a page fault."
+
+This bug has been properly fixed by commit 453805f0a28f ("riscv:
+misaligned: enable IRQs while handling misaligned accesses").
+
+Revert this improper fix.
+
+Fixes: 61a74ad25462 ("riscv: misaligned: fix sleeping function called during misaligned access handling")
+functions: arch/riscv/kernel/traps_misaligned.c:handle_scalar_misaligned_load, arch/riscv/kernel/traps_misaligned.c:handle_scalar_misaligned_store
+fixes: 61a74ad25462(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index dd8e4af6583f..93043924fe6c 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -455,5 +455,5 @@ static int handle_scalar_misaligned_load(struct pt_regs *regs)
+ 	val.data_u64 = 0;
+ 	if (user_mode(regs)) {
+-		if (copy_from_user_nofault(&val, (u8 __user *)addr, len))
++		if (copy_from_user(&val, (u8 __user *)addr, len))
+ 			return -1;
+ 	} else {
+@@ -556,5 +556,5 @@ static int handle_scalar_misaligned_store(struct pt_regs *regs)
+ 
+ 	if (user_mode(regs)) {
+-		if (copy_to_user_nofault((u8 __user *)addr, &val, len))
++		if (copy_to_user((u8 __user *)addr, &val, len))
+ 			return -1;
+ 	} else {
+
+##### A173
+=== b0843f836126 A 2025-06-20 +1/-1
+riscv: Fix sparse warning in vendor_extensions/sifive.c
+
+sparse reports the following warning:
+
+arch/riscv/kernel/vendor_extensions/sifive.c:11:33: sparse: sparse: symbol 'riscv_isa_vendor_ext_sifive' was not declared. Should it be static?
+
+So as this struct is only used in this file, make it static.
+
+Fixes: 2d147d77ae6e ("riscv: Add SiFive xsfvqmaccdod and xsfvqmaccqoq vendor extensions")
+functions: 
+fixes: 2d147d77ae6e(riscv)
+diff --git a/arch/riscv/kernel/vendor_extensions/sifive.c b/arch/riscv/kernel/vendor_extensions/sifive.c
+index 1411337dc1e6..8fcf67e8c07f 100644
+--- a/arch/riscv/kernel/vendor_extensions/sifive.c
++++ b/arch/riscv/kernel/vendor_extensions/sifive.c
+@@ -9,5 +9,5 @@
+ 
+ /* All SiFive vendor extensions supported in Linux */
+-const struct riscv_isa_ext_data riscv_isa_vendor_ext_sifive[] = {
++static const struct riscv_isa_ext_data riscv_isa_vendor_ext_sifive[] = {
+ 	__RISCV_ISA_EXT_DATA(xsfvfnrclipxfqf, RISCV_ISA_VENDOR_EXT_XSFVFNRCLIPXFQF),
+ 	__RISCV_ISA_EXT_DATA(xsfvfwmaccqqq, RISCV_ISA_VENDOR_EXT_XSFVFWMACCQQQ),
+
+##### A174
+=== 2b29be967ae4 A 2025-06-24 +3/-3
+riscv: cpu_ops_sbi: Use static array for boot_data
+
+Since commit 6b9f29b81b15 ("riscv: Enable pcpu page first chunk
+allocator"), if NUMA is enabled, the page percpu allocator may be used
+on very sparse configurations, or when requested on boot with
+percpu_alloc=page.
+
+In that case, percpu data gets put in the vmalloc area. However,
+sbi_hsm_hart_start() needs the physical address of a sbi_hart_boot_data,
+and simply assumes that __pa() would work. This causes the just started
+hart to immediately access an invalid address and hang.
+
+Fortunately, struct sbi_hart_boot_data is not too large, so we can
+simply allocate an array for boot_data statically, putting it in the
+kernel image.
+
+This fixes NUMA=y SMP boot on Sophgo SG2042.
+
+To reproduce on QEMU: Set CONFIG_NUMA=y and CONFIG_DEBUG_VIRTUAL=y, then
+run with:
+
+  qemu-system-riscv64 -M virt -smp 2 -nographic \
+    -kernel arch/riscv/boot/Image \
+    -append "percpu_alloc=page"
+
+Kernel output:
+
+[    0.000000] Booting Linux on hartid 0
+[    0.000000] Linux version 6.16.0-rc1 (dram@sakuya) (riscv64-unknown-linux-gnu-gcc (GCC) 14.2.1 20250322, GNU ld (GNU Binutils) 2.44) #11 SMP Tue Jun 24 14:56:22 CST 2025
+...
+[    0.000000] percpu: 28 4K pages/cpu s85784 r8192 d20712
+...
+[    0.083192] smp: Bringing up secondary CPUs ...
+[    0.086722] ------------[ cut here ]------------
+[    0.086849] virt_to_phys used for non-linear address: (____ptrval____) (0xff2000000001d080)
+[    0.088001] WARNING: CPU: 0 PID: 1 at arch/riscv/mm/physaddr.c:14 __virt_to_phys+0xae/0xe8
+[    0.088376] Modules linked in:
+[    0.088656] CPU: 0 UID: 0 PID: 1 Comm: swapper/0 Not tainted 6.16.0-rc1 #11 NONE
+[    0.088833] Hardware name: riscv-virtio,qemu (DT)
+[    0.088948] epc : __virt_to_phys+0xae/0xe8
+[    0.089001]  ra : __virt_to_phys+0xae/0xe8
+functions: arch/riscv/kernel/cpu_ops_sbi.c:sbi_cpu_start
+fixes: 6b9f29b81b15(riscv)
+diff --git a/arch/riscv/kernel/cpu_ops_sbi.c b/arch/riscv/kernel/cpu_ops_sbi.c
+index e6fbaaf54956..87d655944803 100644
+--- a/arch/riscv/kernel/cpu_ops_sbi.c
++++ b/arch/riscv/kernel/cpu_ops_sbi.c
+@@ -19,8 +19,8 @@ const struct cpu_operations cpu_ops_sbi;
+ /*
+  * Ordered booting via HSM brings one cpu at a time. However, cpu hotplug can
+- * be invoked from multiple threads in parallel. Define a per cpu data
++ * be invoked from multiple threads in parallel. Define an array of boot data
+  * to handle that.
+  */
+-static DEFINE_PER_CPU(struct sbi_hart_boot_data, boot_data);
++static struct sbi_hart_boot_data boot_data[NR_CPUS];
+ 
+ static int sbi_hsm_hart_start(unsigned long hartid, unsigned long saddr,
+@@ -68,5 +68,5 @@ static int sbi_cpu_start(unsigned int cpuid, struct task_struct *tidle)
+ 	unsigned long hartid = cpuid_to_hartid_map(cpuid);
+ 	unsigned long hsm_data;
+-	struct sbi_hart_boot_data *bdata = &per_cpu(boot_data, cpuid);
++	struct sbi_hart_boot_data *bdata = &boot_data[cpuid];
+ 
+ 	/* Make sure tidle is updated */

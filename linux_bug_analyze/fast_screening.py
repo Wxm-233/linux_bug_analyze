@@ -15,6 +15,15 @@ from .semantic_signals import source_signals
 VERSION = 'fast-screen-v2'
 FAST_TASK = TASK.replace('1–8 个整数行编号', '1–32 个整数行编号（优先选择1–8条最必要证据）')
 
+
+def key_hunk_diff(diff):
+    """Keep every changed line and one adjacent context line on each side."""
+    lines=diff.splitlines(keepends=True)
+    changed={i for i,line in enumerate(lines)
+             if line.startswith(('+','-')) and not line.startswith(('+++ ','--- '))}
+    return ''.join(line for i,line in enumerate(lines)
+                   if not line.startswith(' ') or i-1 in changed or i+1 in changed)
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -25,7 +34,9 @@ class SharedBudget:
     def __init__(self, output, max_requests, token_budget):
         self.path=output/'usage.json'
         self.lock=threading.RLock()
+        self.condition=threading.Condition(self.lock)
         self.stopped=threading.Event()
+        self.active=0
         self.max_requests,self.token_budget=max_requests,token_budget
         self.data=json.loads(self.path.read_text()) if self.path.exists() else {
             'requests':0,'charged_tokens':0,'reported_tokens':0,'records':[]}
@@ -35,47 +46,69 @@ class SharedBudget:
         save(self.path,self.data)
 
     def reserve(self, amount, h, tier):
-        with self.lock:
-            if self.stopped.is_set():raise StopRun('本轮已停止派发')
-            if self.data['requests']>=self.max_requests or self.data['charged_tokens']+amount>self.token_budget:
-                self.stopped.set()
-                raise StopRun('共享请求或token预算不足')
-            self.data['requests']+=1;self.data['charged_tokens']+=amount
-            r=dict(id=self.data['requests'],hash=h,tier=tier,reserved_tokens=amount,status='in_flight')
-            self.data['records'].append(r);self.persist()
-            return r
+        with self.condition:
+            while True:
+                if self.stopped.is_set():raise StopRun('本轮已停止派发')
+                if self.data['requests']>=self.max_requests:
+                    self.stopped.set();self.condition.notify_all()
+                    raise StopRun('共享请求预算不足')
+                if self.data['charged_tokens']+amount<=self.token_budget:
+                    self.data['requests']+=1;self.data['charged_tokens']+=amount
+                    r=dict(id=self.data['requests'],hash=h,tier=tier,reserved_tokens=amount,status='in_flight')
+                    self.data['records'].append(r);self.persist();self.active+=1
+                    return r
+                # In-flight reservations usually exceed reported usage. Wait for
+                # their refunds before deciding that the token budget is spent.
+                if not self.active:
+                    self.stopped.set();self.condition.notify_all()
+                    raise StopRun('共享token预算不足')
+                self.condition.wait(timeout=1)
 
     def finish(self,r,total,**fields):
-        with self.lock:
+        with self.condition:
             if type(total) is int and total>=0:
                 self.data['charged_tokens']+=total-r['reserved_tokens']
                 self.data['reported_tokens']+=total;r['total_tokens']=total
-            r.update(fields);self.persist()
+            r.update(fields)
+            try:self.persist()
+            finally:
+                self.active-=1
+                self.condition.notify_all()
 
 class FastScreener:
-    def __init__(self,client,output,*,model,context='',endpoint='',workers=4,
+    def __init__(self,client,output,*,model,context='',endpoint='',workers=16,
                  max_requests=100,token_budget=2000000,compact_chars=6000,
-                 full_chars=20000,max_tokens=1200,format_retries=0,transport_retries=1):
+                 full_chars=20000,max_tokens=1200,format_retries=0,transport_retries=1,
+                 material_mode='original'):
         self.client,self.output,self.model,self.context=client,output,model,context
         self.workers,self.compact_chars,self.full_chars=workers,compact_chars,full_chars
         self.max_tokens=max_tokens
+        if material_mode not in ('original','key-hunks'):
+            raise ValueError('unknown material mode')
+        self.material_mode=material_mode
         self.format_retries,self.transport_retries=format_retries,transport_retries
         self.budget=SharedBudget(output,max_requests,token_budget)
         identity=dict(version=VERSION,protocol=PROMPT_VERSION,task=FAST_TASK,system=SYSTEM,
                       model=model,endpoint=endpoint,context=context,compact_chars=compact_chars,
                       full_chars=full_chars,max_tokens=max_tokens,format_retries=format_retries,
                       transport_retries=transport_retries)
+        if material_mode!='original':
+            identity['material_mode']=material_mode
         p=output/'identity.json'
         if p.exists() and json.loads(p.read_text())!=identity:
             raise ValueError('运行配置变化，请使用新输出目录')
         save(p,identity);self.identity=digest(identity)
 
     def stage(self,original,chars,tier):
-        diff,shortened=truncate_diff(original.diff,chars)
+        compact_hunks=self.material_mode=='key-hunks' and tier=='compact'
+        source_diff=key_hunk_diff(original.diff) if compact_hunks else original.diff
+        diff,shortened=truncate_diff(source_diff,chars)
         c=replace(original,diff=diff,diff_truncated=original.diff_truncated or shortened)
         signals=source_signals(original)
         material=(f'hash: {c.hash}\nsubject: {c.subject}\nbody:\n{c.body}\nfiles:\n'
-                  +'\n'.join(c.files)+f'\ndiff_truncated: {c.diff_truncated}\ndiff:\n{c.diff}')
+                  +'\n'.join(c.files)
+                  +(f'\ndiff_context_reduced: {compact_hunks}' if compact_hunks else '')
+                  +f'\ndiff_truncated: {c.diff_truncated}\ndiff:\n{c.diff}')
         lines=evidence_lines(material)
         prompt=FAST_TASK+'\n研究框架：\n'+self.context+'\n提交材料：\n'+'\n'.join(
             f'[{i}] {line}' for i,line in enumerate(lines,1))

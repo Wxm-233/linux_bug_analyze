@@ -1,0 +1,48 @@
+########## 第18条  编号 A373  提交 7120a9d9e023  日期 2026-03-04
+
+【提交说明】
+RISC-V: KVM: Fix potential UAF in kvm_riscv_aia_imsic_has_attr()
+
+The KVM_DEV_RISCV_AIA_GRP_APLIC branch of aia_has_attr() was identified
+to have a race condition with concurrent KVM_SET_DEVICE_ATTR ioctls,
+leading to a use-after-free bug.
+
+Upon analyzing the code, it was discovered that the
+KVM_DEV_RISCV_AIA_GRP_IMSIC branch of aia_has_attr() suffers from the same
+lack of synchronization. It invokes kvm_riscv_aia_imsic_has_attr() without
+holding dev->kvm->lock.
+
+While aia_has_attr() is running, a concurrent aia_set_attr() could call
+aia_init() under the dev->kvm->lock. If aia_init() fails, it may trigger
+kvm_riscv_vcpu_aia_imsic_cleanup(), which frees imsic_state. Without proper
+locking, kvm_riscv_aia_imsic_has_attr() could attempt to access imsic_state
+while it is being deallocated.
+
+Although this specific path has not yet been reported by a fuzzer, it
+is logically identical to the APLIC issue. Fix this by acquiring the
+dev->kvm->lock before calling kvm_riscv_aia_imsic_has_attr(), ensuring
+consistency with the locking pattern used for other AIA attribute groups.
+
+Fixes: 5463091a51cf ("RISC-V: KVM: Expose IMSIC registers as attributes of AIA irqchip")
+
+【改动统计】
+ arch/riscv/kvm/aia_device.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/aia_device.c b/arch/riscv/kvm/aia_device.c
+index fb901947aefe..9a45c85239fe 100644
+--- a/arch/riscv/kvm/aia_device.c
++++ b/arch/riscv/kvm/aia_device.c
+@@ -471,7 +471,10 @@ static int aia_has_attr(struct kvm_device *dev, struct kvm_device_attr *attr)
+ 		mutex_unlock(&dev->kvm->lock);
+ 		break;
+ 	case KVM_DEV_RISCV_AIA_GRP_IMSIC:
+-		return kvm_riscv_aia_imsic_has_attr(dev->kvm, attr->attr);
++		mutex_lock(&dev->kvm->lock);
++		r = kvm_riscv_aia_imsic_has_attr(dev->kvm, attr->attr);
++		mutex_unlock(&dev->kvm->lock);
++		break;
+ 	}
+ 
+ 	return r;

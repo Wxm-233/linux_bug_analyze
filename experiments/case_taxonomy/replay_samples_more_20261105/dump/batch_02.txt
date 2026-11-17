@@ -1,0 +1,1937 @@
+
+##### A050
+=== adc3e82d2537 LA2 2024-06-13 +1/-6
+ACPI: NUMA: change the ACPI_NUMA to a hidden option
+
+x86/arm64/loongarch would select ACPI_NUMA by default and riscv
+would do the same thing, so change it to a hidden option and the
+select statements except for the X86_64_ACPI_NUMA can also go away.
+functions: 
+fixes: 
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 5d91259ee7b5..5079ad4e21a5 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -1485,5 +1485,4 @@ config NUMA
+ 	bool "NUMA Memory Allocation and Scheduler Support"
+ 	select GENERIC_ARCH_NUMA
+-	select ACPI_NUMA if ACPI
+ 	select OF_NUMA
+ 	select HAVE_SETUP_PER_CPU_AREA
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index e38139c576ee..8d9e06e4ad84 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -471,5 +471,4 @@ config NUMA
+ 	bool "NUMA Support"
+ 	select SMP
+-	select ACPI_NUMA if ACPI
+ 	help
+ 	  Say Y to compile the kernel with NUMA (Non-Uniform Memory Access)
+diff --git a/drivers/acpi/numa/Kconfig b/drivers/acpi/numa/Kconfig
+index 849c2bd820b9..f33194d1e43f 100644
+--- a/drivers/acpi/numa/Kconfig
++++ b/drivers/acpi/numa/Kconfig
+@@ -1,8 +1,5 @@
+ # SPDX-License-Identifier: GPL-2.0
+ config ACPI_NUMA
+-	bool "NUMA support"
+-	depends on NUMA
+-	depends on (X86 || ARM64 || LOONGARCH)
+-	default y if ARM64
++	def_bool NUMA && !X86
+ 
+ config ACPI_HMAT
+
+##### A051
+=== 8c3470425270 LA2 2024-07-09 +10/-0
+LoongArch: KVM: Add dirty bitmap initially all set support
+
+Add KVM_DIRTY_LOG_INITIALLY_SET support on LoongArch system, this
+feature comes from other architectures like x86 and arm64.
+functions: arch/loongarch/kvm/mmu.c:kvm_arch_commit_memory_region
+fixes: 
+diff --git a/arch/loongarch/include/asm/kvm_host.h b/arch/loongarch/include/asm/kvm_host.h
+index 32c4948f534f..309ce329b747 100644
+--- a/arch/loongarch/include/asm/kvm_host.h
++++ b/arch/loongarch/include/asm/kvm_host.h
+@@ -38,4 +38,7 @@
+ 	(KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP | KVM_GUESTDBG_SINGLESTEP)
+ 
++#define KVM_DIRTY_LOG_MANUAL_CAPS	\
++	(KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE | KVM_DIRTY_LOG_INITIALLY_SET)
++
+ struct kvm_vm_stat {
+ 	struct kvm_vm_stat_generic generic;
+diff --git a/arch/loongarch/kvm/mmu.c b/arch/loongarch/kvm/mmu.c
+index f1ed1c5296cf..1057bb984ba0 100644
+--- a/arch/loongarch/kvm/mmu.c
++++ b/arch/loongarch/kvm/mmu.c
+@@ -468,4 +468,11 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
+ 	 */
+ 	if (!(old_flags & KVM_MEM_LOG_DIRTY_PAGES) && log_dirty_pages) {
++		/*
++		 * Initially-all-set does not require write protecting any page
++		 * because they're all assumed to be dirty.
++		 */
++		if (kvm_dirty_log_manual_protect_and_init_set(kvm))
++			return;
++
+ 		spin_lock(&kvm->mmu_lock);
+ 		/* Write protect GPA page table entries */
+
+##### A052
+=== e05d4cd9b895 LA2 2024-07-20 +33/-0
+LoongArch: Add support for relocating the kernel with RELR relocation
+
+RELR as a relocation packing format for relative relocations for
+reducing the size of relative relocation records.  In a position
+independent executable there are often many relative relocation
+records, and our vmlinux is a PIE.
+
+The LLD linker (since 17.0.0) and the BFD linker (since 2.43) supports
+packing the relocations in the RELR format for LoongArch, with the flag
+-z pack-relative-relocs.
+
+Commits 5cf896fb6be3eff ("arm64: Add support for relocating the kernel
+with RELR relocations") and ccb2d173b983984bfa ("Makefile: use -z
+pack-relative-relocs") have already added the framework to use RELR.
+We just need to wire it up and process the RELR relocation records in
+relocate_relative() in addition to the RELA relocation records.
+
+A ".p2align 3" directive is added to la_abs macro or the BFD linker
+cannot pack the relocation records against the .la_abs section (the
+". = ALIGN(8);" directive in vmlinux.lds.S is too late in the linking
+process).
+
+With defconfig and CONFIG_RELR vmlinux.efi is 2.1 MiB (6%) smaller, and
+vmlinuz.efi (using gzip compression) is 384 KiB (2.8%) smaller.
+functions: arch/loongarch/kernel/relocate.c:relocate_relative
+fixes: 
+ arch/loongarch/Kconfig                |  1 +
+ arch/loongarch/include/asm/asmmacro.h |  1 +
+ arch/loongarch/include/asm/setup.h    |  5 +++++
+ arch/loongarch/kernel/relocate.c      | 18 ++++++++++++++++++
+ arch/loongarch/kernel/vmlinux.lds.S   |  8 ++++++++
+ 5 files changed, 33 insertions(+)
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index 9687b1d24126..f5df69ad70a6 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -611,4 +611,5 @@ config ARCH_HAS_GENERIC_CRASHKERNEL_RESERVATION
+ config RELOCATABLE
+ 	bool "Relocatable kernel"
++	select ARCH_HAS_RELR
+ 	help
+ 	  This builds the kernel as a Position Independent Executable (PIE),
+diff --git a/arch/loongarch/include/asm/asmmacro.h b/arch/loongarch/include/asm/asmmacro.h
+index 655db7d7a427..8d7f501b0a12 100644
+--- a/arch/loongarch/include/asm/asmmacro.h
++++ b/arch/loongarch/include/asm/asmmacro.h
+@@ -610,4 +610,5 @@
+ 	lu52i.d	\reg, \reg, 0
+ 	.pushsection ".la_abs", "aw", %progbits
++	.p2align 3
+ 	.dword	766b
+ 	.dword	\sym
+diff --git a/arch/loongarch/include/asm/setup.h b/arch/loongarch/include/asm/setup.h
+index ee52fb1e9963..3c2fb16b11b6 100644
+--- a/arch/loongarch/include/asm/setup.h
++++ b/arch/loongarch/include/asm/setup.h
+@@ -35,4 +35,9 @@ extern long __rela_dyn_begin;
+ extern long __rela_dyn_end;
+ 
++#ifdef CONFIG_RELR
++extern long __relr_dyn_begin;
++extern long __relr_dyn_end;
++#endif
++
+ extern unsigned long __init relocate_kernel(void);
+ 
+diff --git a/arch/loongarch/kernel/relocate.c b/arch/loongarch/kernel/relocate.c
+index e3836f0b9bd8..50c469067f3a 100644
+--- a/arch/loongarch/kernel/relocate.c
++++ b/arch/loongarch/kernel/relocate.c
+@@ -39,4 +39,22 @@ static inline void __init relocate_relative(void)
+ 		*(Elf64_Addr *)RELOCATED(addr) = relocated_addr;
+ 	}
++
++#ifdef CONFIG_RELR
++	u64 *addr = NULL;
++	u64 *relr = (u64 *)&__relr_dyn_begin;
++	u64 *relr_end = (u64 *)&__relr_dyn_end;
++
++	for ( ; relr < relr_end; relr++) {
++		if ((*relr & 1) == 0) {
++			addr = (u64 *)(*relr + reloc_offset);
++			*addr++ += reloc_offset;
++		} else {
++			for (u64 *p = addr, r = *relr >> 1; r; p++, r >>= 1)
++				if (r & 1)
++					*p += reloc_offset;
++			addr += 63;
++		}
++	}
++#endif
+ }
+... (18 more diff lines)
+
+##### A053
+=== 3515863d9f29 LA2 2024-08-07 +38/-119
+arch, mm: pull out allocation of NODE_DATA to generic code
+
+Architectures that support NUMA duplicate the code that allocates
+NODE_DATA on the node-local memory with slight variations in reporting of
+the addresses where the memory was allocated.
+
+Use x86 version as the basis for the generic alloc_node_data() function
+and call this function in architecture specific numa initialization.
+
+Round up node data size to SMP_CACHE_BYTES rather than to PAGE_SIZE like
+x86 used to do since the bootmem era when allocation granularity was
+PAGE_SIZE anyway.
+functions: arch/loongarch/kernel/numa.c:alloc_node_data, arch/mips/loongson64/numa.c:node_mem_init, arch/powerpc/mm/numa.c:setup_node_data, arch/sh/mm/init.c:allocate_pgdat, arch/sparc/mm/init_64.c:allocate_node_data, arch/x86/mm/numa.c:alloc_node_data, arch/x86/mm/numa.c:numa_register_memblks, drivers/base/arch_numa.c:setup_node_data
+fixes: 
+ arch/loongarch/kernel/numa.c | 18 ------------------
+ arch/mips/loongson64/numa.c  | 16 ++--------------
+ arch/powerpc/mm/numa.c       | 24 +++---------------------
+ arch/sh/mm/init.c            |  7 +------
+ arch/sparc/mm/init_64.c      |  9 ++-------
+ arch/x86/mm/numa.c           | 34 +---------------------------------
+ drivers/base/arch_numa.c     | 21 +--------------------
+ include/linux/numa.h         |  1 +
+ mm/numa.c                    | 27 +++++++++++++++++++++++++++
+ 9 files changed, 38 insertions(+), 119 deletions(-)
+diff --git a/arch/loongarch/kernel/numa.c b/arch/loongarch/kernel/numa.c
+index acada671e020..84fe7f854820 100644
+--- a/arch/loongarch/kernel/numa.c
++++ b/arch/loongarch/kernel/numa.c
+@@ -188,22 +188,4 @@ int __init numa_add_memblk(int nid, u64 start, u64 end)
+ }
+ 
+-static void __init alloc_node_data(int nid)
+-{
+-	void *nd;
+-	unsigned long nd_pa;
+-	size_t nd_sz = roundup(sizeof(pg_data_t), PAGE_SIZE);
+-
+-	nd_pa = memblock_phys_alloc_try_nid(nd_sz, SMP_CACHE_BYTES, nid);
+-	if (!nd_pa) {
+-		pr_err("Cannot find %zu Byte for node_data (initial node: %d)\n", nd_sz, nid);
+-		return;
+-	}
+-
+-	nd = __va(nd_pa);
+-
+-	node_data[nid] = nd;
+-	memset(nd, 0, sizeof(pg_data_t));
+-}
+-
+ static void __init node_mem_init(unsigned int node)
+ {
+diff --git a/arch/mips/loongson64/numa.c b/arch/mips/loongson64/numa.c
+index d56238745744..8388400d052f 100644
+--- a/arch/mips/loongson64/numa.c
++++ b/arch/mips/loongson64/numa.c
+@@ -82,10 +82,6 @@ static void __init init_topology_matrix(void)
+ static void __init node_mem_init(unsigned int node)
+ {
+-	struct pglist_data *nd;
+ 	unsigned long node_addrspace_offset;
+ 	unsigned long start_pfn, end_pfn;
+-	unsigned long nd_pa;
+-	int tnid;
+-	const size_t nd_size = roundup(sizeof(pg_data_t), SMP_CACHE_BYTES);
+ 
+ 	node_addrspace_offset = nid_to_addrbase(node);
+@@ -97,14 +93,6 @@ static void __init node_mem_init(unsigned int node)
+ 		node, start_pfn, end_pfn);
+ 
+-	nd_pa = memblock_phys_alloc_try_nid(nd_size, SMP_CACHE_BYTES, node);
+-	if (!nd_pa)
+-		panic("Cannot allocate %zu bytes for node %d data\n",
+-		      nd_size, node);
+-	nd = __va(nd_pa);
+-	memset(nd, 0, sizeof(struct pglist_data));
+-	tnid = early_pfn_to_nid(nd_pa >> PAGE_SHIFT);
+-	if (tnid != node)
+-		pr_info("NODE_DATA(%d) on node %d\n", node, tnid);
+-	node_data[node] = nd;
++	alloc_node_data(node);
++
+ 	NODE_DATA(node)->node_start_pfn = start_pfn;
+ 	NODE_DATA(node)->node_spanned_pages = end_pfn - start_pfn;
+diff --git a/arch/powerpc/mm/numa.c b/arch/powerpc/mm/numa.c
+... (200 more diff lines)
+
+##### A054
+=== e688c220732e LA2 2024-08-07 +6/-0
+LoongArch: Enable general EFI poweroff method
+
+efi_shutdown_init() can register a general sys_off handler named
+efi_power_off(). Enable this by providing efi_poweroff_required(),
+like arm and x86. Since EFI poweroff is also supported on LoongArch,
+and the enablement makes the poweroff function usable for hardwares
+which lack ACPI S5.
+
+We prefer ACPI poweroff rather than EFI poweroff (like x86), so we only
+require EFI poweroff if acpi_gbl_reduced_hardware or acpi_no_s5 is true.
+functions: 
+fixes: 
+diff --git a/arch/loongarch/kernel/efi.c b/arch/loongarch/kernel/efi.c
+index 000825406c1f..2bf86aeda874 100644
+--- a/arch/loongarch/kernel/efi.c
++++ b/arch/loongarch/kernel/efi.c
+@@ -67,4 +67,10 @@ void __init efi_runtime_init(void)
+ }
+ 
++bool efi_poweroff_required(void)
++{
++	return efi_enabled(EFI_RUNTIME_SERVICES) &&
++		(acpi_gbl_reduced_hardware || acpi_no_s5);
++}
++
+ unsigned long __initdata screen_info_table = EFI_INVALID_TABLE_ADDR;
+ 
+
+##### A055
+=== 25d4054cc974 LA2 2024-09-04 +51/-81
+mm: make arch_get_unmapped_area() take vm_flags by default
+
+Patch series "mm: Care about shadow stack guard gap when getting an
+unmapped area", v2.
+
+As covered in the commit log for c44357c2e76b ("x86/mm: care about shadow
+stack guard gap during placement") our current mmap() implementation does
+not take care to ensure that a new mapping isn't placed with existing
+mappings inside it's own guard gaps.  This is particularly important for
+shadow stacks since if two shadow stacks end up getting placed adjacent to
+each other then they can overflow into each other which weakens the
+protection offered by the feature.
+
+On x86 there is a custom arch_get_unmapped_area() which was updated by the
+above commit to cover this case by specifying a start_gap for allocations
+with VM_SHADOW_STACK.  Both arm64 and RISC-V have equivalent features and
+use the generic implementation of arch_get_unmapped_area() so let's make
+the equivalent change there so they also don't get shadow stack pages
+placed without guard pages.  The arm64 and RISC-V shadow stack
+implementations are currently on the list:
+
+   https://lore.kernel.org/r/20240829-arm64-gcs-v12-0-42fec94743
+   https://lore.kernel.org/lkml/20240403234054.2020347-1-debug@rivosinc.com/
+
+Given the addition of the use of vm_flags in the generic implementation we
+also simplify the set of possibilities that have to be dealt with in the
+core code by making arch_get_unmapped_area() take vm_flags as standard. 
+This is a bit invasive since the prototype change touches quite a few
+architectures but since the parameter is ignored the change is
+straightforward, the simplification for the generic code seems worth it.
+
+
+This patch (of 3):
+
+When we introduced arch_get_unmapped_area_vmflags() in 961148704acd ("mm:
+introduce arch_get_unmapped_area_vmflags()") we did so as part of properly
+supporting guard pages for shadow stacks on x86_64, which uses a custom
+arch_get_unmapped_area().  Equivalent features are also present on both
+arm64 and RISC-V, both of which use the generic implementation of
+arch_get_unmapped_area() and will require equivalent modification there. 
+Rather than continue to deal with having two versions of the functions
+functions: arch/parisc/mm/hugetlbpage.c:hugetlb_get_unmapped_area, arch/x86/kernel/sys_x86_64.c:arch_get_unmapped_area_topdown_vmflags, arch/x86/kernel/sys_x86_64.c:arch_get_unmapped_area, arch/x86/kernel/sys_x86_64.c:arch_get_unmapped_area_topdown, mm/mmap.c:arch_get_unmapped_area_vmflags, mm/mmap.c:arch_get_unmapped_area_topdown_vmflags, mm/mmap.c:mm_get_unmapped_area_vmflags, mm/mmap.c:mm_get_unmapped_area
+fixes: 
+ arch/parisc/mm/hugetlbpage.c      |  2 +-
+ arch/powerpc/mm/book3s64/slice.c  |  6 ++++--
+ arch/s390/mm/mmap.c               |  4 ++--
+ arch/sh/mm/mmap.c                 |  5 +++--
+ arch/sparc/kernel/sys_sparc_32.c  |  2 +-
+ arch/sparc/kernel/sys_sparc_64.c  |  4 ++--
+ arch/x86/include/asm/pgtable_64.h |  1 -
+ arch/x86/kernel/sys_x86_64.c      | 21 +++------------------
+ arch/xtensa/kernel/syscall.c      |  3 ++-
+ include/linux/sched/mm.h          | 23 ++++++++---------------
+ mm/mmap.c                         | 31 +++++++------------------------
+ 18 files changed, 51 insertions(+), 81 deletions(-)
+diff --git a/arch/alpha/kernel/osf_sys.c b/arch/alpha/kernel/osf_sys.c
+index e5f881bc8288..8886ab539273 100644
+--- a/arch/alpha/kernel/osf_sys.c
++++ b/arch/alpha/kernel/osf_sys.c
+@@ -1230,5 +1230,5 @@ unsigned long
+ arch_get_unmapped_area(struct file *filp, unsigned long addr,
+ 		       unsigned long len, unsigned long pgoff,
+-		       unsigned long flags)
++		       unsigned long flags, vm_flags_t vm_flags)
+ {
+ 	unsigned long limit;
+diff --git a/arch/arc/mm/mmap.c b/arch/arc/mm/mmap.c
+index 69a915297155..2185afe8d59f 100644
+--- a/arch/arc/mm/mmap.c
++++ b/arch/arc/mm/mmap.c
+@@ -24,5 +24,6 @@
+ unsigned long
+ arch_get_unmapped_area(struct file *filp, unsigned long addr,
+-		unsigned long len, unsigned long pgoff, unsigned long flags)
++		unsigned long len, unsigned long pgoff,
++		unsigned long flags, vm_flags_t vm_flags)
+ {
+ 	struct mm_struct *mm = current->mm;
+diff --git a/arch/arm/mm/mmap.c b/arch/arm/mm/mmap.c
+index d65d0e6ed10a..3dbb383c26d5 100644
+--- a/arch/arm/mm/mmap.c
++++ b/arch/arm/mm/mmap.c
+@@ -29,5 +29,6 @@
+ unsigned long
+ arch_get_unmapped_area(struct file *filp, unsigned long addr,
+-		unsigned long len, unsigned long pgoff, unsigned long flags)
++		unsigned long len, unsigned long pgoff,
++		unsigned long flags, vm_flags_t vm_flags)
+ {
+ 	struct mm_struct *mm = current->mm;
+@@ -79,6 +80,6 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
+ unsigned long
+ arch_get_unmapped_area_topdown(struct file *filp, const unsigned long addr0,
+-			const unsigned long len, const unsigned long pgoff,
+-			const unsigned long flags)
++		        const unsigned long len, const unsigned long pgoff,
++		        const unsigned long flags, vm_flags_t vm_flags)
+ {
+ 	struct vm_area_struct *vma;
+diff --git a/arch/csky/abiv1/mmap.c b/arch/csky/abiv1/mmap.c
+index 7f826331d409..1047865e82a9 100644
+--- a/arch/csky/abiv1/mmap.c
++++ b/arch/csky/abiv1/mmap.c
+@@ -24,5 +24,6 @@
+ unsigned long
+ arch_get_unmapped_area(struct file *filp, unsigned long addr,
+-		unsigned long len, unsigned long pgoff, unsigned long flags)
++		unsigned long len, unsigned long pgoff,
++		unsigned long flags, vm_flags_t vm_flags)
+ {
+ 	struct mm_struct *mm = current->mm;
+diff --git a/arch/loongarch/mm/mmap.c b/arch/loongarch/mm/mmap.c
+index 889030985135..914e82ff3f65 100644
+--- a/arch/loongarch/mm/mmap.c
++++ b/arch/loongarch/mm/mmap.c
+... (309 more diff lines)
+
+##### A056
+=== a53f48b6327c LA2 2024-09-11 +65/-1
+LoongArch: KVM: Add VM feature detection function
+
+Loongson SIMD Extension (LSX), Loongson Advanced SIMD Extension (LASX)
+and Loongson Binary Translation (LBT) features are defined in register
+CPUCFG2. Two kinds of LSX/LASX/LBT feature detection are added here, one
+is VCPU feature, and the other is VM feature. VCPU feature dection can
+only work with VCPU thread itself, and requires VCPU thread is created
+already. So LSX/LASX/LBT feature detection for VM is added also, it can
+be done even if VM is not created, and also can be done by any threads
+besides VCPU threads.
+
+Here ioctl command KVM_HAS_DEVICE_ATTR is added for VM, and macro
+KVM_LOONGARCH_VM_FEAT_CTRL is added to check supported feature. And
+five sub-features relative with LSX/LASX/LBT are added as following:
+ KVM_LOONGARCH_VM_FEAT_LSX
+ KVM_LOONGARCH_VM_FEAT_LASX
+ KVM_LOONGARCH_VM_FEAT_X86BT
+ KVM_LOONGARCH_VM_FEAT_ARMBT
+ KVM_LOONGARCH_VM_FEAT_MIPSBT
+functions: arch/loongarch/kvm/vcpu.c:_kvm_get_cpucfg_mask, arch/loongarch/kvm/vm.c:kvm_arch_vm_ioctl
+fixes: 
+ arch/loongarch/include/uapi/asm/kvm.h |  8 ++++++++
+ arch/loongarch/kvm/vcpu.c             |  6 ++++++
+ arch/loongarch/kvm/vm.c               | 52 +++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 65 insertions(+), 1 deletion(-)
+diff --git a/arch/loongarch/include/uapi/asm/kvm.h b/arch/loongarch/include/uapi/asm/kvm.h
+index ddc5cab0ffd0..49bafac8b22d 100644
+--- a/arch/loongarch/include/uapi/asm/kvm.h
++++ b/arch/loongarch/include/uapi/asm/kvm.h
+@@ -83,4 +83,12 @@ struct kvm_fpu {
+ #define KVM_IOC_CPUCFG(REG)		LOONGARCH_REG_64(KVM_REG_LOONGARCH_CPUCFG, REG)
+ 
++/* Device Control API on vm fd */
++#define KVM_LOONGARCH_VM_FEAT_CTRL	0
++#define  KVM_LOONGARCH_VM_FEAT_LSX	0
++#define  KVM_LOONGARCH_VM_FEAT_LASX	1
++#define  KVM_LOONGARCH_VM_FEAT_X86BT	2
++#define  KVM_LOONGARCH_VM_FEAT_ARMBT	3
++#define  KVM_LOONGARCH_VM_FEAT_MIPSBT	4
++
+ /* Device Control API on vcpu fd */
+ #define KVM_LOONGARCH_VCPU_CPUCFG	0
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index 6905283f535b..ae991b3fda79 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -498,4 +498,10 @@ static int _kvm_get_cpucfg_mask(int id, u64 *v)
+ 		if (cpu_has_lasx)
+ 			*v |= CPUCFG2_LASX;
++		if (cpu_has_lbt_x86)
++			*v |= CPUCFG2_X86BT;
++		if (cpu_has_lbt_arm)
++			*v |= CPUCFG2_ARMBT;
++		if (cpu_has_lbt_mips)
++			*v |= CPUCFG2_MIPSBT;
+ 
+ 		return 0;
+diff --git a/arch/loongarch/kvm/vm.c b/arch/loongarch/kvm/vm.c
+index 6b2e4f66ad26..33398a151e71 100644
+--- a/arch/loongarch/kvm/vm.c
++++ b/arch/loongarch/kvm/vm.c
+@@ -100,6 +100,56 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
+ }
+ 
++static int kvm_vm_feature_has_attr(struct kvm *kvm, struct kvm_device_attr *attr)
++{
++	switch (attr->attr) {
++	case KVM_LOONGARCH_VM_FEAT_LSX:
++		if (cpu_has_lsx)
++			return 0;
++		return -ENXIO;
++	case KVM_LOONGARCH_VM_FEAT_LASX:
++		if (cpu_has_lasx)
++			return 0;
++		return -ENXIO;
++	case KVM_LOONGARCH_VM_FEAT_X86BT:
++		if (cpu_has_lbt_x86)
++			return 0;
++		return -ENXIO;
++	case KVM_LOONGARCH_VM_FEAT_ARMBT:
++		if (cpu_has_lbt_arm)
++			return 0;
++		return -ENXIO;
++	case KVM_LOONGARCH_VM_FEAT_MIPSBT:
++		if (cpu_has_lbt_mips)
+... (34 more diff lines)
+
+##### A057
+=== b67ee19a907d LA2 2024-09-11 +84/-3
+LoongArch: KVM: Add Binary Translation extension support
+
+Loongson Binary Translation (LBT) is used to accelerate binary translation,
+which contains 4 scratch registers (scr0 to scr3), x86/ARM eflags (eflags)
+and x87 fpu stack pointer (ftop).
+
+Like FPU extension, here a lazy enabling method is used for LBT. the LBT
+context is saved/restored on the vcpu context switch path.
+functions: arch/loongarch/kvm/vcpu.c:kvm_own_fpu, arch/loongarch/kvm/vcpu.c:kvm_own_lsx, arch/loongarch/kvm/vcpu.c:kvm_own_lasx, arch/loongarch/kvm/vcpu.c:kvm_lose_fpu
+fixes: 
+ arch/loongarch/include/asm/kvm_host.h | 11 ++++++++--
+ arch/loongarch/include/asm/kvm_vcpu.h |  6 ++++++
+ arch/loongarch/kvm/exit.c             |  9 ++++++++
+ arch/loongarch/kvm/vcpu.c             | 61 ++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 84 insertions(+), 3 deletions(-)
+diff --git a/arch/loongarch/include/asm/kvm_host.h b/arch/loongarch/include/asm/kvm_host.h
+index 5f0677e03817..5262cec07182 100644
+--- a/arch/loongarch/include/asm/kvm_host.h
++++ b/arch/loongarch/include/asm/kvm_host.h
+@@ -134,6 +134,7 @@ enum emulation_result {
+ #define KVM_LARCH_LSX		(0x1 << 1)
+ #define KVM_LARCH_LASX		(0x1 << 2)
+-#define KVM_LARCH_SWCSR_LATEST	(0x1 << 3)
+-#define KVM_LARCH_HWCSR_USABLE	(0x1 << 4)
++#define KVM_LARCH_LBT		(0x1 << 3)
++#define KVM_LARCH_SWCSR_LATEST	(0x1 << 4)
++#define KVM_LARCH_HWCSR_USABLE	(0x1 << 5)
+ 
+ struct kvm_vcpu_arch {
+@@ -169,4 +170,5 @@ struct kvm_vcpu_arch {
+ 	/* FPU state */
+ 	struct loongarch_fpu fpu FPU_ALIGN;
++	struct loongarch_lbt lbt;
+ 
+ 	/* CSR state */
+@@ -240,4 +242,9 @@ static inline bool kvm_guest_has_lasx(struct kvm_vcpu_arch *arch)
+ }
+ 
++static inline bool kvm_guest_has_lbt(struct kvm_vcpu_arch *arch)
++{
++	return arch->cpucfg[2] & (CPUCFG2_X86BT | CPUCFG2_ARMBT | CPUCFG2_MIPSBT);
++}
++
+ /* Debug: dump vcpu state */
+ int kvm_arch_vcpu_dump_regs(struct kvm_vcpu *vcpu);
+diff --git a/arch/loongarch/include/asm/kvm_vcpu.h b/arch/loongarch/include/asm/kvm_vcpu.h
+index 86570084e05a..ca067bf6dd0a 100644
+--- a/arch/loongarch/include/asm/kvm_vcpu.h
++++ b/arch/loongarch/include/asm/kvm_vcpu.h
+@@ -76,4 +76,10 @@ static inline void kvm_restore_lasx(struct loongarch_fpu *fpu) { }
+ #endif
+ 
++#ifdef CONFIG_CPU_HAS_LBT
++int kvm_own_lbt(struct kvm_vcpu *vcpu);
++#else
++static inline int kvm_own_lbt(struct kvm_vcpu *vcpu) { return -EINVAL; }
++#endif
++
+ void kvm_init_timer(struct kvm_vcpu *vcpu, unsigned long hz);
+ void kvm_save_timer(struct kvm_vcpu *vcpu);
+diff --git a/arch/loongarch/kvm/exit.c b/arch/loongarch/kvm/exit.c
+index ea73f9dc2cc6..a3d550a34973 100644
+--- a/arch/loongarch/kvm/exit.c
++++ b/arch/loongarch/kvm/exit.c
+@@ -749,4 +749,12 @@ static int kvm_handle_lasx_disabled(struct kvm_vcpu *vcpu)
+ }
+ 
++static int kvm_handle_lbt_disabled(struct kvm_vcpu *vcpu)
++{
++	if (kvm_own_lbt(vcpu))
++		kvm_queue_exception(vcpu, EXCCODE_INE, 0);
++
++	return RESUME_GUEST;
++}
++
+... (108 more diff lines)
+
+##### A058
+=== d4f31acf1302 LA2 2024-09-24 +35/-89
+LoongArch: Simplify _percpu_read() and _percpu_write()
+
+Now _percpu_read() and _percpu_write() macros call __percpu_read()
+and __percpu_write() static inline functions that result in a single
+assembly instruction. However, percpu infrastructure expects its leaf
+definitions to encode the size of their percpu variable, so the patch
+merges all the asm clauses from the static inline function into the
+corresponding leaf macros.
+
+The secondary effect of this change is to avoid explicit __percpu
+annotations for function arguments. Currently, __percpu macro is defined
+in include/linux/compiler_types.h, but with proposed patch [1], __percpu
+definition will need macros from include/asm-generic/percpu.h, creating
+forward dependency loop.
+
+The proposed solution is the same as x86 architecture uses.
+
+[1] https://lore.kernel.org/lkml/20240812115945.484051-4-ubizjak@gmail.com/
+functions: 
+fixes: 
+ arch/loongarch/include/asm/percpu.h | 124 ++++++++++++++++----------------------------------------
+ 1 file changed, 35 insertions(+), 89 deletions(-)
+diff --git a/arch/loongarch/include/asm/percpu.h b/arch/loongarch/include/asm/percpu.h
+index 8f290e5546cf..87be9b14e9da 100644
+--- a/arch/loongarch/include/asm/percpu.h
++++ b/arch/loongarch/include/asm/percpu.h
+@@ -69,73 +69,4 @@ PERCPU_OP(or, or, |)
+ #undef PERCPU_OP
+ 
+-static __always_inline unsigned long __percpu_read(void __percpu *ptr, int size)
+-{
+-	unsigned long ret;
+-
+-	switch (size) {
+-	case 1:
+-		__asm__ __volatile__ ("ldx.b %[ret], $r21, %[ptr]	\n"
+-		: [ret] "=&r"(ret)
+-		: [ptr] "r"(ptr)
+-		: "memory");
+-		break;
+-	case 2:
+-		__asm__ __volatile__ ("ldx.h %[ret], $r21, %[ptr]	\n"
+-		: [ret] "=&r"(ret)
+-		: [ptr] "r"(ptr)
+-		: "memory");
+-		break;
+-	case 4:
+-		__asm__ __volatile__ ("ldx.w %[ret], $r21, %[ptr]	\n"
+-		: [ret] "=&r"(ret)
+-		: [ptr] "r"(ptr)
+-		: "memory");
+-		break;
+-	case 8:
+-		__asm__ __volatile__ ("ldx.d %[ret], $r21, %[ptr]	\n"
+-		: [ret] "=&r"(ret)
+-		: [ptr] "r"(ptr)
+-		: "memory");
+-		break;
+-	default:
+-		ret = 0;
+-		BUILD_BUG();
+-	}
+-
+-	return ret;
+-}
+-
+-static __always_inline void __percpu_write(void __percpu *ptr, unsigned long val, int size)
+-{
+-	switch (size) {
+-	case 1:
+-		__asm__ __volatile__("stx.b %[val], $r21, %[ptr]	\n"
+-		:
+-		: [val] "r" (val), [ptr] "r" (ptr)
+-		: "memory");
+-		break;
+-	case 2:
+-		__asm__ __volatile__("stx.h %[val], $r21, %[ptr]	\n"
+-		:
+-		: [val] "r" (val), [ptr] "r" (ptr)
+-		: "memory");
+-		break;
+-	case 4:
+... (89 more diff lines)
+
+##### A059
+=== e8dd556c7432 LA2 2024-09-24 +1/-0
+LoongArch: Enable generic CPU vulnerabilites support
+
+Currently, many architectures support generic CPU vulnerabilites, such
+as x86, arm64 and riscv:
+
+ commit 61dc0f555b5c ("x86/cpu: Implement CPU vulnerabilites sysfs functions")
+ commit 61ae1321f06c ("arm64: enable generic CPU vulnerabilites support")
+ commit 0e3f3649d44b ("riscv: Enable generic CPU vulnerabilites support")
+
+All LoongArch CPUs (since Loongson-3A5000) implement a special mechanism
+in the processor core to prevent "Meltdown" and "Spectre" attacks, so it
+can enable generic CPU vulnerabilites support for LoongArch too.
+
+Without this patch, there are no user interfaces of vulnerabilities to
+check on LoongArch. The output of those files reflects the state of the
+CPUs in the system, the output value "Not affected" means "CPU is not
+affected by the vulnerability".
+
+Before:
+
+ # cat /sys/devices/system/cpu/vulnerabilities/spec_rstack_overflow
+ cat: /sys/devices/system/cpu/vulnerabilities/spec_rstack_overflow: No such file or directory
+ # cat /sys/devices/system/cpu/vulnerabilities/spec_store_bypass
+ cat: /sys/devices/system/cpu/vulnerabilities/spec_store_bypass: No such file or directory
+ # cat /sys/devices/system/cpu/vulnerabilities/meltdown
+ cat: /sys/devices/system/cpu/vulnerabilities/meltdown: No such file or directory
+
+After:
+
+ # cat /sys/devices/system/cpu/vulnerabilities/spec_rstack_overflow
+ Not affected
+ # cat /sys/devices/system/cpu/vulnerabilities/spec_store_bypass
+ Not affected
+ # cat /sys/devices/system/cpu/vulnerabilities/meltdown
+ Not affected
+functions: 
+fixes: 
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index 34531dc8a61f..b9d3c98efe18 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -83,4 +83,5 @@ config LOONGARCH
+ 	select GENERIC_CPU_AUTOPROBE
+ 	select GENERIC_CPU_DEVICES
++	select GENERIC_CPU_VULNERABILITIES
+ 	select GENERIC_ENTRY
+ 	select GENERIC_GETTIMEOFDAY
+
+##### A060
+=== f93f67d06b10 LA2 2024-09-24 +83/-27
+LoongArch: Improve hardware page table walker
+
+LoongArch has similar problems explained in commit 7f0b1bf04511348995d6
+("arm64: Fix barriers used for page table modifications"), when hardware
+page table walker (PTW) enabled, speculative accesses may cause spurious
+page fault in kernel space. Theoretically, in order to completely avoid
+spurious page fault we need a "dbar + ibar" pair between the page table
+modifications and the subsequent memory accesses using the corresponding
+virtual address. But "ibar" is too heavy for performace, so we only use
+a "dbar 0b11000" in set_pte(). And let spurious_fault() filter the rest
+rare spurious page faults which should be avoided by "ibar".
+
+Besides, we replace the llsc loop with amo in set_pte() which has better
+performace, and refactor mmu_context.h to 1) avoid any load/store/branch
+instructions between the writing of CSR.ASID & CSR.PGDL, 2) ensure flush
+tlb operation is after updating ASID.
+functions: arch/loongarch/mm/fault.c:no_context
+fixes: 
+ arch/loongarch/include/asm/atomic.h      |  2 ++
+ arch/loongarch/include/asm/mmu_context.h | 35 +++++++++++++++++++++++++++--------
+ arch/loongarch/include/asm/pgtable.h     | 32 +++++++++++++-------------------
+ arch/loongarch/mm/fault.c                | 41 +++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 83 insertions(+), 27 deletions(-)
+diff --git a/arch/loongarch/include/asm/atomic.h b/arch/loongarch/include/asm/atomic.h
+index 99af8b3160a8..c86f0ab922ec 100644
+--- a/arch/loongarch/include/asm/atomic.h
++++ b/arch/loongarch/include/asm/atomic.h
+@@ -16,4 +16,5 @@
+ #define __SC		"sc.w	"
+ #define __AMADD		"amadd.w	"
++#define __AMOR		"amor.w		"
+ #define __AMAND_DB	"amand_db.w	"
+ #define __AMOR_DB	"amor_db.w	"
+@@ -23,4 +24,5 @@
+ #define __SC		"sc.d	"
+ #define __AMADD		"amadd.d	"
++#define __AMOR		"amor.d		"
+ #define __AMAND_DB	"amand_db.d	"
+ #define __AMOR_DB	"amor_db.d	"
+diff --git a/arch/loongarch/include/asm/mmu_context.h b/arch/loongarch/include/asm/mmu_context.h
+index 9f97c3453b9c..304363bd3935 100644
+--- a/arch/loongarch/include/asm/mmu_context.h
++++ b/arch/loongarch/include/asm/mmu_context.h
+@@ -50,10 +50,10 @@ static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
+ /* Normal, classic get_new_mmu_context */
+ static inline void
+-get_new_mmu_context(struct mm_struct *mm, unsigned long cpu)
++get_new_mmu_context(struct mm_struct *mm, unsigned long cpu, bool *need_flush)
+ {
+ 	u64 asid = asid_cache(cpu);
+ 
+ 	if (!((++asid) & cpu_asid_mask(&cpu_data[cpu])))
+-		local_flush_tlb_user();	/* start new asid cycle */
++		*need_flush = true;	/* start new asid cycle */
+ 
+ 	cpu_context(cpu, mm) = asid_cache(cpu) = asid;
+@@ -75,19 +75,32 @@ init_new_context(struct task_struct *tsk, struct mm_struct *mm)
+ }
+ 
++static inline void atomic_update_pgd_asid(unsigned long asid, unsigned long pgdl)
++{
++	__asm__ __volatile__(
++	"csrwr %[pgdl_val], %[pgdl_reg] \n\t"
++	"csrwr %[asid_val], %[asid_reg] \n\t"
++	: [asid_val] "+r" (asid), [pgdl_val] "+r" (pgdl)
++	: [asid_reg] "i" (LOONGARCH_CSR_ASID), [pgdl_reg] "i" (LOONGARCH_CSR_PGDL)
++	: "memory"
++	);
++}
++
+ static inline void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
+ 				      struct task_struct *tsk)
+ {
++	bool need_flush = false;
+ 	unsigned int cpu = smp_processor_id();
+ 
+ 	/* Check if our ASID is of an older version and thus invalid */
+ 	if (!asid_valid(next, cpu))
+-		get_new_mmu_context(next, cpu);
+-
+-	write_csr_asid(cpu_asid(cpu, next));
++		get_new_mmu_context(next, cpu, &need_flush);
+ 
+... (126 more diff lines)
+
+##### A061
+=== 7888af4166d4 LA2 2024-10-08 +134/-103
+ftrace: Make ftrace_regs abstract from direct use
+
+ftrace_regs was created to hold registers that store information to save
+function parameters, return value and stack. Since it is a subset of
+pt_regs, it should only be used by its accessor functions. But because
+pt_regs can easily be taken from ftrace_regs (on most archs), it is
+tempting to use it directly. But when running on other architectures, it
+may fail to build or worse, build but crash the kernel!
+
+Instead, make struct ftrace_regs an empty structure and have the
+architectures define __arch_ftrace_regs and all the accessor functions
+will typecast to it to get to the actual fields. This will help avoid
+usage of ftrace_regs directly.
+functions: arch/arm64/kernel/asm-offsets.c:main, arch/arm64/kernel/ftrace.c:ftrace_graph_func, arch/loongarch/kernel/ftrace_dyn.c:ftrace_graph_func, arch/powerpc/kernel/trace/ftrace.c:ftrace_graph_func, arch/powerpc/kernel/trace/ftrace_64_pg.c:ftrace_graph_func, arch/riscv/kernel/asm-offsets.c:asm_offsets, arch/riscv/kernel/ftrace.c:ftrace_graph_func, arch/s390/kernel/asm-offsets.c:main, arch/s390/kernel/ftrace.c:kprobe_ftrace_handler, arch/s390/lib/test_unwind.c:test_unwind_ftrace_handler, arch/x86/kernel/ftrace.c:ftrace_graph_func, kernel/trace/ftrace.c:arch_ftrace_ops_list_func
+fixes: 
+ arch/riscv/include/asm/ftrace.h          | 21 ++++++++++++---------
+ arch/riscv/kernel/asm-offsets.c          | 28 ++++++++++++++--------------
+ arch/riscv/kernel/ftrace.c               |  2 +-
+ arch/s390/include/asm/ftrace.h           | 23 +++++++++++++----------
+ arch/s390/kernel/asm-offsets.c           |  4 ++--
+ arch/s390/kernel/ftrace.c                |  2 +-
+ arch/s390/lib/test_unwind.c              |  4 ++--
+ arch/x86/include/asm/ftrace.h            | 25 ++++++++++++++-----------
+ arch/x86/kernel/ftrace.c                 |  2 +-
+ include/linux/ftrace.h                   | 21 ++++++++++++++++++---
+ kernel/trace/ftrace.c                    |  2 +-
+ 19 files changed, 134 insertions(+), 103 deletions(-)
+diff --git a/arch/arm64/include/asm/ftrace.h b/arch/arm64/include/asm/ftrace.h
+index dc9cf0bd2a4c..bbb69c7751b9 100644
+--- a/arch/arm64/include/asm/ftrace.h
++++ b/arch/arm64/include/asm/ftrace.h
+@@ -57,4 +57,6 @@ unsigned long ftrace_call_adjust(unsigned long addr);
+ struct dyn_ftrace;
+ struct ftrace_ops;
++struct ftrace_regs;
++#define arch_ftrace_regs(fregs) ((struct __arch_ftrace_regs *)(fregs))
+ 
+ #define arch_ftrace_get_regs(regs) NULL
+@@ -64,5 +66,5 @@ struct ftrace_ops;
+  * stack alignment
+  */
+-struct ftrace_regs {
++struct __arch_ftrace_regs {
+ 	/* x0 - x8 */
+ 	unsigned long regs[9];
+@@ -84,5 +86,5 @@ static __always_inline unsigned long
+ ftrace_regs_get_instruction_pointer(const struct ftrace_regs *fregs)
+ {
+-	return fregs->pc;
++	return arch_ftrace_regs(fregs)->pc;
+ }
+ 
+@@ -91,5 +93,5 @@ ftrace_regs_set_instruction_pointer(struct ftrace_regs *fregs,
+ 				    unsigned long pc)
+ {
+-	fregs->pc = pc;
++	arch_ftrace_regs(fregs)->pc = pc;
+ }
+ 
+@@ -97,5 +99,5 @@ static __always_inline unsigned long
+ ftrace_regs_get_stack_pointer(const struct ftrace_regs *fregs)
+ {
+-	return fregs->sp;
++	return arch_ftrace_regs(fregs)->sp;
+ }
+ 
+@@ -104,5 +106,5 @@ ftrace_regs_get_argument(struct ftrace_regs *fregs, unsigned int n)
+ {
+ 	if (n < 8)
+-		return fregs->regs[n];
++		return arch_ftrace_regs(fregs)->regs[n];
+ 	return 0;
+ }
+@@ -111,5 +113,5 @@ static __always_inline unsigned long
+ ftrace_regs_get_return_value(const struct ftrace_regs *fregs)
+ {
+-	return fregs->regs[0];
++	return arch_ftrace_regs(fregs)->regs[0];
+ }
+ 
+@@ -118,5 +120,5 @@ ftrace_regs_set_return_value(struct ftrace_regs *fregs,
+ 			     unsigned long ret)
+ {
+-	fregs->regs[0] = ret;
++	arch_ftrace_regs(fregs)->regs[0] = ret;
+ }
+ 
+... (552 more diff lines)
+
+##### A062
+=== e4cf33ca4812 LA2 2024-10-10 +49/-119
+ftrace: Consolidate ftrace_regs accessor functions for archs using pt_regs
+
+Most architectures use pt_regs within ftrace_regs making a lot of the
+accessor functions just calls to the pt_regs internally. Instead of
+duplication this effort, use a HAVE_ARCH_FTRACE_REGS for architectures
+that have their own ftrace_regs that is not based on pt_regs and will
+define all the accessor functions, and for the architectures that just use
+pt_regs, it will leave it undefined, and the default accessor functions
+will be used.
+
+Note, this will also make it easier to add new accessor functions to
+ftrace_regs as it will mean having to touch less architectures.
+functions: 
+fixes: 
+ arch/arm64/include/asm/ftrace.h     |  1 +
+ arch/loongarch/include/asm/ftrace.h | 25 +------------------------
+ arch/powerpc/include/asm/ftrace.h   | 26 +-------------------------
+ arch/riscv/include/asm/ftrace.h     |  1 +
+ arch/s390/include/asm/ftrace.h      | 26 +-------------------------
+ arch/x86/include/asm/ftrace.h       | 21 +--------------------
+ include/linux/ftrace.h              | 32 +++++++-------------------------
+ include/linux/ftrace_regs.h         | 36 ++++++++++++++++++++++++++++++++++++
+ 8 files changed, 49 insertions(+), 119 deletions(-)
+diff --git a/arch/arm64/include/asm/ftrace.h b/arch/arm64/include/asm/ftrace.h
+index bbb69c7751b9..5ccff4de7f09 100644
+--- a/arch/arm64/include/asm/ftrace.h
++++ b/arch/arm64/include/asm/ftrace.h
+@@ -55,4 +55,5 @@ unsigned long ftrace_call_adjust(unsigned long addr);
+ 
+ #ifdef CONFIG_DYNAMIC_FTRACE_WITH_ARGS
++#define HAVE_ARCH_FTRACE_REGS
+ struct dyn_ftrace;
+ struct ftrace_ops;
+diff --git a/arch/loongarch/include/asm/ftrace.h b/arch/loongarch/include/asm/ftrace.h
+index 0e15d36ce251..8f13eaeaa325 100644
+--- a/arch/loongarch/include/asm/ftrace.h
++++ b/arch/loongarch/include/asm/ftrace.h
+@@ -44,10 +44,6 @@ void prepare_ftrace_return(unsigned long self_addr, unsigned long *parent);
+ #ifdef CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS
+ struct ftrace_ops;
+-struct ftrace_regs;
+-#define arch_ftrace_regs(fregs) ((struct __arch_ftrace_regs *)(fregs))
+ 
+-struct __arch_ftrace_regs {
+-	struct pt_regs regs;
+-};
++#include <linux/ftrace_regs.h>
+ 
+ static __always_inline struct pt_regs *arch_ftrace_get_regs(struct ftrace_regs *fregs)
+@@ -56,10 +52,4 @@ static __always_inline struct pt_regs *arch_ftrace_get_regs(struct ftrace_regs *
+ }
+ 
+-static __always_inline unsigned long
+-ftrace_regs_get_instruction_pointer(struct ftrace_regs *fregs)
+-{
+-	return instruction_pointer(&arch_ftrace_regs(fregs)->regs);
+-}
+-
+ static __always_inline void
+ ftrace_regs_set_instruction_pointer(struct ftrace_regs *fregs, unsigned long ip)
+@@ -68,17 +58,4 @@ ftrace_regs_set_instruction_pointer(struct ftrace_regs *fregs, unsigned long ip)
+ }
+ 
+-#define ftrace_regs_get_argument(fregs, n) \
+-	regs_get_kernel_argument(&arch_ftrace_regs(fregs)->regs, n)
+-#define ftrace_regs_get_stack_pointer(fregs) \
+-	kernel_stack_pointer(&arch_ftrace_regs(fregs)->regs)
+-#define ftrace_regs_return_value(fregs) \
+-	regs_return_value(&arch_ftrace_regs(fregs)->regs)
+-#define ftrace_regs_set_return_value(fregs, ret) \
+-	regs_set_return_value(&arch_ftrace_regs(fregs)->regs, ret)
+-#define ftrace_override_function_with_return(fregs) \
+-	override_function_with_return(&arch_ftrace_regs(fregs)->regs)
+-#define ftrace_regs_query_register_offset(name) \
+-	regs_query_register_offset(name)
+-
+ #define ftrace_graph_func ftrace_graph_func
+ void ftrace_graph_func(unsigned long ip, unsigned long parent_ip,
+diff --git a/arch/powerpc/include/asm/ftrace.h b/arch/powerpc/include/asm/ftrace.h
+index e299fd47d201..0edfb874eb02 100644
+--- a/arch/powerpc/include/asm/ftrace.h
++++ b/arch/powerpc/include/asm/ftrace.h
+@@ -33,10 +33,5 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec);
+... (219 more diff lines)
+
+##### A063
+=== 73adbd92f322 LA2 2024-10-23 +5/-4
+LoongArch: KVM: Mark hrtimer to expire in hard interrupt context
+
+Like commit 2c0d278f3293f ("KVM: LAPIC: Mark hrtimer to expire in hard
+interrupt context") and commit 9090825fa9974 ("KVM: arm/arm64: Let the
+timer expire in hardirq context on RT"), On PREEMPT_RT enabled kernels
+unmarked hrtimers are moved into soft interrupt expiry mode by default.
+Then the timers are canceled from an preempt-notifier which is invoked
+with disabled preemption which is not allowed on PREEMPT_RT.
+
+The timer callback is short so in could be invoked in hard-IRQ context.
+So let the timer expire on hard-IRQ context even on -RT.
+
+This fix a "scheduling while atomic" bug for PREEMPT_RT enabled kernels:
+
+ BUG: scheduling while atomic: qemu-system-loo/1011/0x00000002
+ Modules linked in: amdgpu rfkill nft_fib_inet nft_fib_ipv4 nft_fib_ipv6 nft_fib nft_reject_inet nf_reject_ipv4 nf_reject_ipv6 nft_reject nft_ct nft_chain_nat ns
+ CPU: 1 UID: 0 PID: 1011 Comm: qemu-system-loo Tainted: G        W          6.12.0-rc2+ #1774
+ Tainted: [W]=WARN
+ Hardware name: Loongson Loongson-3A5000-7A1000-1w-CRB/Loongson-LS3A5000-7A1000-1w-CRB, BIOS vUDK2018-LoongArch-V2.0.0-prebeta9 10/21/2022
+ Stack : ffffffffffffffff 0000000000000000 9000000004e3ea38 9000000116744000
+         90000001167475a0 0000000000000000 90000001167475a8 9000000005644830
+         90000000058dc000 90000000058dbff8 9000000116747420 0000000000000001
+         0000000000000001 6a613fc938313980 000000000790c000 90000001001c1140
+         00000000000003fe 0000000000000001 000000000000000d 0000000000000003
+         0000000000000030 00000000000003f3 000000000790c000 9000000116747830
+         90000000057ef000 0000000000000000 9000000005644830 0000000000000004
+         0000000000000000 90000000057f4b58 0000000000000001 9000000116747868
+         900000000451b600 9000000005644830 9000000003a13998 0000000010000020
+         00000000000000b0 0000000000000004 0000000000000000 0000000000071c1d
+         ...
+ Call Trace:
+ [<9000000003a13998>] show_stack+0x38/0x180
+ [<9000000004e3ea34>] dump_stack_lvl+0x84/0xc0
+ [<9000000003a71708>] __schedule_bug+0x48/0x60
+ [<9000000004e45734>] __schedule+0x1114/0x1660
+ [<9000000004e46040>] schedule_rtlock+0x20/0x60
+ [<9000000004e4e330>] rtlock_slowlock_locked+0x3f0/0x10a0
+ [<9000000004e4f038>] rt_spin_lock+0x58/0x80
+ [<9000000003b02d68>] hrtimer_cancel_wait_running+0x68/0xc0
+ [<9000000003b02e30>] hrtimer_cancel+0x70/0x80
+ [<ffff80000235eb70>] kvm_restore_timer+0x50/0x1a0 [kvm]
+functions: arch/loongarch/kvm/timer.c:_kvm_save_timer, arch/loongarch/kvm/vcpu.c:kvm_arch_vcpu_create
+fixes: 
+diff --git a/arch/loongarch/kvm/timer.c b/arch/loongarch/kvm/timer.c
+index 74a4b5c272d6..32dc213374be 100644
+--- a/arch/loongarch/kvm/timer.c
++++ b/arch/loongarch/kvm/timer.c
+@@ -162,8 +162,9 @@ static void _kvm_save_timer(struct kvm_vcpu *vcpu)
+ 
+ 		/*
+-		 * HRTIMER_MODE_PINNED is suggested since vcpu may run in
+-		 * the same physical cpu in next time
++		 * HRTIMER_MODE_PINNED_HARD is suggested since vcpu may run in
++		 * the same physical cpu in next time, and the timer should run
++		 * in hardirq context even in the PREEMPT_RT case.
+ 		 */
+-		hrtimer_start(&vcpu->arch.swtimer, expire, HRTIMER_MODE_ABS_PINNED);
++		hrtimer_start(&vcpu->arch.swtimer, expire, HRTIMER_MODE_ABS_PINNED_HARD);
+ 	}
+ }
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index 0697b1064251..174734a23d0a 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -1458,5 +1458,5 @@ int kvm_arch_vcpu_create(struct kvm_vcpu *vcpu)
+ 	vcpu->arch.flush_gpa = INVALID_GPA;
+ 
+-	hrtimer_init(&vcpu->arch.swtimer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED);
++	hrtimer_init(&vcpu->arch.swtimer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS_PINNED_HARD);
+ 	vcpu->arch.swtimer.function = kvm_swtimer_wakeup;
+ 
+
+##### A064
+=== aecaf181651c LA2 2024-10-30 +73/-62
+jump_label: adjust inline asm to be consistent
+
+To avoid duplication of inline asm between C and Rust, we need to
+import the inline asm from the relevant `jump_label.h` header into Rust.
+To make that easier, this patch updates the header files to expose the
+inline asm via a new ARCH_STATIC_BRANCH_ASM macro.
+
+The header files are all updated to define a ARCH_STATIC_BRANCH_ASM that
+takes the same arguments in a consistent order so that Rust can use the
+same logic for every architecture.
+functions: 
+fixes: 
+ arch/arm/include/asm/jump_label.h       | 14 +++++++++-----
+ arch/arm64/include/asm/jump_label.h     | 20 +++++++++++++-------
+ arch/loongarch/include/asm/jump_label.h | 16 ++++++++++------
+ arch/riscv/include/asm/jump_label.h     | 50 ++++++++++++++++++++++++++++----------------------
+ arch/x86/include/asm/jump_label.h       | 35 +++++++++++++----------------------
+ 5 files changed, 73 insertions(+), 62 deletions(-)
+diff --git a/arch/arm/include/asm/jump_label.h b/arch/arm/include/asm/jump_label.h
+index e4eb54f6cd9f..a35aba7f548c 100644
+--- a/arch/arm/include/asm/jump_label.h
++++ b/arch/arm/include/asm/jump_label.h
+@@ -10,11 +10,15 @@
+ #define JUMP_LABEL_NOP_SIZE 4
+ 
++/* This macro is also expanded on the Rust side. */
++#define ARCH_STATIC_BRANCH_ASM(key, label)		\
++	"1:\n\t"					\
++	WASM(nop) "\n\t"				\
++	".pushsection __jump_table,  \"aw\"\n\t"	\
++	".word 1b, " label ", " key "\n\t"		\
++	".popsection\n\t"				\
++
+ static __always_inline bool arch_static_branch(struct static_key *key, bool branch)
+ {
+-	asm goto("1:\n\t"
+-		 WASM(nop) "\n\t"
+-		 ".pushsection __jump_table,  \"aw\"\n\t"
+-		 ".word 1b, %l[l_yes], %c0\n\t"
+-		 ".popsection\n\t"
++	asm goto(ARCH_STATIC_BRANCH_ASM("%c0", "%l[l_yes]")
+ 		 : :  "i" (&((char *)key)[branch]) :  : l_yes);
+ 
+diff --git a/arch/arm64/include/asm/jump_label.h b/arch/arm64/include/asm/jump_label.h
+index a0a5bbae7229..424ed421cd97 100644
+--- a/arch/arm64/include/asm/jump_label.h
++++ b/arch/arm64/include/asm/jump_label.h
+@@ -20,8 +20,12 @@
+ 	".pushsection	__jump_table, \"aw\"\n\t"	\
+ 	".align		3\n\t"				\
+-	".long		1b - ., %l["#label"] - .\n\t"	\
+-	".quad		%c0 - .\n\t"			\
+-	".popsection\n\t"				\
+-	:  :  "i"(key) :  : label
++	".long		1b - ., " label " - .\n\t"	\
++	".quad		" key " - .\n\t"		\
++	".popsection\n\t"
++
++/* This macro is also expanded on the Rust side. */
++#define ARCH_STATIC_BRANCH_ASM(key, label)		\
++	"1:	nop\n\t"				\
++	JUMP_TABLE_ENTRY(key, label)
+ 
+ static __always_inline bool arch_static_branch(struct static_key * const key,
+@@ -31,6 +35,6 @@ static __always_inline bool arch_static_branch(struct static_key * const key,
+ 
+ 	asm goto(
+-		"1:	nop					\n\t"
+-		JUMP_TABLE_ENTRY(k, l_yes)
++		ARCH_STATIC_BRANCH_ASM("%c0", "%l[l_yes]")
++		:  :  "i"(k) :  : l_yes
+ 		);
+ 
+@@ -44,7 +48,9 @@ static __always_inline bool arch_static_branch_jump(struct static_key * const ke
+ {
+ 	char *k = &((char *)key)[branch];
++
+ 	asm goto(
+... (178 more diff lines)
+
+##### A065
+=== 2560014ec150 LA2 2024-12-01 +0/-3
+loongarch, um, xtensa: get rid of generated arch/$ARCH/include/asm/param.h
+
+For loongarch and xtensa that gets them to do what x86 et.al. are
+doing - have asm/param.h resolve to uapi variant, which is generated
+by mandatory-y += param.h and contains exact same include.
+
+On um it will resolve to x86 uapi variant instead, which also contains
+the same include (um doesn't have uapi headers, but it does build the
+host ones).
+functions: 
+fixes: 
+diff --git a/arch/loongarch/include/asm/Kbuild b/arch/loongarch/include/asm/Kbuild
+index 80ddb5edb845..b04d2cef935f 100644
+--- a/arch/loongarch/include/asm/Kbuild
++++ b/arch/loongarch/include/asm/Kbuild
+@@ -11,4 +11,3 @@ generic-y += ioctl.h
+ generic-y += mmzone.h
+ generic-y += statfs.h
+-generic-y += param.h
+ generic-y += text-patching.h
+diff --git a/arch/um/include/asm/Kbuild b/arch/um/include/asm/Kbuild
+index 04ab3b653a48..b6810db24ca4 100644
+--- a/arch/um/include/asm/Kbuild
++++ b/arch/um/include/asm/Kbuild
+@@ -16,5 +16,4 @@ generic-y += mmiowb.h
+ generic-y += module.h
+ generic-y += module.lds.h
+-generic-y += param.h
+ generic-y += parport.h
+ generic-y += percpu.h
+diff --git a/arch/xtensa/include/asm/Kbuild b/arch/xtensa/include/asm/Kbuild
+index cc5dba738389..13fe45dea296 100644
+--- a/arch/xtensa/include/asm/Kbuild
++++ b/arch/xtensa/include/asm/Kbuild
+@@ -4,5 +4,4 @@ generic-y += extable.h
+ generic-y += kvm_para.h
+ generic-y += mcs_spinlock.h
+-generic-y += param.h
+ generic-y += parport.h
+ generic-y += qrwlock.h
+
+##### A066
+=== 4346ba160409 LA2 2024-12-26 +538/-245
+fprobe: Rewrite fprobe on function-graph tracer
+
+Rewrite fprobe implementation on function-graph tracer.
+Major API changes are:
+ -  'nr_maxactive' field is deprecated.
+ -  This depends on CONFIG_DYNAMIC_FTRACE_WITH_ARGS or
+    !CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS, and
+    CONFIG_HAVE_FUNCTION_GRAPH_FREGS. So currently works only
+    on x86_64.
+ -  Currently the entry size is limited in 15 * sizeof(long).
+ -  If there is too many fprobe exit handler set on the same
+    function, it will fail to probe.
+functions: kernel/trace/fprobe.c:__fprobe_handler, kernel/trace/fprobe.c:fprobe_handler, kernel/trace/fprobe.c:fprobe_kprobe_handler, kernel/trace/fprobe.c:fprobe_exit_handler, kernel/trace/fprobe.c:fprobe_init, kernel/trace/fprobe.c:fprobe_init_rethook, kernel/trace/fprobe.c:fprobe_fail_cleanup, kernel/trace/fprobe.c:register_fprobe, kernel/trace/fprobe.c:register_fprobe_ips, kernel/trace/fprobe.c:fprobe_is_registered, kernel/trace/fprobe.c:unregister_fprobe, lib/test_fprobe.c:fprobe_selftest_nest_target
+fixes: 
+ arch/arm64/include/asm/ftrace.h     |   6 +
+ arch/loongarch/include/asm/ftrace.h |   6 +
+ arch/powerpc/include/asm/ftrace.h   |   6 +
+ arch/riscv/include/asm/ftrace.h     |   5 +
+ arch/s390/include/asm/ftrace.h      |   6 +
+ arch/x86/include/asm/ftrace.h       |   6 +
+ include/linux/fprobe.h              |  58 ++++--
+ kernel/trace/Kconfig                |   8 +-
+ kernel/trace/fprobe.c               | 637 ++++++++++++++++++++++++++++++++++++++++----------------
+ lib/test_fprobe.c                   |  45 ----
+ 10 files changed, 538 insertions(+), 245 deletions(-)
+diff --git a/arch/arm64/include/asm/ftrace.h b/arch/arm64/include/asm/ftrace.h
+index 10e56522122a..876e88ad4119 100644
+--- a/arch/arm64/include/asm/ftrace.h
++++ b/arch/arm64/include/asm/ftrace.h
+@@ -136,4 +136,10 @@ ftrace_regs_get_frame_pointer(const struct ftrace_regs *fregs)
+ }
+ 
++static __always_inline unsigned long
++ftrace_regs_get_return_address(const struct ftrace_regs *fregs)
++{
++	return arch_ftrace_regs(fregs)->lr;
++}
++
+ static __always_inline struct pt_regs *
+ ftrace_partial_regs(const struct ftrace_regs *fregs, struct pt_regs *regs)
+diff --git a/arch/loongarch/include/asm/ftrace.h b/arch/loongarch/include/asm/ftrace.h
+index ceb3e3d9c0d3..6e0a99763a9a 100644
+--- a/arch/loongarch/include/asm/ftrace.h
++++ b/arch/loongarch/include/asm/ftrace.h
+@@ -62,4 +62,10 @@ ftrace_regs_set_instruction_pointer(struct ftrace_regs *fregs, unsigned long ip)
+ 	(arch_ftrace_regs(fregs)->regs.regs[22])
+ 
++static __always_inline unsigned long
++ftrace_regs_get_return_address(struct ftrace_regs *fregs)
++{
++	return *(unsigned long *)(arch_ftrace_regs(fregs)->regs.regs[1]);
++}
++
+ #define ftrace_graph_func ftrace_graph_func
+ void ftrace_graph_func(unsigned long ip, unsigned long parent_ip,
+diff --git a/arch/powerpc/include/asm/ftrace.h b/arch/powerpc/include/asm/ftrace.h
+index fe181bafdca4..82da7c7a1d12 100644
+--- a/arch/powerpc/include/asm/ftrace.h
++++ b/arch/powerpc/include/asm/ftrace.h
+@@ -58,4 +58,10 @@ ftrace_regs_set_instruction_pointer(struct ftrace_regs *fregs,
+ }
+ 
++static __always_inline unsigned long
++ftrace_regs_get_return_address(struct ftrace_regs *fregs)
++{
++	return arch_ftrace_regs(fregs)->regs.link;
++}
++
+ struct ftrace_ops;
+ 
+diff --git a/arch/riscv/include/asm/ftrace.h b/arch/riscv/include/asm/ftrace.h
+index 7064a530794b..c4721ce44ca4 100644
+--- a/arch/riscv/include/asm/ftrace.h
++++ b/arch/riscv/include/asm/ftrace.h
+@@ -187,4 +187,9 @@ static __always_inline unsigned long ftrace_regs_get_return_value(const struct f
+ }
+ 
++static __always_inline unsigned long ftrace_regs_get_return_address(const struct ftrace_regs *fregs)
++{
++	return arch_ftrace_regs(fregs)->ra;
++}
++
+ static __always_inline void ftrace_regs_set_return_value(struct ftrace_regs *fregs,
+ 							 unsigned long ret)
+diff --git a/arch/s390/include/asm/ftrace.h b/arch/s390/include/asm/ftrace.h
+... (986 more diff lines)
+
+##### A067
+=== 762abbc0d09f LA2 2024-12-26 +33/-8
+fprobe: Use ftrace_regs in fprobe exit handler
+
+Change the fprobe exit handler to use ftrace_regs structure instead of
+pt_regs. This also introduce HAVE_FTRACE_REGS_HAVING_PT_REGS which
+means the ftrace_regs is including the pt_regs so that ftrace_regs
+can provide pt_regs without memory allocation.
+Fprobe introduces a new dependency with that.
+functions: kernel/trace/bpf_trace.c:kprobe_multi_link_exit_handler, kernel/trace/fprobe.c:fprobe_exit_handler, kernel/trace/trace_fprobe.c:fexit_dispatcher, lib/test_fprobe.c:fp_exit_handler
+fixes: 
+ arch/loongarch/Kconfig          | 1 +
+ arch/s390/Kconfig               | 1 +
+ arch/x86/Kconfig                | 1 +
+ include/linux/fprobe.h          | 2 +-
+ include/linux/ftrace.h          | 6 ++++++
+ kernel/trace/Kconfig            | 7 +++++++
+ kernel/trace/bpf_trace.c        | 6 +++++-
+ kernel/trace/fprobe.c           | 3 ++-
+ kernel/trace/trace_fprobe.c     | 6 +++++-
+ lib/test_fprobe.c               | 6 +++---
+ samples/fprobe/fprobe_example.c | 2 +-
+ 11 files changed, 33 insertions(+), 8 deletions(-)
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index 49f5bfc00e5a..6396615ec035 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -129,4 +129,5 @@ config LOONGARCH
+ 	select HAVE_DYNAMIC_FTRACE
+ 	select HAVE_DYNAMIC_FTRACE_WITH_ARGS
++	select HAVE_FTRACE_REGS_HAVING_PT_REGS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_REGS
+diff --git a/arch/s390/Kconfig b/arch/s390/Kconfig
+index 102029e56cf0..d8eee56c10b6 100644
+--- a/arch/s390/Kconfig
++++ b/arch/s390/Kconfig
+@@ -184,4 +184,5 @@ config S390
+ 	select HAVE_DYNAMIC_FTRACE
+ 	select HAVE_DYNAMIC_FTRACE_WITH_ARGS
++	select HAVE_FTRACE_REGS_HAVING_PT_REGS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_REGS
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index ff0d7e07c611..6cb420783ef3 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -226,4 +226,5 @@ config X86
+ 	select HAVE_DYNAMIC_FTRACE_WITH_REGS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_ARGS	if X86_64
++	select HAVE_FTRACE_REGS_HAVING_PT_REGS	if X86_64
+ 	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+ 	select HAVE_SAMPLE_FTRACE_DIRECT	if X86_64
+diff --git a/include/linux/fprobe.h b/include/linux/fprobe.h
+index ca64ee5e45d2..ef609bcca0f9 100644
+--- a/include/linux/fprobe.h
++++ b/include/linux/fprobe.h
+@@ -15,5 +15,5 @@ typedef int (*fprobe_entry_cb)(struct fprobe *fp, unsigned long entry_ip,
+ 
+ typedef void (*fprobe_exit_cb)(struct fprobe *fp, unsigned long entry_ip,
+-			       unsigned long ret_ip, struct pt_regs *regs,
++			       unsigned long ret_ip, struct ftrace_regs *regs,
+ 			       void *entry_data);
+ 
+diff --git a/include/linux/ftrace.h b/include/linux/ftrace.h
+index 9a1e768e47da..bf8bb6c10553 100644
+--- a/include/linux/ftrace.h
++++ b/include/linux/ftrace.h
+@@ -177,4 +177,10 @@ static inline struct pt_regs *arch_ftrace_get_regs(struct ftrace_regs *fregs)
+ #endif /* CONFIG_HAVE_DYNAMIC_FTRACE_WITH_ARGS */
+ 
++#ifdef CONFIG_HAVE_FTRACE_REGS_HAVING_PT_REGS
++
++static_assert(sizeof(struct pt_regs) == ftrace_regs_size());
++
++#endif /* CONFIG_HAVE_FTRACE_REGS_HAVING_PT_REGS */
++
+ static __always_inline struct pt_regs *ftrace_get_regs(struct ftrace_regs *fregs)
+ {
+diff --git a/kernel/trace/Kconfig b/kernel/trace/Kconfig
+index f10ca86fbfad..7f8165f2049a 100644
+--- a/kernel/trace/Kconfig
++++ b/kernel/trace/Kconfig
+... (102 more diff lines)
+
+##### A068
+=== a762e9267dca LA2 2024-12-26 +10/-0
+ftrace: Add CONFIG_HAVE_FTRACE_GRAPH_FUNC
+
+Add CONFIG_HAVE_FTRACE_GRAPH_FUNC kconfig in addition to ftrace_graph_func
+macro check. This is for the other feature (e.g. FPROBE) which requires to
+access ftrace_regs from fgraph_ops::entryfunc() can avoid compiling if
+the fgraph can not pass the valid ftrace_regs.
+functions: 
+fixes: 
+ arch/arm64/Kconfig     | 1 +
+ arch/loongarch/Kconfig | 1 +
+ arch/powerpc/Kconfig   | 1 +
+ arch/riscv/Kconfig     | 1 +
+ arch/x86/Kconfig       | 1 +
+ kernel/trace/Kconfig   | 5 +++++
+ 6 files changed, 10 insertions(+)
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 5f086777dad9..a8644a5af9fb 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -217,4 +217,5 @@ config ARM64
+ 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
+ 	select HAVE_GUP_FAST
++	select HAVE_FTRACE_GRAPH_FUNC
+ 	select HAVE_FTRACE_MCOUNT_RECORD
+ 	select HAVE_FUNCTION_TRACER
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index 6396615ec035..fe0d9e549ca9 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -136,4 +136,5 @@ config LOONGARCH
+ 	select HAVE_EXIT_THREAD
+ 	select HAVE_GUP_FAST
++	select HAVE_FTRACE_GRAPH_FUNC
+ 	select HAVE_FTRACE_MCOUNT_RECORD
+ 	select HAVE_FUNCTION_ARG_ACCESS_API
+diff --git a/arch/powerpc/Kconfig b/arch/powerpc/Kconfig
+index a0ce777f9706..c28349ad1ac2 100644
+--- a/arch/powerpc/Kconfig
++++ b/arch/powerpc/Kconfig
+@@ -241,4 +241,5 @@ config PPC
+ 	select HAVE_EFFICIENT_UNALIGNED_ACCESS
+ 	select HAVE_GUP_FAST
++	select HAVE_FTRACE_GRAPH_FUNC
+ 	select HAVE_FTRACE_MCOUNT_RECORD
+ 	select HAVE_FUNCTION_ARG_ACCESS_API
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 1e807c61258f..c736e349f222 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -147,4 +147,5 @@ config RISCV
+ 	select HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+ 	select HAVE_DYNAMIC_FTRACE_WITH_ARGS if HAVE_DYNAMIC_FTRACE
++	select HAVE_FTRACE_GRAPH_FUNC
+ 	select HAVE_FTRACE_MCOUNT_RECORD if !XIP_KERNEL
+ 	select HAVE_FUNCTION_GRAPH_TRACER
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 6cb420783ef3..db435d159c1b 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -236,4 +236,5 @@ config X86
+ 	select HAVE_GUP_FAST
+ 	select HAVE_FENTRY			if X86_64 || DYNAMIC_FTRACE
++	select HAVE_FTRACE_GRAPH_FUNC		if HAVE_FUNCTION_GRAPH_TRACER
+ 	select HAVE_FTRACE_MCOUNT_RECORD
+ 	select HAVE_FUNCTION_GRAPH_FREGS	if HAVE_FUNCTION_GRAPH_TRACER
+diff --git a/kernel/trace/Kconfig b/kernel/trace/Kconfig
+index 82654bbfad9a..2fc55a1a88aa 100644
+--- a/kernel/trace/Kconfig
++++ b/kernel/trace/Kconfig
+@@ -35,4 +35,9 @@ config HAVE_FUNCTION_GRAPH_FREGS
+ 	bool
+ 
++config HAVE_FTRACE_GRAPH_FUNC
++	bool
++	help
+... (4 more diff lines)
+
+##### A069
+=== b5fa903b7f7c LA2 2024-12-26 +100/-0
+fprobe: Add fprobe_header encoding feature
+
+Fprobe store its data structure address and size on the fgraph return stack
+by __fprobe_header. But most 64bit architecture can combine those to
+one unsigned long value because 4 MSB in the kernel address are the same.
+With this encoding, fprobe can consume less space on ret_stack.
+
+This introduces asm/fprobe.h to define arch dependent encode/decode
+macros. Note that since fprobe depends on CONFIG_HAVE_FUNCTION_GRAPH_FREGS,
+currently only arm64, loongarch, riscv, s390 and x86 are supported.
+functions: 
+fixes: 
+ arch/arm64/include/asm/Kbuild       |  1 +
+ arch/loongarch/include/asm/fprobe.h | 12 ++++++++++++
+ arch/riscv/include/asm/Kbuild       |  1 +
+ arch/s390/include/asm/fprobe.h      | 10 ++++++++++
+ arch/x86/include/asm/Kbuild         |  1 +
+ include/asm-generic/fprobe.h        | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ kernel/trace/fprobe.c               | 29 +++++++++++++++++++++++++++++
+ 7 files changed, 100 insertions(+)
+diff --git a/arch/arm64/include/asm/Kbuild b/arch/arm64/include/asm/Kbuild
+index 4e350df9a02d..d2ff8f6c3231 100644
+--- a/arch/arm64/include/asm/Kbuild
++++ b/arch/arm64/include/asm/Kbuild
+@@ -9,4 +9,5 @@ syscall-y += unistd_compat_32.h
+ 
+ generic-y += early_ioremap.h
++generic-y += fprobe.h
+ generic-y += mcs_spinlock.h
+ generic-y += mmzone.h
+diff --git a/arch/loongarch/include/asm/fprobe.h b/arch/loongarch/include/asm/fprobe.h
+new file mode 100644
+index 000000000000..7af3b3126caf
+--- /dev/null
++++ b/arch/loongarch/include/asm/fprobe.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _ASM_LOONGARCH_FPROBE_H
++#define _ASM_LOONGARCH_FPROBE_H
++
++/*
++ * Explicitly undef ARCH_DEFINE_ENCODE_FPROBE_HEADER, because loongarch does not
++ * have enough number of fixed MSBs of the address of kernel objects for
++ * encoding the size of data in fprobe_header. Use 2-entries encoding instead.
++ */
++#undef ARCH_DEFINE_ENCODE_FPROBE_HEADER
++
++#endif /* _ASM_LOONGARCH_FPROBE_H */
+diff --git a/arch/riscv/include/asm/Kbuild b/arch/riscv/include/asm/Kbuild
+index de13d5a234f8..bd5fc9403295 100644
+--- a/arch/riscv/include/asm/Kbuild
++++ b/arch/riscv/include/asm/Kbuild
+@@ -5,4 +5,5 @@ syscall-y += syscall_table_64.h
+ generic-y += early_ioremap.h
+ generic-y += flat.h
++generic-y += fprobe.h
+ generic-y += kvm_para.h
+ generic-y += mmzone.h
+diff --git a/arch/s390/include/asm/fprobe.h b/arch/s390/include/asm/fprobe.h
+new file mode 100644
+index 000000000000..5ef600b372f4
+--- /dev/null
++++ b/arch/s390/include/asm/fprobe.h
+@@ -0,0 +1,10 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _ASM_S390_FPROBE_H
++#define _ASM_S390_FPROBE_H
++
++#include <asm-generic/fprobe.h>
++
++#undef FPROBE_HEADER_MSB_PATTERN
++#define FPROBE_HEADER_MSB_PATTERN 0
++
++#endif /* _ASM_S390_FPROBE_H */
+diff --git a/arch/x86/include/asm/Kbuild b/arch/x86/include/asm/Kbuild
+index 6c23d1661b17..58f4ddecc5fa 100644
+--- a/arch/x86/include/asm/Kbuild
++++ b/arch/x86/include/asm/Kbuild
+@@ -11,4 +11,5 @@ generated-y += xen-hypercalls.h
+ 
+... (104 more diff lines)
+
+##### A070
+=== 86758b504864 LA2 2025-02-18 +55/-59
+mm/ioremap: pass pgprot_t to ioremap_prot() instead of unsigned long
+
+ioremap_prot() currently accepts pgprot_val parameter as an unsigned long,
+thus implicitly assuming that pgprot_val and pgprot_t could never be
+bigger than unsigned long.  But this assumption soon will not be true on
+arm64 when using D128 pgtables.  In 128 bit page table configuration,
+unsigned long is 64 bit, but pgprot_t is 128 bit.
+
+Passing platform abstracted pgprot_t argument is better as compared to
+size based data types.  Let's change the parameter to directly pass
+pgprot_t like another similar helper generic_ioremap_prot().
+
+Without this change in place, D128 configuration does not work on arm64 as
+the top 64 bits gets silently stripped when passing the protection value
+to this function.
+functions: arch/arc/mm/ioremap.c:ioremap, arch/arc/mm/ioremap.c:ioremap_prot, arch/arm64/kernel/acpi.c:acpi_os_ioremap, arch/arm64/mm/ioremap.c:ioremap_prot, arch/mips/mm/ioremap.c:ioremap_prot, arch/mips/mm/ioremap64.c:ioremap_prot, arch/parisc/mm/ioremap.c:ioremap_prot, arch/powerpc/mm/ioremap.c:ioremap_prot, arch/powerpc/platforms/ps3/spu.c:setup_areas, arch/riscv/kernel/acpi.c:acpi_os_ioremap, arch/s390/pci/pci.c:ioremap_prot, arch/sh/boards/mach-landisk/setup.c:landisk_devices_setup
+fixes: 
+ arch/sh/boards/mach-lboxre2/setup.c |  2 +-
+ arch/sh/boards/mach-sh03/setup.c    |  2 +-
+ arch/sh/include/asm/io.h            |  2 +-
+ arch/sh/mm/ioremap.c                |  3 +--
+ arch/x86/include/asm/io.h           |  2 +-
+ arch/x86/mm/ioremap.c               |  4 ++--
+ arch/xtensa/include/asm/io.h        |  6 +++---
+ arch/xtensa/mm/ioremap.c            |  4 ++--
+ include/asm-generic/io.h            |  4 ++--
+ mm/ioremap.c                        |  4 ++--
+ mm/memory.c                         |  6 +++---
+ 30 files changed, 55 insertions(+), 59 deletions(-)
+diff --git a/arch/arc/mm/ioremap.c b/arch/arc/mm/ioremap.c
+index b07004d53267..fd8897a0e52c 100644
+--- a/arch/arc/mm/ioremap.c
++++ b/arch/arc/mm/ioremap.c
+@@ -33,5 +33,5 @@ void __iomem *ioremap(phys_addr_t paddr, unsigned long size)
+ 
+ 	return ioremap_prot(paddr, size,
+-			    pgprot_val(pgprot_noncached(PAGE_KERNEL)));
++			    pgprot_noncached(PAGE_KERNEL));
+ }
+ EXPORT_SYMBOL(ioremap);
+@@ -45,8 +45,6 @@ EXPORT_SYMBOL(ioremap);
+  */
+ void __iomem *ioremap_prot(phys_addr_t paddr, size_t size,
+-			   unsigned long flags)
++			   pgprot_t prot)
+ {
+-	pgprot_t prot = __pgprot(flags);
+-
+ 	/* force uncached */
+ 	return generic_ioremap_prot(paddr, size, pgprot_noncached(prot));
+diff --git a/arch/arm64/include/asm/io.h b/arch/arm64/include/asm/io.h
+index 76ebbdc6ffdd..9b96840fb979 100644
+--- a/arch/arm64/include/asm/io.h
++++ b/arch/arm64/include/asm/io.h
+@@ -271,7 +271,7 @@ int arm64_ioremap_prot_hook_register(const ioremap_prot_hook_t hook);
+ 
+ #define ioremap_wc(addr, size)	\
+-	ioremap_prot((addr), (size), PROT_NORMAL_NC)
++	ioremap_prot((addr), (size), __pgprot(PROT_NORMAL_NC))
+ #define ioremap_np(addr, size)	\
+-	ioremap_prot((addr), (size), PROT_DEVICE_nGnRnE)
++	ioremap_prot((addr), (size), __pgprot(PROT_DEVICE_nGnRnE))
+ 
+ /*
+@@ -294,5 +294,5 @@ static inline void __iomem *ioremap_cache(phys_addr_t addr, size_t size)
+ 		return (void __iomem *)__phys_to_virt(addr);
+ 
+-	return ioremap_prot(addr, size, PROT_NORMAL);
++	return ioremap_prot(addr, size, __pgprot(PROT_NORMAL));
+ }
+ 
+diff --git a/arch/arm64/kernel/acpi.c b/arch/arm64/kernel/acpi.c
+index e6f66491fbe9..b9a66fc146c9 100644
+--- a/arch/arm64/kernel/acpi.c
++++ b/arch/arm64/kernel/acpi.c
+@@ -380,5 +380,5 @@ void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size)
+ 		}
+ 	}
+-	return ioremap_prot(phys, size, pgprot_val(prot));
++	return ioremap_prot(phys, size, prot);
+ }
+ 
+diff --git a/arch/arm64/mm/ioremap.c b/arch/arm64/mm/ioremap.c
+index 6cc0b7e7eb03..10e246f11271 100644
+--- a/arch/arm64/mm/ioremap.c
++++ b/arch/arm64/mm/ioremap.c
+@@ -16,8 +16,7 @@ int arm64_ioremap_prot_hook_register(ioremap_prot_hook_t hook)
+ 
+ void __iomem *ioremap_prot(phys_addr_t phys_addr, size_t size,
+... (416 more diff lines)
+
+##### A071
+=== b2aba529bf77 LA2 2025-02-24 +0/-15
+KVM: Drop kvm_arch_sync_events() now that all implementations are nops
+
+Remove kvm_arch_sync_events() now that x86 no longer uses it (no other
+arch has ever used it).
+
+No functional change intended.
+functions: arch/x86/kvm/x86.c:kvm_arch_sync_events, virt/kvm/kvm_main.c:kvm_destroy_vm
+fixes: 
+ arch/arm64/include/asm/kvm_host.h     | 2 --
+ arch/loongarch/include/asm/kvm_host.h | 1 -
+ arch/mips/include/asm/kvm_host.h      | 1 -
+ arch/powerpc/include/asm/kvm_host.h   | 1 -
+ arch/riscv/include/asm/kvm_host.h     | 2 --
+ arch/s390/include/asm/kvm_host.h      | 1 -
+ arch/x86/kvm/x86.c                    | 5 -----
+ include/linux/kvm_host.h              | 1 -
+ virt/kvm/kvm_main.c                   | 1 -
+ 9 files changed, 15 deletions(-)
+diff --git a/arch/arm64/include/asm/kvm_host.h b/arch/arm64/include/asm/kvm_host.h
+index d919557af5e5..39dff4fa1255 100644
+--- a/arch/arm64/include/asm/kvm_host.h
++++ b/arch/arm64/include/asm/kvm_host.h
+@@ -1335,6 +1335,4 @@ static inline bool kvm_system_needs_idmapped_vectors(void)
+ }
+ 
+-static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+-
+ void kvm_init_host_debug_data(void);
+ void kvm_vcpu_load_debug(struct kvm_vcpu *vcpu);
+diff --git a/arch/loongarch/include/asm/kvm_host.h b/arch/loongarch/include/asm/kvm_host.h
+index 590982cd986e..ab5b7001e2ff 100644
+--- a/arch/loongarch/include/asm/kvm_host.h
++++ b/arch/loongarch/include/asm/kvm_host.h
+@@ -321,5 +321,4 @@ static inline bool kvm_is_ifetch_fault(struct kvm_vcpu_arch *arch)
+ /* Misc */
+ static inline void kvm_arch_hardware_unsetup(void) {}
+-static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+ static inline void kvm_arch_memslots_updated(struct kvm *kvm, u64 gen) {}
+ static inline void kvm_arch_vcpu_blocking(struct kvm_vcpu *vcpu) {}
+diff --git a/arch/mips/include/asm/kvm_host.h b/arch/mips/include/asm/kvm_host.h
+index f7222eb594ea..c14b10821817 100644
+--- a/arch/mips/include/asm/kvm_host.h
++++ b/arch/mips/include/asm/kvm_host.h
+@@ -887,5 +887,4 @@ extern int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu,
+ 			     struct kvm_mips_interrupt *irq);
+ 
+-static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+ static inline void kvm_arch_free_memslot(struct kvm *kvm,
+ 					 struct kvm_memory_slot *slot) {}
+diff --git a/arch/powerpc/include/asm/kvm_host.h b/arch/powerpc/include/asm/kvm_host.h
+index 6e1108f8fce6..2d139c807577 100644
+--- a/arch/powerpc/include/asm/kvm_host.h
++++ b/arch/powerpc/include/asm/kvm_host.h
+@@ -903,5 +903,4 @@ struct kvm_vcpu_arch {
+ #define __KVM_HAVE_CREATE_DEVICE
+ 
+-static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+ static inline void kvm_arch_memslots_updated(struct kvm *kvm, u64 gen) {}
+ static inline void kvm_arch_flush_shadow_all(struct kvm *kvm) {}
+diff --git a/arch/riscv/include/asm/kvm_host.h b/arch/riscv/include/asm/kvm_host.h
+index cc33e35cd628..0e9c2fab6378 100644
+--- a/arch/riscv/include/asm/kvm_host.h
++++ b/arch/riscv/include/asm/kvm_host.h
+@@ -302,6 +302,4 @@ static inline bool kvm_arch_pmi_in_guest(struct kvm_vcpu *vcpu)
+ }
+ 
+-static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+-
+ #define KVM_RISCV_GSTAGE_TLB_MIN_ORDER		12
+ 
+diff --git a/arch/s390/include/asm/kvm_host.h b/arch/s390/include/asm/kvm_host.h
+index 9a367866cab0..424f899d8163 100644
+--- a/arch/s390/include/asm/kvm_host.h
++++ b/arch/s390/include/asm/kvm_host.h
+@@ -1057,5 +1057,4 @@ extern int kvm_s390_gisc_register(struct kvm *kvm, u32 gisc);
+ extern int kvm_s390_gisc_unregister(struct kvm *kvm, u32 gisc);
+ 
+-static inline void kvm_arch_sync_events(struct kvm *kvm) {}
+... (36 more diff lines)
+
+##### A072
+=== 3109d5ff484b LA2 2025-03-08 +5/-1
+LoongArch: Set hugetlb mmap base address aligned with pmd size
+
+With ltp test case "testcases/bin/hugefork02", there is a dmesg error
+report message such as:
+
+ kernel BUG at mm/hugetlb.c:5550!
+ Oops - BUG[#1]:
+ CPU: 0 UID: 0 PID: 1517 Comm: hugefork02 Not tainted 6.14.0-rc2+ #241
+ Hardware name: QEMU QEMU Virtual Machine, BIOS unknown 2/2/2022
+ pc 90000000004eaf1c ra 9000000000485538 tp 900000010edbc000 sp 900000010edbf940
+ a0 900000010edbfb00 a1 9000000108d20280 a2 00007fffe9474000 a3 00007ffff3474000
+ a4 0000000000000000 a5 0000000000000003 a6 00000000003cadd3 a7 0000000000000000
+ t0 0000000001ffffff t1 0000000001474000 t2 900000010ecd7900 t3 00007fffe9474000
+ t4 00007fffe9474000 t5 0000000000000040 t6 900000010edbfb00 t7 0000000000000001
+ t8 0000000000000005 u0 90000000004849d0 s9 900000010edbfa00 s0 9000000108d20280
+ s1 00007fffe9474000 s2 0000000002000000 s3 9000000108d20280 s4 9000000002b38b10
+ s5 900000010edbfb00 s6 00007ffff3474000 s7 0000000000000406 s8 900000010edbfa08
+    ra: 9000000000485538 unmap_vmas+0x130/0x218
+   ERA: 90000000004eaf1c __unmap_hugepage_range+0x6f4/0x7d0
+  PRMD: 00000004 (PPLV0 +PIE -PWE)
+  EUEN: 00000007 (+FPE +SXE +ASXE -BTE)
+  ECFG: 00071c1d (LIE=0,2-4,10-12 VS=7)
+ ESTAT: 000c0000 [BRK] (IS= ECode=12 EsubCode=0)
+ PRID: 0014c010 (Loongson-64bit, Loongson-3A5000)
+ Process hugefork02 (pid: 1517, threadinfo=00000000a670eaf4, task=000000007a95fc64)
+ Call Trace:
+ [<90000000004eaf1c>] __unmap_hugepage_range+0x6f4/0x7d0
+ [<9000000000485534>] unmap_vmas+0x12c/0x218
+ [<9000000000494068>] exit_mmap+0xe0/0x308
+ [<900000000025fdc4>] mmput+0x74/0x180
+ [<900000000026a284>] do_exit+0x294/0x898
+ [<900000000026aa30>] do_group_exit+0x30/0x98
+ [<900000000027bed4>] get_signal+0x83c/0x868
+ [<90000000002457b4>] arch_do_signal_or_restart+0x54/0xfa0
+ [<90000000015795e8>] irqentry_exit_to_user_mode+0xb8/0x138
+ [<90000000002572d0>] tlb_do_page_fault_1+0x114/0x1b4
+
+The problem is that base address allocated from hugetlbfs is not aligned
+with pmd size. Here add a checking for hugetlbfs and align base address
+with pmd size. After this patch the test case "testcases/bin/hugefork02"
+passes to run.
+functions: arch/loongarch/mm/mmap.c:arch_get_unmapped_area_common
+fixes: 
+diff --git a/arch/loongarch/mm/mmap.c b/arch/loongarch/mm/mmap.c
+index 914e82ff3f65..1df9e99582cc 100644
+--- a/arch/loongarch/mm/mmap.c
++++ b/arch/loongarch/mm/mmap.c
+@@ -4,4 +4,5 @@
+  */
+ #include <linux/export.h>
++#include <linux/hugetlb.h>
+ #include <linux/io.h>
+ #include <linux/kfence.h>
+@@ -64,6 +65,9 @@ static unsigned long arch_get_unmapped_area_common(struct file *filp,
+ 
+ 	info.length = len;
+-	info.align_mask = do_color_align ? (PAGE_MASK & SHM_ALIGN_MASK) : 0;
+ 	info.align_offset = pgoff << PAGE_SHIFT;
++	if (filp && is_file_hugepages(filp))
++		info.align_mask = huge_page_mask_align(filp);
++	else
++		info.align_mask = do_color_align ? (PAGE_MASK & SHM_ALIGN_MASK) : 0;
+ 
+ 	if (dir == DOWN) {
+
+##### A073
+=== c9117434c8f7 LA2 2025-03-08 +46/-1
+LoongArch: Use polling play_dead() when resuming from hibernation
+
+When CONFIG_RANDOM_KMALLOC_CACHES or other randomization infrastructrue
+enabled, the idle_task's stack may different between the booting kernel
+and target kernel. So when resuming from hibernation, an ACTION_BOOT_CPU
+IPI wakeup the idle instruction in arch_cpu_idle_dead() and jump to the
+interrupt handler. But since the stack pointer is changed, the interrupt
+handler cannot restore correct context.
+
+So rename the current arch_cpu_idle_dead() to idle_play_dead(), make it
+as the default version of play_dead(), and the new arch_cpu_idle_dead()
+call play_dead() directly. For hibernation, implement an arch-specific
+hibernate_resume_nonboot_cpu_disable() to use the polling version (idle
+instruction is replace by nop, and irq is disabled) of play_dead(), i.e.
+poll_play_dead(), to avoid IPI handler corrupting the idle_task's stack
+when resuming from hibernation.
+
+This solution is a little similar to commit 406f992e4a372dafbe3c ("x86 /
+hibernate: Use hlt_play_dead() when resuming from hibernation").
+functions: 
+fixes: 
+ arch/loongarch/kernel/smp.c | 47 ++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 46 insertions(+), 1 deletion(-)
+diff --git a/arch/loongarch/kernel/smp.c b/arch/loongarch/kernel/smp.c
+index fbf747447f13..4b24589c0b56 100644
+--- a/arch/loongarch/kernel/smp.c
++++ b/arch/loongarch/kernel/smp.c
+@@ -20,4 +20,5 @@
+ #include <linux/threads.h>
+ #include <linux/export.h>
++#include <linux/suspend.h>
+ #include <linux/syscore_ops.h>
+ #include <linux/time.h>
+@@ -424,5 +425,5 @@ void loongson_cpu_die(unsigned int cpu)
+ }
+ 
+-void __noreturn arch_cpu_idle_dead(void)
++static void __noreturn idle_play_dead(void)
+ {
+ 	register uint64_t addr;
+@@ -448,4 +449,48 @@ void __noreturn arch_cpu_idle_dead(void)
+ }
+ 
++#ifdef CONFIG_HIBERNATION
++static void __noreturn poll_play_dead(void)
++{
++	register uint64_t addr;
++	register void (*init_fn)(void);
++
++	idle_task_exit();
++	__this_cpu_write(cpu_state, CPU_DEAD);
++
++	__smp_mb();
++	do {
++		__asm__ __volatile__("nop\n\t");
++		addr = iocsr_read64(LOONGARCH_IOCSR_MBUF0);
++	} while (addr == 0);
++
++	init_fn = (void *)TO_CACHE(addr);
++	iocsr_write32(0xffffffff, LOONGARCH_IOCSR_IPI_CLEAR);
++
++	init_fn();
++	BUG();
++}
++#endif
++
++static void (*play_dead)(void) = idle_play_dead;
++
++void __noreturn arch_cpu_idle_dead(void)
++{
++	play_dead();
++	BUG(); /* play_dead() doesn't return */
++}
++
++#ifdef CONFIG_HIBERNATION
++int hibernate_resume_nonboot_cpu_disable(void)
++{
++	int ret;
++
++	play_dead = poll_play_dead;
++	ret = suspend_disable_secondary_cpus();
++	play_dead = idle_play_dead;
++
+... (6 more diff lines)
+
+##### A074
+=== 8268af309d07 LA2 2025-03-13 +21/-86
+arch, mm: set max_mapnr when allocating memory map for FLATMEM
+
+max_mapnr is essentially the size of the memory map for systems that use
+FLATMEM. There is no reason to calculate it in each and every architecture
+when it's anyway calculated in alloc_node_mem_map().
+
+Drop setting of max_mapnr from architecture code and set it once in
+alloc_node_mem_map().
+
+While on it, move definition of mem_map and max_mapnr to mm/mm_init.c so
+there won't be two copies for MMU and !MMU variants.
+functions: arch/alpha/mm/init.c:mem_init, arch/arc/mm/init.c:setup_arch_memory, arch/arm/mm/init.c:mem_init, arch/csky/mm/init.c:mem_init, arch/loongarch/mm/init.c:mem_init, arch/microblaze/mm/init.c:setup_memory, arch/mips/mm/init.c:paging_init, arch/nios2/kernel/setup.c:setup_arch, arch/nios2/mm/init.c:paging_init, arch/openrisc/mm/init.c:mem_init, arch/parisc/mm/init.c:mem_init, arch/powerpc/kernel/setup-common.c:setup_arch
+fixes: 
+ arch/sparc/mm/init_32.c            |  1 -
+ arch/um/include/shared/mem_user.h  |  1 -
+ arch/um/kernel/physmem.c           | 12 ------------
+ arch/um/kernel/um_arch.c           |  1 -
+ arch/x86/mm/init_32.c              |  3 ---
+ arch/xtensa/mm/init.c              |  1 -
+ include/asm-generic/memory_model.h |  5 +++--
+ include/linux/mm.h                 | 11 -----------
+ mm/memory.c                        |  8 --------
+ mm/mm_init.c                       | 25 +++++++++++++++++--------
+ mm/nommu.c                         |  4 ----
+ 26 files changed, 21 insertions(+), 86 deletions(-)
+diff --git a/arch/alpha/mm/init.c b/arch/alpha/mm/init.c
+index 61c2198b1359..ec0eeae9c653 100644
+--- a/arch/alpha/mm/init.c
++++ b/arch/alpha/mm/init.c
+@@ -277,5 +277,4 @@ void __init
+ mem_init(void)
+ {
+-	set_max_mapnr(max_low_pfn);
+ 	high_memory = (void *) __va(max_low_pfn * PAGE_SIZE);
+ 	memblock_free_all();
+diff --git a/arch/arc/mm/init.c b/arch/arc/mm/init.c
+index 6a71b23f1383..7ef883d58dc1 100644
+--- a/arch/arc/mm/init.c
++++ b/arch/arc/mm/init.c
+@@ -155,9 +155,4 @@ void __init setup_arch_memory(void)
+ 	arch_pfn_offset = min(min_low_pfn, min_high_pfn);
+ 	kmap_init();
+-
+-#else /* CONFIG_HIGHMEM */
+-	/* pfn_valid() uses this when FLATMEM=y and HIGHMEM=n */
+-	max_mapnr = max_low_pfn - min_low_pfn;
+-
+ #endif /* CONFIG_HIGHMEM */
+ 
+diff --git a/arch/arm/mm/init.c b/arch/arm/mm/init.c
+index 9aec1cb2386f..d4bcc745a044 100644
+--- a/arch/arm/mm/init.c
++++ b/arch/arm/mm/init.c
+@@ -276,6 +276,4 @@ void __init mem_init(void)
+ #endif
+ 
+-	set_max_mapnr(pfn_to_page(max_pfn) - mem_map);
+-
+ #ifdef CONFIG_SA1111
+ 	/* now that our DMA memory is actually so designated, we can free it */
+diff --git a/arch/csky/mm/init.c b/arch/csky/mm/init.c
+index ab51acbc19b2..ba6694d6170a 100644
+--- a/arch/csky/mm/init.c
++++ b/arch/csky/mm/init.c
+@@ -47,8 +47,4 @@ void __init mem_init(void)
+ #ifdef CONFIG_HIGHMEM
+ 	unsigned long tmp;
+-
+-	set_max_mapnr(highend_pfn - ARCH_PFN_OFFSET);
+-#else
+-	set_max_mapnr(max_low_pfn - ARCH_PFN_OFFSET);
+ #endif
+ 	high_memory = (void *) __va(max_low_pfn << PAGE_SHIFT);
+diff --git a/arch/loongarch/mm/init.c b/arch/loongarch/mm/init.c
+index ca5aa5f46a9f..00449df50db1 100644
+--- a/arch/loongarch/mm/init.c
++++ b/arch/loongarch/mm/init.c
+@@ -79,5 +79,4 @@ void __init paging_init(void)
+ void __init mem_init(void)
+ {
+-	max_mapnr = max_low_pfn;
+ 	high_memory = (void *) __va(max_low_pfn << PAGE_SHIFT);
+ 
+diff --git a/arch/microblaze/mm/init.c b/arch/microblaze/mm/init.c
+index 4520c5741579..857cd2b44bcf 100644
+... (308 more diff lines)

@@ -1,0 +1,82 @@
+commit 56ae10cf628b02279980d17439c6241a643959c2
+Author:     Ryan Roberts <ryan.roberts@arm.com>
+AuthorDate: Tue Jan 23 14:17:55 2024 +0000
+Commit:     Andrew Morton <akpm@linux-foundation.org>
+CommitDate: Wed Feb 7 21:20:33 2024 -0800
+
+    mm/userfaultfd: UFFDIO_MOVE implementation should use ptep_get()
+    
+    Commit c33c794828f2 ("mm: ptep_get() conversion") converted all (non-arch)
+    call sites to use ptep_get() instead of doing a direct dereference of the
+    pte.  Full rationale can be found in that commit's log.
+    
+    Since then, UFFDIO_MOVE has been implemented which does 7 direct pte
+    dereferences.  Let's fix those up to use ptep_get().
+    
+    I've asserted in the past that there is no reliable automated mechanism to
+    catch these; I'm relying on a combination of Coccinelle (which throws up a
+    lot of false positives) and some compiler magic to force a compiler error
+    on dereference.  But given the frequency with which new issues are coming
+    up, I'll add it to my todo list to try to find an automated solution.
+    
+    Link: https://lkml.kernel.org/r/20240123141755.3836179-1-ryan.roberts@arm.com
+    Fixes: adef440691ba ("userfaultfd: UFFDIO_MOVE uABI")
+    Signed-off-by: Ryan Roberts <ryan.roberts@arm.com>
+    Reviewed-by: Suren Baghdasaryan <surenb@google.com>
+    Cc: Andrea Arcangeli <aarcange@redhat.com>
+    Cc: David Hildenbrand <david@redhat.com>
+    Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+
+diff --git a/mm/userfaultfd.c b/mm/userfaultfd.c
+index 75fcf1f783bc..7cf7d4384259 100644
+--- a/mm/userfaultfd.c
++++ b/mm/userfaultfd.c
+@@ -902,8 +902,8 @@ static int move_present_pte(struct mm_struct *mm,
+ 
+ 	double_pt_lock(dst_ptl, src_ptl);
+ 
+-	if (!pte_same(*src_pte, orig_src_pte) ||
+-	    !pte_same(*dst_pte, orig_dst_pte)) {
++	if (!pte_same(ptep_get(src_pte), orig_src_pte) ||
++	    !pte_same(ptep_get(dst_pte), orig_dst_pte)) {
+ 		err = -EAGAIN;
+ 		goto out;
+ 	}
+@@ -946,8 +946,8 @@ static int move_swap_pte(struct mm_struct *mm,
+ 
+ 	double_pt_lock(dst_ptl, src_ptl);
+ 
+-	if (!pte_same(*src_pte, orig_src_pte) ||
+-	    !pte_same(*dst_pte, orig_dst_pte)) {
++	if (!pte_same(ptep_get(src_pte), orig_src_pte) ||
++	    !pte_same(ptep_get(dst_pte), orig_dst_pte)) {
+ 		double_pt_unlock(dst_ptl, src_ptl);
+ 		return -EAGAIN;
+ 	}
+@@ -1016,7 +1016,7 @@ static int move_pages_pte(struct mm_struct *mm, pmd_t *dst_pmd, pmd_t *src_pmd,
+ 	}
+ 
+ 	spin_lock(dst_ptl);
+-	orig_dst_pte = *dst_pte;
++	orig_dst_pte = ptep_get(dst_pte);
+ 	spin_unlock(dst_ptl);
+ 	if (!pte_none(orig_dst_pte)) {
+ 		err = -EEXIST;
+@@ -1024,7 +1024,7 @@ static int move_pages_pte(struct mm_struct *mm, pmd_t *dst_pmd, pmd_t *src_pmd,
+ 	}
+ 
+ 	spin_lock(src_ptl);
+-	orig_src_pte = *src_pte;
++	orig_src_pte = ptep_get(src_pte);
+ 	spin_unlock(src_ptl);
+ 	if (pte_none(orig_src_pte)) {
+ 		if (!(mode & UFFDIO_MOVE_MODE_ALLOW_SRC_HOLES))
+@@ -1054,7 +1054,7 @@ static int move_pages_pte(struct mm_struct *mm, pmd_t *dst_pmd, pmd_t *src_pmd,
+ 			 * page isn't freed under us
+ 			 */
+ 			spin_lock(src_ptl);
+-			if (!pte_same(orig_src_pte, *src_pte)) {
++			if (!pte_same(orig_src_pte, ptep_get(src_pte))) {
+ 				spin_unlock(src_ptl);
+ 				err = -EAGAIN;
+ 				goto out;

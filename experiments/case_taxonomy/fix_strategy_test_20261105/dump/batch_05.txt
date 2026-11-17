@@ -1,0 +1,1187 @@
+
+##### L125
+=== eeeeaafa62ea L 2025-11-09 +2/-2
+LoongArch: Use correct accessor to read FWPC/MWPC
+
+CSR.FWPC and CSR.MWPC are 32bit registers, so use csr_read32() rather
+than csr_read64() to read the values of FWPC/MWPC.
+
+Fixes: edffa33c7bb5a73 ("LoongArch: Add hardware breakpoints/watchpoints support")
+functions: 
+fixes: edffa33c7bb5
+diff --git a/arch/loongarch/include/asm/hw_breakpoint.h b/arch/loongarch/include/asm/hw_breakpoint.h
+index 13b2462f3d8c..5faa97a87a9e 100644
+--- a/arch/loongarch/include/asm/hw_breakpoint.h
++++ b/arch/loongarch/include/asm/hw_breakpoint.h
+@@ -135,5 +135,5 @@ static inline void hw_breakpoint_thread_switch(struct task_struct *next)
+ static inline int get_num_brps(void)
+ {
+-	return csr_read64(LOONGARCH_CSR_FWPC) & CSR_FWPC_NUM;
++	return csr_read32(LOONGARCH_CSR_FWPC) & CSR_FWPC_NUM;
+ }
+ 
+@@ -141,5 +141,5 @@ static inline int get_num_brps(void)
+ static inline int get_num_wrps(void)
+ {
+-	return csr_read64(LOONGARCH_CSR_MWPC) & CSR_MWPC_NUM;
++	return csr_read32(LOONGARCH_CSR_MWPC) & CSR_MWPC_NUM;
+ }
+ 
+
+##### L126
+=== 20d7338f2d3b L 2025-11-20 +18/-22
+LoongArch: Use UAPI types in ptrace UAPI header
+
+The kernel UAPI headers already contain fixed-width integer types, there
+is no need to rely on the libc types. There may not be a libc available
+or the libc may not provides the <stdint.h>, like for example on nolibc.
+
+This also aligns the header with the rest of the LoongArch UAPI headers.
+
+Fixes: 803b0fc5c3f2 ("LoongArch: Add process management")
+functions: 
+fixes: 803b0fc5c3f2
+ arch/loongarch/include/uapi/asm/ptrace.h | 40 ++++++++++++++++++----------------------
+ 1 file changed, 18 insertions(+), 22 deletions(-)
+diff --git a/arch/loongarch/include/uapi/asm/ptrace.h b/arch/loongarch/include/uapi/asm/ptrace.h
+index aafb3cd9e943..215e0f9e8aa3 100644
+--- a/arch/loongarch/include/uapi/asm/ptrace.h
++++ b/arch/loongarch/include/uapi/asm/ptrace.h
+@@ -11,8 +11,4 @@
+ #include <linux/types.h>
+ 
+-#ifndef __KERNEL__
+-#include <stdint.h>
+-#endif
+-
+ /*
+  * For PTRACE_{POKE,PEEK}USR. 0 - 31 are GPRs,
+@@ -42,42 +38,42 @@ struct user_pt_regs {
+ 
+ struct user_fp_state {
+-	uint64_t fpr[32];
+-	uint64_t fcc;
+-	uint32_t fcsr;
++	__u64 fpr[32];
++	__u64 fcc;
++	__u32 fcsr;
+ };
+ 
+ struct user_lsx_state {
+ 	/* 32 registers, 128 bits width per register. */
+-	uint64_t vregs[32*2];
++	__u64 vregs[32*2];
+ };
+ 
+ struct user_lasx_state {
+ 	/* 32 registers, 256 bits width per register. */
+-	uint64_t vregs[32*4];
++	__u64 vregs[32*4];
+ };
+ 
+ struct user_lbt_state {
+-	uint64_t scr[4];
+-	uint32_t eflags;
+-	uint32_t ftop;
++	__u64 scr[4];
++	__u32 eflags;
++	__u32 ftop;
+ };
+ 
+ struct user_watch_state {
+-	uint64_t dbg_info;
++	__u64 dbg_info;
+ 	struct {
+-		uint64_t    addr;
+-		uint64_t    mask;
+-		uint32_t    ctrl;
+-		uint32_t    pad;
++		__u64    addr;
++		__u64    mask;
++		__u32    ctrl;
++		__u32    pad;
+ 	} dbg_regs[8];
+ };
+ 
+... (14 more diff lines)
+
+##### L127
+=== 677e6123e3d2 L 2025-11-20 +3/-0
+LoongArch: BPF: Disable trampoline for kernel module function trace
+
+The current LoongArch BPF trampoline implementation is incompatible
+with tracing functions in kernel modules. This causes several severe
+and user-visible problems:
+
+* The `bpf_selftests/module_attach` test fails consistently.
+* Kernel lockup when a BPF program is attached to a module function [1].
+* Critical kernel modules like WireGuard experience traffic disruption
+  when their functions are traced with fentry [2].
+
+Given the severity and the potential for other unknown side-effects, it
+is safest to disable the feature entirely for now. This patch prevents
+the BPF subsystem from allowing trampoline attachments to kernel module
+functions on LoongArch.
+
+This is a temporary mitigation until the core issues in the trampoline
+code for kernel module handling can be identified and fixed.
+
+[root@fedora bpf]# ./test_progs -a module_attach -v
+bpf_testmod.ko is already unloaded.
+Loading bpf_testmod.ko...
+Successfully loaded bpf_testmod.ko.
+test_module_attach:PASS:skel_open 0 nsec
+test_module_attach:PASS:set_attach_target 0 nsec
+test_module_attach:PASS:set_attach_target_explicit 0 nsec
+test_module_attach:PASS:skel_load 0 nsec
+libbpf: prog 'handle_fentry': failed to attach: -ENOTSUPP
+libbpf: prog 'handle_fentry': failed to auto-attach: -ENOTSUPP
+test_module_attach:FAIL:skel_attach skeleton attach failed: -524
+Summary: 0/0 PASSED, 0 SKIPPED, 1 FAILED
+Successfully unloaded bpf_testmod.ko.
+
+[1]: https://lore.kernel.org/loongarch/CAK3+h2wDmpC-hP4u4pJY8T-yfKyk4yRzpu2LMO+C13FMT58oqQ@mail.gmail.com/
+[2]: https://lore.kernel.org/loongarch/CAK3+h2wYcpc+OwdLDUBvg2rF9rvvyc5amfHT-KcFaK93uoELPg@mail.gmail.com/
+
+Fixes: f9b6b41f0cf3 ("LoongArch: BPF: Add basic bpf trampoline support")
+functions: arch/loongarch/net/bpf_jit.c:__arch_prepare_bpf_trampoline
+fixes: f9b6b41f0cf3
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index cbe53d0b7fb0..f97dc9936401 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1625,4 +1625,7 @@ static int __arch_prepare_bpf_trampoline(struct jit_ctx *ctx, struct bpf_tramp_i
+ 	else if (is_bpf_text_address((unsigned long)orig_call))
+ 		orig_call += LOONGARCH_BPF_FENTRY_NBYTES;
++	/* Module tracing not supported - cause kernel lockups */
++	else if (is_module_text_address((unsigned long)orig_call))
++		return -ENOTSUPP;
+ 
+ 	if (flags & BPF_TRAMP_F_CALL_ORIG) {
+
+##### L128
+=== 3f5a238f24d7 L 2025-12-31 +42/-0
+LoongArch: BPF: Sign extend kfunc call arguments
+
+The kfunc calls are native calls so they should follow LoongArch calling
+conventions. Sign extend its arguments properly to avoid kernel panic.
+This is done by adding a new emit_abi_ext() helper. The emit_abi_ext()
+helper performs extension in place meaning a value already store in the
+target register (Note: this is different from the existing sign_extend()
+helper and thus we can't reuse it).
+
+Fixes: 5dc615520c4d ("LoongArch: Add BPF JIT support")
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 5dc615520c4d
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 8dc58781b8eb..5352d0c30fb2 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -951,4 +951,20 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 		}
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *m;
++			int i;
++
++			m = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!m)
++				return -EINVAL;
++
++			for (i = 0; i < m->nr_args; i++) {
++				u8 reg = regmap[BPF_REG_1 + i];
++				bool sign = m->arg_flags[i] & BTF_FMODEL_SIGNED_ARG;
++
++				emit_abi_ext(ctx, reg, m->arg_size[i], sign);
++			}
++		}
++
+ 		move_addr(ctx, t1, func_addr);
+ 		emit_insn(ctx, jirl, LOONGARCH_GPR_RA, t1, 0);
+diff --git a/arch/loongarch/net/bpf_jit.h b/arch/loongarch/net/bpf_jit.h
+index 5697158fd164..75b6330030a9 100644
+--- a/arch/loongarch/net/bpf_jit.h
++++ b/arch/loongarch/net/bpf_jit.h
+@@ -89,4 +89,30 @@ static inline void emit_sext_32(struct jit_ctx *ctx, enum loongarch_gpr reg, boo
+ }
+ 
++/* Emit proper extension according to ABI requirements.
++ * Note that it requires a value of size `size` already resides in register `reg`.
++ */
++static inline void emit_abi_ext(struct jit_ctx *ctx, int reg, u8 size, bool sign)
++{
++	/* ABI requires unsigned char/short to be zero-extended */
++	if (!sign && (size == 1 || size == 2))
++		return;
++
++	switch (size) {
++	case 1:
++		emit_insn(ctx, extwb, reg, reg);
++		break;
++	case 2:
++		emit_insn(ctx, extwh, reg, reg);
++		break;
++	case 4:
++		emit_insn(ctx, addiw, reg, reg, 0);
++		break;
++	case 8:
++		break;
++	default:
++		pr_warn("bpf_jit: invalid size %d for extension\n", size);
++	}
++}
++
+ static inline void move_addr(struct jit_ctx *ctx, enum loongarch_gpr rd, u64 addr)
+ {
+
+##### L129
+=== 45cb47c628df L 2025-12-31 +10/-4
+LoongArch: Refactor register restoration in ftrace_common_return
+
+Refactor the register restoration sequence in the ftrace_common_return
+function to clearly distinguish between the logic of normal returns and
+direct call returns in function tracing scenarios. The logic is as
+follows:
+
+1. In the case of a normal return, the execution flow returns to the
+traced function, and ftrace must ensure that the register data is
+consistent with the state when the function was entered.
+
+ra = parent return address; t0 = traced function return address.
+
+2. In the case of a direct call return, the execution flow jumps to the
+custom trampoline function, and ftrace must ensure that the register
+data is consistent with the state when ftrace was entered.
+
+ra = traced function return address; t0 = parent return address.
+
+Fixes: 9cdc3b6a299c ("LoongArch: ftrace: Add direct call support")
+functions: 
+fixes: 9cdc3b6a299c
+diff --git a/arch/loongarch/kernel/mcount_dyn.S b/arch/loongarch/kernel/mcount_dyn.S
+index d6b474ad1d5e..5729c20e5b8b 100644
+--- a/arch/loongarch/kernel/mcount_dyn.S
++++ b/arch/loongarch/kernel/mcount_dyn.S
+@@ -95,5 +95,4 @@ SYM_INNER_LABEL(ftrace_graph_call, SYM_L_GLOBAL)
+  */
+ ftrace_common_return:
+-	PTR_L		ra, sp, PT_R1
+ 	PTR_L		a0, sp, PT_R4
+ 	PTR_L		a1, sp, PT_R5
+@@ -105,10 +104,15 @@ ftrace_common_return:
+ 	PTR_L		a7, sp, PT_R11
+ 	PTR_L		fp, sp, PT_R22
+-	PTR_L		t0, sp, PT_ERA
+ 	PTR_L		t1, sp, PT_R13
+-	PTR_ADDI	sp, sp, PT_SIZE
+ 	bnez		t1, .Ldirect
++
++	PTR_L		ra, sp, PT_R1
++	PTR_L		t0, sp, PT_ERA
++	PTR_ADDI	sp, sp, PT_SIZE
+ 	jr		t0
+ .Ldirect:
++	PTR_L		t0, sp, PT_R1
++	PTR_L		ra, sp, PT_ERA
++	PTR_ADDI	sp, sp, PT_SIZE
+ 	jr		t1
+ SYM_CODE_END(ftrace_common)
+@@ -162,5 +166,7 @@ SYM_CODE_END(return_to_handler)
+ SYM_CODE_START(ftrace_stub_direct_tramp)
+ 	UNWIND_HINT_UNDEFINED
+-	jr		t0
++	move		t1, ra
++	move		ra, t0
++	jr		t1
+ SYM_CODE_END(ftrace_stub_direct_tramp)
+ #endif /* CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS */
+
+##### L130
+=== d314e1f48260 L 2025-12-31 +1/-0
+LoongArch: BPF: Save return address register ra to t0 before trampoline
+
+Modify the build_prologue() function to ensure the return address
+register ra is saved to t0 before entering trampoline operations.
+This change ensures the accurate return address handling when a BPF
+program calls another BPF program, preventing errors in the BPF-to-BPF
+call chain.
+
+Fixes: 677e6123e3d2 ("LoongArch: BPF: Disable trampoline for kernel module function trace")
+functions: arch/loongarch/net/bpf_jit.c:build_prologue
+fixes: 677e6123e3d2
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 766ded335fd8..9729c0ff7bfc 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -140,4 +140,5 @@ static void build_prologue(struct jit_ctx *ctx)
+ 	stack_adjust += bpf_stack_adjust;
+ 
++	move_reg(ctx, LOONGARCH_GPR_T0, LOONGARCH_GPR_RA);
+ 	/* Reserve space for the move_imm + jirl instruction */
+ 	for (i = 0; i < LOONGARCH_LONG_JUMP_NINSNS; i++)
+
+##### L131
+=== 0d26ca8ec461 L 2026-01-15 +0/-8
+LoongArch: Remove redundant code in head.S
+
+SETUP_MODES already setup the initial values of CSR.CRMD, CSR.PRMD and
+CSR.EUEN, so the redundant open code can be removed.
+
+Fixes: 7b2afeafaf9c2d5 ("LoongArch: Adjust boot & setup for 32BIT/64BIT")
+functions: 
+fixes: 7b2afeafaf9c
+diff --git a/arch/loongarch/kernel/head.S b/arch/loongarch/kernel/head.S
+index 7f288e89573b..4eed7bc312a8 100644
+--- a/arch/loongarch/kernel/head.S
++++ b/arch/loongarch/kernel/head.S
+@@ -127,12 +127,4 @@ SYM_CODE_START(smpboot_entry)
+ 	csrxchg		t0, t1, LOONGARCH_CSR_IMPCTL1
+ #endif
+-	/* Enable PG */
+-	li.w		t0, 0xb0		# PLV=0, IE=0, PG=1
+-	csrwr		t0, LOONGARCH_CSR_CRMD
+-	li.w		t0, 0x04		# PLV=0, PIE=1, PWE=0
+-	csrwr		t0, LOONGARCH_CSR_PRMD
+-	li.w		t0, 0x00		# FPE=0, SXE=0, ASXE=0, BTE=0
+-	csrwr		t0, LOONGARCH_CSR_EUEN
+-
+ 	la.pcrel	t0, cpuboot_data
+ 	ld.d		sp, t0, CPU_BOOT_STACK
+
+##### L132
+=== b254c629a963 L 2026-03-16 +5/-0
+LoongArch: BPF: Make arch_protect_bpf_trampoline() return 0
+
+Occasionally there exist "text_copy_cb: operation failed" when executing
+the bpf selftests, the reason is copy_to_kernel_nofault() failed and the
+ecode of ESTAT register is 0x4 (PME: Page Modification Exception) due to
+the pte is not writeable. The root cause is that there is another place
+to set the pte entry as readonly which is in the generic weak version of
+arch_protect_bpf_trampoline().
+
+There are two ways to fix this race condition issue: the direct way is
+to modify the generic weak arch_protect_bpf_trampoline() to add a mutex
+lock for set_memory_rox(), but the other simple and proper way is to
+just make arch_protect_bpf_trampoline() return 0 in the arch-specific
+code because LoongArch has already use the BPF prog pack allocator for
+trampoline.
+
+Here are the trimmed kernel log messages:
+
+  copy_to_kernel_nofault: memory access failed, ecode 0x4
+  copy_to_kernel_nofault: the caller is text_copy_cb+0x50/0xa0
+  text_copy_cb: operation failed
+  ------------[ cut here ]------------
+  bpf_prog_pack bug: missing bpf_arch_text_invalidate?
+  WARNING: kernel/bpf/core.c:1008 at bpf_prog_pack_free+0x200/0x228
+  ...
+  Call Trace:
+  [<9000000000248914>] show_stack+0x64/0x188
+  [<9000000000241308>] dump_stack_lvl+0x6c/0x9c
+  [<90000000002705bc>] __warn+0x9c/0x200
+  [<9000000001c428c0>] __report_bug+0xa8/0x1c0
+  [<9000000001c42b5c>] report_bug+0x64/0x120
+  [<9000000001c7dcd0>] do_bp+0x270/0x3c0
+  [<9000000000246f40>] handle_bp+0x120/0x1c0
+  [<900000000047b030>] bpf_prog_pack_free+0x200/0x228
+  [<900000000047b2ec>] bpf_jit_binary_pack_free+0x24/0x60
+  [<900000000026989c>] bpf_jit_free+0x54/0xb0
+  [<900000000029e10c>] process_one_work+0x184/0x610
+  [<900000000029ef8c>] worker_thread+0x24c/0x388
+  [<90000000002a902c>] kthread+0x13c/0x170
+  [<9000000001c7dfe8>] ret_from_kernel_thread+0x28/0x1c0
+  [<9000000000246624>] ret_from_kernel_thread_asm+0xc/0x88
+functions: 
+fixes: 4ab17e762b34
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index e8e0ad34928c..9cb796e16379 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1575,4 +1575,9 @@ void arch_free_bpf_trampoline(void *image, unsigned int size)
+ }
+ 
++int arch_protect_bpf_trampoline(void *image, unsigned int size)
++{
++	return 0;
++}
++
+ /*
+  * Sign-extend the register if necessary
+
+##### L133
+=== c252c12d1f55 L 2026-03-16 +2/-2
+LoongArch: KVM: Fix typo issue in kvm_vm_init_features()
+
+Most of VM feature detections are integer OR operations, and integer
+assignment operation will clear previous integer OR operation. So here
+change all integer assignment operations to integer OR operations.
+
+Fixes: 82db90bf461b ("LoongArch: KVM: Move feature detection in kvm_vm_init_features()")
+functions: arch/loongarch/kvm/vm.c:kvm_vm_init_features
+fixes: 82db90bf461b
+diff --git a/arch/loongarch/kvm/vm.c b/arch/loongarch/kvm/vm.c
+index 17b3d5b36cfc..8cc5ee1c53ef 100644
+--- a/arch/loongarch/kvm/vm.c
++++ b/arch/loongarch/kvm/vm.c
+@@ -50,6 +50,6 @@ static void kvm_vm_init_features(struct kvm *kvm)
+ 
+ 	/* Enable all PV features by default */
+-	kvm->arch.pv_features = BIT(KVM_FEATURE_IPI);
+-	kvm->arch.kvm_features = BIT(KVM_LOONGARCH_VM_FEAT_PV_IPI);
++	kvm->arch.pv_features |= BIT(KVM_FEATURE_IPI);
++	kvm->arch.kvm_features |= BIT(KVM_LOONGARCH_VM_FEAT_PV_IPI);
+ 	if (kvm_pvtime_supported()) {
+ 		kvm->arch.pv_features |= BIT(KVM_FEATURE_PREEMPT);
+
+##### L134
+=== c8b8f3c50f48 L 2026-03-16 +8/-0
+LoongArch: Only use SC.Q when supported by the assembler
+
+The 128-bit atomic cmpxchg implementation uses the SC.Q instruction.
+Older versions of GNU AS do not support that instruction, erroring out:
+
+ERROR:root:{standard input}: Assembler messages:
+{standard input}:4831: Error: no match insn: sc.q	$t0,$t1,$r14
+{standard input}:6407: Error: no match insn: sc.q	$t0,$t1,$r23
+{standard input}:10856: Error: no match insn: sc.q	$t0,$t1,$r14
+
+make[4]: *** [../scripts/Makefile.build:289: mm/slub.o] Error 1
+
+(Binutils 2.41)
+
+So test support for SC.Q in Kconfig and disable the atomics if the
+instruction is not available.
+
+Fixes: f0e4b1b6e295 ("LoongArch: Add 128-bit atomic cmpxchg support")
+functions: 
+fixes: f0e4b1b6e295
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index d211c6572b0a..92068ff38685 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -305,4 +305,7 @@ config AS_HAS_LVZ_EXTENSION
+ 	def_bool $(as-instr,hvcl 0)
+ 
++config AS_HAS_SCQ_EXTENSION
++	def_bool $(as-instr,sc.q \$t0$(comma)\$t1$(comma)\$t2)
++
+ config CC_HAS_ANNOTATE_TABLEJUMP
+ 	def_bool $(cc-option,-mannotate-tablejump)
+diff --git a/arch/loongarch/include/asm/cmpxchg.h b/arch/loongarch/include/asm/cmpxchg.h
+index 58cabab6d90d..909f9274fe71 100644
+--- a/arch/loongarch/include/asm/cmpxchg.h
++++ b/arch/loongarch/include/asm/cmpxchg.h
+@@ -239,4 +239,6 @@ __cmpxchg(volatile void *ptr, unsigned long old, unsigned long new, unsigned int
+   })
+ 
++#ifdef CONFIG_AS_HAS_SCQ_EXTENSION
++
+ union __u128_halves {
+ 	u128 full;
+@@ -291,4 +293,7 @@ union __u128_halves {
+ 	__arch_cmpxchg128(ptr, o, n, "");				\
+ })
++
++#endif /* CONFIG_AS_HAS_SCQ_EXTENSION */
++
+ #else
+ #include <asm-generic/cmpxchg-local.h>
+
+##### L135
+=== b97bd69eb0f6 L 2026-03-26 +1/-1
+LoongArch: KVM: Handle the case that EIOINTC's coremap is empty
+
+EIOINTC's coremap in eiointc_update_sw_coremap() can be empty, currently
+we get a cpuid with -1 in this case, but we actually need 0 because it's
+similar as the case that cpuid >= 4.
+
+This fix an out-of-bounds access to kvm_arch::phyid_map::phys_map[].
+
+Fixes: 3956a52bc05bd81 ("LoongArch: KVM: Add EIOINTC read and write functions")
+functions: arch/loongarch/kvm/intc/eiointc.c:eiointc_update_sw_coremap
+fixes: 3956a52bc05b
+diff --git a/arch/loongarch/kvm/intc/eiointc.c b/arch/loongarch/kvm/intc/eiointc.c
+index d2acb4d09e73..c7badc813923 100644
+--- a/arch/loongarch/kvm/intc/eiointc.c
++++ b/arch/loongarch/kvm/intc/eiointc.c
+@@ -84,5 +84,5 @@ static inline void eiointc_update_sw_coremap(struct loongarch_eiointc *s,
+ 		if (!(s->status & BIT(EIOINTC_ENABLE_CPU_ENCODE))) {
+ 			cpuid = ffs(cpuid) - 1;
+-			cpuid = (cpuid >= 4) ? 0 : cpuid;
++			cpuid = ((cpuid < 0) || (cpuid >= 4)) ? 0 : cpuid;
+ 		}
+ 
+
+##### L136
+=== e4878c37f667 L 2026-03-26 +53/-10
+LoongArch: vDSO: Emit GNU_EH_FRAME correctly
+
+With -fno-asynchronous-unwind-tables and --no-eh-frame-hdr (the default
+of the linker), the GNU_EH_FRAME segment (specified by vdso.lds.S) is
+empty.  This is not valid, as the current DWARF specification mandates
+the first byte of the EH frame to be the version number 1.  It causes
+some unwinders to complain, for example the ClickHouse query profiler
+spams the log with messages:
+
+    clickhouse-server[365854]: libunwind: unsupported .eh_frame_hdr
+    version: 127 at 7ffffffb0000
+
+Here "127" is just the byte located at the p_vaddr (0, i.e. the
+beginning of the vDSO) of the empty GNU_EH_FRAME segment. Cross-
+checking with /proc/365854/maps has also proven 7ffffffb0000 is the
+start of vDSO in the process VM image.
+
+In LoongArch the -fno-asynchronous-unwind-tables option seems just a
+MIPS legacy, and MIPS only uses this option to satisfy the MIPS-specific
+"genvdso" program, per the commit cfd75c2db17e ("MIPS: VDSO: Explicitly
+use -fno-asynchronous-unwind-tables").  IIRC it indicates some inherent
+limitation of the MIPS ELF ABI and has nothing to do with LoongArch.  So
+we can simply flip it over to -fasynchronous-unwind-tables and pass
+--eh-frame-hdr for linking the vDSO, allowing the profilers to unwind the
+stack for statistics even if the sample point is taken when the PC is in
+the vDSO.
+
+However simply adjusting the options above would exploit an issue: when
+the libgcc unwinder saw the invalid GNU_EH_FRAME segment, it silently
+falled back to a machine-specific routine to match the code pattern of
+rt_sigreturn() and extract the registers saved in the sigframe if the
+code pattern is matched.  As unwinding from signal handlers is vital for
+libgcc to support pthread cancellation etc., the fall-back routine had
+been silently keeping the LoongArch Linux systems functioning since
+Linux 5.19.  But when we start to emit GNU_EH_FRAME with the correct
+format, fall-back routine will no longer be used and libgcc will fail
+to unwind the sigframe, and unwinding from signal handlers will no
+longer work, causing dozens of glibc test failures.  To make it possible
+to unwind from signal handlers again, it's necessary to code the unwind
+info in __vdso_rt_sigreturn via .cfi_* directives.
+
+functions: arch/loongarch/kernel/asm-offsets.c:output_sc_defines
+fixes: c6b99bed6b8f
+ arch/loongarch/include/asm/linkage.h  | 36 ++++++++++++++++++++++++++++++++++++
+ arch/loongarch/include/asm/sigframe.h |  9 +++++++++
+ arch/loongarch/kernel/asm-offsets.c   |  2 ++
+ arch/loongarch/kernel/signal.c        |  6 +-----
+ arch/loongarch/vdso/Makefile          |  4 ++--
+ arch/loongarch/vdso/sigreturn.S       |  6 +++---
+ 6 files changed, 53 insertions(+), 10 deletions(-)
+diff --git a/arch/loongarch/include/asm/linkage.h b/arch/loongarch/include/asm/linkage.h
+index e2eca1a25b4e..a1bd6a3ee03a 100644
+--- a/arch/loongarch/include/asm/linkage.h
++++ b/arch/loongarch/include/asm/linkage.h
+@@ -42,3 +42,39 @@
+ 	SYM_END(name, SYM_T_NONE)
+ 
++/*
++ * This is for the signal handler trampoline, which is used as the return
++ * address of the signal handlers in userspace instead of called normally.
++ * The long standing libgcc bug https://gcc.gnu.org/PR124050 requires a
++ * nop between .cfi_startproc and the actual address of the trampoline, so
++ * we cannot simply use SYM_FUNC_START.
++ *
++ * This wrapper also contains all the .cfi_* directives for recovering
++ * the content of the GPRs and the "return address" (where the rt_sigreturn
++ * syscall will jump to), assuming there is a struct rt_sigframe (where
++ * a struct sigcontext containing those information we need to recover) at
++ * $sp.  The "DWARF for the LoongArch(TM) Architecture" manual states
++ * column 0 is for $zero, but it does not make too much sense to
++ * save/restore the hardware zero register.  Repurpose this column here
++ * for the return address (here it's not the content of $ra we cannot use
++ * the default column 3).
++ */
++#define SYM_SIGFUNC_START(name)				\
++	.cfi_startproc;					\
++	.cfi_signal_frame;				\
++	.cfi_def_cfa 3, RT_SIGFRAME_SC;			\
++	.cfi_return_column 0;				\
++	.cfi_offset 0, SC_PC;				\
++							\
++	.irp num, 1,  2,  3,  4,  5,  6,  7,  8, 	\
++		  9,  10, 11, 12, 13, 14, 15, 16,	\
++		  17, 18, 19, 20, 21, 22, 23, 24,	\
++		  25, 26, 27, 28, 29, 30, 31;		\
++	.cfi_offset \num, SC_REGS + \num * SZREG;	\
++	.endr;						\
++							\
++	nop;						\
++	SYM_START(name, SYM_L_GLOBAL, SYM_A_ALIGN)
++
++#define SYM_SIGFUNC_END(name) SYM_FUNC_END(name)
++
+ #endif
+diff --git a/arch/loongarch/include/asm/sigframe.h b/arch/loongarch/include/asm/sigframe.h
+new file mode 100644
+index 000000000000..109298b8d7e0
+--- /dev/null
++++ b/arch/loongarch/include/asm/sigframe.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: GPL-2.0+ */
++
++#include <asm/siginfo.h>
++#include <asm/ucontext.h>
++
++struct rt_sigframe {
++	struct siginfo rs_info;
++	struct ucontext rs_uctx;
++};
+diff --git a/arch/loongarch/kernel/asm-offsets.c b/arch/loongarch/kernel/asm-offsets.c
+... (73 more diff lines)
+
+##### L137
+=== 2433f3f5724b L 2026-05-04 +14/-0
+LoongArch: KVM: Fix HW timer interrupt lost when inject interrupt by software
+
+With passthrough HW timer, timer interrupt is injected by HW. When
+inject emulated CPU interrupt by software such SIP0/SIP1/IPI, HW timer
+interrupt may be lost.
+
+Here check whether there is timer tick value inversion before and after
+injecting emulated CPU interrupt by software, timer enabling by reading
+timer cfg register is skipped. If the timer tick value is detected with
+changing, then timer should be enabled. And inject a timer interrupt by
+software if there is.
+
+Fixes: f45ad5b8aa93 ("LoongArch: KVM: Implement vcpu interrupt operations").
+functions: arch/loongarch/kvm/interrupt.c:kvm_irq_deliver, arch/loongarch/kvm/interrupt.c:kvm_irq_clear
+fixes: f45ad5b8aa93
+diff --git a/arch/loongarch/kvm/interrupt.c b/arch/loongarch/kvm/interrupt.c
+index 53dac8ab8fb1..a18c60dffbba 100644
+--- a/arch/loongarch/kvm/interrupt.c
++++ b/arch/loongarch/kvm/interrupt.c
+@@ -29,4 +29,5 @@ static int kvm_irq_deliver(struct kvm_vcpu *vcpu, unsigned int priority)
+ {
+ 	unsigned int irq = 0;
++	unsigned long old, new;
+ 
+ 	clear_bit(priority, &vcpu->arch.irq_pending);
+@@ -44,5 +45,11 @@ static int kvm_irq_deliver(struct kvm_vcpu *vcpu, unsigned int priority)
+ 	case INT_SWI0:
+ 	case INT_SWI1:
++		old = kvm_read_hw_gcsr(LOONGARCH_CSR_TVAL);
+ 		set_gcsr_estat(irq);
++		new = kvm_read_hw_gcsr(LOONGARCH_CSR_TVAL);
++
++		/* Inject TI if TVAL inverted */
++		if (new > old)
++			set_gcsr_estat(CPU_TIMER);
+ 		break;
+ 
+@@ -61,4 +68,5 @@ static int kvm_irq_clear(struct kvm_vcpu *vcpu, unsigned int priority)
+ {
+ 	unsigned int irq = 0;
++	unsigned long old, new;
+ 
+ 	clear_bit(priority, &vcpu->arch.irq_clear);
+@@ -75,5 +83,11 @@ static int kvm_irq_clear(struct kvm_vcpu *vcpu, unsigned int priority)
+ 	case INT_SWI0:
+ 	case INT_SWI1:
++		old = kvm_read_hw_gcsr(LOONGARCH_CSR_TVAL);
+ 		clear_gcsr_estat(irq);
++		new = kvm_read_hw_gcsr(LOONGARCH_CSR_TVAL);
++
++		/* Inject TI if TVAL inverted */
++		if (new > old)
++			set_gcsr_estat(CPU_TIMER);
+ 		break;
+ 
+
+##### L138
+=== 8dfa2f8780e4 L 2026-05-04 +3/-0
+LoongArch: Fix potential ADE in loongson_gpu_fixup_dma_hang()
+
+The switch case in loongson_gpu_fixup_dma_hang() may not DC2 or DC3, and
+readl(crtc_reg) will access with random address, because the "device" is
+from "base+PCI_DEVICE_ID", "base" is from "pdev->devfn+1". This is wrong
+when my platform inserts a discrete GPU:
+
+lspci -tv
+-[0000:00]-+-00.0  Loongson Technology LLC Hyper Transport Bridge Controller
+...
+           +-06.0  Loongson Technology LLC LG100 GPU
+           +-06.2  Loongson Technology LLC Device 7a37
+...
+
+Add a default switch case to fix the panic as below:
+
+ Kernel ade access[#1]:
+ CPU: 0 PID: 1 Comm: swapper/0 Not tainted 6.6.136-loong64-desktop-hwe+ #4
+ pc 90000000017e5534 ra 90000000017e54c0 tp 90000001002f8000 sp 90000001002fb6c0
+ a0 80000efe00003100 a1 0000000000003100 a2 0000000000000000 a3 0000000000000002
+ a4 90000001002fb6b4 a5 900000087cdb58fd a6 90000000027af000 a7 0000000000000001
+ t0 00000000000085b9 t1 000000000000ffff t2 0000000000000000 t3 0000000000000000
+ t4 fffffffffffffffd t5 00000000fffb6d9c t6 0000000000083b00 t7 00000000000070c0
+ t8 900000087cdb4d94 u0 900000087cdb58fd s9 90000001002fb826 s0 90000000031c12c8
+ s1 7fffffffffffff00 s2 90000000031c12d0 s3 0000000000002710 s4 0000000000000000
+ s5 0000000000000000 s6 9000000100053000 s7 7fffffffffffff00 s8 90000000030d4000
+    ra: 90000000017e54c0 loongson_gpu_fixup_dma_hang+0x40/0x210
+   ERA: 90000000017e5534 loongson_gpu_fixup_dma_hang+0xb4/0x210
+  CRMD: 000000b0 (PLV0 -IE -DA +PG DACF=CC DACM=CC -WE)
+  PRMD: 00000004 (PPLV0 +PIE -PWE)
+  EUEN: 00000000 (-FPE -SXE -ASXE -BTE)
+  ECFG: 00071c1d (LIE=0,2-4,10-12 VS=7)
+ ESTAT: 00480000 [ADEM] (IS= ECode=8 EsubCode=1)
+  BADV: 7fffffffffffff00
+  PRID: 0014d000 (Loongson-64bit, Loongson-3A6000-HV)
+ Modules linked in:
+ Process swapper/0 (pid: 1, threadinfo=(____ptrval____), task=(____ptrval____))
+ Stack : 0000000000000006 90000001002fb778 90000001002fb704 0000000000000007
+         0000000016a65700 90000000017e5690 000000000000ffff ffffffffffffffff
+         900000000209f7c0 9000000100053000 900000000209f7a8 9000000000eebc08
+         0000000000000000 0000000000000000 0000000000000006 90000001002fb778
+functions: arch/loongarch/pci/pci.c:loongson_gpu_fixup_dma_hang
+fixes: 95db0c9f526d
+diff --git a/arch/loongarch/pci/pci.c b/arch/loongarch/pci/pci.c
+index d233ea2218fe..f33c7ea1443d 100644
+--- a/arch/loongarch/pci/pci.c
++++ b/arch/loongarch/pci/pci.c
+@@ -133,4 +133,7 @@ static void loongson_gpu_fixup_dma_hang(struct pci_dev *pdev, bool on)
+ 		crtc_offset = 0x400;
+ 		break;
++	default:
++		iounmap(regbase);
++		return;
+ 	}
+ 
+
+##### L139
+=== 98b8aebb14fd L 2026-05-04 +1/-1
+LoongArch: Fix SYM_SIGFUNC_START definition for 32BIT
+
+The SYM_SIGFUNC_START definition should match sigcontext that the length
+of GPRs are 8 bytes for both 32BIT and 64BIT. So replace SZREG with 8 to
+fix it.
+
+Fixes: e4878c37f6679fde ("LoongArch: vDSO: Emit GNU_EH_FRAME correctly")
+functions: 
+fixes: e4878c37f667
+diff --git a/arch/loongarch/include/asm/linkage.h b/arch/loongarch/include/asm/linkage.h
+index a1bd6a3ee03a..ae937d1708b2 100644
+--- a/arch/loongarch/include/asm/linkage.h
++++ b/arch/loongarch/include/asm/linkage.h
+@@ -70,5 +70,5 @@
+ 		  17, 18, 19, 20, 21, 22, 23, 24,	\
+ 		  25, 26, 27, 28, 29, 30, 31;		\
+-	.cfi_offset \num, SC_REGS + \num * SZREG;	\
++	.cfi_offset \num, SC_REGS + \num * 8;		\
+ 	.endr;						\
+ 							\
+
+##### L140
+=== 4a09f4a23a30 L 2026-05-22 +7/-4
+LoongArch: KVM: Move some variable declarations to paravirt.h
+
+Some variables relative with paravirt feature are declared in the header
+file asm/qspinlock.h, however this file can be included only when option
+CONFIG_SMP is on. There is compiling warnings if CONFIG_SMP is off since
+variables are not declared.
+
+Move these variable declarations to header file asm/paravirt.h to avoid
+compiling warnings.
+
+Fixes: c43dce6f13fb ("LoongArch: KVM: Make vcpu_is_preempted() as a macro rather than function")
+functions: 
+fixes: c43dce6f13fb
+diff --git a/arch/loongarch/include/asm/paravirt.h b/arch/loongarch/include/asm/paravirt.h
+index 0111f0ad5f73..acae1c5e5f88 100644
+--- a/arch/loongarch/include/asm/paravirt.h
++++ b/arch/loongarch/include/asm/paravirt.h
+@@ -5,4 +5,10 @@
+ #ifdef CONFIG_PARAVIRT
+ 
++#include <linux/jump_label.h>
++
++DECLARE_STATIC_KEY_FALSE(virt_preempt_key);
++DECLARE_STATIC_KEY_FALSE(virt_spin_lock_key);
++DECLARE_PER_CPU(struct kvm_steal_time, steal_time);
++
+ int __init pv_ipi_init(void);
+ int __init pv_time_init(void);
+diff --git a/arch/loongarch/include/asm/qspinlock.h b/arch/loongarch/include/asm/qspinlock.h
+index 0ee15b3b3937..fbfc6be82f26 100644
+--- a/arch/loongarch/include/asm/qspinlock.h
++++ b/arch/loongarch/include/asm/qspinlock.h
+@@ -4,10 +4,7 @@
+ 
+ #include <asm/kvm_para.h>
+-#include <linux/jump_label.h>
++#include <asm/paravirt.h>
+ 
+ #ifdef CONFIG_PARAVIRT
+-DECLARE_STATIC_KEY_FALSE(virt_preempt_key);
+-DECLARE_STATIC_KEY_FALSE(virt_spin_lock_key);
+-DECLARE_PER_CPU(struct kvm_steal_time, steal_time);
+ 
+ #define virt_spin_lock virt_spin_lock
+
+##### L141
+=== af3d1bb9a09d L 2026-05-29 +0/-221
+crypto: loongson - Remove broken and unused loongson-rng
+
+The loongson-rng rng_alg has several vulnerabilities, including not
+providing forward security, and a use-after-free bug due to the use of
+wait_for_completion_interruptible().
+
+Meanwhile, the rng_alg framework doesn't really have any purpose in the
+first place other than to access the software algorithms crypto/drbg.c
+and crypto/jitterentropy.c.  Hardware-specific rng_algs have no
+in-kernel user, and unlike hwrng there's no feed into the actual Linux
+RNG.  As such, there's really no point to this code.  There are of
+course other rng_alg drivers that are similarly unused, but they're
+similarly in the process of being phased out, e.g.
+https://lore.kernel.org/r/20260529193648.18172-1-ebiggers@kernel.org and
+https://lore.kernel.org/r/20260529220430.34135-1-ebiggers@kernel.org
+
+Given that, there's no point in fixing forward these vulnerabilities,
+and it makes much more sense to simply roll back the addition of this
+driver.  If this platform provides TRNG (not PRNG) functionality, it
+could make sense to add a hwrng driver, but it would be quite different.
+
+Fixes: 766b2d724c8d ("crypto: loongson - add Loongson RNG driver support")
+functions: drivers/crypto/loongson/loongson-rng.c:loongson_rng_generate, drivers/crypto/loongson/loongson-rng.c:loongson_rng_init, drivers/crypto/loongson/loongson-rng.c:loongson_rng_exit, drivers/crypto/loongson/loongson-rng.c:loongson_rng_seed, drivers/crypto/loongson/loongson-rng.c:loongson_rng_probe
+fixes: 766b2d724c8d
+ MAINTAINERS                                 |   1 -
+ arch/loongarch/configs/loongson32_defconfig |   1 -
+ arch/loongarch/configs/loongson64_defconfig |   1 -
+ drivers/crypto/Kconfig                      |   1 -
+ drivers/crypto/Makefile                     |   1 -
+ drivers/crypto/loongson/Kconfig             |   6 --
+ drivers/crypto/loongson/Makefile            |   1 -
+ drivers/crypto/loongson/loongson-rng.c      | 209 ------------------------------------------------
+ 8 files changed, 221 deletions(-)
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 882214b0e7db..6c805560c77c 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -15071,5 +15071,4 @@ L:	linux-crypto@vger.kernel.org
+ S:	Maintained
+ F:	drivers/char/tpm/tpm_loongson.c
+-F:	drivers/crypto/loongson/
+ F:	drivers/mfd/loongson-se.c
+ F:	include/linux/mfd/loongson-se.h
+diff --git a/arch/loongarch/configs/loongson32_defconfig b/arch/loongarch/configs/loongson32_defconfig
+index d5ef396dffe3..82897236863f 100644
+--- a/arch/loongarch/configs/loongson32_defconfig
++++ b/arch/loongarch/configs/loongson32_defconfig
+@@ -1092,5 +1092,4 @@ CONFIG_CRYPTO_USER_API_RNG=m
+ CONFIG_CRYPTO_USER_API_AEAD=m
+ CONFIG_CRYPTO_DEV_VIRTIO=m
+-CONFIG_CRYPTO_DEV_LOONGSON_RNG=m
+ CONFIG_DMA_CMA=y
+ CONFIG_CMA_SIZE_MBYTES=0
+diff --git a/arch/loongarch/configs/loongson64_defconfig b/arch/loongarch/configs/loongson64_defconfig
+index cba4cdff5acd..a94e88bd7ec5 100644
+--- a/arch/loongarch/configs/loongson64_defconfig
++++ b/arch/loongarch/configs/loongson64_defconfig
+@@ -1125,5 +1125,4 @@ CONFIG_CRYPTO_USER_API_RNG=m
+ CONFIG_CRYPTO_USER_API_AEAD=m
+ CONFIG_CRYPTO_DEV_VIRTIO=m
+-CONFIG_CRYPTO_DEV_LOONGSON_RNG=m
+ CONFIG_DMA_CMA=y
+ CONFIG_DMA_NUMA_CMA=y
+diff --git a/drivers/crypto/Kconfig b/drivers/crypto/Kconfig
+index 5dab813a9f74..223cb3c32261 100644
+--- a/drivers/crypto/Kconfig
++++ b/drivers/crypto/Kconfig
+@@ -846,5 +846,4 @@ config CRYPTO_DEV_CCREE
+ 
+ source "drivers/crypto/hisilicon/Kconfig"
+-source "drivers/crypto/loongson/Kconfig"
+ 
+ source "drivers/crypto/amlogic/Kconfig"
+diff --git a/drivers/crypto/Makefile b/drivers/crypto/Makefile
+index 283bbc650b5b..ad773158ae56 100644
+--- a/drivers/crypto/Makefile
++++ b/drivers/crypto/Makefile
+@@ -44,5 +44,4 @@ obj-$(CONFIG_CRYPTO_DEV_ARTPEC6) += axis/
+ obj-y += xilinx/
+ obj-y += hisilicon/
+-obj-y += loongson/
+ obj-$(CONFIG_CRYPTO_DEV_AMLOGIC_GXL) += amlogic/
+ obj-y += intel/
+diff --git a/drivers/crypto/loongson/Kconfig b/drivers/crypto/loongson/Kconfig
+deleted file mode 100644
+index f4e1544ffbb4..000000000000
+--- a/drivers/crypto/loongson/Kconfig
++++ /dev/null
+@@ -1,6 +0,0 @@
+-config CRYPTO_DEV_LOONGSON_RNG
+-	tristate "Support for Loongson RNG Driver"
+-	depends on MFD_LOONGSON_SE
+-	select CRYPTO_RNG
+... (224 more diff lines)
+
+##### L142
+=== 09b318ab77b7 L 2026-06-11 +4/-0
+LoongArch: KVM: Check irq validity in kvm_vcpu_ioctl_interrupt()
+
+Function kvm_vcpu_ioctl_interrupt() can be called from userspace, here
+add irq validility cheking in kvm_vcpu_ioctl_interrupt().
+
+Fixes: f45ad5b8aa93 ("LoongArch: KVM: Implement vcpu interrupt operations")
+functions: arch/loongarch/kvm/vcpu.c:kvm_vcpu_ioctl_interrupt
+fixes: f45ad5b8aa93
+diff --git a/arch/loongarch/kvm/vcpu.c b/arch/loongarch/kvm/vcpu.c
+index ab0b0da270ca..4235bf8e455e 100644
+--- a/arch/loongarch/kvm/vcpu.c
++++ b/arch/loongarch/kvm/vcpu.c
+@@ -1453,4 +1453,8 @@ int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu, struct kvm_interrupt *irq)
+ {
+ 	int intr = (int)irq->irq;
++	unsigned int vector = abs(intr);
++
++	if (vector >= EXCCODE_INT_NUM)
++		return -EINVAL;
+ 
+ 	if (intr > 0)
+
+##### L143
+=== ebd50de14f1a L 2026-06-11 +0/-1
+LoongArch: KVM: Return full old CSR value from kvm_emu_xchg_csr()
+
+The LoongArch CSRXCHG instruction returns the full old CSR value in rd
+after applying the masked update. kvm_emu_xchg_csr() currently masks
+the saved value before returning it to the guest, so rd receives only
+the bits selected by the write mask.
+
+That breaks the architectural behavior and makes a zero mask return 0
+instead of the previous CSR value. So, keep the masked CSR update, but
+return the unmodified old CSR value.
+
+Fixes: da50f5a693ff ("LoongArch: KVM: Implement handle csr exception")
+functions: arch/loongarch/kvm/exit.c:kvm_emu_xchg_csr
+fixes: da50f5a693ff
+diff --git a/arch/loongarch/kvm/exit.c b/arch/loongarch/kvm/exit.c
+index c8492670f169..8572b63478bb 100644
+--- a/arch/loongarch/kvm/exit.c
++++ b/arch/loongarch/kvm/exit.c
+@@ -104,5 +104,4 @@ static unsigned long kvm_emu_xchg_csr(struct kvm_vcpu *vcpu, int csrid,
+ 		val = (old & ~csr_mask) | (val & csr_mask);
+ 		kvm_write_sw_gcsr(csr, csrid, val);
+-		old = old & csr_mask;
+ 	} else
+ 		pr_warn_once("Unsupported csrxchg 0x%x with pc %lx\n", csrid, vcpu->arch.pc);
+
+##### L144
+=== 018e9828eb52 L 2026-06-25 +4/-0
+LoongArch: Fix missing dirty page tracking in {pte,pmd}_wrprotect()
+
+When hardware page table walker (PTW) is enabled on LoongArch, the CPU
+may set _PAGE_DIRTY directly in the page table entry during a write TLB
+miss, without going through the software TLB store handler. The software
+TLB store handler (tlbex.S:254) sets both _PAGE_DIRTY and_PAGE_MODIFIED
+together:
+
+    ori t0, t0, (_PAGE_VALID | _PAGE_DIRTY | _PAGE_MODIFIED)
+
+Since hardware PTW only sets _PAGE_DIRTY, the software-only bit, i.e.
+_PAGE_MODIFIED is left unchanged. This creates a window where a PTE has
+_PAGE_DIRTY set (hardware knows the page is dirty) but _PAGE_MODIFIED
+clear (software is unaware).
+
+When fork()/clone() triggers copy-on-write, __copy_present_ptes() calls
+pte_wrprotect(), which unconditionally clears both the _PAGE_WRITE and
+_PAGE_DIRTY bits:
+
+    pte_val(pte) &= ~(_PAGE_WRITE | _PAGE_DIRTY);
+
+Since _PAGE_MODIFIED was never set, the dirtiness information is lost
+completely. Subsequently, when memory pressure triggers page reclaim,
+page_mkclean() / try_to_unmap() sees the page as clean (i.e. pte_dirty()
+returns false) and the page may be freed without writeback, causing data
+corruption.
+
+Fix this by propagating the _PAGE_DIRTY bit to the _PAGE_MODIFIED bit in
+both pte_wrprotect() and pmd_wrprotect() before clearing writeable bits:
+
+    if (pte_val(pte) & _PAGE_DIRTY)
+        pte_val(pte) |= _PAGE_MODIFIED;
+
+The pmd_wrprotect() fix handles the CONFIG_TRANSPARENT_HUGEPAGE case,
+where pmd entries need the same treatment.
+
+This ensures the software dirty tracking bit (checked by pte_dirty() and
+pmd_dirty(), which read both the _PAGE_DIRTY and _PAGE_MODIFIED bits) is
+preserved across fork COW write-protection.
+
+The issue was found by the LTP madvise09 test case, which exercises page
+functions: 
+fixes: 09cfefb7fa70
+diff --git a/arch/loongarch/include/asm/pgtable.h b/arch/loongarch/include/asm/pgtable.h
+index 2a0b63ae421f..223528c04d73 100644
+--- a/arch/loongarch/include/asm/pgtable.h
++++ b/arch/loongarch/include/asm/pgtable.h
+@@ -430,4 +430,6 @@ static inline pte_t pte_mkwrite_novma(pte_t pte)
+ static inline pte_t pte_wrprotect(pte_t pte)
+ {
++	if (pte_val(pte) & _PAGE_DIRTY)
++		pte_val(pte) |= _PAGE_MODIFIED;
+ 	pte_val(pte) &= ~(_PAGE_WRITE | _PAGE_DIRTY);
+ 	return pte;
+@@ -536,4 +538,6 @@ static inline pmd_t pmd_mkwrite_novma(pmd_t pmd)
+ static inline pmd_t pmd_wrprotect(pmd_t pmd)
+ {
++	if (pmd_val(pmd) & _PAGE_DIRTY)
++		pmd_val(pmd) |= _PAGE_MODIFIED;
+ 	pmd_val(pmd) &= ~(_PAGE_WRITE | _PAGE_DIRTY);
+ 	return pmd;
+
+##### L145
+=== d4e58d2c21d9 L 2026-06-25 +2/-1
+LoongArch: Move struct kimage forward declaration before use
+
+arch_kimage_file_post_load_cleanup() and load_other_segments(), both
+inside the CONFIG_KEXEC_FILE block, take a struct kimage pointer before
+the forward declaration appears. Move the forward declaration above so
+it precedes its first use instead of relying on a transitive include.
+
+Fixes: d162feec6b6e ("LoongArch: Add preparatory infrastructure for kexec_file")
+functions: 
+fixes: d162feec6b6e
+diff --git a/arch/loongarch/include/asm/kexec.h b/arch/loongarch/include/asm/kexec.h
+index 209fa43222e1..6be136e9f0a0 100644
+--- a/arch/loongarch/include/asm/kexec.h
++++ b/arch/loongarch/include/asm/kexec.h
+@@ -42,4 +42,6 @@ struct kimage_arch {
+ };
+ 
++struct kimage;
++
+ #ifdef CONFIG_KEXEC_FILE
+ extern const struct kexec_file_ops kexec_efi_ops;
+@@ -60,5 +62,4 @@ typedef void (*do_kexec_t)(unsigned long efi_boot,
+ 			   unsigned long first_ind_entry);
+ 
+-struct kimage;
+ extern const unsigned char relocate_new_kernel[];
+ extern const size_t relocate_new_kernel_size;
+
+##### L146
+=== dacd348b8a99 L 2026-07-23 +4/-4
+LoongArch: BPF: Zero-extend signed ALU32 div/mod results
+
+ALU32 operations write a 32-bit result and leave the upper 32 bits of
+the BPF register zero. The LoongArch JIT sign-extends the result of
+signed ALU32 BPF_DIV and BPF_MOD (off=1), so a negative 32-bit quotient
+or remainder leaves bits 63:32 set in JITted code while the verifier
+and interpreter model those bits as zero.
+
+Keep sign-extension on the operands, which signed divide needs, and
+zero-extend the ALU32 result after the divide or modulo instruction,
+matching the unsigned ALU32 div/mod paths and every other ALU32
+operation in this JIT.
+
+Fixes: 2425c9e002d2 ("LoongArch: BPF: Support signed div instructions")
+Fixes: 7b6b13d32965 ("LoongArch: BPF: Support signed mod instructions")
+Assisted-by: Claude:claude-opus-4-8
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 2425c9e002d2, 7b6b13d32965
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 2738b4db1165..c91d474faba7 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -836,5 +836,5 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			emit_sext_32(ctx, t1, is32);
+ 			emit_insn(ctx, divd, dst, dst, t1);
+-			emit_sext_32(ctx, dst, is32);
++			emit_zext_32(ctx, dst, is32);
+ 		}
+ 		break;
+@@ -853,5 +853,5 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			emit_sext_32(ctx, dst, is32);
+ 			emit_insn(ctx, divd, dst, dst, t1);
+-			emit_sext_32(ctx, dst, is32);
++			emit_zext_32(ctx, dst, is32);
+ 		}
+ 		break;
+@@ -871,5 +871,5 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			emit_sext_32(ctx, t1, is32);
+ 			emit_insn(ctx, modd, dst, dst, t1);
+-			emit_sext_32(ctx, dst, is32);
++			emit_zext_32(ctx, dst, is32);
+ 		}
+ 		break;
+@@ -888,5 +888,5 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			emit_sext_32(ctx, dst, is32);
+ 			emit_insn(ctx, modd, dst, dst, t1);
+-			emit_sext_32(ctx, dst, is32);
++			emit_zext_32(ctx, dst, is32);
+ 		}
+ 		break;
+
+##### L147
+=== 47e20d4b3da9 L 2026-07-24 +1/-0
+LoongArch: BPF: Fix memory leak in bpf_jit_free()
+
+When bpf_int_jit_compile() is called for subprograms, it returns early
+during the first pass (!prog->is_func || extra_pass is false), keeping
+ctx->offset alive for the subsequent extra pass.
+
+If JIT compilation fails for a later subprogram, the BPF core aborts and
+calls bpf_jit_free() to clean up the first subprogram. However,
+bpf_jit_free() fails to free jit_data->ctx.offset, which causes a memory
+leak of the JIT context offsets array.
+
+So fix this by adding the missing kvfree(jit_data->ctx.offset) in
+bpf_jit_free().
+
+Fixes: 4ab17e762b34 ("LoongArch: BPF: Use BPF prog pack allocator")
+functions: arch/loongarch/net/bpf_jit.c:bpf_jit_free
+fixes: 4ab17e762b34
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index c91d474faba7..29c281bef28e 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -2362,4 +2362,5 @@ void bpf_jit_free(struct bpf_prog *prog)
+ 		if (jit_data) {
+ 			bpf_jit_binary_pack_finalize(jit_data->ro_header, jit_data->header);
++			kvfree(jit_data->ctx.offset);
+ 			kfree(jit_data);
+ 		}
+
+##### L148
+=== 01c823f14ed4 L 2026-08-10 +2/-0
+LoongArch: KVM: Prevent division by zero in periodic timer restore
+
+A guest can write CSR.TCFG with the periodic bit set but a period value
+of zero. When kvm_restore_timer() later enters the periodic branch,
+period = cfg & CSR_TCFG_VAL evaluates to 0, causing (delta % period) to
+trigger a division by zero and crash the host kernel.
+
+Clamp the period to 1 to avoid the panic.
+
+Fixes: a5857b9ff6e0 ("LoongArch: KVM: Implement vcpu timer operations")
+functions: arch/loongarch/kvm/timer.c:kvm_restore_timer
+fixes: a5857b9ff6e0
+diff --git a/arch/loongarch/kvm/timer.c b/arch/loongarch/kvm/timer.c
+index 96f33e34855a..524d4096bac0 100644
+--- a/arch/loongarch/kvm/timer.c
++++ b/arch/loongarch/kvm/timer.c
+@@ -136,4 +136,6 @@ void kvm_restore_timer(struct kvm_vcpu *vcpu)
+ 	else if (cfg & CSR_TCFG_PERIOD) {
+ 		period = cfg & CSR_TCFG_VAL;
++		if (!period)
++			period = 1;
+ 		delta = ktime_to_tick(vcpu, ktime_sub(now, expire));
+ 		delta = period - (delta % period);
+
+##### L149
+=== 81aa3a58b542 L 2026-08-10 +1/-2
+LoongArch: KVM: Fix uninitialized stack variable issue with dmsintc
+
+Variable vector[] is declared on stack in function dmsintc_inject_irq()
+and sometimes it is used without initialized. Here fix this issue.
+
+Fixes: 03de5eecb0f0 ("LoongArch: KVM: Add DMSINTC inject msi to vCPU")
+functions: arch/loongarch/kvm/intc/dmsintc.c:dmsintc_inject_irq
+fixes: 03de5eecb0f0
+diff --git a/arch/loongarch/kvm/intc/dmsintc.c b/arch/loongarch/kvm/intc/dmsintc.c
+index de25735ce039..5f16fb185831 100644
+--- a/arch/loongarch/kvm/intc/dmsintc.c
++++ b/arch/loongarch/kvm/intc/dmsintc.c
+@@ -20,6 +20,5 @@ void dmsintc_inject_irq(struct kvm_vcpu *vcpu)
+ 	for (i = 0; i < 4; i++) {
+ 		old = atomic64_read(&(ds->vector_map[i]));
+-		if (old)
+-			vector[i] = atomic64_xchg(&(ds->vector_map[i]), 0);
++		vector[i] = old ? atomic64_xchg(&(ds->vector_map[i]), 0) : 0;
+ 	}
+ 

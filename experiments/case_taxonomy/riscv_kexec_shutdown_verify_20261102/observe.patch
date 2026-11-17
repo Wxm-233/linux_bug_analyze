@@ -1,0 +1,26 @@
+--- a/arch/riscv/kernel/machine_kexec.c	2026-11-02 08:42:54.218510256 +0800
++++ o/arch/riscv/kernel/machine_kexec.c	2026-11-02 08:42:54.218973660 +0800
+@@ -17,6 +17,7 @@
+ #include <linux/reboot.h>
+ #include <linux/interrupt.h>
+ #include <linux/irq.h>
++#include <linux/sched.h>
+ 
+ /*
+  * machine_kexec_prepare - Initialize kexec
+@@ -113,7 +114,14 @@
+ 	local_irq_disable();
+ 
+ #if defined(CONFIG_HOTPLUG_CPU)
+-	smp_shutdown_nonboot_cpus(smp_processor_id());
++	{
++		unsigned long sw0 = current->nvcsw + current->nivcsw;
++
++		pr_info("KEXEC-OBS before: irqs_disabled=%d switches=%lu\n", irqs_disabled(), sw0);
++		smp_shutdown_nonboot_cpus(smp_processor_id());
++		pr_info("KEXEC-OBS after: irqs_disabled=%d switches_delta=%lu\n", irqs_disabled(),
++			current->nvcsw + current->nivcsw - sw0);
++	}
+ #endif
+ }
+ 

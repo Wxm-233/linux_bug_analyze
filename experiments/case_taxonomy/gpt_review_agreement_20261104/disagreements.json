@@ -1,0 +1,816 @@
+{
+ "fix_strategy.follow": [
+  {
+   "item": "A069",
+   "ours": "F1",
+   "gpt": "F3",
+   "ours_detail": "使用fixmap改代码期间关抢占，防止迁移到别的CPU；arm64用关中断的自旋锁达到同样效果",
+   "gpt_reason": "在临时 fixmap 的映射与解除之间禁止抢占以避免迁移，而 arm64 用保存中断状态的自旋锁覆盖该区间。"
+  },
+  {
+   "item": "A387",
+   "ours": "F1",
+   "gpt": "F3",
+   "ours_detail": "KVM_SET_GUEST_DEBUG补调用配置函数，使设置真正生效",
+   "gpt_reason": "RISC-V 在 ioctl 中补调配置钩子切换 hedeleg 的断点委派位，arm64 则在该接口保存调试状态供运行路径配置。"
+  },
+  {
+   "item": "A393",
+   "ours": "F4",
+   "gpt": "F1",
+   "ours_detail": "machine_kexec_prepare跳过buf为空的段（IMA会产生空缓冲区）",
+   "gpt_reason": "按公共 kexec 路径允许出现空缓冲区的约定跳过 NULL 段，避免读取 IMA 预留段时解引用空指针。"
+  },
+  {
+   "item": "B444",
+   "ours": "F4",
+   "gpt": "F1",
+   "ours_detail": "去掉各架构对栈随机化熵的过滤，统一用默认10位；各架构原来都有这个问题",
+   "gpt_reason": "移除 arm64、s390 和 x86 的局部熵掩码，让公共 KSTACK_OFFSET_MAX 与原已采用该默认值的 RISC-V 一致地限制实际偏移。"
+  },
+  {
+   "item": "B577",
+   "ours": "F4",
+   "gpt": "F1",
+   "ours_detail": "公共ring buffer在强制8字节对齐时总减去长度字段大小",
+   "gpt_reason": "按公共事件写入路径的布局，在强制 8 字节对齐时也扣除小事件中单独存放长度的字段。"
+  }
+ ],
+ "fix_strategy.main_action": [
+  {
+   "item": "B455",
+   "ours": "A6",
+   "gpt": "A7",
+   "ours_detail": "公共binfmt_flat在不偏移数据段的配置下不再初始化共享库指针数组；该变体只有RISC-V用",
+   "gpt_reason": "将无数据段偏移配置下的共享库指针初始化循环上界设为零，避免覆盖未预留的区域。"
+  },
+  {
+   "item": "B577",
+   "ours": "A7",
+   "gpt": "A4",
+   "ours_detail": "公共ring buffer在强制8字节对齐时总减去长度字段大小",
+   "gpt_reason": "按公共事件写入路径的布局，在强制 8 字节对齐时也扣除小事件中单独存放长度的字段。"
+  }
+ ],
+ "fix_strategy.layer": [],
+ "fix_strategy.cites": [
+  {
+   "item": "A003",
+   "ours": "N",
+   "gpt": "Y",
+   "ours_detail": "覆盖公共默认is_trap_insn，同时认ebreak和c.ebreak（powerpc也自行实现）",
+   "gpt_reason": "覆盖 uprobe 的公共弱实现，按陷阱识别约定同时识别 RISC-V 的 ebreak 与 c.ebreak。"
+  },
+  {
+   "item": "B444",
+   "ours": "N",
+   "gpt": "Y",
+   "ours_detail": "去掉各架构对栈随机化熵的过滤，统一用默认10位；各架构原来都有这个问题",
+   "gpt_reason": "移除 arm64、s390 和 x86 的局部熵掩码，让公共 KSTACK_OFFSET_MAX 与原已采用该默认值的 RISC-V 一致地限制实际偏移。"
+  },
+  {
+   "item": "B577",
+   "ours": "N",
+   "gpt": "Y",
+   "ours_detail": "公共ring buffer在强制8字节对齐时总减去长度字段大小",
+   "gpt_reason": "按公共事件写入路径的布局，在强制 8 字节对齐时也扣除小事件中单独存放长度的字段。"
+  }
+ ],
+ "fix_strategy.follow_F1_or_not": [
+  {
+   "item": "A069",
+   "ours": true,
+   "gpt": false,
+   "ours_detail": "使用fixmap改代码期间关抢占，防止迁移到别的CPU；arm64用关中断的自旋锁达到同样效果",
+   "gpt_reason": "在临时 fixmap 的映射与解除之间禁止抢占以避免迁移，而 arm64 用保存中断状态的自旋锁覆盖该区间。"
+  },
+  {
+   "item": "A387",
+   "ours": true,
+   "gpt": false,
+   "ours_detail": "KVM_SET_GUEST_DEBUG补调用配置函数，使设置真正生效",
+   "gpt_reason": "RISC-V 在 ioctl 中补调配置钩子切换 hedeleg 的断点委派位，arm64 则在该接口保存调试状态供运行路径配置。"
+  },
+  {
+   "item": "A393",
+   "ours": false,
+   "gpt": true,
+   "ours_detail": "machine_kexec_prepare跳过buf为空的段（IMA会产生空缓冲区）",
+   "gpt_reason": "按公共 kexec 路径允许出现空缓冲区的约定跳过 NULL 段，避免读取 IMA 预留段时解引用空指针。"
+  },
+  {
+   "item": "B444",
+   "ours": false,
+   "gpt": true,
+   "ours_detail": "去掉各架构对栈随机化熵的过滤，统一用默认10位；各架构原来都有这个问题",
+   "gpt_reason": "移除 arm64、s390 和 x86 的局部熵掩码，让公共 KSTACK_OFFSET_MAX 与原已采用该默认值的 RISC-V 一致地限制实际偏移。"
+  },
+  {
+   "item": "B577",
+   "ours": false,
+   "gpt": true,
+   "ours_detail": "公共ring buffer在强制8字节对齐时总减去长度字段大小",
+   "gpt_reason": "按公共事件写入路径的布局，在强制 8 字节对齐时也扣除小事件中单独存放长度的字段。"
+  }
+ ],
+ "test_labels3": [
+  {
+   "item": "L02",
+   "ours": "unsure",
+   "gpt": "bug",
+   "ours_detail": "panic路径先bust_spinlocks(1)，smp_call_function不报警告；machine_halt/restart/power_off只关抢占、未关中断。但sysrq-b在键盘中断中调用emergency_restart→machine_restart→smp_send_stop，此时关中断且oops_in_progress为0，开启lockdep时会触发lockdep_assert_irqs_enabled；这算不算实际错误拿不准",
+   "gpt_reason": "硬中断触发 panic 时会在非任务上下文调用 smp_send_stop，通用 SMP 调用即使 wait 为 0 也会触发 WARN_ON_ONCE(!in_task())。"
+  },
+  {
+   "item": "L06",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "启用未对齐访问的寄存器转储时，v6.2 的 do_ale 可在关中断状态沿 show_registers 读取用户栈并触发 might_fault 告警。"
+  },
+  {
+   "item": "L09",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "启用 KPROBES 时用户态执行 break 11 就能进入没有活跃探针的单步路径，未关闭过抢占却执行 preempt_enable_no_resched 会导致抢占计数下溢。"
+  },
+  {
+   "item": "L10",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "v6.3 的 breakpoint_handler 未检查硬件命中状态，单个执行断点触发时会错误地向同一 CPU 上其他非空断点槽报告事件。"
+  },
+  {
+   "item": "L11",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "普通 perf 硬件断点命中后也会无条件执行 force_sig(SIGTRAP)，因此没有 SIGTRAP 处理器的监控目标会被意外终止。"
+  },
+  {
+   "item": "L15",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "__do_page_fault按PIE开中断：从用户态或开中断的内核进入时已先开中断；faulthandler_disabled或没有mm时直接返回，不进handle_mm_fault；关中断的内核上下文访问用户地址在各架构都是同样处理（与开发样本15的标签一致）",
+   "gpt_reason": "仅关中断不会使 faulthandler_disabled 为真，例如旧的 do_ale 若在关中断转储未驻留的用户 HugeTLB 栈页，嵌套页故障仍可进入 hugetlb_fault 取互斥锁。"
+  },
+  {
+   "item": "M02",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "崩溃转储路径：panic已bust_spinlocks(1)置oops_in_progress，smp_call_function不等待（wait=0），关中断调用在此场合是允许的（与LoongArch开发样本20的标签一致）",
+   "gpt_reason": "硬中断触发 panic 且已加载崩溃内核时，崩溃关机对 smp_call_function 的调用会触发通用 SMP 代码的 WARN_ON_ONCE(!in_task())。"
+  },
+  {
+   "item": "M04",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "MIPS中die只由die_if_kernel和mm/fault.c的no_context调用，regs都是内核态，show_registers按user_mode(regs)读内核栈和内核正文，不走get_user",
+   "gpt_reason": "从用户态收到 NMI 时 nmi_exception_handler 可直接传入用户寄存器调用 die，用户栈读取在持有 die_lock 时触发 might_fault。"
+  },
+  {
+   "item": "M18",
+   "ours": "unsure",
+   "gpt": "bug",
+   "ours_detail": "do_mcheck入口为cli；用户态发生机器检查时，show_code走get_user，开启DEBUG_ATOMIC_SLEEP会报“在原子上下文中睡眠”警告，但紧接着就panic，这算不算实际错误拿不准",
+   "gpt_reason": "机器检查入口用 CLI 关中断，被打断的是用户态时转储代码仍会调用带 might_fault 的 get_user。"
+  },
+  {
+   "item": "M21",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "gpt_reason": "MIPS 可启用 NO_HZ_FULL，R2 仿真快路径在 exception_enter 之前对 SIGSEGV 获取 mmap 读锁，争锁时可在 RCU 仍处于用户态静止期时调度。"
+  },
+  {
+   "item": "M34",
+   "ours": "not_issue",
+   "gpt": "convention",
+   "ours_detail": "参照架构多出的是WARN_ON_ONCE(trap_nr != UPROBE_TRAP_NR)这一自检警告，缺少它不会造成错误",
+   "gpt_reason": "MIPS 恢复 XOL 的保存状态且有独立的异常检测钩子，缺少其他架构在收尾处提供的额外诊断断言。"
+  },
+  {
+   "item": "M36",
+   "ours": "bug",
+   "gpt": "not_issue",
+   "ours_detail": "arch_mem_init（由setup_arch调用）中执行parse_early_param，早于start_kernel中的jump_label_init；MIPS选了IRQ_FORCED_THREADING和HAVE_ARCH_JUMP_LABEL，启动参数threadirqs的setup_forced_irqthreads会调用static_branch_enable，触发“static key used before call to jump_label_init”警告；到终点版本仍未改（LoongArch的同一问题已由ea68d444a658修复）",
+   "gpt_reason": "早期参数由 arch_mem_init 解析，跳转标签由公共启动代码初始化，MIPS 的启动和内存布局也不依赖其余两个架构辅助调用。"
+  }
+ ],
+ "test_labels3_scored": [
+  {
+   "item": "L06",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "启用未对齐访问的寄存器转储时，v6.2 的 do_ale 可在关中断状态沿 show_registers 读取用户栈并触发 might_fault 告警。"
+  },
+  {
+   "item": "L09",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "启用 KPROBES 时用户态执行 break 11 就能进入没有活跃探针的单步路径，未关闭过抢占却执行 preempt_enable_no_resched 会导致抢占计数下溢。"
+  },
+  {
+   "item": "L10",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "v6.3 的 breakpoint_handler 未检查硬件命中状态，单个执行断点触发时会错误地向同一 CPU 上其他非空断点槽报告事件。"
+  },
+  {
+   "item": "L11",
+   "ours": "convention",
+   "gpt": "bug",
+   "ours_detail": "noinstr入口中的调用发生在irqentry_enter之后，上下文已建立；LoongArch不做noinstr的objtool校验，上游到终点版本一直保留这种写法（与开发样本的同类标签一致）",
+   "gpt_reason": "普通 perf 硬件断点命中后也会无条件执行 force_sig(SIGTRAP)，因此没有 SIGTRAP 处理器的监控目标会被意外终止。"
+  },
+  {
+   "item": "L15",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "__do_page_fault按PIE开中断：从用户态或开中断的内核进入时已先开中断；faulthandler_disabled或没有mm时直接返回，不进handle_mm_fault；关中断的内核上下文访问用户地址在各架构都是同样处理（与开发样本15的标签一致）",
+   "gpt_reason": "仅关中断不会使 faulthandler_disabled 为真，例如旧的 do_ale 若在关中断转储未驻留的用户 HugeTLB 栈页，嵌套页故障仍可进入 hugetlb_fault 取互斥锁。"
+  },
+  {
+   "item": "M02",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "崩溃转储路径：panic已bust_spinlocks(1)置oops_in_progress，smp_call_function不等待（wait=0），关中断调用在此场合是允许的（与LoongArch开发样本20的标签一致）",
+   "gpt_reason": "硬中断触发 panic 且已加载崩溃内核时，崩溃关机对 smp_call_function 的调用会触发通用 SMP 代码的 WARN_ON_ONCE(!in_task())。"
+  },
+  {
+   "item": "M04",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "MIPS中die只由die_if_kernel和mm/fault.c的no_context调用，regs都是内核态，show_registers按user_mode(regs)读内核栈和内核正文，不走get_user",
+   "gpt_reason": "从用户态收到 NMI 时 nmi_exception_handler 可直接传入用户寄存器调用 die，用户栈读取在持有 die_lock 时触发 might_fault。"
+  },
+  {
+   "item": "M21",
+   "ours": "not_issue",
+   "gpt": "bug",
+   "ours_detail": "genex.S中该处理函数的BUILD_HANDLER第三个参数为sti，入口已打开中断，从用户态进入时get_user/down_read可以睡眠；内核态时读的是内核正文，不会缺页",
+   "gpt_reason": "MIPS 可启用 NO_HZ_FULL，R2 仿真快路径在 exception_enter 之前对 SIGSEGV 获取 mmap 读锁，争锁时可在 RCU 仍处于用户态静止期时调度。"
+  },
+  {
+   "item": "M34",
+   "ours": "not_issue",
+   "gpt": "convention",
+   "ours_detail": "参照架构多出的是WARN_ON_ONCE(trap_nr != UPROBE_TRAP_NR)这一自检警告，缺少它不会造成错误",
+   "gpt_reason": "MIPS 恢复 XOL 的保存状态且有独立的异常检测钩子，缺少其他架构在收尾处提供的额外诊断断言。"
+  },
+  {
+   "item": "M36",
+   "ours": "bug",
+   "gpt": "not_issue",
+   "ours_detail": "arch_mem_init（由setup_arch调用）中执行parse_early_param，早于start_kernel中的jump_label_init；MIPS选了IRQ_FORCED_THREADING和HAVE_ARCH_JUMP_LABEL，启动参数threadirqs的setup_forced_irqthreads会调用static_branch_enable，触发“static key used before call to jump_label_init”警告；到终点版本仍未改（LoongArch的同一问题已由ea68d444a658修复）",
+   "gpt_reason": "早期参数由 arch_mem_init 解析，跳转标签由公共启动代码初始化，MIPS 的启动和内存布局也不依赖其余两个架构辅助调用。"
+  }
+ ],
+ "expand_vs_labels3": [
+  {
+   "item": "C0_15 do_page_fault",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "not_issue：开中断取决于父上下文：从用户态或开中断的内核进入时已先开中断；关中断的内核上下文访问用户地址在各架构都是同样处理，不是LoongArch特有问题",
+   "gpt_reason": "内核任务可在仅关闭本地中断时访问用户页发生缺页，此时 faulthandler_disabled 不一定成立，因而可能在中断仍关闭时执行 down_read。"
+  },
+  {
+   "item": "C0_20 machine_crash_shutdown",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "not_issue：崩溃转储路径：panic/die已调用bust_spinlocks置oops_in_progress，smp_call_function不等待（wait=0），关中断调用在此场合是允许的",
+   "gpt_reason": "首次执行崩溃停核会关中断调用 smp_call_function，wait 为零仍须先获取可能被占用的 CSD，且违反该接口的中断状态约定。"
+  },
+  {
+   "item": "C0_23 on_thread_stack",
+   "ours": "real",
+   "gpt": "false_alarm",
+   "ours_detail": "convention：noinstr代码调用的on_thread_stack只是static inline，参照架构为__always_inline；后来a45728fd4120在启用STACKLEAK时顺带改为__always_inline，说明中没有提到noinstr，难以判断是否算修复",
+   "gpt_reason": "v6.1 的 LoongArch 没有启用会用到该辅助函数的 STACKLEAK 支持，通用入口代码也不通过它检查 LoongArch 的线程栈。"
+  },
+  {
+   "item": "C0_27 setup_arch",
+   "ours": "real",
+   "gpt": "unsure",
+   "ours_detail": "bug：setup_arch中先调用parse_early_param，而jump_label_init在其后（start_kernel中）才执行，早期参数处理改静态键会出错；修复把jump_label_init移到parse_early_param之前，说明中写“与其他架构的做法相同”",
+   "gpt_reason": "通用 start_kernel 会初始化静态键，但材料省略了 LoongArch 其余启动实现，尚无法确认 init_mm 的镜像边界是否另有初始化或影响此版本的调用者。"
+  }
+ ],
+ "rule_flags": [
+  {
+   "item": "Q_06 arch_ftrace_update_code",
+   "ours": "real",
+   "gpt": "false_alarm",
+   "ours_detail": "a fixed_upstream RISC-V later defined its own arch_ftrace_update_code in c97bf629963e \"Fix text patching when IPI are used\" (2024-02, no Fixes tag): the stop_machine default did not suit RISC-V patching",
+   "gpt_reason": "v6.6 的 RISC-V 可用通用 stop_machine 路径安全地修改跟踪指令，架构间的覆盖差异只影响更新方式和开销。"
+  },
+  {
+   "item": "Q_07 memcpy_fromio",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator generic memcpy_fromio is functionally correct; arch versions are optimisations",
+   "gpt_reason": "v6.6 的通用 memcpy_fromio 用普通 memcpy 读取 MMIO，普通内存拷贝可能产生设备不支持的未对齐读取或破坏 I/O 访问顺序。"
+  },
+  {
+   "item": "Q_09 memcpy_toio",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator same as 2",
+   "gpt_reason": "v6.6 的通用 memcpy_toio 用普通 memcpy 写入 MMIO，编译器或拷贝实现可能产生设备不支持的写入宽度或顺序。"
+  },
+  {
+   "item": "Q_11 pcibios_assign_all_busses",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator default policy is fine",
+   "gpt_reason": "v6.6 的通用默认值强制重编 PCI 总线号，移除层级中靠前的根端口后再扫描时可能与仍登记的后续总线号区间冲突。"
+  },
+  {
+   "item": "Q_20 kvm_riscv_vcpu_pmu_ctr_stop",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator_corrected same as 14 (ctr_stop)",
+   "gpt_reason": "客体可在已使用的固件计数器上用 SKIP_MATCH 配置非固件事件而保留其计数器类型，停止时仅靠范围分支保护由该事件号得到的 fw_event 下标。"
+  },
+  {
+   "item": "Q_25 kvm_riscv_vcpu_pmu_ctr_start",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator_corrected same as 14 (ctr_start)",
+   "gpt_reason": "客体可用 SKIP_MATCH 给已使用的固件计数器保存非固件事件号，启动时得到的 fevent_code 只经过可被错预测的范围判断便用于访问 fw_event。"
+  },
+  {
+   "item": "Q_27 kvm_age_gfn",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator arm64 dropped the WARN_ON in a refactor to its own page-table API; no requirement for RISC-V",
+   "gpt_reason": "v6.6 的 KVM 会按内存槽边界裁剪合法的 PMD 级老化通知，交给 kvm_age_gfn 的范围可能不是三种整页大小之一而触发误报。"
+  },
+  {
+   "item": "Q_30 __acpi_unmap_table",
+   "ours": "real",
+   "gpt": "false_alarm",
+   "ours_detail": "a fixed_upstream same as 27 for unmap",
+   "gpt_reason": "v6.6 的 early_memunmap 直接调用同一个 early_iounmap，所以此处取消映射操作等价。"
+  },
+  {
+   "item": "Q_39 pmu_fw_ctr_read_hi",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator fevent_code comes from pmc->event_idx, validated and stored at configuration time; the guest cannot supply an out-of-range value here",
+   "gpt_reason": "在 RV32 宿主上，客体可请求读取尚未配置的固件计数器高位，其无效事件号可在分支错预测时被用作未加掩码的 fw_event 下标，即使 cidx 已做掩码。"
+  },
+  {
+   "item": "Q_40 pmu_ctr_read",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator same as 14",
+   "gpt_reason": "客体可选择尚未配置的固件计数器，cidx 的掩码只保护 pmc 数组，后续条件错预测仍可能将无效事件号的低位用作 fw_event 下标。"
+  }
+ ],
+ "heldout18": [
+  {
+   "item": "H0_06 memset_io",
+   "ours": "false_alarm",
+   "gpt": "real",
+   "ours_detail": "b first_annotator generic memset_io is functionally correct",
+   "gpt_reason": "v6.6 的 RISC-V 将 memset_io 落到普通 memset，后者用本机字宽和字节存储且缺少 MMIO 顺序保证，设备可能看到不支持的宽度或乱序写入。"
+  },
+  {
+   "item": "H0_16 kfence_protect_page",
+   "ours": "real",
+   "gpt": "false_alarm",
+   "ours_detail": "a fixed_upstream b3431a8bb336 riscv: Fix IPIs usage in kfence_protect_page() (A122)",
+   "gpt_reason": "原始 v6.6 的 KFENCE 要求 RV64 和 MMU，正常配置走 SBI RFENCE，而当时可为 RFENCE 启用 IPI 的 CLINT 是无 MMU 的 M 模式中断源。"
+  }
+ ],
+ "ctx_v612": [
+  {
+   "item": "K02 die_console",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "same as 1",
+   "gpt_reason": "并发的 die_kernel_fault 可在 die_lock 外更新非原子的 oops_in_progress，若两个增量合并成一次，另一 CPU 可提前将计数减到零并使持锁路径进入阻塞的 console_lock。"
+  },
+  {
+   "item": "K03 die_rt",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "die() takes spinlock_t with irqs off in trap handling, which sleeps on PREEMPT_RT; fixed later by 6a97f4118ac0 (A118)",
+   "gpt_reason": "第 184 行只在用户态陷入分支执行，do_trap_error 对同一组寄存器走发送 SIGILL 的分支，跳过 die。"
+  },
+  {
+   "item": "K06 die_rt",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "same path through handle_break",
+   "gpt_reason": "第 302 行只处理用户态断点，handle_break 会发送 SIGTRAP 或被探针接管，不会调用 die。"
+  },
+  {
+   "item": "K08 ecall_die",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "the kernel-mode branch of do_trap_ecall_u that reaches die is not reachable in normal operation",
+   "gpt_reason": "异常向量按 U 态 ecall 的异常码分派到 do_trap_ecall_u，正常硬件陷入保存的特权级必为 U 态，因而到不了第 349 行的内核态分支。"
+  },
+  {
+   "item": "K10 die_rt",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "die path from the misaligned load trap",
+   "gpt_reason": "第 207 行的用户态加载模拟失败时，do_trap_error 根据同一组寄存器发送 SIGBUS，不会调用 die。"
+  },
+  {
+   "item": "K11 misaligned_uaccess",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "same as 9",
+   "gpt_reason": "copy_from_user 只在 handle_misaligned_load 的用户态分支执行，第 214 行传入的内核态寄存器使其走 memcpy 分支。"
+  },
+  {
+   "item": "K14 die_rt",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "die path from the misaligned store trap",
+   "gpt_reason": "第 228 行的用户态存储模拟失败时，do_trap_error 根据同一组寄存器发送 SIGBUS，不会调用 die。"
+  },
+  {
+   "item": "K15 misaligned_uaccess",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "same as 13",
+   "gpt_reason": "copy_to_user 只在 handle_misaligned_store 的用户态分支执行，第 235 行传入的内核态寄存器使其走 memcpy 分支。"
+  },
+  {
+   "item": "K18 hibernate_drain_rt",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "spinlock_t in swsusp_save with irqs off is in the common hibernation path of every architecture, not RISC-V specific",
+   "gpt_reason": "swsusp_save 传入 NULL，跳过所列的 drain_local_pages 到 drain_pages_zone 的直调分支，实际经 drain_pages 到达同一个锁。"
+  },
+  {
+   "item": "K20 hibernate_flush",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "flush_icache_all path with one CPU online not checked",
+   "gpt_reason": "休眠映像恢复到这一分支时只有一个 CPU 在线，flush_icache_all 在本地刷新后直接返回。"
+  },
+  {
+   "item": "K22 noinstr_inline",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "on_thread_stack static inline called from noinstr stackleak_erase; x86 uses __always_inline; unchanged at the end version",
+   "gpt_reason": "v6.12 的 RISC-V 未启用 HAVE_ARCH_STACKLEAK 所需的架构支持，因此指定的 stackleak_erase 调用路径不会编入内核。"
+  },
+  {
+   "item": "K23 noinstr_callee",
+   "ours": "c",
+   "gpt": "a",
+   "ours_detail": "noinstr arch_stack_walk calls instrumentable walk_stackframe; RISC-V has no objtool check, impact not established",
+   "gpt_reason": "noinstr 的 arch_stack_walk 无条件调用仅标有 notrace 的 walk_stackframe，后者的内存访问仍可由 KASAN 插桩。"
+  },
+  {
+   "item": "K24 noinstr_callee",
+   "ours": "c",
+   "gpt": "a",
+   "ours_detail": "noinstr do_page_fault calls handle_page_fault outside instrumentation_begin/end; same open question as in mech_scan_riscv_20261102",
+   "gpt_reason": "noinstr 的 do_page_fault 在 irqentry_enter 返回后直接调用可插桩的 handle_page_fault，调用点仍在允许插桩的标记范围之外。"
+  },
+  {
+   "item": "K25 noinstr_callee",
+   "ours": "c",
+   "gpt": "a",
+   "ours_detail": "noinstr handle_riscv_irq calls irq_enter_rcu outside instrumentation_begin/end, which x86 wraps; impact not established",
+   "gpt_reason": "noinstr 的 handle_riscv_irq 在允许插桩的标记范围之外直接调用了可被函数跟踪插桩的 irq_enter_rcu。"
+  },
+  {
+   "item": "K26 noinstr_callee",
+   "ours": "c",
+   "gpt": "a",
+   "ours_detail": "same as 25 for irq_exit_rcu",
+   "gpt_reason": "noinstr 的 handle_riscv_irq 在允许插桩的标记范围之外直接调用了可被函数跟踪插桩的 irq_exit_rcu。"
+  }
+ ],
+ "forward_end": [
+  {
+   "item": "E03 CTX|sleep|hugetlb_fault|mutex_lock",
+   "ours": "b",
+   "gpt": "c",
+   "ours_detail": "handle_page_fault itself enables interrupts (line 319) before handle_mm_fault when the faulting context had them on",
+   "gpt_reason": "常规缺页在处理前会恢复中断，但 faulthandler_disabled 不单独检查关中断状态，尚无法确认只有本地中断关闭的受支持调用能否到达 hugetlb_fault。"
+  },
+  {
+   "item": "E04 CTX|rt|do_oops_enter_exit|spin_lock_irqsave",
+   "ours": "c",
+   "gpt": "a2",
+   "ours_detail": "oops_enter takes the spinlock_t pause_on_oops_lock only when pause_on_oops is set; same in the common oops path of every architecture, not RISC-V specific",
+   "gpt_reason": "内核软件检查异常在关中断状态调用 die，当 PREEMPT_RT 启用且 pause_on_oops 非零时会进入可能阻塞的 pause_on_oops_lock 获取路径。"
+  },
+  {
+   "item": "E05 CTX|rt|mark_free_pages|spin_lock_irqsave",
+   "ours": "c",
+   "gpt": "a2",
+   "ours_detail": "zone spinlock_t in swsusp_save with irqs off is the common hibernation path of every architecture, not RISC-V specific",
+   "gpt_reason": "启用休眠和 PREEMPT_RT 时，镜像保存路径在关中断状态下由 mark_free_pages 获取具有阻塞语义的 zone->lock。"
+  },
+  {
+   "item": "E08 CTX|noinstr|on_thread_stack|called from noinstr/__cpuidle",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "static inline on_thread_stack called from noinstr stackleak code while x86 uses __always_inline; impact not established",
+   "gpt_reason": "do_irq 在 irqentry_enter 后使用这个通常直接内联的栈地址比较，内联后的代码受调用者 noinstr 约束。"
+  },
+  {
+   "item": "E09 CTX|noinstr|cpu_relax|called from noinstr/__cpuidle",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "static inline cpu_relax called from noinstr code while x86 uses __always_inline; impact not established",
+   "gpt_reason": "cpu_idle_poll 在已有的插桩标记区间调用 cpu_relax，而该内联助手只执行汇编和编译器屏障。"
+  },
+  {
+   "item": "E10 CTX|noinstr|walk_stackframe|instrumentable callee",
+   "ours": "c",
+   "gpt": "a2",
+   "ours_detail": "noinstr arch_stack_walk calls instrumentable walk_stackframe; RISC-V has no objtool check",
+   "gpt_reason": "启用 KASAN 等编译期插桩时，仅有 notrace 的 walk_stackframe 仍可被插桩并由 noinstr 的 arch_stack_walk 直接调用。"
+  },
+  {
+   "item": "E11 CTX|noinstr|handle_page_fault|instrumentable callee",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "noinstr do_page_fault calls handle_page_fault outside instrumentation_begin/end",
+   "gpt_reason": "handle_page_fault 在 irqentry_enter 建立 RCU 和入口跟踪状态后、irqentry_exit 之前运行，此时缺页处理允许插桩。"
+  },
+  {
+   "item": "E12 CTX|noinstr|irq_enter_rcu|instrumentable callee",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "noinstr handle_riscv_irq calls irq_enter_rcu outside instrumentation_begin/end, which x86 wraps",
+   "gpt_reason": "do_irq 先用 irqentry_enter 建立 RCU 和入口跟踪状态，再调用含 irq_enter_rcu 的处理函数，符合通用中断入口的顺序。"
+  },
+  {
+   "item": "E13 CTX|noinstr|irq_exit_rcu|instrumentable callee",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "same as 12 for irq_exit_rcu",
+   "gpt_reason": "irq_exit_rcu 在 do_irq 调用 irqentry_exit 撤销入口状态之前执行，仍处于允许插桩的中断处理区间。"
+  },
+  {
+   "item": "E14 R7|arch/riscv/kvm/vcpu_pmu.c:pmu_fw_ctr_read_hi",
+   "ours": "b",
+   "gpt": "a2",
+   "ours_detail": "fevent_code comes from pmc->event_idx, validated and stored at configuration time; the guest cannot supply an out-of-range value here",
+   "gpt_reason": "RV32 上客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，随后高半部读取只用可被错误推测的分支检查该下标。"
+  },
+  {
+   "item": "E15 R7|arch/riscv/kvm/vcpu_pmu.c:pmu_ctr_read",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "same as 14",
+   "gpt_reason": "客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，随后固件计数读取时下标只有分支检查而无推测执行屏蔽。"
+  },
+  {
+   "item": "E17 R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_start",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "same as 14 (ctr_start)",
+   "gpt_reason": "客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，启动计数器时可以在错误推测下用该码访问 fw_event。"
+  },
+  {
+   "item": "E18 R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_stop",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "same as 14 (ctr_stop)",
+   "gpt_reason": "客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，停止计数器时可以在错误推测下用该码访问 fw_event。"
+  },
+  {
+   "item": "E20 R10|arch/riscv/kernel/cacheinfo.c:init_cache_level",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "arm64 init_cache_level handles ACPI, RISC-V only the DT path; the common fetch_cache_info already sets the ACPI levels early, effect not checked",
+   "gpt_reason": "RISC-V 委托 init_of_cache_level 处理设备树，该公共函数会调用 get_cpu_cacheinfo 并填写缓存层数及叶节点数。"
+  }
+ ],
+ "forward_end_real": [
+  {
+   "item": "E03 CTX|sleep|hugetlb_fault|mutex_lock",
+   "ours": "b",
+   "gpt": "c",
+   "ours_detail": "handle_page_fault itself enables interrupts (line 319) before handle_mm_fault when the faulting context had them on",
+   "gpt_reason": "常规缺页在处理前会恢复中断，但 faulthandler_disabled 不单独检查关中断状态，尚无法确认只有本地中断关闭的受支持调用能否到达 hugetlb_fault。"
+  },
+  {
+   "item": "E04 CTX|rt|do_oops_enter_exit|spin_lock_irqsave",
+   "ours": "c",
+   "gpt": "real",
+   "ours_detail": "oops_enter takes the spinlock_t pause_on_oops_lock only when pause_on_oops is set; same in the common oops path of every architecture, not RISC-V specific",
+   "gpt_reason": "内核软件检查异常在关中断状态调用 die，当 PREEMPT_RT 启用且 pause_on_oops 非零时会进入可能阻塞的 pause_on_oops_lock 获取路径。"
+  },
+  {
+   "item": "E05 CTX|rt|mark_free_pages|spin_lock_irqsave",
+   "ours": "c",
+   "gpt": "real",
+   "ours_detail": "zone spinlock_t in swsusp_save with irqs off is the common hibernation path of every architecture, not RISC-V specific",
+   "gpt_reason": "启用休眠和 PREEMPT_RT 时，镜像保存路径在关中断状态下由 mark_free_pages 获取具有阻塞语义的 zone->lock。"
+  },
+  {
+   "item": "E08 CTX|noinstr|on_thread_stack|called from noinstr/__cpuidle",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "static inline on_thread_stack called from noinstr stackleak code while x86 uses __always_inline; impact not established",
+   "gpt_reason": "do_irq 在 irqentry_enter 后使用这个通常直接内联的栈地址比较，内联后的代码受调用者 noinstr 约束。"
+  },
+  {
+   "item": "E09 CTX|noinstr|cpu_relax|called from noinstr/__cpuidle",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "static inline cpu_relax called from noinstr code while x86 uses __always_inline; impact not established",
+   "gpt_reason": "cpu_idle_poll 在已有的插桩标记区间调用 cpu_relax，而该内联助手只执行汇编和编译器屏障。"
+  },
+  {
+   "item": "E10 CTX|noinstr|walk_stackframe|instrumentable callee",
+   "ours": "c",
+   "gpt": "real",
+   "ours_detail": "noinstr arch_stack_walk calls instrumentable walk_stackframe; RISC-V has no objtool check",
+   "gpt_reason": "启用 KASAN 等编译期插桩时，仅有 notrace 的 walk_stackframe 仍可被插桩并由 noinstr 的 arch_stack_walk 直接调用。"
+  },
+  {
+   "item": "E11 CTX|noinstr|handle_page_fault|instrumentable callee",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "noinstr do_page_fault calls handle_page_fault outside instrumentation_begin/end",
+   "gpt_reason": "handle_page_fault 在 irqentry_enter 建立 RCU 和入口跟踪状态后、irqentry_exit 之前运行，此时缺页处理允许插桩。"
+  },
+  {
+   "item": "E12 CTX|noinstr|irq_enter_rcu|instrumentable callee",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "noinstr handle_riscv_irq calls irq_enter_rcu outside instrumentation_begin/end, which x86 wraps",
+   "gpt_reason": "do_irq 先用 irqentry_enter 建立 RCU 和入口跟踪状态，再调用含 irq_enter_rcu 的处理函数，符合通用中断入口的顺序。"
+  },
+  {
+   "item": "E13 CTX|noinstr|irq_exit_rcu|instrumentable callee",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "same as 12 for irq_exit_rcu",
+   "gpt_reason": "irq_exit_rcu 在 do_irq 调用 irqentry_exit 撤销入口状态之前执行，仍处于允许插桩的中断处理区间。"
+  },
+  {
+   "item": "E14 R7|arch/riscv/kvm/vcpu_pmu.c:pmu_fw_ctr_read_hi",
+   "ours": "b",
+   "gpt": "real",
+   "ours_detail": "fevent_code comes from pmc->event_idx, validated and stored at configuration time; the guest cannot supply an out-of-range value here",
+   "gpt_reason": "RV32 上客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，随后高半部读取只用可被错误推测的分支检查该下标。"
+  },
+  {
+   "item": "E15 R7|arch/riscv/kvm/vcpu_pmu.c:pmu_ctr_read",
+   "ours": "b",
+   "gpt": "real",
+   "ours_detail": "same as 14",
+   "gpt_reason": "客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，随后固件计数读取时下标只有分支检查而无推测执行屏蔽。"
+  },
+  {
+   "item": "E17 R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_start",
+   "ours": "b",
+   "gpt": "real",
+   "ours_detail": "same as 14 (ctr_start)",
+   "gpt_reason": "客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，启动计数器时可以在错误推测下用该码访问 fw_event。"
+  },
+  {
+   "item": "E18 R7|arch/riscv/kvm/vcpu_pmu.c:kvm_riscv_vcpu_pmu_ctr_stop",
+   "ours": "b",
+   "gpt": "real",
+   "ours_detail": "same as 14 (ctr_stop)",
+   "gpt_reason": "客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，停止计数器时可以在错误推测下用该码访问 fw_event。"
+  },
+  {
+   "item": "E20 R10|arch/riscv/kernel/cacheinfo.c:init_cache_level",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "arm64 init_cache_level handles ACPI, RISC-V only the DT path; the common fetch_cache_info already sets the ACPI levels early, effect not checked",
+   "gpt_reason": "RISC-V 委托 init_of_cache_level 处理设备树，该公共函数会调用 get_cpu_cacheinfo 并填写缓存层数及叶节点数。"
+  }
+ ],
+ "mech_v66": [
+  {
+   "item": "Q00 ",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "RISC-V later defined its own arch_ftrace_update_code in c97bf629963e \"Fix text patching when IPI are used\" (2024-02, no Fixes tag): the stop_machine default did not suit RISC-V patching",
+   "gpt_reason": "RISC-V 的 ftrace 指令序列需要在 stop_machine 下更新，默认实现正好提供所需的同步。"
+  },
+  {
+   "item": "Q01 ",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "arm64 uses it to attach the ACPI companion to the root bridge; whether RISC-V ACPI PCI needs it was not checked",
+   "gpt_reason": "RISC-V 的 PCI 主桥由通用 PCI 核心和宿主控制器驱动完成设置，额外的平台准备钩子可以成功空返回。"
+  },
+  {
+   "item": "Q02 ",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "generic memcpy_fromio is functionally correct; arch versions are optimisations",
+   "gpt_reason": "RV64 的普通 memcpy 在对齐的批量复制中会对 MMIO 发出 64 位读事务，只支持较窄访问的设备可能返回错误数据或触发总线异常。"
+  },
+  {
+   "item": "Q04 ",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "same as 2",
+   "gpt_reason": "RV64 的普通 memcpy 可对 MMIO 发出设备不支持的 64 位写事务，而且缺少 RISC-V 的写 I/O 排序处理，可能导致设备写入失败或乱序。"
+  },
+  {
+   "item": "Q05 ",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "arm64 uses it for ACPI bus setup; RISC-V need not checked",
+   "gpt_reason": "通用 PCI 核心仍会调用宿主总线的 ops->add_bus，RISC-V 无须再通过这个可选钩子做额外初始化。"
+  },
+  {
+   "item": "Q09 ",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "RISC-V added back init_cache_level (1845d381f280, no Fixes tag); effect of the default not checked",
+   "gpt_reason": "RISC-V 通过 fetch_cache_info 从设备树或 ACPI PPTT 预先取得缓存层级，成功时通用代码跳过弱实现，缺少固件信息时返回无数据。"
+  },
+  {
+   "item": "Q12 ",
+   "ours": "a",
+   "gpt": "c",
+   "ours_detail": "guest-controlled irq index after a bound check without array_index_nospec; fixed later by 8565617a8599 \"KVM: riscv: Fix Spectre-v1 in APLIC interrupt handling\"",
+   "gpt_reason": "客体控制的 TARGET 偏移先经调用方范围检查，现有源码不足以判断两处检查被推测绕过后票锁路径能否暴露宿主状态。"
+  },
+  {
+   "item": "Q15 ",
+   "ours": "a",
+   "gpt": "c",
+   "ours_detail": "same as 12",
+   "gpt_reason": "客体读取 CLRIP 字寄存器时可触达最后一字中超出实际 IRQ 数的位，但源码无法确认锁保护下的推测读取有可观察的泄露途径。"
+  },
+  {
+   "item": "Q16 ",
+   "ours": "a",
+   "gpt": "c",
+   "ours_detail": "same as 12",
+   "gpt_reason": "客体提供的 TARGET 偏移有外层范围检查，返回值也只是锁内取得的寄存器数据，现有源码不足以确认推测访问可泄露宿主数据。"
+  },
+  {
+   "item": "Q18 ",
+   "ours": "a",
+   "gpt": "c",
+   "ours_detail": "same as 12",
+   "gpt_reason": "客体可通过 SETIENUM 或 CLRIENUM 直接提供越界 IRQ，但仍需确认锁内状态读改写能否形成可观察的推测执行泄露。"
+  },
+  {
+   "item": "Q19 ",
+   "ours": "a",
+   "gpt": "c",
+   "ours_detail": "same as 12",
+   "gpt_reason": "客体控制的 SOURCECFG 偏移先经调用方范围检查，缺少证据表明越界路径上的锁操作或推测写入会泄露数据。"
+  },
+  {
+   "item": "Q23 ",
+   "ours": "a",
+   "gpt": "c",
+   "ours_detail": "same as 12",
+   "gpt_reason": "客体可读取 SETIE 的最后一个字并触达数组尾部之外的 IRQ，但现有源码无法确认锁内的状态位读取会形成泄露途径。"
+  },
+  {
+   "item": "Q24 ",
+   "ours": "b",
+   "gpt": "a",
+   "ours_detail": "arm64 dropped the WARN_ON in a refactor to its own page-table API; no requirement for RISC-V",
+   "gpt_reason": "KVM 核心会把宿主老化通知裁剪到 memslot 边界，RISC-V 可能对有效的裁剪范围发出警告并漏清起始页之后的 G-stage 叶项。"
+  },
+  {
+   "item": "Q25 ",
+   "ours": "c",
+   "gpt": "b",
+   "ours_detail": "arm64 fixed the check for folded PUD levels; RISC-V folds levels at run time, effect not checked",
+   "gpt_reason": "RISC-V 的用户态取指同样要求 U 位为 1，且 pud_leaf 已包含 R 和 W 位均为 0 的仅执行叶项。"
+  },
+  {
+   "item": "Q28 ",
+   "ours": "a",
+   "gpt": "b",
+   "ours_detail": "same as 27 for unmap",
+   "gpt_reason": "通用 early_memunmap 本身就调用 early_iounmap，两者释放的是同一套早期映射槽。"
+  }
+ ],
+ "unified_v61": [
+  {
+   "item": "P02 CTX|noinstr|cpu_relax|called from noinstr/__cpuidle",
+   "ours": "c",
+   "gpt": "a",
+   "ours_detail": "static inline called from noinstr code while x86 uses __always_inline; still static inline at the end version, impact not established",
+   "gpt_reason": "cpu_idle_poll() 在进入 RCU 扩展静止状态后执行 cpu_relax()，启用 CONFIG_GCOV_PROFILE_ALL 时其静态键分支仍可执行覆盖率插桩。"
+  }
+ ],
+ "judge_context": []
+}

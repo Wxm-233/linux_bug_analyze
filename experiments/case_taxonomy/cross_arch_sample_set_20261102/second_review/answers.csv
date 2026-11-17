@@ -1,0 +1,41 @@
+序号,编号,提交,机制,跨架构,对应物种类,对应物位置,理由
+1,A062,a9ad73295cc1,M7,C,K1,include/linux/syscalls.h:__SYSCALL_DEFINEx,rv32的64位参数占寄存器对而包装器只按参数个数传寄存器导致截断，违反公共系统调用参数宽度与传递约定。
+2,A392,5fc6e7d45373,M10,C,K2,arch/arm64/kernel/machine_kexec_file.c:prepare_elf_headers,崩溃转储须排除全部crashkernel保留区，RISC-V遗漏low区及其额外range，违反与arm64相同的转储范围约定（对应物位置未核实）。
+3,A396,e971f19e4c82,M7,R,,,重试计数从不递减使五次重试上限失效并无限循环，属于循环次数边界错误，未能指出RISC-V NACL队列之外承担同一要求的对应物。
+4,B498,e9d86b8e17e7,M1,C,K3,scripts/Makefile.vmlinux:cmd_strip_relocs,公共剥离规则默认所有.rel*节均可删除，误删RISC-V运行时重定位及kexec必需的.rela.dyn，默认处理假设不适用。
+5,A047,680341382da5,M1,C,K1,arch/arm64/kernel/return_address.c:return_address,公共CALLER_ADDR默认依赖多层__builtin_return_address而RISC-V仅支持第零层，须像arm64一样提供栈遍历实现。
+6,A281,767423658d53,M7,C,K2,arch/arm64/kernel/kexec_image.c:image_load,kexec放置入口必须满足目标内核启动对齐，PAGE_SIZE不足以满足RV64的2MB或RV32的4MB要求，arm64加载器也承担启动对齐要求（对应物位置未核实）。
+7,B560,511361fe7a88,X2,R,,,仅修正RISC-V自测试中多语句EXPECT_EQ宏的条件分支括号以解决编译错误，属于测试代码修复。
+8,A014,82180b1fae24,X2,R,,,仅将模块链接测试中的rv64专用加载及数据指令改为rv32也可用的形式，属于架构测试代码修复。
+9,A398,e8f3e9ba146a,M7,C,K1,arch/arm64/kvm/mmu.c:kvm_arch_prepare_memory_region,KVM内存槽为左闭右开区间而旧比较误拒绝恰好结束于GPA上限的合法槽，属于公共KVM接口的差一错误（对应物位置未核实）。
+10,A382,4d2b03699460,M9,C,K2,arch/arm64/kernel/alternative.c:__apply_alternatives,替代补丁必须匹配具体能力或勘误位，逻辑与把任意非零位图误判为所有补丁均适用，arm64也逐项筛选替代补丁（对应物位置未核实）。
+11,B478,7e86490c5dee,X2,R,,,仅纠正临时宏#undef中的名称笔误，材料未显示改变驱动运行行为。
+12,A328,c796e1872012,M1,C,K2,arch/arm64/kernel/setup.c:setup_machine_fdt,将仅适用于线性映射的__pa套用于fixmap中的DTB使公共FDT扫描收到错误物理地址，arm64也须保留DTB真实物理地址（对应物位置未核实）。
+13,A339,2d117e67f318,M6,C,K2,arch/x86/kvm/vmx/vmx.c:vmx_exit,架构资源须在kvm_exit禁用硬件之后释放，提前销毁仍启用的per-CPU IRQ违反退出生命周期，其他KVM架构退出流程也承担此顺序要求（对应物位置未核实）。
+14,B463,b14e40f5dc7c,M6,R,,,K210驱动在分配失败时遗漏释放此前取得的OF节点引用，属于局部出错路径资源泄漏，材料未给出其他架构承担同一流程要求的对应物。
+15,A105,cfb10de18538,M9,C,K1,arch/arm64/include/asm/thread_info.h:THREAD_SIZE,后启用KASAN时Kconfig默认值不会同步增大已选栈大小，须让栈大小持续受实际KASAN配置约束，arm64栈定义也考虑该配置（对应物位置未核实）。
+16,B446,d3882564a77c,M7,C,K1,arch/arm64/include/asm/unistd32.h:__NR_io_pgetevents_time64,32位兼容系统调用须对min_nr和nr做符号扩展，错误选择原生入口漏掉扩展，多个架构承担同一系统调用ABI要求。
+17,A042,97cf301fa42e,M3,C,K1,arch/arm64/include/asm/tlb.h:tlb_flush,释放页表目录后必须维护相应TLB及页表遍历缓存，旧刷新条件遗漏freed_tables，违反各架构MMU回收钩子的映射维护要求（对应物位置未核实）。
+18,A001,559fe94a449c,X2,R,,,仅更新默认地址空间从SV48变为SV57后的注释，不改变内核运行行为。
+19,A122,b3431a8bb336,M5,C,K1,arch/x86/include/asm/kfence.h:kfence_protect_page,KFENCE保护钩子可能在关中断路径执行，不能使用要求中断可用的远程IPI刷新，属于公共钩子的执行上下文限制（对应物位置未核实）。
+20,B419,8b79d4e99407,M9,R,,,SBI控制台与直接访问同一硬件的驱动不应默认同时启用，修复限制RISC-V特有控制台配置，未能指出其他架构的具体对应实现。
+21,B482,537a2525eaf7,X2,R,,,修正工具bootstrap构建中空命令行ARCH覆盖普通赋值的问题，属于工具构建代码而非内核跨架构接口缺陷。
+22,A044,ce68c035457b,M1,C,K1,arch/arm64/mm/hugetlbpage.c:arch_hugetlb_migration_supported,默认大页迁移支持判定未涵盖NAPOT尺寸，RISC-V须按实际支持的几何覆盖该公共钩子，arm64也提供架构判定（对应物位置未核实）。
+23,B576,e4d3386b74fb,M6,C,K3,sound/core/pcm_lib.c:interleaved_copy,公共PCM静音路径允许data为NULL却仍构造数据传输迭代器，导致RISC-V暴露空指针解引用，属于公共代码的空指针处理缺失。
+24,A085,3b6564427aea,M7,C,K2,arch/arm64/mm/init.c:arm64_memblock_init,将内存总量限制误作物理地址跨度限制使非连续内存越出线性映射边界，其他架构也须裁掉线性映射之外的可分配RAM（对应物位置未核实）。
+25,A142,67a5ba8f742f,M8,C,K1,arch/arm64/kernel/entry-ftrace.S:return_to_handler,公共fgraph接口从fgraph_ret_regs改为ftrace_regs后RISC-V返回桩仍按旧布局构造参数，未跟上接口演进（对应物位置未核实）。
+26,B584,5a799714e8ca,M4,C,K3,drivers/net/ethernet/mellanox/mlx5/core/en_main.c:mlx5e_channel_stats_alloc,发布stats_nch前必须保证对应channel_stats指针对读者可见，缺少release与acquire配对使弱内存架构读到计数却仍读到空指针。
+27,A378,3033b2b1e394,M10,C,K1,arch/arm64/kernel/process.c:set_tagged_addr_ctrl,公共tagged-address控制接口的禁用分支须与实际生效状态一致，RISC-V只清软件pmlen未清硬件pmm，遗漏禁用步骤（对应物位置未核实）。
+28,A035,1458eb2c9d88,M3,C,K1,arch/arm64/mm/hugetlbpage.c:set_huge_pte_at,重设NAPOT映射前须整组清空并刷新TLB再安装新项，旧实现遗漏与arm64连续映射相对应的Break-Before-Make步骤（对应物位置未核实）。
+29,A312,b75a22e7d4f2,M9,C,K2,arch/arm64/kernel/cpufeature.c:update_cpu_capabilities,不能把面向DT和cpuinfo的扩展描述表当作全部内部能力集合，错误能力筛选丢掉Xlinuxenvcfg，arm64也区分内部能力与用户可见能力（对应物位置未核实）。
+30,A054,05ab803d1ad8,M10,C,K2,arch/arm64/mm/proc.S:cpu_do_suspend/cpu_do_resume,非保留休眠须保存并恢复CPU运行环境，RISC-V漏掉已启用的envcfg状态，其他架构的CPU休眠实现也承担寄存器状态恢复要求（对应物位置未核实）。
+31,A370,5c1bb0787111,M7,C,K2,arch/x86/kvm/pmu.c:kvm_pmu_rdpmc,客体提供的PMU计数器索引必须小于数组元素数，旧大于比较放过等于上限的索引，x86虚拟PMU读取也承担索引有效性检查（对应物位置未核实）。
+32,A100,5ba7a75a53df,M9,R,,,探测向量编译支持时未满足该工具链要求的V依赖M条件导致错误禁用功能，材料涉及RISC-V专属ISA组合且未能指出具体跨架构对应物。
+33,A387,5eb6d68fe24d,M10,C,K1,arch/x86/kvm/x86.c:kvm_arch_vcpu_ioctl_set_guest_debug,KVM_SET_GUEST_DEBUG更新软件标志后还须应用实际调试配置，RISC-V遗漏应用步骤使公共ioctl不生效（对应物位置未核实）。
+34,A261,45ebe4540817,M7,C,K1,arch/arm64/include/asm/memory.h:vmemmap,将struct page存储字节的对齐量直接用于物理地址造成单位及对齐错误，违反公共MM对pfn_to_page基址的对齐要求，arm64也提供该映射（对应物位置未核实）。
+35,B553,7217cee35aad,M9,C,K2,drivers/iommu/arm/arm-smmu-v3/arm-smmu-v3.c:arm_smmu_setup_irqs,MSI中断动态分配且不要求DT中存在有线IRQ，旧探测把有线中断条件错误施加到MSI模式，arm-smmu-v3也区分两类中断来源（对应物位置未核实）。
+36,B518,cb9f6a40382c,M6,R,,,在确认IMSIC对象非空之前读取其fwnode会提前解引用空指针，属于驱动对象有效性检查顺序错误，未能指出同一跨架构流程的对应物。
+37,A076,fb1cf0878328,M5,C,K1,arch/x86/mm/pat/set_memory.c:__kernel_map_pages,DEBUG_PAGEALLOC公共钩子可在原子上下文执行，RISC-V调用会睡眠的__set_memory违反该上下文限制（对应物位置未核实）。
+38,A155,e94eb7ea6f20,M10,C,K2,arch/arm64/kernel/setup.c:reserve_memblock_reserved_regions,各架构导出的iomem须标明RAM内部的保留子区间，RISC-V遗漏重叠情形使kexec可能覆盖保留内存，违反同一导出约定（对应物位置未核实）。
+39,A169,6f49743af42c,M9,C,K1,arch/arm64/Kconfig:ARCH_SUPPORTS_CFI_CLANG,声明公共kCFI支持须满足本架构实际编译器能力条件，RISC-V漏设clang17门槛使kCFI与ftrace组合触发编译器崩溃（对应物位置未核实）。
+40,B441,0fc670d07d5d,X2,R,,,公共测试头文件拆分后RISC-V的KVM自测试遗漏显式包含所需头文件，修复对象仅为测试构建代码。

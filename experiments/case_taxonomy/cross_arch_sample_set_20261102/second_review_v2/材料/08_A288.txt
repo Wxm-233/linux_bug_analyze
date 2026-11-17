@@ -1,0 +1,46 @@
+########## 第8条  编号 A288  提交 749b94b08005  日期 2023-12-13
+
+【提交说明】
+riscv: Fix module_alloc() that did not reset the linear mapping permissions
+
+After unloading a module, we must reset the linear mapping permissions,
+see the example below:
+
+Before unloading a module:
+
+0xffffaf809d65d000-0xffffaf809d6dc000    0x000000011d65d000       508K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6dc000-0xffffaf809d6dd000    0x000000011d6dc000         4K PTE .   ..     ..   D A G . . . R V
+0xffffaf809d6dd000-0xffffaf809d6e1000    0x000000011d6dd000        16K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X . R V
+
+After unloading a module:
+
+0xffffaf809d65d000-0xffffaf809d6e1000    0x000000011d65d000       528K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X W R V
+
+The last mapping is not reset and we end up with WX mappings in the linear
+mapping.
+
+So add VM_FLUSH_RESET_PERMS to our module_alloc() definition.
+
+Fixes: 0cff8bff7af8 ("riscv: avoid the PIC offset of static percpu data in module beyond 2G limits")
+
+【改动统计】
+ arch/riscv/kernel/module.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index aac019ed63b1..862834bb1d64 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -894,7 +894,8 @@ void *module_alloc(unsigned long size)
+ {
+ 	return __vmalloc_node_range(size, 1, MODULES_VADDR,
+ 				    MODULES_END, GFP_KERNEL,
+-				    PAGE_KERNEL, 0, NUMA_NO_NODE,
++				    PAGE_KERNEL, VM_FLUSH_RESET_PERMS,
++				    NUMA_NO_NODE,
+ 				    __builtin_return_address(0));
+ }
+ #endif

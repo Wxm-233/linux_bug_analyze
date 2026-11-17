@@ -1,0 +1,59 @@
+commit 835e5ac3f98e78eca5c512bd48bd1880b90c4eb1
+Author:     Alexandre Ghiti <alexghiti@rivosinc.com>
+AuthorDate: Fri Apr 28 14:01:19 2023 +0200
+Commit:     Palmer Dabbelt <palmer@rivosinc.com>
+CommitDate: Thu Jun 1 18:15:20 2023 -0700
+
+    riscv: Fix huge_ptep_set_wrprotect when PTE is a NAPOT
+    
+    We need to avoid inconsistencies across the PTEs that form a NAPOT
+    region, so when we write protect such a region, we should clear and flush
+    all the PTEs to make sure that any of those PTEs is not cached which would
+    result in such inconsistencies (arm64 does the same).
+    
+    Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+    Signed-off-by: Alexandre Ghiti <alexghiti@rivosinc.com>
+    Reviewed-by: Andrew Jones <ajones@ventanamicro.com>
+    Link: https://lore.kernel.org/r/20230428120120.21620-1-alexghiti@rivosinc.com
+    Cc: stable@vger.kernel.org
+    Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index a163a3e0f0d4..238d00bdac14 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -213,29 +213,33 @@ pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+ }
+ 
+ void huge_ptep_set_wrprotect(struct mm_struct *mm,
+ 			     unsigned long addr,
+ 			     pte_t *ptep)
+ {
+ 	pte_t pte = ptep_get(ptep);
+ 	unsigned long order;
++	pte_t orig_pte;
+ 	int i, pte_num;
+ 
+ 	if (!pte_napot(pte)) {
+ 		ptep_set_wrprotect(mm, addr, ptep);
+ 		return;
+ 	}
+ 
+ 	order = napot_cont_order(pte);
+ 	pte_num = napot_pte_num(order);
+ 	ptep = huge_pte_offset(mm, addr, napot_cont_size(order));
++	orig_pte = get_clear_contig_flush(mm, addr, ptep, pte_num);
++
++	orig_pte = pte_wrprotect(orig_pte);
+ 
+ 	for (i = 0; i < pte_num; i++, addr += PAGE_SIZE, ptep++)
+-		ptep_set_wrprotect(mm, addr, ptep);
++		set_pte_at(mm, addr, ptep, orig_pte);
+ }
+ 
+ pte_t huge_ptep_clear_flush(struct vm_area_struct *vma,
+ 			    unsigned long addr,
+ 			    pte_t *ptep)
+ {
+ 	pte_t pte = ptep_get(ptep);
+ 	int pte_num;

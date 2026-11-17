@@ -1,0 +1,43 @@
+diff --git a/arch/loongarch/include/asm/pgtable.h b/arch/loongarch/include/asm/pgtable.h
+--- a/arch/loongarch/include/asm/pgtable.h
++++ b/arch/loongarch/include/asm/pgtable.h
+@@ -11,6 +11,7 @@
+ #define _ASM_PGTABLE_H
+ 
+ #include <linux/compiler.h>
++#include <asm/barrier.h>
+ #include <asm/addrspace.h>
+ #include <asm/page.h>
+ #include <asm/pgtable-bits.h>
+@@ -190,6 +191,8 @@ static inline void set_pud(pud_t *pud, pud_t pudval)
+ {
+ 	WRITE_ONCE(*pud, pudval);
++	if (pud_val(pudval) & _PAGE_HUGE)
++		mb();
+ }
+ 
+ static inline void pud_clear(pud_t *pudp)
+@@ -246,6 +249,8 @@ static inline void set_pmd(pmd_t *pmd, pmd_t pmdval)
+ {
+ 	WRITE_ONCE(*pmd, pmdval);
++	if (pmd_val(pmdval) & _PAGE_HUGE)
++		mb();
+ }
+ 
+ static inline void pmd_clear(pmd_t *pmdp)
+@@ -386,6 +391,14 @@ static inline void set_pte(pte_t *ptep, pte_t pteval)
+ 			WRITE_ONCE(*buddy, __pte(pte_val(ptep_get(buddy)) | _PAGE_GLOBAL));
+ #endif /* CONFIG_SMP */
+ 	}
++
++	/*
++	 * Valid kernel mapping: make sure the page table write is visible
++	 * to the page table walker before subsequent accesses through the
++	 * new virtual address. Invalid PTEs are covered by TLB flushing and
++	 * user mappings by update_mmu_cache().
++	 */
++	if ((pte_val(pteval) & (_PAGE_GLOBAL | _PAGE_VALID)) == (_PAGE_GLOBAL | _PAGE_VALID))
++		mb();
+ }
+ 
+ static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)

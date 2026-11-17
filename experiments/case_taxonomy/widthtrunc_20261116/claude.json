@@ -1,0 +1,182 @@
+[
+ {
+  "k": 1,
+  "loc": "fs/ext4/dir.c:259",
+  "verdict": "可能",
+  "why": "ext4_readdir 非 htree 目录：ctx->pos 是 loff_t，s_blocksize 是 unsigned long，32 位上 ~(s_blocksize-1) 只有 32 位，零扩展后清掉 pos 的高 32 位；目录超过 4GB 时读取位置出错。和 ocfs2 的修复 a63308ab426f 完全同形。触发需要超大目录，后果是 readdir 位置错乱。"
+ },
+ {
+  "k": 2,
+  "loc": "fs/hugetlbfs/inode.c:227",
+  "verdict": "不可能",
+  "why": "x & ~huge_page_mask(h) 取的是大页内偏移，~mask 本身就只含低位，零扩展正确，不需要高位。"
+ },
+ {
+  "k": 3,
+  "loc": "fs/hugetlbfs/inode.c:245",
+  "verdict": "不可能",
+  "why": "同 2，取页内偏移。"
+ },
+ {
+  "k": 4,
+  "loc": "fs/hugetlbfs/inode.c:613",
+  "verdict": "不可能",
+  "why": "同 2，只检查是否对齐。"
+ },
+ {
+  "k": 5,
+  "loc": "fs/hugetlbfs/inode.c:636",
+  "verdict": "不可能",
+  "why": "同 2。"
+ },
+ {
+  "k": 6,
+  "loc": "fs/hugetlbfs/inode.c:637",
+  "verdict": "不可能",
+  "why": "同 2。"
+ },
+ {
+  "k": 7,
+  "loc": "fs/hugetlbfs/inode.c:850",
+  "verdict": "不可能",
+  "why": "同 2，只检查是否对齐。"
+ },
+ {
+  "k": 8,
+  "loc": "mm/filemap.c:3183",
+  "verdict": "不可能",
+  "why": "左边是 offset_in_folio(folio, start)，结果是 folio 内偏移（小值），不需要高位；分析器把调用实参里的 start 当成了左操作数，属于规则的毛病。"
+ },
+ {
+  "k": 9,
+  "loc": "mm/memory-failure.c:1745",
+  "verdict": "不可能",
+  "why": "size 只在 tk->size_shift 非 0 时才非 0，而 size_shift 只对 device-dax/fsdax 映射设置，需要 ZONE_DEVICE → MEMORY_HOTPLUG → 64BIT，32 位上走不到。"
+ },
+ {
+  "k": 10,
+  "loc": "arch/arm/kernel/setup.c:988",
+  "verdict": "不可能",
+  "why": "arm32 的 max_low_pfn - min_low_pfn 只是低端内存，远小于 4GB，移位不会溢出。"
+ },
+ {
+  "k": 11,
+  "loc": "arch/parisc/kernel/sys_parisc.c:217",
+  "verdict": "不可能",
+  "why": "在 #ifdef CONFIG_64BIT 里，只在 64 位上编译。"
+ },
+ {
+  "k": 12,
+  "loc": "arch/parisc/kernel/sys_parisc.c:223",
+  "verdict": "不可能",
+  "why": "同 11。"
+ },
+ {
+  "k": 13,
+  "loc": "arch/powerpc/mm/mem.c:139",
+  "verdict": "不可能",
+  "why": "add_pages 只在 MEMORY_HOTPLUG 下编译，MEMORY_HOTPLUG depends on 64BIT。"
+ },
+ {
+  "k": 14,
+  "loc": "arch/powerpc/mm/mem.c:140",
+  "verdict": "不可能",
+  "why": "同 13。"
+ },
+ {
+  "k": 15,
+  "loc": "arch/sparc/kernel/smp_64.c:405",
+  "verdict": "不可能",
+  "why": "sparc smp_64.c 只在 64 位上编译。"
+ },
+ {
+  "k": 16,
+  "loc": "arch/x86/mm/init_64.c:986",
+  "verdict": "不可能",
+  "why": "x86 init_64.c 只在 64 位上编译。"
+ },
+ {
+  "k": 17,
+  "loc": "fs/ext2/dir.c:292",
+  "verdict": "可能",
+  "why": "ext2_readdir：n 是 unsigned long 页号，(n<<PAGE_SHIFT) 在 32 位上溢出，目录超过 4GB 时 ctx->pos 错。和 ocfs2/erofs 的修复同形；触发需要超大目录。"
+ },
+ {
+  "k": 18,
+  "loc": "fs/ext4/inode.c:2857",
+  "verdict": "可能",
+  "why": "ext4_do_writepages：writeback_index 是 pgoff_t，<< PAGE_SHIFT 在 32 位上对超过 4GB 的文件溢出，range_cyclic 回写从错误位置开始。和 iomap 的修复 c13094b894de 完全同形。"
+ },
+ {
+  "k": 19,
+  "loc": "fs/ext4/inode.c:2996",
+  "verdict": "可能",
+  "why": "同 18，end_pos 也截断，回绕回写的范围错误。"
+ },
+ {
+  "k": 20,
+  "loc": "fs/f2fs/file.c:3035",
+  "verdict": "可能",
+  "why": "f2fs_defragment_range：pg_start 是页号，<< PAGE_SHIFT 在 32 位上对超过 4GB 的偏移溢出，回写范围错误。同 18 的形态。"
+ },
+ {
+  "k": 21,
+  "loc": "fs/f2fs/file.c:3036",
+  "verdict": "可能",
+  "why": "同 20。"
+ },
+ {
+  "k": 22,
+  "loc": "fs/fuse/dax.c:189",
+  "verdict": "不可能",
+  "why": "FUSE DAX 依赖 FS_DAX → ZONE_DEVICE → MEMORY_HOTPLUG → 64BIT，32 位上不编译。"
+ },
+ {
+  "k": 23,
+  "loc": "fs/fuse/dax.c:402",
+  "verdict": "不可能",
+  "why": "同 22。"
+ },
+ {
+  "k": 24,
+  "loc": "fs/fuse/dax.c:837",
+  "verdict": "不可能",
+  "why": "同 22。"
+ },
+ {
+  "k": 25,
+  "loc": "fs/fuse/dax.c:931",
+  "verdict": "不可能",
+  "why": "同 22。"
+ },
+ {
+  "k": 26,
+  "loc": "fs/fuse/dax.c:1083",
+  "verdict": "不可能",
+  "why": "同 22。"
+ },
+ {
+  "k": 27,
+  "loc": "fs/gfs2/quota.c:752",
+  "verdict": "不可能",
+  "why": "quota 文件很小，index << (PAGE_SHIFT - bsize_shift) 不会超过 32 位。"
+ },
+ {
+  "k": 28,
+  "loc": "fs/libfs.c:38",
+  "verdict": "不可能",
+  "why": "32 位上单个文件的页缓存不可能超过 2^23 页（32GB），nrpages << 3 不溢出。"
+ },
+ {
+  "k": 29,
+  "loc": "fs/nilfs2/inode.c:1145",
+  "verdict": "说不清",
+  "why": "nilfs_fiemap 的 delalloc_blklen 若超过 4GB 才会溢出，需要 32 位上有超过 4GB 的延迟分配数据，没法确定。"
+ },
+ {
+  "k": 30,
+  "loc": "fs/nilfs2/recovery.c:543",
+  "verdict": "可能",
+  "why": "nilfs_recover_dsync_blocks：rb->blkoff 是 unsigned long 块号，<< i_blkbits 在 32 位上对超过 4GB 的文件偏移溢出，恢复时写到错误位置。"
+ }
+]

@@ -1,0 +1,752 @@
+==========================================================================================
+[1] fs/dax.c:2011-2086  函数 dax_iomap_pmd_fault  用到的大阶数来源 PMD_ORDER（展开后是 PMD_ORDER）
+    常量表：在 arm-4k, arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   2011 {
+   2011 {
+   2012 	struct address_space *mapping = vmf->vma->vm_file->f_mapping;
+>> 2013 	XA_STATE_ORDER(xas, &mapping->i_pages, vmf->pgoff, PMD_ORDER);
+   2014 	struct iomap_iter iter = {
+   2015 		.inode		= mapping->host,
+   2016 		.len		= PMD_SIZE,
+   2017 		.flags		= IOMAP_DAX | IOMAP_FAULT,
+        ...
+   2043 	/*
+   2044 	 * grab_mapping_entry() will make sure we get an empty PMD entry,
+   2045 	 * a zero PMD entry or a DAX PMD.  If it can't (because a PTE
+   2046 	 * entry is already in the array, for instance), it will return
+   2047 	 * VM_FAULT_FALLBACK.
+   2048 	 */
+>> 2049 	entry = grab_mapping_entry(&xas, mapping, PMD_ORDER);
+   2050 	if (xa_is_internal(entry)) {
+   2051 		ret = xa_to_internal(entry);
+   2052 		goto fallback;
+   2053 	}
+==========================================================================================
+[2] fs/dax.c:2132-2167  函数 dax_insert_pfn_mkwrite  用到的大阶数来源 PMD_ORDER（展开后是 PMD_ORDER）
+    常量表：在 arm-4k, arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   2132 {
+        ...
+   2152 	xas_unlock_irq(&xas);
+   2153 	folio = pfn_folio(pfn);
+   2154 	folio_ref_inc(folio);
+   2155 	if (order == 0)
+   2156 		ret = vmf_insert_page_mkwrite(vmf, &folio->page, true);
+   2157 #ifdef CONFIG_FS_DAX_PMD
+>> 2158 	else if (order == PMD_ORDER)
+   2159 		ret = vmf_insert_folio_pmd(vmf, folio, FAULT_FLAG_WRITE);
+   2160 #endif
+   2161 	else
+   2162 		ret = VM_FAULT_FALLBACK;
+==========================================================================================
+[3] mm/huge_memory.c:1521-1575  函数 do_huge_pmd_anonymous_page  用到的大阶数来源 PMD_ORDER（展开后是 PMD_ORDER）
+    常量表：在 arm-4k, arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1521 {
+   1521 {
+   1522 	struct vm_area_struct *vma = vmf->vma;
+   1523 	unsigned long haddr = vmf->address & HPAGE_PMD_MASK;
+   1524 	vm_fault_t ret;
+   1525 
+>> 1526 	if (!thp_vma_suitable_order(vma, haddr, PMD_ORDER))
+   1527 		return VM_FAULT_FALLBACK;
+   1528 	ret = vmf_anon_prepare(vmf);
+   1529 	if (ret)
+   1530 		return ret;
+==========================================================================================
+[4] mm/khugepaged.c:1853-2075  函数 try_collapse_pte_mapped_thp  用到的大阶数来源 HPAGE_PMD_NR, PMD_ORDER（展开后是 HPAGE_PMD_ORDER, PMD_ORDER）
+    常量表：在 arm-4k, arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1853 {
+        ...
+   1881 	 * If we are here, we've succeeded in replacing all the native pages
+   1882 	 * in the page cache with a single hugepage. If a mm were to fault-in
+   1883 	 * this memory (mapped by a suitably aligned VMA), we'd get the hugepage
+   1884 	 * and map it by a PMD, regardless of sysfs THP settings. As such, let's
+   1885 	 * analogously elide sysfs THP settings here and force collapse.
+   1886 	 */
+>> 1887 	if (!thp_vma_allowable_order(vma, vma->vm_flags, TVA_FORCED_COLLAPSE, PMD_ORDER))
+   1888 		return SCAN_VMA_CHECK;
+   1889 
+   1890 	/*
+   1891 	 * Keep pmd pgtable while the uffd bit is in use; see comment in
+        ...
+   1922 	start_pte = pte_offset_map_lock(mm, pmd, haddr, &ptl);
+   1923 	if (!start_pte)		/* mmap_lock + page lock should prevent this */
+   1924 		goto drop_folio;
+   1925 
+   1926 	/* step 1: check all mapped PTEs are to the right huge page */
+   1927 	for (i = 0, addr = haddr, pte = start_pte;
+>> 1928 	     i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE, pte++) {
+   1929 		struct page *page;
+   1930 		pte_t ptent = ptep_get(pte);
+   1931 
+   1932 		/* empty pte, skip */
+        ...
+   1976 		spin_lock_nested(ptl, SINGLE_DEPTH_NESTING);
+   1977 
+   1978 	if (unlikely(!pmd_same(pgt_pmd, pmdp_get_lockless(pmd))))
+   1979 		goto abort;
+   1980 
+   1981 	/* step 2: clear page table and adjust rmap */
+>> 1982 	for (i = 0, addr = haddr, pte = start_pte; i < HPAGE_PMD_NR;
+   1983 	     i += nr_batch_ptes, addr += nr_batch_ptes * PAGE_SIZE,
+   1984 	     pte += nr_batch_ptes) {
+   1985 		unsigned int max_nr_batch_ptes = (end - addr) >> PAGE_SHIFT;
+   1986 		struct page *page;
+==========================================================================================
+[5] mm/memory.c:5609-5682  函数 do_set_pmd  用到的大阶数来源 HPAGE_PMD_NR, PMD_ORDER（展开后是 HPAGE_PMD_ORDER, PMD_ORDER）
+    常量表：在 arm-4k, arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   5609 {
+        ...
+   5621 	 * behave as if we are forcing a collapse.
+   5622 	 */
+   5623 	if (thp_disabled_by_hw() || vma_thp_disabled(vma, vma->vm_flags,
+   5624 						     /* forced_collapse=*/ true))
+   5625 		return ret;
+   5626 
+>> 5627 	if (!thp_vma_suitable_order(vma, haddr, PMD_ORDER))
+   5628 		return ret;
+   5629 
+   5630 	if (!is_pmd_order(folio_order(folio)))
+   5631 		return ret;
+        ...
+   5651 	}
+   5652 
+   5653 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
+   5654 	if (unlikely(!pmd_none(*vmf->pmd)))
+   5655 		goto out;
+   5656 
+>> 5657 	flush_icache_pages(vma, page, HPAGE_PMD_NR);
+   5658 
+   5659 	entry = folio_mk_pmd(folio, vma->vm_page_prot);
+   5660 	if (write)
+   5661 		entry = maybe_pmd_mkwrite(pmd_mkdirty(entry), vma);
+   5662 
+>> 5663 	add_mm_counter(vma->vm_mm, mm_counter_file(folio), HPAGE_PMD_NR);
+   5664 	folio_add_file_rmap_pmd(folio, page, vma);
+   5665 
+   5666 	/*
+   5667 	 * deposit and withdraw with pmd lock held
+==========================================================================================
+[6] mm/swapfile.c:3536-3611  函数 setup_swap_clusters_info  用到的大阶数来源 SWAPFILE_CLUSTER, SWAP_NR_ORDERS（展开后是 HPAGE_PMD_ORDER, PMD_ORDER）
+    常量表：在 arm-4k, arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   3536 {
+   3536 {
+>> 3537 	unsigned long nr_clusters = DIV_ROUND_UP(maxpages, SWAPFILE_CLUSTER);
+   3538 	struct swap_cluster_info *cluster_info;
+   3539 	int err = -ENOMEM;
+   3540 	unsigned long i;
+   3541 
+        ...
+   3547 		spin_lock_init(&cluster_info[i].lock);
+   3548 
+   3549 	if (!(si->flags & SWP_SOLIDSTATE)) {
+   3550 		si->global_cluster = kmalloc_obj(*si->global_cluster);
+   3551 		if (!si->global_cluster)
+   3552 			goto err;
+>> 3553 		for (i = 0; i < SWAP_NR_ORDERS; i++)
+   3554 			si->global_cluster->next[i] = SWAP_ENTRY_INVALID;
+   3555 		spin_lock_init(&si->global_cluster_lock);
+   3556 	}
+   3557 
+        ...
+   3573 			goto err;
+   3574 		}
+   3575 		err = swap_cluster_setup_bad_slot(si, cluster_info, page_nr, false);
+   3576 		if (err)
+   3577 			goto err;
+   3578 	}
+>> 3579 	for (i = maxpages; i < round_up(maxpages, SWAPFILE_CLUSTER); i++) {
+   3580 		err = swap_cluster_setup_bad_slot(si, cluster_info, i, true);
+   3581 		if (err)
+   3582 			goto err;
+   3583 	}
+   3584 
+   3585 	INIT_LIST_HEAD(&si->free_clusters);
+   3586 	INIT_LIST_HEAD(&si->full_clusters);
+   3587 	INIT_LIST_HEAD(&si->discard_clusters);
+   3588 
+>> 3589 	for (i = 0; i < SWAP_NR_ORDERS; i++) {
+   3590 		INIT_LIST_HEAD(&si->nonfull_clusters[i]);
+   3591 		INIT_LIST_HEAD(&si->frag_clusters[i]);
+   3592 	}
+   3593 
+==========================================================================================
+[7] include/linux/rmap.h:333-398  函数 __folio_rmap_sanity_checks  用到的大阶数来源 HPAGE_PMD_NR, HPAGE_PUD_NR（展开后是 HPAGE_PMD_ORDER, HPAGE_PUD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    333 {
+        ...
+    356 	case PGTABLE_LEVEL_PMD:
+    357 		/*
+    358 		 * We don't support folios larger than a single PMD yet. So
+    359 		 * when PGTABLE_LEVEL_PMD is set, we assume that we are creating
+    360 		 * a single "entire" mapping of the folio.
+    361 		 */
+>>  362 		VM_WARN_ON_FOLIO(folio_nr_pages(folio) != HPAGE_PMD_NR, folio);
+>>  363 		VM_WARN_ON_FOLIO(nr_pages != HPAGE_PMD_NR, folio);
+    364 		break;
+    365 	case PGTABLE_LEVEL_PUD:
+    366 		/*
+    367 		 * Assume that we are creating a single "entire" mapping of the
+    368 		 * folio.
+    369 		 */
+>>  370 		VM_WARN_ON_FOLIO(folio_nr_pages(folio) != HPAGE_PUD_NR, folio);
+>>  371 		VM_WARN_ON_FOLIO(nr_pages != HPAGE_PUD_NR, folio);
+    372 		break;
+    373 	default:
+    374 		BUILD_BUG();
+    375 	}
+==========================================================================================
+[8] include/linux/rmap.h:559-565  函数 folio_dup_file_rmap_pmd  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    559 {
+    559 {
+    560 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+>>  561 	__folio_dup_file_rmap(folio, page, HPAGE_PMD_NR, dst_vma, PGTABLE_LEVEL_PTE);
+    562 #else
+    563 	WARN_ON_ONCE(true);
+    564 #endif
+    565 }
+==========================================================================================
+[9] mm/debug_vm_pgtable.c:1144-1270  函数 init_args  用到的大阶数来源 HPAGE_PMD_ORDER, HPAGE_PUD_ORDER（展开后是 HPAGE_PMD_ORDER, HPAGE_PUD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1144 {
+        ...
+   1236 	 * Allocate (huge) pages because some of the tests need to access
+   1237 	 * the data in the pages. The corresponding tests will be skipped
+   1238 	 * if we fail to allocate (huge) pages.
+   1239 	 */
+   1240 	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) &&
+   1241 	    has_transparent_pud_hugepage()) {
+>> 1242 		page = debug_vm_pgtable_alloc_huge_page(args, HPAGE_PUD_ORDER);
+   1243 		if (page) {
+   1244 			args->pud_pfn = page_to_pfn(page);
+   1245 			args->pmd_pfn = args->pud_pfn;
+   1246 			args->pte_pfn = args->pud_pfn;
+   1247 			return 0;
+   1248 		}
+   1249 	}
+   1250 
+   1251 	if (IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) &&
+   1252 	    has_transparent_hugepage()) {
+>> 1253 		page = debug_vm_pgtable_alloc_huge_page(args, HPAGE_PMD_ORDER);
+   1254 		if (page) {
+   1255 			args->pmd_pfn = page_to_pfn(page);
+   1256 			args->pte_pfn = args->pmd_pfn;
+   1257 			return 0;
+==========================================================================================
+[10] mm/huge_memory.c:1588-1654  函数 insert_pmd  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1588 {
+        ...
+   1623 
+   1624 		if (is_huge_zero_folio(fop.folio)) {
+   1625 			entry = pmd_mkspecial(entry);
+   1626 		} else {
+   1627 			folio_get(fop.folio);
+   1628 			folio_add_file_rmap_pmd(fop.folio, &fop.folio->page, vma);
+>> 1629 			add_mm_counter(mm, mm_counter_file(fop.folio), HPAGE_PMD_NR);
+   1630 		}
+   1631 	} else {
+   1632 		entry = pmd_mkhuge(pfn_pmd(fop.pfn, prot));
+   1633 		entry = pmd_mkspecial(entry);
+==========================================================================================
+[11] mm/huge_memory.c:1911-2018  函数 copy_huge_pmd  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1911 {
+        ...
+   1988 		pte_free(dst_mm, pgtable);
+   1989 		spin_unlock(src_ptl);
+   1990 		spin_unlock(dst_ptl);
+   1991 		__split_huge_pmd(src_vma, src_pmd, addr, false);
+   1992 		return -EAGAIN;
+   1993 	}
+>> 1994 	add_mm_counter(dst_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+   1995 out_zero_page:
+   1996 	mm_inc_nr_ptes(dst_mm);
+   1997 	pgtable_trans_huge_deposit(dst_mm, dst_pmd, pgtable);
+   1998 
+==========================================================================================
+[12] mm/huge_memory.c:2439-2462  函数 zap_huge_pmd_folio  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   2439 {
+        ...
+   2441 
+   2442 	/* Present and device private folios are rmappable. */
+   2443 	if (is_present || is_device_private)
+   2444 		folio_remove_rmap_pmd(folio, &folio->page, vma);
+   2445 
+   2446 	if (folio_test_anon(folio)) {
+>> 2447 		add_mm_counter(mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+   2448 	} else {
+   2449 		add_mm_counter(mm, mm_counter_file(folio),
+>> 2450 			       -HPAGE_PMD_NR);
+   2451 
+   2452 		if (is_present && pmd_dirty(pmdval))
+   2453 			folio_mark_dirty(folio);
+   2454 		if (is_present && pmd_young(pmdval) &&
+==========================================================================================
+[13] mm/huge_memory.c:3144-3427  函数 __split_huge_pmd_locked  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   3144 {
+        ...
+   3182 			folio = page_folio(page);
+   3183 			if (!folio_test_dirty(folio) && pmd_dirty(old_pmd))
+   3184 				folio_mark_dirty(folio);
+   3185 			if (!folio_test_referenced(folio) && pmd_young(old_pmd))
+   3186 				folio_set_referenced(folio);
+   3187 			folio_remove_rmap_pmd(folio, page, vma);
+>> 3188 			add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+   3189 			folio_put(folio);
+   3190 			return;
+   3191 		}
+>> 3192 		add_mm_counter(mm, mm_counter_file(folio), -HPAGE_PMD_NR);
+   3193 		return;
+   3194 	}
+   3195 
+   3196 	if (is_huge_zero_pmd(*pmd)) {
+        ...
+   3244 		if (freeze && anon_exclusive &&
+   3245 		    folio_try_share_anon_rmap_pmd(folio, page))
+   3246 			freeze = false;
+   3247 		if (!freeze) {
+   3248 			rmap_t rmap_flags = RMAP_NONE;
+   3249 
+>> 3250 			folio_ref_add(folio, HPAGE_PMD_NR - 1);
+   3251 			if (anon_exclusive)
+   3252 				rmap_flags |= RMAP_EXCLUSIVE;
+   3253 
+>> 3254 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
+   3255 						 vma, haddr, rmap_flags);
+   3256 		}
+   3257 	} else {
+   3258 		/*
+        ...
+   3312 		if (freeze && anon_exclusive &&
+   3313 		    folio_try_share_anon_rmap_pmd(folio, page))
+   3314 			freeze = false;
+   3315 		if (!freeze) {
+   3316 			rmap_t rmap_flags = RMAP_NONE;
+   3317 
+>> 3318 			folio_ref_add(folio, HPAGE_PMD_NR - 1);
+   3319 			if (anon_exclusive)
+   3320 				rmap_flags |= RMAP_EXCLUSIVE;
+>> 3321 			folio_add_anon_rmap_ptes(folio, page, HPAGE_PMD_NR,
+   3322 						 vma, haddr, rmap_flags);
+   3323 		}
+   3324 	}
+   3325 
+        ...
+   3338 	 * avoid any possibility of altering permissions across VMAs.
+   3339 	 */
+   3340 	if (freeze || pmd_is_migration_entry(old_pmd)) {
+   3341 		pte_t entry;
+   3342 		swp_entry_t swp_entry;
+   3343 
+>> 3344 		for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+   3345 			if (write)
+   3346 				swp_entry = make_writable_migration_entry(
+   3347 							page_to_pfn(page + i));
+   3348 			else if (anon_exclusive)
+        ...
+   3364 			set_pte_at(mm, addr, pte + i, entry);
+   3365 		}
+   3366 	} else if (pmd_is_device_private_entry(old_pmd)) {
+   3367 		pte_t entry;
+   3368 		swp_entry_t swp_entry;
+   3369 
+>> 3370 		for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+   3371 			/*
+   3372 			 * anon_exclusive was already propagated to the relevant
+   3373 			 * pages corresponding to the pte entries when freeze
+   3374 			 * is false.
+        ...
+   3407 			entry = pte_mkuffd(entry);
+   3408 
+   3409 		/* Restore PAGE_NONE so an RWP marker keeps trapping */
+   3410 		if (userfaultfd_rwp(vma) && uffd_wp)
+   3411 			entry = pte_modify(entry, PAGE_NONE);
+   3412 
+>> 3413 		for (i = 0; i < HPAGE_PMD_NR; i++)
+   3414 			VM_WARN_ON(!pte_none(ptep_get(pte + i)));
+   3415 
+>> 3416 		set_ptes(mm, haddr, pte, entry, HPAGE_PMD_NR);
+   3417 	}
+   3418 	pte_unmap(pte);
+   3419 
+   3420 	if (!pmd_is_migration_entry(*pmd))
+==========================================================================================
+[14] mm/huge_memory.c:3932-4080  函数 __folio_freeze_and_split_unmapped  用到的大阶数来源 HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   3932 {
+        ...
+   3971 		}
+   3972 
+   3973 		if (mapping) {
+   3974 			int nr = folio_nr_pages(folio);
+   3975 
+   3976 			if (folio_test_pmd_mappable(folio) &&
+>> 3977 			    new_order < HPAGE_PMD_ORDER) {
+   3978 				if (folio_test_swapbacked(folio)) {
+   3979 					lruvec_stat_mod_folio(folio,
+   3980 							NR_SHMEM_THPS, -nr);
+   3981 				} else {
+==========================================================================================
+[15] mm/khugepaged.c:2244-2672  函数 collapse_file  用到的大阶数来源 HPAGE_PMD_NR, HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   2244 {
+   2244 {
+   2245 	struct address_space *mapping = file->f_mapping;
+   2246 	struct page *dst;
+   2247 	struct folio *folio, *tmp, *new_folio;
+>> 2248 	pgoff_t index = 0, end = start + HPAGE_PMD_NR;
+   2249 	LIST_HEAD(pagelist);
+>> 2250 	XA_STATE_ORDER(xas, &mapping->i_pages, start, HPAGE_PMD_ORDER);
+   2251 	enum scan_result result = SCAN_SUCCEED;
+   2252 	int nr_none = 0;
+   2253 	bool is_shmem = shmem_file(file);
+   2254 
+        ...
+   2256 	 * MADV_COLLAPSE ignores shmem huge config, so do not check shmem
+   2257 	 *
+   2258 	 * TODO: once shmem always calls mapping_set_large_folios() on its
+   2259 	 * mapping, the shmem check can be removed.
+   2260 	 */
+   2261 	VM_WARN_ON_ONCE(!is_shmem && !mapping_pmd_folio_support(mapping));
+>> 2262 	VM_WARN_ON_ONCE(start & (HPAGE_PMD_NR - 1));
+   2263 
+>> 2264 	result = alloc_charge_folio(&new_folio, mm, cc, HPAGE_PMD_ORDER);
+   2265 	if (result != SCAN_SUCCEED)
+   2266 		goto out;
+   2267 
+   2268 	mapping_set_update(&xas, mapping);
+        ...
+   2589 		}
+   2590 	} else {
+   2591 		xas_lock_irq(&xas);
+   2592 	}
+   2593 
+   2594 	if (is_shmem) {
+>> 2595 		lruvec_stat_mod_folio(new_folio, NR_SHMEM, HPAGE_PMD_NR);
+>> 2596 		lruvec_stat_mod_folio(new_folio, NR_SHMEM_THPS, HPAGE_PMD_NR);
+   2597 	} else {
+>> 2598 		lruvec_stat_mod_folio(new_folio, NR_FILE_THPS, HPAGE_PMD_NR);
+   2599 	}
+>> 2600 	lruvec_stat_mod_folio(new_folio, NR_FILE_PAGES, HPAGE_PMD_NR);
+   2601 
+   2602 	/*
+   2603 	 * Mark new_folio as uptodate before inserting it into the
+   2604 	 * page cache so that it isn't mistaken for an fallocated but
+   2605 	 * unwritten page.
+   2606 	 */
+   2607 	folio_mark_uptodate(new_folio);
+>> 2608 	folio_ref_add(new_folio, HPAGE_PMD_NR - 1);
+   2609 
+   2610 	if (is_shmem)
+   2611 		folio_mark_dirty(new_folio);
+   2612 	folio_add_lru(new_folio);
+   2613 
+   2614 	/* Join all the small entries into a single multi-index entry. */
+>> 2615 	xas_set_order(&xas, start, HPAGE_PMD_ORDER);
+   2616 	xas_store(&xas, new_folio);
+   2617 	WARN_ON_ONCE(xas_error(&xas));
+   2618 	xas_unlock_irq(&xas);
+   2619 
+        ...
+   2664 	new_folio->mapping = NULL;
+   2665 
+   2666 	folio_unlock(new_folio);
+   2667 	folio_put(new_folio);
+   2668 out:
+   2669 	VM_BUG_ON(!list_empty(&pagelist));
+>> 2670 	trace_mm_khugepaged_collapse_file(mm, new_folio, index, addr, is_shmem, file, HPAGE_PMD_NR, result);
+   2671 	return result;
+   2672 }
+==========================================================================================
+[16] mm/khugepaged.c:2677-2778  函数 collapse_scan_file  用到的大阶数来源 HPAGE_PMD_NR, HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   2677 {
+   2677 {
+>> 2678 	const unsigned int max_ptes_none = collapse_max_ptes_none(cc, NULL, HPAGE_PMD_ORDER);
+>> 2679 	const unsigned int max_ptes_swap = collapse_max_ptes_swap(cc, HPAGE_PMD_ORDER);
+   2680 	struct folio *folio = NULL;
+   2681 	struct address_space *mapping = file->f_mapping;
+   2682 	XA_STATE(xas, &mapping->i_pages, start);
+   2683 	int present, swap;
+        ...
+   2685 	enum scan_result result = SCAN_SUCCEED;
+   2686 
+   2687 	present = 0;
+   2688 	swap = 0;
+   2689 	collapse_control_init_scan(cc);
+   2690 	rcu_read_lock();
+>> 2691 	xas_for_each(&xas, folio, start + HPAGE_PMD_NR - 1) {
+   2692 		if (xas_retry(&xas, folio))
+   2693 			continue;
+   2694 
+   2695 		if (xa_is_value(folio)) {
+        ...
+   2759 		}
+   2760 	}
+   2761 	rcu_read_unlock();
+   2762 	if (result == SCAN_PTE_MAPPED_HUGEPAGE)
+   2763 		cc->progress++;
+   2764 	else
+>> 2765 		cc->progress += HPAGE_PMD_NR;
+   2766 
+   2767 	if (result == SCAN_SUCCEED) {
+>> 2768 		if (present < HPAGE_PMD_NR - max_ptes_none) {
+   2769 			result = SCAN_EXCEED_NONE_PTE;
+   2770 			count_vm_event(THP_SCAN_EXCEED_NONE_PTE);
+   2771 		} else {
+   2772 			result = collapse_file(mm, addr, file, start, cc);
+==========================================================================================
+[17] mm/migrate_device.c:803-910  函数 migrate_vma_insert_huge_pmd_page  用到的大阶数来源 HPAGE_PMD_NR, HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    803 {
+        ...
+    811 	pmd_t entry;
+    812 	bool flush = false;
+    813 	unsigned long i;
+    814 
+    815 	VM_WARN_ON_ONCE(!folio);
+    816 
+>>  817 	if (!thp_vma_suitable_order(vma, addr, HPAGE_PMD_ORDER))
+    818 		return -EINVAL;
+    819 
+    820 	ret = anon_vma_prepare(vma);
+    821 	if (ret)
+    822 		return ret;
+    823 
+>>  824 	folio_set_order(folio, HPAGE_PMD_ORDER);
+    825 	folio_set_large_rmappable(folio);
+    826 
+    827 	if (mem_cgroup_charge(folio, migrate->vma->vm_mm, gfp)) {
+    828 		count_vm_event(THP_FAULT_FALLBACK);
+>>  829 		count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_FAULT_FALLBACK_CHARGE);
+    830 		ret = -ENOMEM;
+    831 		goto abort;
+    832 	}
+    833 
+        ...
+    871 
+    872 	if (is_huge_zero_pmd(*pmdp))
+    873 		flush = true;
+    874 	else if (!pmd_none(*pmdp))
+    875 		goto unlock_abort;
+    876 
+>>  877 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, HPAGE_PMD_NR);
+    878 	folio_add_new_anon_rmap(folio, vma, addr, RMAP_EXCLUSIVE);
+    879 	if (!folio_is_zone_device(folio))
+    880 		folio_add_lru_vma(folio, vma);
+    881 	folio_get(folio);
+        ...
+    891 	set_pmd_at(vma->vm_mm, addr, pmdp, entry);
+    892 	update_mmu_cache_pmd(vma, addr, pmdp);
+    893 
+    894 	spin_unlock(ptl);
+    895 
+    896 	count_vm_event(THP_FAULT_ALLOC);
+>>  897 	count_mthp_stat(HPAGE_PMD_ORDER, MTHP_STAT_ANON_FAULT_ALLOC);
+    898 	count_memcg_event_mm(vma->vm_mm, THP_FAULT_ALLOC);
+    899 
+    900 	return 0;
+    901 
+    902 unlock_abort:
+    903 	spin_unlock(ptl);
+    904 free_abort:
+    905 	pte_free(vma->vm_mm, pgtable);
+    906 abort:
+>>  907 	for (i = 0; i < HPAGE_PMD_NR; i++)
+    908 		src[i] &= ~MIGRATE_PFN_MIGRATE;
+    909 	return 0;
+    910 }
+==========================================================================================
+[18] mm/page_io.c:399-417  函数 swap_zeromap_batch  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    399 {
+    399 {
+    400 	int i;
+    401 	bool is_zero;
+    402 	unsigned int ci_start = swp_cluster_offset(entry);
+    403 	struct swap_cluster_info *ci = __swap_entry_to_cluster(entry);
+    404 
+>>  405 	VM_WARN_ON_ONCE(ci_start + max_nr > SWAPFILE_CLUSTER);
+    406 
+    407 	rcu_read_lock();
+    408 	is_zero = __swap_table_test_zero(ci, ci_start);
+    409 	for (i = 1; i < max_nr; i++)
+==========================================================================================
+[19] mm/rmap.c:1753-1759  函数 folio_add_file_rmap_pmd  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1753 {
+   1753 {
+   1754 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+>> 1755 	__folio_add_file_rmap(folio, page, HPAGE_PMD_NR, vma, PGTABLE_LEVEL_PMD);
+   1756 #else
+   1757 	WARN_ON_ONCE(true);
+   1758 #endif
+   1759 }
+==========================================================================================
+[20] mm/shmem.c:672-703  函数 shmem_parse_huge  用到的大阶数来源 HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    672 {
+        ...
+    693 	if (!has_transparent_hugepage() &&
+    694 	    huge != SHMEM_HUGE_NEVER && huge != SHMEM_HUGE_DENY)
+    695 		return -EINVAL;
+    696 
+    697 	/* Do not override huge allocation policy with non-PMD sized mTHP */
+    698 	if (huge == SHMEM_HUGE_FORCE &&
+>>  699 	    huge_shmem_orders_inherit != BIT(HPAGE_PMD_ORDER))
+    700 		return -EINVAL;
+    701 
+    702 	return huge;
+    703 }
+==========================================================================================
+[21] mm/shmem.c:1609-1754  函数 shmem_writeout  用到的大阶数来源 HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1609 {
+        ...
+   1645 		/* Ensure the subpages are still dirty */
+   1646 		folio_test_set_dirty(folio);
+   1647 		if (split_folio_to_list(folio, folio_list))
+   1648 			goto redirty;
+   1649 
+   1650 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+>> 1651 		if (order >= HPAGE_PMD_ORDER) {
+   1652 			count_memcg_folio_events(folio, THP_SWPOUT_FALLBACK, 1);
+   1653 			count_vm_event(THP_SWPOUT_FALLBACK);
+   1654 		}
+   1655 #endif
+==========================================================================================
+[22] mm/shmem.c:1820-1834  函数 shmem_hpage_pmd_enabled  用到的大阶数来源 HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1820 {
+   1820 {
+   1821 	if (shmem_huge == SHMEM_HUGE_DENY)
+   1822 		return false;
+>> 1823 	if (test_bit(HPAGE_PMD_ORDER, &huge_shmem_orders_always))
+   1824 		return true;
+>> 1825 	if (test_bit(HPAGE_PMD_ORDER, &huge_shmem_orders_madvise))
+   1826 		return true;
+>> 1827 	if (test_bit(HPAGE_PMD_ORDER, &huge_shmem_orders_within_size))
+   1828 		return true;
+>> 1829 	if (test_bit(HPAGE_PMD_ORDER, &huge_shmem_orders_inherit) &&
+   1830 	    shmem_huge != SHMEM_HUGE_NEVER)
+   1831 		return true;
+   1832 
+   1833 	return false;
+==========================================================================================
+[23] mm/shmem.c:1942-2041  函数 shmem_alloc_and_add_folio  用到的大阶数来源 HPAGE_PMD_NR（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   1942 {
+        ...
+   1962 			folio = shmem_alloc_folio(gfp, order, info, aligned_index);
+   1963 			if (folio) {
+   1964 				index = aligned_index;
+   1965 				goto allocated;
+   1966 			}
+   1967 
+>> 1968 			if (pages == HPAGE_PMD_NR)
+   1969 				count_vm_event(THP_FILE_FALLBACK);
+   1970 			count_mthp_stat(order, MTHP_STAT_SHMEM_FALLBACK);
+   1971 			order = next_order(&suitable_orders, order);
+   1972 		}
+        ...
+   1985 	error = mem_cgroup_charge(folio, fault_mm, gfp);
+   1986 	if (error) {
+   1987 		if (xa_find(&mapping->i_pages, &index,
+   1988 				index + pages - 1, XA_PRESENT)) {
+   1989 			error = -EEXIST;
+   1990 		} else if (pages > 1) {
+>> 1991 			if (pages == HPAGE_PMD_NR) {
+   1992 				count_vm_event(THP_FILE_FALLBACK);
+   1993 				count_vm_event(THP_FILE_FALLBACK_CHARGE);
+   1994 			}
+   1995 			count_mthp_stat(folio_order(folio), MTHP_STAT_SHMEM_FALLBACK);
+==========================================================================================
+[24] mm/shmem.c:5377-5430  函数 shmem_init  用到的大阶数来源 HPAGE_PMD_ORDER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+   5377 {
+        ...
+   5412 
+   5413 	/*
+   5414 	 * Default to setting PMD-sized THP to inherit the global setting and
+   5415 	 * disable all other multi-size THPs.
+   5416 	 */
+   5417 	if (!shmem_orders_configured)
+>> 5418 		huge_shmem_orders_inherit = BIT(HPAGE_PMD_ORDER);
+   5419 #endif
+   5420 	return;
+   5421 
+   5422 out1:
+==========================================================================================
+[25] mm/swap.h:100-102  函数 swp_cluster_offset  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    100 {
+    100 {
+>>  101 	return swp_offset(entry) % SWAPFILE_CLUSTER;
+    102 }
+==========================================================================================
+[26] mm/swap.h:124-128  函数 __swap_offset_to_cluster  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    124 {
+    124 {
+    125 	VM_WARN_ON_ONCE(percpu_ref_is_zero(&si->users)); /* race with swapoff */
+>>  126 	VM_WARN_ON_ONCE(offset >= roundup(si->max, SWAPFILE_CLUSTER));
+>>  127 	return &si->cluster_info[offset / SWAPFILE_CLUSTER];
+    128 }
+==========================================================================================
+[27] mm/swap_state.c:413-495  函数 __swap_cache_alloc  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    413 {
+        ...
+    416 	struct folio *folio;
+    417 	void *shadow = NULL;
+    418 	unsigned short memcg_id;
+    419 	unsigned long address, nr_pages = 1UL << order;
+    420 	struct vm_area_struct *vma = vmf ? vmf->vma : NULL;
+    421 
+>>  422 	VM_WARN_ON_ONCE(nr_pages > SWAPFILE_CLUSTER);
+    423 	entry.val = round_down(targ_entry.val, nr_pages);
+    424 
+    425 	/* Check if the slot and range are available, skip allocation if not */
+    426 	spin_lock(&ci->lock);
+==========================================================================================
+[28] mm/swap_state.c:517-542  函数 swap_cache_alloc_folio  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    517 {
+        ...
+    520 	struct swap_cluster_info *ci;
+    521 
+    522 	ci = __swap_entry_to_cluster(targ_entry);
+    523 	order = highest_order(orders);
+    524 
+    525 	/* orders must be non-zero, and must not exceed cluster size. */
+>>  526 	if (WARN_ON_ONCE(!orders || (1UL << order) > SWAPFILE_CLUSTER))
+    527 		return ERR_PTR(-EINVAL);
+    528 
+    529 	do {
+    530 		ret = __swap_cache_alloc(ci, targ_entry, gfp, order,
+==========================================================================================
+[29] mm/swap_table.h:221-227  函数 __swap_table_set  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    221 {
+    221 {
+    222 	atomic_long_t *table = rcu_dereference_protected(ci->table, true);
+    223 
+    224 	lockdep_assert_held(&ci->lock);
+>>  225 	VM_WARN_ON_ONCE(off >= SWAPFILE_CLUSTER);
+    226 	atomic_long_set(&table[off], swp_tb);
+    227 }
+==========================================================================================
+[30] mm/swap_table.h:231-238  函数 __swap_table_xchg  用到的大阶数来源 SWAPFILE_CLUSTER（展开后是 HPAGE_PMD_ORDER）
+    常量表：在 arm64-64k, loongarch-64k, mips-64k 上，该来源大于 MAX_PAGECACHE_ORDER；函数里没有出现任何页缓存上限守卫
+    231 {
+    231 {
+    232 	atomic_long_t *table = rcu_dereference_protected(ci->table, true);
+    233 
+    234 	lockdep_assert_held(&ci->lock);
+>>  235 	VM_WARN_ON_ONCE(off >= SWAPFILE_CLUSTER);
+    236 	/* Ordering is guaranteed by cluster lock, relax */
+    237 	return atomic_long_xchg_relaxed(&table[off], swp_tb);
+    238 }

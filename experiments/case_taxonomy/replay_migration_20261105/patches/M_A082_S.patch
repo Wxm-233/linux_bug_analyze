@@ -1,0 +1,52 @@
+diff --git a/arch/loongarch/kernel/kfpu.c b/arch/loongarch/kernel/kfpu.c
+--- a/arch/loongarch/kernel/kfpu.c
++++ b/arch/loongarch/kernel/kfpu.c
+@@ -18,18 +18,37 @@
+ static DEFINE_PER_CPU(bool, in_kernel_fpu);
+ static DEFINE_PER_CPU(unsigned int, euen_current);
+ 
++static inline void kfpu_lock(void)
++{
++	if (!irqs_disabled()) {
++		if (!IS_ENABLED(CONFIG_PREEMPT_RT))
++			local_bh_disable();
++		else
++			preempt_disable();
++	} else {
++		preempt_disable();
++	}
++}
++
++static inline void kfpu_unlock(void)
++{
++	if (!irqs_disabled()) {
++		if (!IS_ENABLED(CONFIG_PREEMPT_RT))
++			local_bh_enable();
++		else
++			preempt_enable();
++	} else {
++		preempt_enable();
++	}
++}
++
+ void kernel_fpu_begin(void)
+ {
+ 	unsigned int *euen_curr;
+ 
+-	preempt_disable();
++	kfpu_lock();
+ 
+ 	WARN_ON(this_cpu_read(in_kernel_fpu));
+ 
+ 	this_cpu_write(in_kernel_fpu, true);
+ 	euen_curr = this_cpu_ptr(&euen_current);
+ 
+ 	*euen_curr = csr_xchg32(euen_mask, euen_mask, LOONGARCH_CSR_EUEN);
+@@ -75,7 +94,7 @@
+ 
+ 	this_cpu_write(in_kernel_fpu, false);
+ 
+-	preempt_enable();
++	kfpu_unlock();
+ }
+ EXPORT_SYMBOL_GPL(kernel_fpu_end);

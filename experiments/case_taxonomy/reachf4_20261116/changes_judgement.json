@@ -1,0 +1,27 @@
+{
+ "judge": "Claude, 2026-11-16, read df2908090cda mm/page_table_check.c, mm/khugepaged.c, arch/{x86,arm64,riscv,powerpc} *_user_accessible_page",
+ "summary": {"changed": 9, "old_F4_new_kept": 9, "old_kept_new_F4": 0, "kernel_table": {"是": 0, "否": 9, "说不清": 0},
+             "top30_reach": {"可能": 0, "不可能": 3, "说不清": 0}, "codex": "不需要（没有“可能”或“说不清”）"},
+ "common_reason_kernel": "这 9 处都在 mm/page_table_check.c。函数开头是 `if (&init_mm == mm) return;`，出现 init_mm 恰恰是为了排除内核页表；旧 F4 见到 init_mm 就整函数滤掉，判反了。新规则看实参来源（参数 pte/pmd，调用者传的是用户页表的项），不滤，判断正确。",
+ "rows": [
+  {"loc": "mm/page_table_check.c:154", "func": "__page_table_check_pte_clear", "A": "pte_special", "new_rank": 15, "kernel": "否",
+   "reach": "不可能", "why": "同一条件里先算 pte_user_accessible_page(mm, addr, pte)，四个架构的实现都先查 present/valid（x86 _PAGE_PRESENT，arm64 pte_valid，riscv/powerpc pte_present），短路后才调 pte_special。"},
+  {"loc": "mm/page_table_check.c:155", "func": "__page_table_check_pte_clear", "A": "pte_pfn", "new_rank": 45, "kernel": "否",
+   "reach": "不可能（不在前 30，顺带判）", "why": "在同一个 if 的分支里，守卫同上。"},
+  {"loc": "mm/page_table_check.c:177", "func": "__page_table_check_pmd_clear", "A": "pmd_pfn", "new_rank": 53, "kernel": "否",
+   "reach": "不可能（不在前 30，顺带判）", "why": "pmd_user_accessible_page 守卫：x86 查 _PAGE_PRESENT，arm64 pmd_valid，riscv/powerpc 先 pmd_leaf（要求 present）。"},
+  {"loc": "mm/page_table_check.c:222", "func": "__page_table_check_ptes_set", "A": "pte_special", "new_rank": 16, "kernel": "否",
+   "reach": "不可能", "why": "同 154：pte_user_accessible_page 在前，短路。"},
+  {"loc": "mm/page_table_check.c:223", "func": "__page_table_check_ptes_set", "A": "pte_pfn", "new_rank": 46, "kernel": "否",
+   "reach": "不可能（不在前 30，顺带判）", "why": "同 222 的 if 分支。"},
+  {"loc": "mm/page_table_check.c:223", "func": "__page_table_check_ptes_set", "A": "pte_write", "new_rank": 47, "kernel": "否",
+   "reach": "不可能（不在前 30，顺带判）", "why": "同 222 的 if 分支。"},
+  {"loc": "mm/page_table_check.c:254", "func": "__page_table_check_pmds_set", "A": "pmd_pfn", "new_rank": 54, "kernel": "否",
+   "reach": "不可能（不在前 30，顺带判）", "why": "pmd_user_accessible_page 守卫，同 177。"},
+  {"loc": "mm/page_table_check.c:254", "func": "__page_table_check_pmds_set", "A": "pmd_write", "new_rank": 66, "kernel": "否",
+   "reach": "不可能（不在前 30，顺带判）", "why": "同上。"},
+  {"loc": "mm/page_table_check.c:281", "func": "__page_table_check_pte_clear_range", "A": "pmd_leaf", "new_rank": 17, "kernel": "否",
+   "reach": "不可能", "why": "只有 mm/khugepaged.c:2049、2210 两处调用，传的 pgt_pmd 是 pmdp_collapse_flush() 取下的旧 pmd，原来指向一张 PTE 页表，按构造一定 present。"}
+ ],
+ "observation": "其中 8 处的守卫是架构函数 pte/pmd_user_accessible_page，它的各架构实现都先查 present，但不在 F1 的守卫名单里。把它加进 F1 可以再滤掉这 8 处（281 是另一种原因），属于下一轮的改动。"
+}

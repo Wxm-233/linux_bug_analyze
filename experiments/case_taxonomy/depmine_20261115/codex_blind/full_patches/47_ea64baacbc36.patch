@@ -1,0 +1,52 @@
+commit ea64baacbc36a0d552aec0d87107182f40211131
+Author:     Mark Brown <broonie@kernel.org>
+AuthorDate: Wed Aug 17 19:23:22 2022 +0100
+Commit:     Will Deacon <will@kernel.org>
+CommitDate: Tue Aug 23 11:29:11 2022 +0100
+
+    arm64/signal: Flush FPSIMD register state when disabling streaming mode
+    
+    When handling a signal delivered to a context with streaming mode enabled
+    we will disable streaming mode for the signal handler, when doing so we
+    should also flush the saved FPSIMD register state like exiting streaming
+    mode in the hardware would do so that if that state is reloaded we get the
+    same behaviour. Without this we will reload whatever the last FPSIMD state
+    that was saved for the task was.
+    
+    Fixes: 40a8e87bb328 ("arm64/sme: Disable ZA and streaming mode when handling signals")
+    Signed-off-by: Mark Brown <broonie@kernel.org>
+    Reviewed-by: Catalin Marinas <catalin.marinas@arm.com>
+    Link: https://lore.kernel.org/r/20220817182324.638214-3-broonie@kernel.org
+    Signed-off-by: Will Deacon <will@kernel.org>
+
+diff --git a/arch/arm64/kernel/signal.c b/arch/arm64/kernel/signal.c
+index 0685b8784927..0d28a783a69a 100644
+--- a/arch/arm64/kernel/signal.c
++++ b/arch/arm64/kernel/signal.c
+@@ -921,16 +921,26 @@ static void setup_return(struct pt_regs *regs, struct k_sigaction *ka,
+ 		regs->pstate |= PSR_BTYPE_C;
+ 	}
+ 
+ 	/* TCO (Tag Check Override) always cleared for signal handlers */
+ 	regs->pstate &= ~PSR_TCO_BIT;
+ 
+ 	/* Signal handlers are invoked with ZA and streaming mode disabled */
+ 	if (system_supports_sme()) {
++		/*
++		 * If we were in streaming mode the saved register
++		 * state was SVE but we will exit SM and use the
++		 * FPSIMD register state - flush the saved FPSIMD
++		 * register state in case it gets loaded.
++		 */
++		if (current->thread.svcr & SVCR_SM_MASK)
++			memset(&current->thread.uw.fpsimd_state, 0,
++			       sizeof(current->thread.uw.fpsimd_state));
++
+ 		current->thread.svcr &= ~(SVCR_ZA_MASK |
+ 					  SVCR_SM_MASK);
+ 		sme_smstop();
+ 	}
+ 
+ 	if (ka->sa.sa_flags & SA_RESTORER)
+ 		sigtramp = ka->sa.sa_restorer;
+ 	else

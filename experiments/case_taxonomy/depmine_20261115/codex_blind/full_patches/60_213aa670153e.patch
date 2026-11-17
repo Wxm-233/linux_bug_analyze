@@ -1,0 +1,78 @@
+commit 213aa670153ed675a007c1f35c5db544b0fefc94
+Author:     Helge Deller <deller@gmx.de>
+AuthorDate: Sat Aug 31 14:02:06 2024 +0200
+Commit:     Helge Deller <deller@gmx.de>
+CommitDate: Tue Sep 3 12:59:21 2024 +0200
+
+    parisc: Delay write-protection until mark_rodata_ro() call
+    
+    Do not write-protect the kernel read-only and __ro_after_init sections
+    earlier than before mark_rodata_ro() is called.  This fixes a boot issue on
+    parisc which is triggered by commit 91a1d97ef482 ("jump_label,module: Don't
+    alloc static_key_mod for __ro_after_init keys"). That commit may modify
+    static key contents in the __ro_after_init section at bootup, so this
+    section needs to be writable at least until mark_rodata_ro() is called.
+    
+    Signed-off-by: Helge Deller <deller@gmx.de>
+    Reported-by: matoro <matoro_mailinglist_kernel@matoro.tk>
+    Reported-by: Christoph Biedl <linux-kernel.bfrz@manchmal.in-ulm.de>
+    Tested-by: Christoph Biedl <linux-kernel.bfrz@manchmal.in-ulm.de>
+    Link: https://lore.kernel.org/linux-parisc/096cad5aada514255cd7b0b9dbafc768@matoro.tk/#r
+    Fixes: 91a1d97ef482 ("jump_label,module: Don't alloc static_key_mod for __ro_after_init keys")
+    Cc: stable@vger.kernel.org # v6.10+
+
+diff --git a/arch/parisc/mm/init.c b/arch/parisc/mm/init.c
+index 34d91cb8b259..96970fa75e4a 100644
+--- a/arch/parisc/mm/init.c
++++ b/arch/parisc/mm/init.c
+@@ -454,17 +454,16 @@ void __init set_kernel_text_rw(int enable_read_write)
+ 
+ void free_initmem(void)
+ {
+ 	unsigned long init_begin = (unsigned long)__init_begin;
+ 	unsigned long init_end = (unsigned long)__init_end;
+ 	unsigned long kernel_end  = (unsigned long)&_end;
+ 
+ 	/* Remap kernel text and data, but do not touch init section yet. */
+-	kernel_set_to_readonly = true;
+ 	map_pages(init_end, __pa(init_end), kernel_end - init_end,
+ 		  PAGE_KERNEL, 0);
+ 
+ 	/* The init text pages are marked R-X.  We have to
+ 	 * flush the icache and mark them RW-
+ 	 *
+ 	 * Do a dummy remap of the data section first (the data
+ 	 * section is already PAGE_KERNEL) to pull in the TLB entries
+@@ -488,21 +487,28 @@ void free_initmem(void)
+ 	/* set up a new led state on systems shipped LED State panel */
+ 	pdc_chassis_send_status(PDC_CHASSIS_DIRECT_BCOMPLETE);
+ }
+ 
+ 
+ #ifdef CONFIG_STRICT_KERNEL_RWX
+ void mark_rodata_ro(void)
+ {
+-	/* rodata memory was already mapped with KERNEL_RO access rights by
+-           pagetable_init() and map_pages(). No need to do additional stuff here */
+-	unsigned long roai_size = __end_ro_after_init - __start_ro_after_init;
++	unsigned long start = (unsigned long) &__start_rodata;
++	unsigned long end = (unsigned long) &__end_rodata;
++
++	pr_info("Write protecting the kernel read-only data: %luk\n",
++	       (end - start) >> 10);
++
++	kernel_set_to_readonly = true;
++	map_pages(start, __pa(start), end - start, PAGE_KERNEL, 0);
+ 
+-	pr_info("Write protected read-only-after-init data: %luk\n", roai_size >> 10);
++	/* force the kernel to see the new page table entries */
++	flush_cache_all();
++	flush_tlb_all();
+ }
+ #endif
+ 
+ 
+ /*
+  * Just an arbitrary offset to serve as a "hole" between mapping areas
+  * (between top of physical memory and a potential pcxl dma mapping
+  * area, and below the vmalloc mapping area).

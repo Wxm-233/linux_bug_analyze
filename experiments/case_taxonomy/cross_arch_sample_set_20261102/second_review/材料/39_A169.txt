@@ -1,0 +1,37 @@
+########## 第39条  编号 A169  提交 6f49743af42c  日期 2025-06-12
+
+【提交说明】
+riscv: Require clang-17 or newer for kCFI
+
+After the combination of commit c217157bcd1d ("riscv: Implement
+HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS"), which starts using
+'-fpatchable-function-entry=M,N', and commit d0262e907e29 ("riscv:
+ftrace: support PREEMPT"), which allows CONFIG_DYNAMIC_FTRACE to be
+enabled by allmodconfig, allmodconfig builds with clang-16 begin
+crashing in the generic LLVM kCFI pass (see [1] for the stack trace).
+
+clang-17 avoids this crash by moving to target-specific lowering of the
+kCFI operand bundles [2]. Require clang-17 to select CONFIG_CFI_CLANG to
+avoid this crash.
+
+Fixes: c217157bcd1d ("riscv: Implement HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS")
+
+【改动统计】
+ arch/riscv/Kconfig | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 36061f4732b7..d71ea0f4466f 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -63,7 +63,8 @@ config RISCV
+ 	select ARCH_OPTIONAL_KERNEL_RWX_DEFAULT
+ 	select ARCH_STACKWALK
+ 	select ARCH_SUPPORTS_ATOMIC_RMW
+-	select ARCH_SUPPORTS_CFI_CLANG
++	# clang >= 17: https://github.com/llvm/llvm-project/commit/62fa708ceb027713b386c7e0efda994f8bdc27e2
++	select ARCH_SUPPORTS_CFI_CLANG if CLANG_VERSION >= 170000
+ 	select ARCH_SUPPORTS_DEBUG_PAGEALLOC if MMU
+ 	select ARCH_SUPPORTS_HUGE_PFNMAP if TRANSPARENT_HUGEPAGE
+ 	select ARCH_SUPPORTS_HUGETLBFS if MMU

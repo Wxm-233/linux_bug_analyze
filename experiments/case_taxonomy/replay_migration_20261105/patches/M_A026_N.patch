@@ -1,0 +1,56 @@
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -99,6 +99,7 @@ config LOONGARCH
+ 	select HAVE_FAST_GUP
+ 	select HAVE_FTRACE_MCOUNT_RECORD
+ 	select HAVE_FUNCTION_ARG_ACCESS_API
++	select HAVE_FUNCTION_ERROR_INJECTION
+ 	select HAVE_FUNCTION_GRAPH_TRACER
+ 	select HAVE_FUNCTION_TRACER
+ 	select HAVE_GENERIC_VDSO
+diff --git a/arch/loongarch/include/asm/ptrace.h b/arch/loongarch/include/asm/ptrace.h
+--- a/arch/loongarch/include/asm/ptrace.h
++++ b/arch/loongarch/include/asm/ptrace.h
+@@ -143,6 +143,11 @@ static inline long regs_return_value(struct pt_regs *regs)
+ 	return regs->regs[4];
+ }
+ 
++static inline void regs_set_return_value(struct pt_regs *regs, unsigned long val)
++{
++	regs->regs[4] = val;
++}
++
+ #define instruction_pointer(regs) ((regs)->csr_era)
+ #define profile_pc(regs) instruction_pointer(regs)
+ 
+diff --git a/arch/loongarch/lib/Makefile b/arch/loongarch/lib/Makefile
+--- a/arch/loongarch/lib/Makefile
++++ b/arch/loongarch/lib/Makefile
+@@ -5,3 +5,5 @@
+ 
+ lib-y	+= delay.o memset.o memcpy.o memmove.o \
+ 	   clear_user.o copy_user.o csum.o dump_tlb.o unaligned.o
++
++obj-$(CONFIG_FUNCTION_ERROR_INJECTION)	+= error-inject.o
+diff --git a/arch/loongarch/lib/error-inject.c b/arch/loongarch/lib/error-inject.c
+new file mode 100644
+--- /dev/null
++++ b/arch/loongarch/lib/error-inject.c
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: GPL-2.0
++
++#include <linux/error-injection.h>
++#include <linux/kprobes.h>
++#include <linux/ptrace.h>
++
++void override_function_with_return(struct pt_regs *regs)
++{
++	/*
++	 * 'regs' is the state on entry of the probed function, captured
++	 * by a kprobe. On return from the exception, execution resumes
++	 * at the caller (the link register $ra), skipping the function body.
++	 */
++	instruction_pointer_set(regs, regs->regs[1]);
++}
++NOKPROBE_SYMBOL(override_function_with_return);

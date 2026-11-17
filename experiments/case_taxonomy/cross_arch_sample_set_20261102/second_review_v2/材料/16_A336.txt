@@ -1,0 +1,31 @@
+########## 第16条  编号 A336  提交 bbb622488749  日期 2025-03-03
+
+【提交说明】
+RISC-V: KVM: Disable the kernel perf counter during configure
+
+The perf event should be marked disabled during the creation as
+it is not ready to be scheduled until there is SBI PMU start call
+or config matching is called with auto start. Otherwise, event add/start
+gets called during perf_event_create_kernel_counter function.
+It will be enabled and scheduled to run via perf_event_enable during
+either the above mentioned scenario.
+
+Fixes: 0cb74b65d2e5 ("RISC-V: KVM: Implement perf support without sampling")
+
+【改动统计】
+ arch/riscv/kvm/vcpu_pmu.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 2707a51b082c..78ac3216a54d 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -666,6 +666,7 @@ int kvm_riscv_vcpu_pmu_ctr_cfg_match(struct kvm_vcpu *vcpu, unsigned long ctr_ba
+ 		.type = etype,
+ 		.size = sizeof(struct perf_event_attr),
+ 		.pinned = true,
++		.disabled = true,
+ 		/*
+ 		 * It should never reach here if the platform doesn't support the sscofpmf
+ 		 * extension as mode filtering won't work without it.

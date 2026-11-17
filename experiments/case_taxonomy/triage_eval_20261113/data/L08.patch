@@ -1,0 +1,85 @@
+commit b254c629a963f0b9d635902f3f979bddbc65f90f
+Author: Tiezhu Yang <yangtiezhu@loongson.cn>
+Date:   Mon Mar 16 10:36:01 2026 +0800
+
+    LoongArch: BPF: Make arch_protect_bpf_trampoline() return 0
+    
+    Occasionally there exist "text_copy_cb: operation failed" when executing
+    the bpf selftests, the reason is copy_to_kernel_nofault() failed and the
+    ecode of ESTAT register is 0x4 (PME: Page Modification Exception) due to
+    the pte is not writeable. The root cause is that there is another place
+    to set the pte entry as readonly which is in the generic weak version of
+    arch_protect_bpf_trampoline().
+    
+    There are two ways to fix this race condition issue: the direct way is
+    to modify the generic weak arch_protect_bpf_trampoline() to add a mutex
+    lock for set_memory_rox(), but the other simple and proper way is to
+    just make arch_protect_bpf_trampoline() return 0 in the arch-specific
+    code because LoongArch has already use the BPF prog pack allocator for
+    trampoline.
+    
+    Here are the trimmed kernel log messages:
+    
+      copy_to_kernel_nofault: memory access failed, ecode 0x4
+      copy_to_kernel_nofault: the caller is text_copy_cb+0x50/0xa0
+      text_copy_cb: operation failed
+      ------------[ cut here ]------------
+      bpf_prog_pack bug: missing bpf_arch_text_invalidate?
+      WARNING: kernel/bpf/core.c:1008 at bpf_prog_pack_free+0x200/0x228
+      ...
+      Call Trace:
+      [<9000000000248914>] show_stack+0x64/0x188
+      [<9000000000241308>] dump_stack_lvl+0x6c/0x9c
+      [<90000000002705bc>] __warn+0x9c/0x200
+      [<9000000001c428c0>] __report_bug+0xa8/0x1c0
+      [<9000000001c42b5c>] report_bug+0x64/0x120
+      [<9000000001c7dcd0>] do_bp+0x270/0x3c0
+      [<9000000000246f40>] handle_bp+0x120/0x1c0
+      [<900000000047b030>] bpf_prog_pack_free+0x200/0x228
+      [<900000000047b2ec>] bpf_jit_binary_pack_free+0x24/0x60
+      [<900000000026989c>] bpf_jit_free+0x54/0xb0
+      [<900000000029e10c>] process_one_work+0x184/0x610
+      [<900000000029ef8c>] worker_thread+0x24c/0x388
+      [<90000000002a902c>] kthread+0x13c/0x170
+      [<9000000001c7dfe8>] ret_from_kernel_thread+0x28/0x1c0
+      [<9000000000246624>] ret_from_kernel_thread_asm+0xc/0x88
+    
+      ---[ end trace 0000000000000000 ]---
+    
+    Here is a simple shell script to reproduce:
+    
+      #!/bin/bash
+    
+      for ((i=1; i<=1000; i++))
+      do
+        echo "Under testing $i ..."
+        dmesg -c > /dev/null
+        ./test_progs -t fentry_attach_stress > /dev/null
+        dmesg -t | grep "text_copy_cb: operation failed"
+        if [ $? -eq 0 ]; then
+          break
+        fi
+      done
+    
+    Cc: stable@vger.kernel.org
+    Fixes: 4ab17e762b34 ("LoongArch: BPF: Use BPF prog pack allocator")
+    Acked-by: Hengqi Chen <hengqi.chen@gmail.com>
+    Signed-off-by: Tiezhu Yang <yangtiezhu@loongson.cn>
+    Signed-off-by: Huacai Chen <chenhuacai@loongson.cn>
+
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index e8e0ad34928c..9cb796e16379 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1574,6 +1574,11 @@ void arch_free_bpf_trampoline(void *image, unsigned int size)
+ 	bpf_prog_pack_free(image, size);
+ }
+ 
++int arch_protect_bpf_trampoline(void *image, unsigned int size)
++{
++	return 0;
++}
++
+ /*
+  * Sign-extend the register if necessary
+  */

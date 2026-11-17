@@ -1,0 +1,879 @@
+
+##### A275
+=== fdef048705da A 2026-08-07 +2/-1
+riscv: cpufeature: Clarify ISA spec version for canonical order
+
+Specify that chapter 27 refers to version 20191213 of the RISC-V ISA
+Unprivileged Architecture. The chapter numbering differs across
+specification versions - for example, in version 20250508, the ISA
+Extension Naming Conventions is chapter 36, not chapter 27.
+
+Historical versions of the RISC-V specification can be found via Link [1].
+
+Fixes: 99e2266f2460 ("RISC-V: clarify ISA string ordering rules in cpu.c")
+functions: 
+fixes: 99e2266f2460(riscv)
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index ebe4a2593c40..16488b33f238 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -474,5 +474,6 @@ static const unsigned int riscv_c_exts[] = {
+ /*
+  * The canonical order of ISA extension names in the ISA string is defined in
+- * chapter 27 of the unprivileged specification.
++ * Chapter 27 of the RISC-V Instruction Set Manual Volume I Unprivileged ISA
++ * (Document Version 20191213).
+  *
+  * Ordinarily, for in-kernel data structures, this order is unimportant but
+
+##### A276
+=== 1519f488e8ce A 2026-08-11 +13/-4
+bpf, riscv: Clear fetch destination on faulting arena atomic
+
+A RMW atomic on an arena pointer is converted to BPF_PROBE_ATOMIC and
+gets an exception table entry, but that entry records no destination
+register to clear unless the instruction is a load-acquire today. That
+is right for a plain BPF_{ADD,AND,OR,XOR}, which only writes memory,
+but an RMW carrying BPF_FETCH also reads the old value into a register:
+src_reg for BPF_{ADD,AND,OR,XOR} | BPF_FETCH and BPF_XCHG, and r0 for
+BPF_CMPXCHG. emit_atomic_rmw() emits it that way, e.g.:
+
+  [...]
+  case BPF_XCHG:
+          ctx->ex_insn_off = ctx->ninsns;
+          emit(is64 ? rv_amoswap_d(rs, rs, rd, 1, 1) :
+               rv_amoswap_w(rs, rs, rd, 1, 1), ctx);
+  [...]
+
+Thus, a fault over an unmapped arena page ex_handler_bpf() jumps over
+the access but leaves rs untouched, and the program resumes with
+whatever it held before the atomic instead of the 0 that every other
+BPF_PROBE_* access delivers. Fill the exception table entry in from
+bpf_atomic_load_reg(), which returns the BPF register an atomic reads
+the memory operand into or -1 when it has none. A load-acquire ends up
+with the same register it gets today, it just goes through the helper.
+Unlike x86-64 and arm64, riscv64 does not report arena violations from
+its exception handler, so there is no access direction to correct here,
+only the missing register clear.
+
+Fixes: fb7cefabae81 ("riscv, bpf: Add support arena atomics for RV64")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_emit_insn
+fixes: fb7cefabae81(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 6b9972b07c1b..2504df1fa111 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1993,8 +1993,17 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 
+ 		/* ret can be 1 (skip-zext); extable entry still needs to be added */
+-		if (ret >= 0)
+-			ret = add_exception_handler(insn,
+-				bpf_atomic_is_load_acq(insn) ? rd : REG_DONT_CLEAR_MARKER,
+-				ctx) ?: ret;
++		if (ret >= 0) {
++			/*
++			 * A load-acquire reads into dst_reg, and a read-modify-write
++			 * carrying BPF_FETCH reads the old value into src_reg, or into
++			 * r0 for a BPF_CMPXCHG. Clear that register on fault, the
++			 * remaining atomics have no destination register.
++			 */
++			int load_reg = bpf_atomic_load_reg(insn);
++
++			ret = add_exception_handler(insn, load_reg < 0 ?
++					REG_DONT_CLEAR_MARKER : regmap[load_reg],
++					ctx) ?: ret;
++		}
+ 
+ 		if (ret)
+
+##### A277
+=== f2aaa6215910 A 2026-08-14 +3/-2
+riscv, bpf: Fix missing sign-ext for signed 1-byte and 2-byte kfunc args
+
+On RV64, the ABI requires sign-extension for signed 1-byte and 2-byte kfunc
+args. However, the RV64 JIT currently does not perform sign-extension for
+such kfunc args.
+
+Before commit 7ce090afbf72 ("bpf: Infer zext_dst based on static register
+liveness analysis"), state pruning could potentially omit zero-extension
+of 32-bit subregisters, which inadvertently masked the above issue by making
+the args appear as if they had been properly sign-extended. After that
+commit, the problem is exposed, causing the kfunc_call/kfunc_call_test4
+selftest to fail.
+
+Fix this by extending the existing sign-extension logic to handle signed
+1-byte and 2-byte kfunc args as well.
+
+Fixes: 443574b03387 ("riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_emit_insn
+fixes: 443574b03387(riscv)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 2504df1fa111..74efe4b138d2 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1824,7 +1824,8 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 			for (idx = 0; idx < fm->nr_args; idx++) {
+ 				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
++				bool sign = fm->arg_flags[idx] & BTF_FMODEL_SIGNED_ARG;
+ 
+-				if (fm->arg_size[idx] == sizeof(int))
+-					emit_sextw(reg, reg, ctx);
++				if (sign_extend(reg, reg, fm->arg_size[idx], sign, ctx))
++					return -EINVAL;
+ 			}
+ 		}
+
+##### A278
+=== 536b523b4073 A 2026-09-02 +9/-1
+bpf, riscv: Make arena support depend on ZACAS
+
+The arena range tree allocates its nodes with kmalloc_nolock() since
+commit f8c67d8550ee ("bpf: Use kmalloc_nolock() in range tree").
+kmalloc_nolock() requires slab caches with cmpxchg128 support
+(__CMPXCHG_DOUBLE); on riscv cmpxchg128 is provided by the ZACAS
+extension. On systems without ZACAS every arena map creation fails
+with a misleading -ENOMEM.
+
+Report the missing support instead: make bpf_jit_supports_arena()
+return system_has_cmpxchg128() where it is defined, so arena map
+creation fails with -EOPNOTSUPP on systems without ZACAS. The macro
+is only defined when both CONFIG_RISCV_ISA_ZACAS and
+CONFIG_TOOLCHAIN_HAS_ZACAS are enabled, so guard it with #ifdef the
+same way mm/slab.h consumes it, and reject arena otherwise. This
+matches how arena BPF_CMPXCHG instructions are already gated on ZACAS
+in bpf_jit_supports_insn().
+
+Fixes: f8c67d8550ee ("bpf: Use kmalloc_nolock() in range tree")
+functions: arch/riscv/net/bpf_jit_comp64.c:bpf_jit_supports_arena
+fixes: f8c67d8550ee(common)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 74efe4b138d2..151031e97a24 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -2129,5 +2129,13 @@ bool bpf_jit_supports_ptr_xchg(void)
+ bool bpf_jit_supports_arena(void)
+ {
+-	return true;
++	/*
++	 * The arena range tree uses kmalloc_nolock(), which needs
++	 * cmpxchg128, provided by ZACAS on riscv.
++	 */
++#ifdef system_has_cmpxchg128
++	return system_has_cmpxchg128();
++#else
++	return false;
++#endif
+ }
+ 
+
+##### A279
+=== 8cb22bec1426 A DEV 2023-08-29 +1/-1
+riscv: kprobes: allow writing to x0
+
+Instructions can write to x0, so we should simulate these instructions
+normally.
+
+Currently, the kernel hangs if an instruction who writes to x0 is
+simulated.
+
+Fixes: c22b0bcb1dd0 ("riscv: Add kprobes supported")
+functions: arch/riscv/kernel/probes/simulate-insn.c:rv_insn_reg_set_val
+fixes: c22b0bcb1dd0(riscv)
+diff --git a/arch/riscv/kernel/probes/simulate-insn.c b/arch/riscv/kernel/probes/simulate-insn.c
+index d3099d67816d..6c166029079c 100644
+--- a/arch/riscv/kernel/probes/simulate-insn.c
++++ b/arch/riscv/kernel/probes/simulate-insn.c
+@@ -25,5 +25,5 @@ static inline bool rv_insn_reg_set_val(struct pt_regs *regs, u32 index,
+ {
+ 	if (index == 0)
+-		return false;
++		return true;
+ 	else if (index <= 31)
+ 		*((unsigned long *)regs + index) = val;
+
+##### A280
+=== e59e5e2754bf A DEV 2023-08-29 +3/-0
+riscv: correct pt_level name via pgtable_l5/4_enabled
+
+The pt_level uses CONFIG_PGTABLE_LEVELS to display page table names.
+But if page mode is downgraded from kernel cmdline or restricted by
+the hardware in 64BIT, it will give a wrong name.
+
+Like, using no4lvl for sv39, ptdump named the 1G-mapping as "PUD"
+that should be "PGD":
+
+0xffffffd840000000-0xffffffd900000000    0x00000000c0000000         3G PUD     D A G . . W R V
+
+So select "P4D/PUD" or "PGD" via pgtable_l5/4_enabled to correct it.
+
+Fixes: e8a62cc26ddf ("riscv: Implement sv48 support")
+functions: arch/riscv/mm/ptdump.c:ptdump_init
+fixes: e8a62cc26ddf(riscv)
+diff --git a/arch/riscv/mm/ptdump.c b/arch/riscv/mm/ptdump.c
+index 20a9f991a6d7..e9090b38f811 100644
+--- a/arch/riscv/mm/ptdump.c
++++ b/arch/riscv/mm/ptdump.c
+@@ -385,4 +385,7 @@ static int __init ptdump_init(void)
+ 	kernel_ptd_info.base_addr = KERN_VIRT_START;
+ 
++	pg_level[1].name = pgtable_l5_enabled ? "P4D" : "PGD";
++	pg_level[2].name = pgtable_l4_enabled ? "PUD" : "PGD";
++
+ 	for (i = 0; i < ARRAY_SIZE(pg_level); i++)
+ 		for (j = 0; j < ARRAY_SIZE(pte_bits); j++)
+
+##### A281
+=== 767423658d53 A DEV 2023-09-07 +7/-1
+riscv: kexec: Align the kexeced kernel entry
+
+The current riscv boot protocol requires 2MB alignment for RV64
+and 4MB alignment for RV32.
+
+In KEXEC_FILE path, the elf_find_pbase() function should align
+the kexeced kernel entry according to the requirement, otherwise
+the kexeced kernel would silently BUG at the setup_vm().
+
+Fixes: 8acea455fafa ("RISC-V: Support for kexec_file on panic")
+functions: arch/riscv/kernel/elf_kexec.c:elf_find_pbase
+fixes: 8acea455fafa(riscv)
+diff --git a/arch/riscv/kernel/elf_kexec.c b/arch/riscv/kernel/elf_kexec.c
+index 5372b708fae2..9a81d6926ac6 100644
+--- a/arch/riscv/kernel/elf_kexec.c
++++ b/arch/riscv/kernel/elf_kexec.c
+@@ -99,5 +99,11 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ 	kbuf.buf_min = lowest_paddr;
+ 	kbuf.buf_max = ULONG_MAX;
+-	kbuf.buf_align = PAGE_SIZE;
++
++	/*
++	 * Current riscv boot protocol requires 2MB alignment for
++	 * RV64 and 4MB alignment for RV32
++	 *
++	 */
++	kbuf.buf_align = PMD_SIZE;
+ 	kbuf.mem = KEXEC_BUF_MEM_UNKNOWN;
+ 	kbuf.memsz = ALIGN(kernel_len, PAGE_SIZE);
+
+##### A282
+=== c20d36cc2a20 A DEV 2023-09-12 +4/-0
+riscv: don't probe unaligned access speed if already done
+
+If misaligned_access_speed percpu var isn't so called "HWPROBE
+MISALIGNED UNKNOWN", it means the probe has happened(this is possible
+for example, hotplug off then hotplug on one cpu), and the percpu var
+has been set, don't probe again in this case.
+
+Fixes: 584ea6564bca ("RISC-V: Probe for unaligned access speed")
+functions: arch/riscv/kernel/cpufeature.c:check_unaligned_access
+fixes: 584ea6564bca(riscv)
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index 970a71422bee..6a01ded615cd 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -573,4 +573,8 @@ void check_unaligned_access(int cpu)
+ 		return;
+ 
++	/* We are already set since the last check */
++	if (per_cpu(misaligned_access_speed, cpu) != RISCV_HWPROBE_MISALIGNED_UNKNOWN)
++		return;
++
+ 	page = alloc_pages(GFP_NOWAIT, get_order(MISALIGNED_BUFFER_SIZE));
+ 	if (!page) {
+
+##### A283
+=== c4676f8dc1e1 A DEV 2023-10-27 +6/-5
+RISC-V: Don't fail in riscv_of_parent_hartid() for disabled HARTs
+
+The riscv_of_processor_hartid() used by riscv_of_parent_hartid() fails
+for HARTs disabled in the DT. This results in the following warning
+thrown by the RISC-V INTC driver for the E-core on SiFive boards:
+
+[    0.000000] riscv-intc: unable to find hart id for /cpus/cpu@0/interrupt-controller
+
+The riscv_of_parent_hartid() is only expected to read the hartid
+from the DT so we directly call of_get_cpu_hwid() instead of calling
+riscv_of_processor_hartid().
+
+Fixes: ad635e723e17 ("riscv: cpu: Add 64bit hartid support on RV64")
+functions: arch/riscv/kernel/cpu.c:riscv_of_parent_hartid
+fixes: ad635e723e17(riscv)
+diff --git a/arch/riscv/kernel/cpu.c b/arch/riscv/kernel/cpu.c
+index c17dacb1141c..157ace8b262c 100644
+--- a/arch/riscv/kernel/cpu.c
++++ b/arch/riscv/kernel/cpu.c
+@@ -126,11 +126,12 @@ int __init riscv_early_of_processor_hartid(struct device_node *node, unsigned lo
+ int riscv_of_parent_hartid(struct device_node *node, unsigned long *hartid)
+ {
+-	int rc;
+-
+ 	for (; node; node = node->parent) {
+ 		if (of_device_is_compatible(node, "riscv")) {
+-			rc = riscv_of_processor_hartid(node, hartid);
+-			if (!rc)
+-				return 0;
++			*hartid = (unsigned long)of_get_cpu_hwid(node, 0);
++			if (*hartid == ~0UL) {
++				pr_warn("Found CPU without hart ID\n");
++				return -ENODEV;
++			}
++			return 0;
+ 		}
+ 	}
+
+##### A284
+=== adb1f95d388a A DEV 2023-10-29 +1/-2
+riscv: Fix an off-by-one in get_early_cmdline()
+
+The ending NULL is not taken into account by strncat(), so switch to
+strlcat() to correctly compute the size of the available memory when
+appending CONFIG_CMDLINE to 'early_cmdline'.
+
+Fixes: 26e7aacb83df ("riscv: Allow to downgrade paging mode from the command line")
+functions: arch/riscv/kernel/pi/cmdline_early.c:get_early_cmdline
+fixes: 26e7aacb83df(riscv)
+diff --git a/arch/riscv/kernel/pi/cmdline_early.c b/arch/riscv/kernel/pi/cmdline_early.c
+index 68e786c84c94..f6d4dedffb84 100644
+--- a/arch/riscv/kernel/pi/cmdline_early.c
++++ b/arch/riscv/kernel/pi/cmdline_early.c
+@@ -39,6 +39,5 @@ static char *get_early_cmdline(uintptr_t dtb_pa)
+ 	    IS_ENABLED(CONFIG_CMDLINE_FORCE) ||
+ 	    fdt_cmdline_size == 0 /* CONFIG_CMDLINE_FALLBACK */) {
+-		strncat(early_cmdline, CONFIG_CMDLINE,
+-			COMMAND_LINE_SIZE - fdt_cmdline_size);
++		strlcat(early_cmdline, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+ 	}
+ 
+
+##### A285
+=== 22e0eb04837a A DEV 2023-11-03 +2/-4
+riscv: fix misaligned access handling of C.SWSP and C.SDSP
+
+This is a backport of a fix that was done in OpenSBI: ec0559eb315b
+("lib: sbi_misaligned_ldst: Fix handling of C.SWSP and C.SDSP").
+
+Unlike C.LWSP/C.LDSP, these encodings can be used with the zero
+register, so checking that the rs2 field is non-zero is unnecessary.
+
+Additionally, the previous check was incorrect since it was checking
+the immediate field of the instruction instead of the rs2 field.
+
+Fixes: 956d705dd279 ("riscv: Unaligned load/store handling for M_MODE")
+functions: arch/riscv/kernel/traps_misaligned.c:handle_misaligned_store
+fixes: 956d705dd279(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 5eba37147caa..5255f8134aef 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -551,6 +551,5 @@ int handle_misaligned_store(struct pt_regs *regs)
+ 		len = 8;
+ 		val.data_ulong = GET_RS2S(insn, regs);
+-	} else if ((insn & INSN_MASK_C_SDSP) == INSN_MATCH_C_SDSP &&
+-		   ((insn >> SH_RD) & 0x1f)) {
++	} else if ((insn & INSN_MASK_C_SDSP) == INSN_MATCH_C_SDSP) {
+ 		len = 8;
+ 		val.data_ulong = GET_RS2C(insn, regs);
+@@ -559,6 +558,5 @@ int handle_misaligned_store(struct pt_regs *regs)
+ 		len = 4;
+ 		val.data_ulong = GET_RS2S(insn, regs);
+-	} else if ((insn & INSN_MASK_C_SWSP) == INSN_MATCH_C_SWSP &&
+-		   ((insn >> SH_RD) & 0x1f)) {
++	} else if ((insn & INSN_MASK_C_SWSP) == INSN_MATCH_C_SWSP) {
+ 		len = 4;
+ 		val.data_ulong = GET_RS2C(insn, regs);
+
+##### A286
+=== 869436dae72a A DEV 2023-11-23 +1/-1
+riscv; fix __user annotation in save_v_state()
+
+The save_v_state() is technically sending a __user pointer through
+__put_user() and thus is generating a sparse warning so force the
+value to be "void *" to fix:
+
+arch/riscv/kernel/signal.c:94:16: warning: incorrect type in initializer (different address spaces)
+arch/riscv/kernel/signal.c:94:16: expected void *__val
+arch/riscv/kernel/signal.c:94:16: got void [noderef] __user *[assigned] datap
+
+Fixes: 8ee0b41898fa26f66e32 ("riscv: signal: Add sigcontext save/restore for vector")
+functions: arch/riscv/kernel/signal.c:save_v_state
+fixes: 8ee0b41898fa(riscv)
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index 88b6220b2608..33dfb5078301 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -92,5 +92,5 @@ static long save_v_state(struct pt_regs *regs, void __user **sc_vec)
+ 			     offsetof(struct __riscv_v_ext_state, datap));
+ 	/* Copy the pointer datap itself. */
+-	err |= __put_user(datap, &state->v_state.datap);
++	err |= __put_user((__force void *)datap, &state->v_state.datap);
+ 	/* Copy the whole vector content to user space datap. */
+ 	err |= __copy_to_user(datap, current->thread.vstate.datap, riscv_v_vsize);
+
+##### A287
+=== c29fc621e1a4 A DEV 2023-12-12 +7/-2
+riscv: Fix wrong usage of lm_alias() when splitting a huge linear mapping
+
+lm_alias() can only be used on kernel mappings since it explicitly uses
+__pa_symbol(), so simply fix this by checking where the address belongs
+to before.
+
+Fixes: 311cd2f6e253 ("riscv: Fix set_memory_XX() and set_direct_map_XX() by splitting huge linear mappings")
+functions: arch/riscv/mm/pageattr.c:__set_memory
+fixes: 311cd2f6e253(riscv)
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index fc5fc4f785c4..96cbda683936 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -306,6 +306,11 @@ static int __set_memory(unsigned long addr, int numpages, pgprot_t set_mask,
+ 		}
+ 	} else if (is_kernel_mapping(start) || is_linear_mapping(start)) {
+-		lm_start = (unsigned long)lm_alias(start);
+-		lm_end = (unsigned long)lm_alias(end);
++		if (is_kernel_mapping(start)) {
++			lm_start = (unsigned long)lm_alias(start);
++			lm_end = (unsigned long)lm_alias(end);
++		} else {
++			lm_start = start;
++			lm_end = end;
++		}
+ 
+ 		ret = split_linear_mapping(lm_start, lm_end);
+
+##### A288
+=== 749b94b08005 A DEV 2023-12-13 +2/-1
+riscv: Fix module_alloc() that did not reset the linear mapping permissions
+
+After unloading a module, we must reset the linear mapping permissions,
+see the example below:
+
+Before unloading a module:
+
+0xffffaf809d65d000-0xffffaf809d6dc000    0x000000011d65d000       508K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6dc000-0xffffaf809d6dd000    0x000000011d6dc000         4K PTE .   ..     ..   D A G . . . R V
+0xffffaf809d6dd000-0xffffaf809d6e1000    0x000000011d6dd000        16K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X . R V
+
+After unloading a module:
+
+0xffffaf809d65d000-0xffffaf809d6e1000    0x000000011d65d000       528K PTE .   ..     ..   D A G . . W R V
+0xffffaf809d6e1000-0xffffaf809d6e7000    0x000000011d6e1000        24K PTE .   ..     ..   D A G . X W R V
+
+The last mapping is not reset and we end up with WX mappings in the linear
+mapping.
+
+So add VM_FLUSH_RESET_PERMS to our module_alloc() definition.
+
+Fixes: 0cff8bff7af8 ("riscv: avoid the PIC offset of static percpu data in module beyond 2G limits")
+functions: arch/riscv/kernel/module.c:module_alloc
+fixes: 0cff8bff7af8(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index aac019ed63b1..862834bb1d64 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -895,5 +895,6 @@ void *module_alloc(unsigned long size)
+ 	return __vmalloc_node_range(size, 1, MODULES_VADDR,
+ 				    MODULES_END, GFP_KERNEL,
+-				    PAGE_KERNEL, 0, NUMA_NO_NODE,
++				    PAGE_KERNEL, VM_FLUSH_RESET_PERMS,
++				    NUMA_NO_NODE,
+ 				    __builtin_return_address(0));
+ }
+
+##### A289
+=== 4c460eb36951 A DEV 2023-12-24 +1/-1
+RISC-V: KVM: Fix indentation in kvm_riscv_vcpu_set_reg_csr()
+
+The indentation of "break" in kvm_riscv_vcpu_set_reg_csr() is
+inconsistent hence let us fix it.
+
+Fixes: c04913f2b54e ("RISCV: KVM: Add sstateen0 to ONE_REG")
+functions: arch/riscv/kvm/vcpu_onereg.c:kvm_riscv_vcpu_set_reg_csr
+fixes: c04913f2b54e(riscv)
+diff --git a/arch/riscv/kvm/vcpu_onereg.c b/arch/riscv/kvm/vcpu_onereg.c
+index 11cdbf844291..c0bad1aed9f0 100644
+--- a/arch/riscv/kvm/vcpu_onereg.c
++++ b/arch/riscv/kvm/vcpu_onereg.c
+@@ -486,5 +486,5 @@ static int kvm_riscv_vcpu_set_reg_csr(struct kvm_vcpu *vcpu,
+ 			rc = kvm_riscv_vcpu_smstateen_set_csr(vcpu, reg_num,
+ 							      reg_val);
+-break;
++		break;
+ 	default:
+ 		rc = -ENOENT;
+
+##### A290
+=== 78996eee79eb A DEV 2024-01-04 +1/-1
+riscv: Fix module loading free order
+
+Reverse order of kfree calls to resolve use-after-free error.
+
+Fixes: d8792a5734b0 ("riscv: Safely remove entries from relocation list")
+functions: arch/riscv/kernel/module.c:add_relocation_to_accumulate
+fixes: d8792a5734b0(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index aac019ed63b1..21c7a773a8ef 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -724,6 +724,6 @@ static int add_relocation_to_accumulate(struct module *me, int type,
+ 			if (!bucket) {
+ 				kfree(entry);
+-				kfree(rel_head);
+ 				kfree(rel_head->rel_entry);
++				kfree(rel_head);
+ 				return -ENOMEM;
+ 			}
+
+##### A291
+=== a35551c7244d A DEV 2024-01-04 +1/-1
+riscv: Fix relocation_hashtable size
+
+A second dereference is needed to get the accurate size of the
+relocation_hashtable.
+
+Fixes: d8792a5734b0 ("riscv: Safely remove entries from relocation list")
+functions: arch/riscv/kernel/module.c:initialize_relocation_hashtable
+fixes: d8792a5734b0(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index 32743180e8ef..ceb0adb38715 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -765,5 +765,5 @@ initialize_relocation_hashtable(unsigned int num_relocations,
+ 
+ 	*relocation_hashtable = kmalloc_array(hashtable_size,
+-					      sizeof(*relocation_hashtable),
++					      sizeof(**relocation_hashtable),
+ 					      GFP_KERNEL);
+ 	if (!*relocation_hashtable)
+
+##### A292
+=== 4525462dd0db A DEV 2024-01-18 +2/-0
+riscv: lib: Check if output in asm goto supported
+
+The output field of an asm goto statement is not supported by all
+compilers. If it is not supported, fallback to the non-optimized code.
+
+Fixes: a04c192eabfb ("riscv: Add checksum library")
+functions: arch/riscv/lib/csum.c:do_csum_with_alignment
+fixes: a04c192eabfb(riscv)
+diff --git a/arch/riscv/lib/csum.c b/arch/riscv/lib/csum.c
+index 06ce8e7250d9..af3df5274ccb 100644
+--- a/arch/riscv/lib/csum.c
++++ b/arch/riscv/lib/csum.c
+@@ -157,4 +157,5 @@ do_csum_with_alignment(const unsigned char *buff, int len)
+ 	csum = do_csum_common(ptr, end, data);
+ 
++#ifdef CC_HAS_ASM_GOTO_TIED_OUTPUT
+ 	/*
+ 	 * Zbb support saves 6 instructions, so not worth checking without
+@@ -215,4 +216,5 @@ do_csum_with_alignment(const unsigned char *buff, int len)
+ 	}
+ no_zbb:
++#endif /* CC_HAS_ASM_GOTO_TIED_OUTPUT */
+ #ifndef CONFIG_32BIT
+ 	csum += ror64(csum, 32);
+
+##### A293
+=== 3752219b6007 A DEV 2024-01-31 +2/-2
+RISC-V: paravirt: Use correct restricted types
+
+__le32 and __le64 types should be used with le32_to_cpu() and
+le64_to_cpu(), as sparse helpfully points out.
+
+Fixes: fdf68acccfc6 ("RISC-V: paravirt: Implement steal-time support")
+functions: arch/riscv/kernel/paravirt.c:pv_time_steal_clock
+fixes: fdf68acccfc6(riscv)
+diff --git a/arch/riscv/kernel/paravirt.c b/arch/riscv/kernel/paravirt.c
+index 15c5d4048db5..0d6225fd3194 100644
+--- a/arch/riscv/kernel/paravirt.c
++++ b/arch/riscv/kernel/paravirt.c
+@@ -92,6 +92,6 @@ static u64 pv_time_steal_clock(int cpu)
+ {
+ 	struct sbi_sta_struct *st = per_cpu_ptr(&steal_time, cpu);
+-	u32 sequence;
+-	u64 steal;
++	__le32 sequence;
++	__le64 steal;
+ 
+ 	/*
+
+##### A294
+=== f072b272aa27 A DEV 2024-01-31 +12/-8
+RISC-V: KVM: Use correct restricted types
+
+__le32 and __le64 types should be used with le32_to_cpu() and
+le64_to_cpu() and __user is needed for pointers referencing
+guest memory, as sparse helpfully points out.
+
+Fixes: e9f12b5fff8a ("RISC-V: KVM: Implement SBI STA extension")
+functions: arch/riscv/kvm/vcpu_sbi_sta.c:kvm_riscv_vcpu_record_steal_time
+fixes: e9f12b5fff8a(riscv)
+diff --git a/arch/riscv/kvm/vcpu_sbi_sta.c b/arch/riscv/kvm/vcpu_sbi_sta.c
+index 01f09fe8c3b0..d8cf9ca28c61 100644
+--- a/arch/riscv/kvm/vcpu_sbi_sta.c
++++ b/arch/riscv/kvm/vcpu_sbi_sta.c
+@@ -27,6 +27,10 @@ void kvm_riscv_vcpu_record_steal_time(struct kvm_vcpu *vcpu)
+ 	gpa_t shmem = vcpu->arch.sta.shmem;
+ 	u64 last_steal = vcpu->arch.sta.last_steal;
+-	u32 *sequence_ptr, sequence;
+-	u64 *steal_ptr, steal;
++	__le32 __user *sequence_ptr;
++	__le64 __user *steal_ptr;
++	__le32 sequence_le;
++	__le64 steal_le;
++	u32 sequence;
++	u64 steal;
+ 	unsigned long hva;
+ 	gfn_t gfn;
+@@ -48,13 +52,13 @@ void kvm_riscv_vcpu_record_steal_time(struct kvm_vcpu *vcpu)
+ 	}
+ 
+-	sequence_ptr = (u32 *)(hva + offset_in_page(shmem) +
++	sequence_ptr = (__le32 __user *)(hva + offset_in_page(shmem) +
+ 			       offsetof(struct sbi_sta_struct, sequence));
+-	steal_ptr = (u64 *)(hva + offset_in_page(shmem) +
++	steal_ptr = (__le64 __user *)(hva + offset_in_page(shmem) +
+ 			    offsetof(struct sbi_sta_struct, steal));
+ 
+-	if (WARN_ON(get_user(sequence, sequence_ptr)))
++	if (WARN_ON(get_user(sequence_le, sequence_ptr)))
+ 		return;
+ 
+-	sequence = le32_to_cpu(sequence);
++	sequence = le32_to_cpu(sequence_le);
+ 	sequence += 1;
+ 
+@@ -62,6 +66,6 @@ void kvm_riscv_vcpu_record_steal_time(struct kvm_vcpu *vcpu)
+ 		return;
+ 
+-	if (!WARN_ON(get_user(steal, steal_ptr))) {
+-		steal = le64_to_cpu(steal);
++	if (!WARN_ON(get_user(steal_le, steal_ptr))) {
++		steal = le64_to_cpu(steal_le);
+ 		vcpu->arch.sta.last_steal = READ_ONCE(current->sched_info.run_delay);
+ 		steal += vcpu->arch.sta.last_steal - last_steal;
+
+##### A295
+=== 313130c62cf1 A DEV 2024-03-08 +1/-1
+riscv: Only check online cpus for emulated accesses
+
+The unaligned access checker only sets valid values for online cpus.
+Check for these values on online cpus rather than on present cpus.
+
+Fixes: 71c54b3d169d ("riscv: report misaligned accesses emulation to hwprobe")
+functions: arch/riscv/kernel/traps_misaligned.c:unaligned_emulation_finish
+fixes: 71c54b3d169d(riscv)
+diff --git a/arch/riscv/kernel/traps_misaligned.c b/arch/riscv/kernel/traps_misaligned.c
+index 8ded225e8c5b..c2ed4e689bf9 100644
+--- a/arch/riscv/kernel/traps_misaligned.c
++++ b/arch/riscv/kernel/traps_misaligned.c
+@@ -633,5 +633,5 @@ void unaligned_emulation_finish(void)
+ 	 * CPU.
+ 	 */
+-	for_each_present_cpu(cpu) {
++	for_each_online_cpu(cpu) {
+ 		if (per_cpu(misaligned_access_speed, cpu) !=
+ 					RISCV_HWPROBE_MISALIGNED_EMULATED) {
+
+##### A296
+=== dd33e5dc7247 A DEV 2024-03-19 +1/-1
+riscv: use KERN_INFO in do_trap
+
+Print the instruction dump with info instead of emergency level.  The
+unhandled signal message is only for informational purpose.
+
+Fixes: b8a03a634129 ("riscv: add userland instruction dump to RISC-V splats")
+functions: arch/riscv/kernel/traps.c:do_trap
+fixes: b8a03a634129(riscv)
+diff --git a/arch/riscv/kernel/traps.c b/arch/riscv/kernel/traps.c
+index 868d6280cf66..05a16b1f0aee 100644
+--- a/arch/riscv/kernel/traps.c
++++ b/arch/riscv/kernel/traps.c
+@@ -123,5 +123,5 @@ void do_trap(struct pt_regs *regs, int signo, int code, unsigned long addr)
+ 		pr_cont("\n");
+ 		__show_regs(regs);
+-		dump_instr(KERN_EMERG, regs);
++		dump_instr(KERN_INFO, regs);
+ 	}
+ 
+
+##### A297
+=== 8e936e98718f A DEV 2024-03-21 +18/-3
+RISC-V: KVM: Fix APLIC in_clrip[x] read emulation
+
+The reads to APLIC in_clrip[x] registers returns rectified input values
+of the interrupt sources.
+
+A rectified input value of an interrupt source is defined by the section
+"4.5.2 Source configurations (sourcecfg[1]–sourcecfg[1023])" of the
+RISC-V AIA specification as:
+
+    rectified input value = (incoming wire value) XOR (source is inverted)
+
+Update the riscv_aplic_input() implementation to match the above.
+
+Fixes: 74967aa208e2 ("RISC-V: KVM: Add in-kernel emulation of AIA APLIC")
+functions: arch/riscv/kvm/aia_aplic.c:aplic_read_input
+fixes: 74967aa208e2(riscv)
+diff --git a/arch/riscv/kvm/aia_aplic.c b/arch/riscv/kvm/aia_aplic.c
+index 5e842b92dc46..b467ba5ed910 100644
+--- a/arch/riscv/kvm/aia_aplic.c
++++ b/arch/riscv/kvm/aia_aplic.c
+@@ -198,7 +198,8 @@ static void aplic_write_enabled(struct aplic *aplic, u32 irq, bool enabled)
+ static bool aplic_read_input(struct aplic *aplic, u32 irq)
+ {
+-	bool ret;
+-	unsigned long flags;
++	u32 sourcecfg, sm, raw_input, irq_inverted;
+ 	struct aplic_irq *irqd;
++	unsigned long flags;
++	bool ret = false;
+ 
+ 	if (!irq || aplic->nr_irqs <= irq)
+@@ -207,5 +208,19 @@ static bool aplic_read_input(struct aplic *aplic, u32 irq)
+ 
+ 	raw_spin_lock_irqsave(&irqd->lock, flags);
+-	ret = (irqd->state & APLIC_IRQ_STATE_INPUT) ? true : false;
++
++	sourcecfg = irqd->sourcecfg;
++	if (sourcecfg & APLIC_SOURCECFG_D)
++		goto skip;
++
++	sm = sourcecfg & APLIC_SOURCECFG_SM_MASK;
++	if (sm == APLIC_SOURCECFG_SM_INACTIVE)
++		goto skip;
++
++	raw_input = (irqd->state & APLIC_IRQ_STATE_INPUT) ? 1 : 0;
++	irq_inverted = (sm == APLIC_SOURCECFG_SM_LEVEL_LOW ||
++			sm == APLIC_SOURCECFG_SM_EDGE_FALL) ? 1 : 0;
++	ret = !!(raw_input ^ irq_inverted);
++
++skip:
+ 	raw_spin_unlock_irqrestore(&irqd->lock, flags);
+ 
+
+##### A298
+=== d8dd9f113e16 A DEV 2024-03-21 +13/-3
+RISC-V: KVM: Fix APLIC setipnum_le/be write emulation
+
+The writes to setipnum_le/be register for APLIC in MSI-mode have special
+consideration for level-triggered interrupts as-per the section "4.9.2
+Special consideration for level-sensitive interrupt sources" of the RISC-V
+AIA specification.
+
+Particularly, the below text from the RISC-V AIA specification defines
+the behaviour of writes to setipnum_le/be register for level-triggered
+interrupts:
+
+"A second option is for the interrupt service routine to write the
+APLIC’s source identity number for the interrupt to the domain’s
+setipnum register just before exiting. This will cause the interrupt’s
+pending bit to be set to one again if the source is still asserting
+an interrupt, but not if the source is not asserting an interrupt."
+
+Fix setipnum_le/be write emulation for in-kernel APLIC by implementing
+the above behaviour in aplic_write_pending() function.
+
+Fixes: 74967aa208e2 ("RISC-V: KVM: Add in-kernel emulation of AIA APLIC")
+functions: arch/riscv/kvm/aia_aplic.c:aplic_write_pending
+fixes: 74967aa208e2(riscv)
+diff --git a/arch/riscv/kvm/aia_aplic.c b/arch/riscv/kvm/aia_aplic.c
+index 39e72aa016a4..5e842b92dc46 100644
+--- a/arch/riscv/kvm/aia_aplic.c
++++ b/arch/riscv/kvm/aia_aplic.c
+@@ -138,9 +138,19 @@ static void aplic_write_pending(struct aplic *aplic, u32 irq, bool pending)
+ 
+ 	sm = irqd->sourcecfg & APLIC_SOURCECFG_SM_MASK;
+-	if (!pending &&
+-	    ((sm == APLIC_SOURCECFG_SM_LEVEL_HIGH) ||
+-	     (sm == APLIC_SOURCECFG_SM_LEVEL_LOW)))
++	if (sm == APLIC_SOURCECFG_SM_INACTIVE)
+ 		goto skip_write_pending;
+ 
++	if (sm == APLIC_SOURCECFG_SM_LEVEL_HIGH ||
++	    sm == APLIC_SOURCECFG_SM_LEVEL_LOW) {
++		if (!pending)
++			goto skip_write_pending;
++		if ((irqd->state & APLIC_IRQ_STATE_INPUT) &&
++		    sm == APLIC_SOURCECFG_SM_LEVEL_LOW)
++			goto skip_write_pending;
++		if (!(irqd->state & APLIC_IRQ_STATE_INPUT) &&
++		    sm == APLIC_SOURCECFG_SM_LEVEL_HIGH)
++			goto skip_write_pending;
++	}
++
+ 	if (pending)
+ 		irqd->state |= APLIC_IRQ_STATE_PENDING;
+
+##### A299
+=== c27fa53b858b A DEV 2024-04-03 +8/-7
+riscv: Fix vector state restore in rt_sigreturn()
+
+The RISC-V Vector specification states in "Appendix D: Calling
+Convention for Vector State" [1] that "Executing a system call causes
+all caller-saved vector registers (v0-v31, vl, vtype) and vstart to
+become unspecified.". In the RISC-V kernel this is called "discarding
+the vstate".
+
+Returning from a signal handler via the rt_sigreturn() syscall, vector
+discard is also performed. However, this is not an issue since the
+vector state should be restored from the sigcontext, and therefore not
+care about the vector discard.
+
+The "live state" is the actual vector register in the running context,
+and the "vstate" is the vector state of the task. A dirty live state,
+means that the vstate and live state are not in synch.
+
+When vectorized user_from_copy() was introduced, an bug sneaked in at
+the restoration code, related to the discard of the live state.
+
+An example when this go wrong:
+
+  1. A userland application is executing vector code
+  2. The application receives a signal, and the signal handler is
+     entered.
+  3. The application returns from the signal handler, using the
+     rt_sigreturn() syscall.
+  4. The live vector state is discarded upon entering the
+     rt_sigreturn(), and the live state is marked as "dirty", indicating
+     that the live state need to be synchronized with the current
+     vstate.
+  5. rt_sigreturn() restores the vstate, except the Vector registers,
+     from the sigcontext
+  6. rt_sigreturn() restores the Vector registers, from the sigcontext,
+     and now the vectorized user_from_copy() is used. The dirty live
+     state from the discard is saved to the vstate, making the vstate
+     corrupt.
+  7. rt_sigreturn() returns to the application, which crashes due to
+     corrupted vstate.
+
+Note that the vectorized user_from_copy() is invoked depending on the
+functions: arch/riscv/kernel/signal.c:__restore_v_state
+fixes: c2a658d41924(riscv)
+diff --git a/arch/riscv/kernel/signal.c b/arch/riscv/kernel/signal.c
+index 501e66debf69..5a2edd7f027e 100644
+--- a/arch/riscv/kernel/signal.c
++++ b/arch/riscv/kernel/signal.c
+@@ -120,4 +120,11 @@ static long __restore_v_state(struct pt_regs *regs, void __user *sc_vec)
+ 	void __user *datap;
+ 
++	/*
++	 * Mark the vstate as clean prior performing the actual copy,
++	 * to avoid getting the vstate incorrectly clobbered by the
++	 *  discarded vector state.
++	 */
++	riscv_v_vstate_set_restore(current, regs);
++
+ 	/* Copy everything of __sc_riscv_v_state except datap. */
+ 	err = __copy_from_user(&current->thread.vstate, &state->v_state,
+@@ -134,11 +141,5 @@ static long __restore_v_state(struct pt_regs *regs, void __user *sc_vec)
+ 	 * copy_from_user to prevent information leak.
+ 	 */
+-	err = copy_from_user(current->thread.vstate.datap, datap, riscv_v_vsize);
+-	if (unlikely(err))
+-		return err;
+-
+-	riscv_v_vstate_set_restore(current, regs);
+-
+-	return err;
++	return copy_from_user(current->thread.vstate.datap, datap, riscv_v_vsize);
+ }
+ #else

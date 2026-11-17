@@ -1,0 +1,78 @@
+########## 第22条  编号 A044  提交 ce68c035457b  日期 2024-01-30
+
+【提交说明】
+riscv: Fix arch_hugetlb_migration_supported() for NAPOT
+
+arch_hugetlb_migration_supported() must be reimplemented to add support
+for NAPOT hugepages, which is done here.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+
+【改动统计】
+ arch/riscv/include/asm/hugetlb.h |  3 +++
+ arch/riscv/mm/hugetlbpage.c      | 16 +++++++++++++---
+ 2 files changed, 16 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/hugetlb.h b/arch/riscv/include/asm/hugetlb.h
+index 4c5b0e929890..20f9c3ba2341 100644
+--- a/arch/riscv/include/asm/hugetlb.h
++++ b/arch/riscv/include/asm/hugetlb.h
+@@ -11,6 +11,9 @@ static inline void arch_clear_hugepage_flags(struct page *page)
+ }
+ #define arch_clear_hugepage_flags arch_clear_hugepage_flags
+ 
++bool arch_hugetlb_migration_supported(struct hstate *h);
++#define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
++
+ #ifdef CONFIG_RISCV_ISA_SVNAPOT
+ #define __HAVE_ARCH_HUGE_PTE_CLEAR
+ void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 87406b26c3da..29c7606414d2 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -364,7 +364,7 @@ void huge_pte_clear(struct mm_struct *mm,
+ 		pte_clear(mm, addr, ptep);
+ }
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	unsigned long order;
+ 
+@@ -392,7 +392,7 @@ arch_initcall(napot_hugetlbpages_init);
+ 
+ #else
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	return false;
+ }
+@@ -409,7 +409,7 @@ int pmd_huge(pmd_t pmd)
+ 	return pmd_leaf(pmd);
+ }
+ 
+-bool __init arch_hugetlb_valid_size(unsigned long size)
++static bool __hugetlb_valid_size(unsigned long size)
+ {
+ 	if (size == HPAGE_SIZE)
+ 		return true;
+@@ -421,6 +421,16 @@ bool __init arch_hugetlb_valid_size(unsigned long size)
+ 		return false;
+ }
+ 
++bool __init arch_hugetlb_valid_size(unsigned long size)
++{
++	return __hugetlb_valid_size(size);
++}
++
++bool arch_hugetlb_migration_supported(struct hstate *h)
++{
++	return __hugetlb_valid_size(huge_page_size(h));
++}
++
+ #ifdef CONFIG_CONTIG_ALLOC
+ static __init int gigantic_pages_init(void)
+ {

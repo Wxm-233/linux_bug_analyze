@@ -1,0 +1,901 @@
+====================================================================================================
+[1] 架构侧：update_mmu_cache 只刷本地 TLB（其他 CPU 可能仍缓存着旧的无效项）
+    架构 riscv，相关定义位置：
+    df2908090cda:arch/riscv/include/asm/pgtable.h:564:static inline void update_mmu_cache_range(struct vm_fault *vmf,
+    df2908090cda:arch/riscv/include/asm/pgtable.h:597:#define update_mmu_cache(vma, addr, ptep) \
+    df2908090cda:arch/riscv/include/asm/pgtable.h:598:	update_mmu_cache_range(NULL, vma, addr, ptep, 1)
+    df2908090cda:arch/riscv/include/asm/pgtable.h:601:	update_mmu_cache_range(NULL, vma, addr, ptep, nr)
+    df2908090cda:arch/riscv/include/asm/pgtable.h:603:static inline void update_mmu_cache_pmd(struct vm_area_struct *vma,
+    df2908090cda:arch/riscv/include/asm/pgtable.h:608:	update_mmu_cache(vma, address, ptep);
+    df2908090cda:arch/riscv/include/asm/pgtable.h:1142:static inline void update_mmu_cache_pud(struct vm_area_struct *vma,
+    df2908090cda:arch/riscv/include/asm/pgtable.h:1147:	update_mmu_cache(vma, address, ptep);
+    df2908090cda:arch/riscv/mm/pgtable.c:26:	 * update_mmu_cache will unconditionally execute, handling both
+====================================================================================================
+[2] 架构侧：update_mmu_cache 只刷本地 TLB（其他 CPU 可能仍缓存着旧的无效项）
+    架构 xtensa，相关定义位置：
+    df2908090cda:arch/xtensa/include/asm/pgtable.h:394:void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
+    df2908090cda:arch/xtensa/include/asm/pgtable.h:396:#define update_mmu_cache(vma, address, ptep) \
+    df2908090cda:arch/xtensa/include/asm/pgtable.h:397:	update_mmu_cache_range(NULL, vma, address, ptep, 1)
+    df2908090cda:arch/xtensa/mm/cache.c:216:void update_mmu_cache_range(struct vm_fault *vmf, struct vm_area_struct *vma,
+====================================================================================================
+[3] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    fs/exfat/file.c:645  函数 exfat_file_fsync  写法 simple_fsync_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    620 	case FS_IOC_GETFSLABEL:
+    621 		return exfat_ioctl_get_volume_label(inode->i_sb, arg);
+    622 	case FS_IOC_SETFSLABEL:
+    623 		return exfat_ioctl_set_volume_label(inode->i_sb, arg);
+    624 	default:
+    625 		return -ENOTTY;
+    626 	}
+    627 }
+    628 
+    629 #ifdef CONFIG_COMPAT
+    630 long exfat_compat_ioctl(struct file *filp, unsigned int cmd,
+    631 				unsigned long arg)
+    632 {
+    633 	return exfat_ioctl(filp, cmd, (unsigned long)compat_ptr(arg));
+    634 }
+    635 #endif
+    636 
+    637 int exfat_file_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
+    638 {
+    639 	struct inode *inode = filp->f_mapping->host;
+    640 	int err;
+    641 
+    642 	if (unlikely(exfat_forced_shutdown(inode->i_sb)))
+    643 		return -EIO;
+    644 
+>>  645 	err = simple_fsync_noflush(filp, start, end, datasync);
+    646 	if (err)
+    647 		return err;
+    648 
+    649 	err = sync_blockdev(inode->i_sb->s_bdev);
+    650 	if (err)
+    651 		return err;
+    652 
+    653 	return blkdev_issue_flush(inode->i_sb->s_bdev);
+    654 }
+    655 
+    656 /*
+    657  * exfat_zero_new_range - zero [start, end) without overwriting uptodate blocks
+====================================================================================================
+[4] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    fs/fat/file.c:193  函数 fat_file_fsync  写法 simple_fsync_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    168 		return fat_ioctl_get_volume_id(inode, user_attr);
+    169 	case FITRIM:
+    170 		return fat_ioctl_fitrim(inode, arg);
+    171 	default:
+    172 		return -ENOTTY;	/* Inappropriate ioctl for device */
+    173 	}
+    174 }
+    175 
+    176 static int fat_file_release(struct inode *inode, struct file *filp)
+    177 {
+    178 	if ((filp->f_mode & FMODE_WRITE) &&
+    179 	    MSDOS_SB(inode->i_sb)->options.flush) {
+    180 		fat_flush_inodes(inode->i_sb, inode, NULL);
+    181 		set_current_state(TASK_UNINTERRUPTIBLE);
+    182 		io_schedule_timeout(HZ/10);
+    183 	}
+    184 	return 0;
+    185 }
+    186 
+    187 int fat_file_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
+    188 {
+    189 	struct inode *inode = filp->f_mapping->host;
+    190 	struct inode *fat_inode = MSDOS_SB(inode->i_sb)->fat_inode;
+    191 	int err;
+    192 
+>>  193 	err = simple_fsync_noflush(filp, start, end, datasync);
+    194 	if (err)
+    195 		return err;
+    196 
+    197 	err = mmb_sync(&MSDOS_I(fat_inode)->i_metadata_bhs);
+    198 	if (err)
+    199 		return err;
+    200 
+    201 	return blkdev_issue_flush(inode->i_sb->s_bdev);
+    202 }
+    203 
+    204 
+    205 const struct file_operations fat_file_operations = {
+====================================================================================================
+[5] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    fs/libfs.c:1595  函数 simple_fsync  写法 simple_fsync_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+   1570 	ret = sync_inode_metadata(inode, 1);
+   1571 out:
+   1572 	/* check and advance again to catch errors after syncing out buffers */
+   1573 	err = file_check_and_advance_wb_err(file);
+   1574 	if (ret == 0)
+   1575 		ret = err;
+   1576 	return ret;
+   1577 }
+   1578 EXPORT_SYMBOL(simple_fsync_noflush);
+   1579 
+   1580 /**
+   1581  * simple_fsync - fsync implementation for simple filesystems with flush
+   1582  * @file:	file to synchronize
+   1583  * @start:	start offset in bytes
+   1584  * @end:	end offset in bytes (inclusive)
+   1585  * @datasync:	only synchronize essential metadata if true
+   1586  *
+   1587  * This function is an fsync handler for simple filesystems. It writes out
+   1588  * dirty data, inode (if dirty), and issues a cache flush.
+   1589  */
+   1590 int simple_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+   1591 {
+   1592 	struct inode *inode = file->f_mapping->host;
+   1593 	int err;
+   1594 
+>> 1595 	err = simple_fsync_noflush(file, start, end, datasync);
+   1596 	if (err)
+   1597 		return err;
+   1598 	return blkdev_issue_flush(inode->i_sb->s_bdev);
+   1599 }
+   1600 EXPORT_SYMBOL(simple_fsync);
+   1601 
+   1602 /**
+   1603  * generic_check_addressable - Check addressability of file system
+   1604  * @blocksize_bits:	log of file system block size
+   1605  * @num_blocks:		number of blocks in file system
+   1606  *
+   1607  * Determine whether a file system with @num_blocks blocks (and a
+====================================================================================================
+[6] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    kernel/bpf/arena.c:198  函数 apply_range_set_cb  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    173 #ifdef ptep_try_set
+    174 	/*
+    175 	 * Kernel-fault recovery may have installed the scratch page here, and
+    176 	 * some architectures (arm64) prohibit valid->valid PTE transitions.
+    177 	 * Install atomically into a none slot. If scratch is present, clear it
+    178 	 * and flush_tlb_before_set() (break-before-make) before retrying.
+    179 	 */
+    180 	while (!ptep_try_set(pte, pteval)) {
+    181 		pte_t old = ptep_get(pte);
+    182 
+    183 		if (pte_none(old))
+    184 			continue;
+    185 		if (WARN_ON_ONCE(pte_page(old) != d->arena->scratch_page))
+    186 			return -EBUSY;
+    187 		ptep_get_and_clear(&init_mm, addr, pte);
+    188 		flush_tlb_before_set(addr);
+    189 	}
+    190 #else
+    191 	/*
+    192 	 * Without ptep_try_set() there is no atomic installer, but such arches
+    193 	 * also do not wire up bpf_arena_handle_page_fault(), so no scratch page
+    194 	 * is ever installed and the slot is always none here.
+    195 	 */
+    196 	if (unlikely(!pte_none(ptep_get(pte))))
+    197 		return -EBUSY;
+>>  198 	set_pte_at(&init_mm, addr, pte, pteval);
+    199 #endif
+    200 	d->i++;
+    201 	WRITE_ONCE(d->arena->nr_pages, d->arena->nr_pages + 1);
+    202 	return 0;
+    203 }
+    204 
+    205 static void flush_vmap_cache(unsigned long start, unsigned long size)
+    206 {
+    207 	flush_cache_vmap(start, start + size);
+    208 }
+    209 
+    210 static int apply_range_clear_cb(pte_t *pte, unsigned long addr, void *data)
+====================================================================================================
+[7] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    kernel/power/snapshot.c:91  函数 hibernate_map_page  写法 set_direct_map_default_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+     66 }
+     67 
+     68 static inline int hibernate_restore_unprotect_page(void *page_address)
+     69 {
+     70 	if (hibernate_restore_protection_active)
+     71 		return set_memory_rw((unsigned long)page_address, 1);
+     72 	return 0;
+     73 }
+     74 #else
+     75 static inline void hibernate_restore_protection_begin(void) {}
+     76 static inline void hibernate_restore_protection_end(void) {}
+     77 static inline int __must_check hibernate_restore_protect_page(void *page_address) {return 0; }
+     78 static inline int hibernate_restore_unprotect_page(void *page_address) {return 0; }
+     79 #endif /* CONFIG_STRICT_KERNEL_RWX  && CONFIG_ARCH_HAS_SET_MEMORY */
+     80 
+     81 
+     82 /*
+     83  * The calls to set_direct_map_*() should not fail because remapping a page
+     84  * here means that we only update protection bits in an existing PTE.
+     85  * It is still worth to have a warning here if something changes and this
+     86  * will no longer be the case.
+     87  */
+     88 static inline void hibernate_map_page(struct page *page)
+     89 {
+     90 	if (IS_ENABLED(CONFIG_ARCH_HAS_SET_DIRECT_MAP)) {
+>>   91 		int ret = set_direct_map_default_noflush(page);
+     92 
+     93 		if (ret)
+     94 			pr_warn_once("Failed to remap page\n");
+     95 	} else {
+     96 		debug_pagealloc_map_pages(page, 1);
+     97 	}
+     98 }
+     99 
+    100 static inline void hibernate_unmap_page(struct page *page)
+    101 {
+    102 	if (IS_ENABLED(CONFIG_ARCH_HAS_SET_DIRECT_MAP)) {
+    103 		unsigned long addr = (unsigned long)page_address(page);
+====================================================================================================
+[8] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/execmem.c:123  函数 execmem_set_direct_map_valid  写法 set_direct_map_valid_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+     98 #define FREE_DELAY	(msecs_to_jiffies(10))
+     99 
+    100 /* mark entries in busy_areas that should be freed asynchronously */
+    101 #define PENDING_FREE_MASK	(1 << (PAGE_SHIFT - 1))
+    102 
+    103 static struct execmem_cache execmem_cache = {
+    104 	.mutex = __MUTEX_INITIALIZER(execmem_cache.mutex),
+    105 	.busy_areas = MTREE_INIT_EXT(busy_areas, MT_FLAGS_LOCK_EXTERN,
+    106 				     execmem_cache.mutex),
+    107 	.free_areas = MTREE_INIT_EXT(free_areas, MT_FLAGS_LOCK_EXTERN,
+    108 				     execmem_cache.mutex),
+    109 };
+    110 
+    111 static inline unsigned long mas_range_len(struct ma_state *mas)
+    112 {
+    113 	return mas->last - mas->index + 1;
+    114 }
+    115 
+    116 static int execmem_set_direct_map_valid(struct vm_struct *vm, bool valid)
+    117 {
+    118 	unsigned int nr = (1 << get_vm_area_page_order(vm));
+    119 	unsigned int updated = 0;
+    120 	int err = 0;
+    121 
+    122 	for (int i = 0; i < vm->nr_pages; i += nr) {
+>>  123 		err = set_direct_map_valid_noflush(vm->pages[i], nr, valid);
+    124 		if (err)
+    125 			goto err_restore;
+    126 		updated += nr;
+    127 	}
+    128 
+    129 	return 0;
+    130 
+    131 err_restore:
+    132 	for (int i = 0; i < updated; i += nr)
+    133 		set_direct_map_valid_noflush(vm->pages[i], nr, !valid);
+    134 
+    135 	return err;
+====================================================================================================
+[9] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/highmem.c:291  函数 map_new_virtual  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    266 
+    267 		/*
+    268 		 * Sleep for somebody else to unmap their entries
+    269 		 */
+    270 		{
+    271 			DECLARE_WAITQUEUE(wait, current);
+    272 			wait_queue_head_t *pkmap_map_wait =
+    273 				get_pkmap_wait_queue_head(color);
+    274 
+    275 			__set_current_state(TASK_UNINTERRUPTIBLE);
+    276 			add_wait_queue(pkmap_map_wait, &wait);
+    277 			unlock_kmap();
+    278 			schedule();
+    279 			remove_wait_queue(pkmap_map_wait, &wait);
+    280 			lock_kmap();
+    281 
+    282 			/* Somebody else might have mapped it while we slept */
+    283 			if (page_address(page))
+    284 				return (unsigned long)page_address(page);
+    285 
+    286 			/* Re-start */
+    287 			goto start;
+    288 		}
+    289 	}
+    290 	vaddr = PKMAP_ADDR(last_pkmap_nr);
+>>  291 	set_pte_at(&init_mm, vaddr,
+    292 		   &(pkmap_page_table[last_pkmap_nr]), mk_pte(page, kmap_prot));
+    293 
+    294 	pkmap_count[last_pkmap_nr] = 1;
+    295 	set_page_address(page, (void *)vaddr);
+    296 
+    297 	return vaddr;
+    298 }
+    299 
+    300 /**
+    301  * kmap_high - map a highmem page into memory
+    302  * @page: &struct page to map
+    303  *
+====================================================================================================
+[10] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/highmem.c:707  函数 __kmap_local_sched_in  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    682 
+    683 void __kmap_local_sched_in(void)
+    684 {
+    685 	struct task_struct *tsk = current;
+    686 	pte_t *kmap_pte;
+    687 	int i;
+    688 
+    689 	/* Restore kmaps */
+    690 	for (i = 0; i < tsk->kmap_ctrl.idx; i++) {
+    691 		pte_t pteval = tsk->kmap_ctrl.pteval[i];
+    692 		unsigned long addr;
+    693 		int idx;
+    694 
+    695 		/* With debug all even slots are unmapped and act as guard */
+    696 		if (IS_ENABLED(CONFIG_DEBUG_KMAP_LOCAL) && !(i & 0x01)) {
+    697 			WARN_ON_ONCE(pte_val(pteval) != 0);
+    698 			continue;
+    699 		}
+    700 		if (WARN_ON_ONCE(pte_none(pteval)))
+    701 			continue;
+    702 
+    703 		/* See comment in __kmap_local_sched_out() */
+    704 		idx = arch_kmap_local_map_idx(i, pte_pfn(pteval));
+    705 		addr = __fix_to_virt(FIX_KMAP_BEGIN + idx);
+    706 		kmap_pte = kmap_get_pte(addr, idx);
+>>  707 		set_pte_at(&init_mm, addr, kmap_pte, pteval);
+    708 		arch_kmap_local_post_map(addr, pteval);
+    709 	}
+    710 }
+    711 
+    712 void kmap_local_fork(struct task_struct *tsk)
+    713 {
+    714 	if (WARN_ON_ONCE(tsk->kmap_ctrl.idx))
+    715 		memset(&tsk->kmap_ctrl, 0, sizeof(tsk->kmap_ctrl));
+    716 }
+    717 
+    718 #endif
+    719 
+====================================================================================================
+[11] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/hugetlb_vmemmap.c:232  函数 vmemmap_remap_pte  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    207 	/* Remapping the head page requires r/w */
+    208 	if (unlikely(walk->nr_walked == 0 && walk->vmemmap_head)) {
+    209 		VM_WARN_ON_ONCE(!PageHead((const struct page *)addr));
+    210 
+    211 		list_del(&walk->vmemmap_head->lru);
+    212 
+    213 		/*
+    214 		 * Makes sure that preceding stores to the page contents from
+    215 		 * vmemmap_remap_free() become visible before the set_pte_at()
+    216 		 * write.
+    217 		 */
+    218 		smp_wmb();
+    219 
+    220 		entry = mk_pte(walk->vmemmap_head, PAGE_KERNEL);
+    221 	} else {
+    222 		VM_WARN_ON_ONCE(!PageTail((const struct page *)addr));
+    223 
+    224 		/*
+    225 		 * Remap the tail pages as read-only to catch illegal write
+    226 		 * operation to the tail pages.
+    227 		 */
+    228 		entry = mk_pte(walk->vmemmap_tail, PAGE_KERNEL_RO);
+    229 	}
+    230 
+    231 	list_add(&page->lru, walk->vmemmap_pages);
+>>  232 	set_pte_at(&init_mm, addr, pte, entry);
+    233 }
+    234 
+    235 static void vmemmap_restore_pte(pte_t *pte, unsigned long addr,
+    236 				struct vmemmap_remap_walk *walk)
+    237 {
+    238 	struct page *src = pte_page(ptep_get(pte)), *dst;
+    239 
+    240 	/*
+    241 	 * When rolling back vmemmap_remap_free(), keep the copied head page
+    242 	 * mapping and restore only PTEs currently pointing at the shared tail
+    243 	 * page.
+    244 	 */
+====================================================================================================
+[12] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/hugetlb_vmemmap.c:259  函数 vmemmap_restore_pte  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    234 
+    235 static void vmemmap_restore_pte(pte_t *pte, unsigned long addr,
+    236 				struct vmemmap_remap_walk *walk)
+    237 {
+    238 	struct page *src = pte_page(ptep_get(pte)), *dst;
+    239 
+    240 	/*
+    241 	 * When rolling back vmemmap_remap_free(), keep the copied head page
+    242 	 * mapping and restore only PTEs currently pointing at the shared tail
+    243 	 * page.
+    244 	 */
+    245 	if (walk->vmemmap_tail && walk->vmemmap_tail != src)
+    246 		return;
+    247 
+    248 	VM_WARN_ON_ONCE(PageHead((const struct page *)addr));
+    249 
+    250 	dst = list_first_entry(walk->vmemmap_pages, struct page, lru);
+    251 	list_del(&dst->lru);
+    252 	copy_page(page_to_virt(dst), page_to_virt(src));
+    253 
+    254 	/*
+    255 	 * Makes sure that preceding stores to the page contents become visible
+    256 	 * before the set_pte_at() write.
+    257 	 */
+    258 	smp_wmb();
+>>  259 	set_pte_at(&init_mm, addr, pte, mk_pte(dst, PAGE_KERNEL));
+    260 }
+    261 
+    262 /**
+    263  * vmemmap_remap_split - split the vmemmap virtual address range [@start, @end)
+    264  *                      backing PMDs of the directmap into PTEs
+    265  * @start:     start address of the vmemmap virtual address range that we want
+    266  *             to remap.
+    267  * @end:       end address of the vmemmap virtual address range that we want to
+    268  *             remap.
+    269  * Return: %0 on success, negative error code otherwise.
+    270  */
+    271 static int vmemmap_remap_split(unsigned long start, unsigned long end)
+====================================================================================================
+[13] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/kasan/init.c:103  函数 zero_pte_populate  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+     78 }
+     79 
+     80 static __init void *early_alloc(size_t size, int node)
+     81 {
+     82 	void *ptr = memblock_alloc_try_nid(size, size, __pa(MAX_DMA_ADDRESS),
+     83 					   MEMBLOCK_ALLOC_ACCESSIBLE, node);
+     84 
+     85 	if (!ptr)
+     86 		panic("%s: Failed to allocate %zu bytes align=%zx nid=%d from=%llx\n",
+     87 		      __func__, size, size, node, (u64)__pa(MAX_DMA_ADDRESS));
+     88 
+     89 	return ptr;
+     90 }
+     91 
+     92 static void __ref zero_pte_populate(pmd_t *pmd, unsigned long addr,
+     93 				unsigned long end)
+     94 {
+     95 	pte_t *pte = pte_offset_kernel(pmd, addr);
+     96 	pte_t zero_pte;
+     97 
+     98 	zero_pte = pfn_pte(PFN_DOWN(__pa_symbol(kasan_early_shadow_page)),
+     99 				PAGE_KERNEL);
+    100 	zero_pte = pte_wrprotect(zero_pte);
+    101 
+    102 	while (addr + PAGE_SIZE <= end) {
+>>  103 		set_pte_at(&init_mm, addr, pte, zero_pte);
+    104 		addr += PAGE_SIZE;
+    105 		pte = pte_offset_kernel(pmd, addr);
+    106 	}
+    107 }
+    108 
+    109 static int __ref zero_pmd_populate(pud_t *pud, unsigned long addr,
+    110 				unsigned long end)
+    111 {
+    112 	pmd_t *pmd = pmd_offset(pud, addr);
+    113 	unsigned long next;
+    114 
+    115 	do {
+====================================================================================================
+[14] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/kasan/shadow.c:317  函数 kasan_populate_vmalloc_pte  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    292 {
+    293 }
+    294 
+    295 struct vmalloc_populate_data {
+    296 	unsigned long start;
+    297 	struct page **pages;
+    298 };
+    299 
+    300 static int kasan_populate_vmalloc_pte(pte_t *ptep, unsigned long addr,
+    301 				      void *_data)
+    302 {
+    303 	struct vmalloc_populate_data *data = _data;
+    304 	struct page *page;
+    305 	pte_t pte;
+    306 	int index;
+    307 
+    308 	lazy_mmu_mode_pause();
+    309 
+    310 	index = PFN_DOWN(addr - data->start);
+    311 	page = data->pages[index];
+    312 	__memset(page_to_virt(page), KASAN_VMALLOC_INVALID, PAGE_SIZE);
+    313 	pte = pfn_pte(page_to_pfn(page), PAGE_KERNEL);
+    314 
+    315 	spin_lock(&init_mm.page_table_lock);
+    316 	if (likely(pte_none(ptep_get(ptep)))) {
+>>  317 		set_pte_at(&init_mm, addr, ptep, pte);
+    318 		data->pages[index] = NULL;
+    319 	}
+    320 	spin_unlock(&init_mm.page_table_lock);
+    321 
+    322 	lazy_mmu_mode_resume();
+    323 
+    324 	return 0;
+    325 }
+    326 
+    327 static void ___free_pages_bulk(struct page **pages, int nr_pages)
+    328 {
+    329 	int i;
+====================================================================================================
+[15] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/percpu-vm.c:145  函数 __pcpu_unmap_pages  写法 vunmap_range_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    120 	return -ENOMEM;
+    121 }
+    122 
+    123 /**
+    124  * pcpu_pre_unmap_flush - flush cache prior to unmapping
+    125  * @chunk: chunk the regions to be flushed belongs to
+    126  * @page_start: page index of the first page to be flushed
+    127  * @page_end: page index of the last page to be flushed + 1
+    128  *
+    129  * Pages in [@page_start,@page_end) of @chunk are about to be
+    130  * unmapped.  Flush cache.  As each flushing trial can be very
+    131  * expensive, issue flush on the whole region at once rather than
+    132  * doing it for each cpu.  This could be an overkill but is more
+    133  * scalable.
+    134  */
+    135 static void pcpu_pre_unmap_flush(struct pcpu_chunk *chunk,
+    136 				 int page_start, int page_end)
+    137 {
+    138 	flush_cache_vunmap(
+    139 		pcpu_chunk_addr(chunk, pcpu_low_unit_cpu, page_start),
+    140 		pcpu_chunk_addr(chunk, pcpu_high_unit_cpu, page_end));
+    141 }
+    142 
+    143 static void __pcpu_unmap_pages(unsigned long addr, int nr_pages)
+    144 {
+>>  145 	vunmap_range_noflush(addr, addr + (nr_pages << PAGE_SHIFT));
+    146 }
+    147 
+    148 /**
+    149  * pcpu_unmap_pages - unmap pages out of a pcpu_chunk
+    150  * @chunk: chunk of interest
+    151  * @pages: pages array which can be used to pass information to free
+    152  * @page_start: page index of the first page to unmap
+    153  * @page_end: page index of the last page to unmap + 1
+    154  *
+    155  * For each cpu, unmap pages [@page_start,@page_end) out of @chunk.
+    156  * Corresponding elements in @pages were cleared by the caller and can
+    157  * be used to carry information to pcpu_free_pages() which will be
+====================================================================================================
+[16] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/percpu-vm.c:213  函数 __pcpu_map_pages  写法 vmap_pages_range_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    188  * returned to vmalloc as vmalloc will handle TLB flushing lazily.
+    189  *
+    190  * As with pcpu_pre_unmap_flush(), TLB flushing also is done at once
+    191  * for the whole region.
+    192  */
+    193 static void pcpu_post_unmap_tlb_flush(struct pcpu_chunk *chunk,
+    194 				      int page_start, int page_end)
+    195 {
+    196 	flush_tlb_kernel_range(
+    197 		pcpu_chunk_addr(chunk, pcpu_low_unit_cpu, page_start),
+    198 		pcpu_chunk_addr(chunk, pcpu_high_unit_cpu, page_end));
+    199 }
+    200 
+    201 static int __pcpu_map_pages(unsigned long addr, struct page **pages,
+    202 			    int nr_pages, gfp_t gfp)
+    203 {
+    204 	unsigned int flags;
+    205 	int ret;
+    206 
+    207 	/*
+    208 	 * The vmalloc page table allocation path does not pass @gfp down
+    209 	 * explicitly.  Apply the corresponding memalloc scope so implicit
+    210 	 * page table allocations preserve NOFS/NOIO constraints.
+    211 	 */
+    212 	flags = memalloc_apply_gfp_scope(gfp);
+>>  213 	ret = vmap_pages_range_noflush(addr, addr + (nr_pages << PAGE_SHIFT),
+    214 				       PAGE_KERNEL, pages, PAGE_SHIFT, gfp);
+    215 	memalloc_restore_scope(flags);
+    216 
+    217 	return ret;
+    218 }
+    219 
+    220 /**
+    221  * pcpu_map_pages - map pages into a pcpu_chunk
+    222  * @chunk: chunk of interest
+    223  * @pages: pages array containing pages to be mapped
+    224  * @page_start: page index of the first page to map
+    225  * @page_end: page index of the last page to map + 1
+====================================================================================================
+[17] 公共侧：在 PMD 大页附近用了按页刷的 flush_cache_page（或第 3 个参数不是页框号）
+    mm/rmap.c:1141  函数 page_vma_mkclean_one  写法 flush_cache_page(vma, address, pte_pfn(entry))
+    相关钩子不为空的架构：arm, microblaze, nios2, sh, sparc, xtensa
+   1116 	 * the folio can not be freed from this function.
+   1117 	 */
+   1118 	mmu_notifier_range_init(&range, MMU_NOTIFY_PROTECTION_PAGE, 0,
+   1119 				vma->vm_mm, address, vma_address_end(pvmw));
+   1120 	mmu_notifier_invalidate_range_start(&range);
+   1121 
+   1122 	while (page_vma_mapped_walk(pvmw)) {
+   1123 		int ret = 0;
+   1124 
+   1125 		address = pvmw->address;
+   1126 		if (pvmw->pte) {
+   1127 			pte_t *pte = pvmw->pte;
+   1128 			pte_t entry = ptep_get(pte);
+   1129 
+   1130 			/*
+   1131 			 * PFN swap PTEs, such as device-exclusive ones, that
+   1132 			 * actually map pages are clean and not writable from a
+   1133 			 * CPU perspective. The MMU notifier takes care of any
+   1134 			 * device aspects.
+   1135 			 */
+   1136 			if (!pte_present(entry))
+   1137 				continue;
+   1138 			if (!pte_dirty(entry) && !pte_write(entry))
+   1139 				continue;
+   1140 
+>> 1141 			flush_cache_page(vma, address, pte_pfn(entry));
+   1142 			entry = ptep_clear_flush(vma, address, pte);
+   1143 			entry = pte_wrprotect(entry);
+   1144 			entry = pte_mkclean(entry);
+   1145 			set_pte_at(vma->vm_mm, address, pte, entry);
+   1146 			ret = 1;
+   1147 		} else {
+   1148 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+   1149 			pmd_t *pmd = pvmw->pmd;
+   1150 			pmd_t entry = pmdp_get(pmd);
+   1151 
+   1152 			/*
+   1153 			 * Please see the comment above (!pte_present).
+====================================================================================================
+[18] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/secretmem.c:231  函数 secretmem_free_folio  写法 set_direct_map_default_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    206 
+    207 	vma_desc_set_flags(desc, VMA_DONTDUMP_BIT);
+    208 	desc->vm_ops = &secretmem_vm_ops;
+    209 
+    210 	return 0;
+    211 }
+    212 
+    213 bool vma_is_secretmem(struct vm_area_struct *vma)
+    214 {
+    215 	return vma->vm_ops == &secretmem_vm_ops;
+    216 }
+    217 
+    218 static const struct file_operations secretmem_fops = {
+    219 	.release	= secretmem_release,
+    220 	.mmap_prepare	= secretmem_mmap_prepare,
+    221 };
+    222 
+    223 static int secretmem_migrate_folio(struct address_space *mapping,
+    224 		struct folio *dst, struct folio *src, enum migrate_mode mode)
+    225 {
+    226 	return -EBUSY;
+    227 }
+    228 
+    229 static void secretmem_free_folio(struct folio *folio)
+    230 {
+>>  231 	set_direct_map_default_noflush(folio_page(folio, 0));
+    232 	folio_zero_segment(folio, 0, folio_size(folio));
+    233 }
+    234 
+    235 const struct address_space_operations secretmem_aops = {
+    236 	.dirty_folio	= noop_dirty_folio,
+    237 	.free_folio	= secretmem_free_folio,
+    238 	.migrate_folio	= secretmem_migrate_folio,
+    239 };
+    240 
+    241 static int secretmem_setattr(struct mnt_idmap *idmap,
+    242 			     struct dentry *dentry, struct iattr *iattr)
+    243 {
+====================================================================================================
+[19] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/sparse-vmemmap.c:179  函数 vmemmap_pte_populate  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    154 {
+    155 	pte_t *pte = pte_offset_kernel(pmd, addr);
+    156 	if (pte_none(ptep_get(pte))) {
+    157 		pte_t entry;
+    158 		void *p;
+    159 
+    160 		if (ptpfn == (unsigned long)-1) {
+    161 			p = vmemmap_alloc_block_buf(PAGE_SIZE, node, altmap);
+    162 			if (!p)
+    163 				return NULL;
+    164 			ptpfn = PHYS_PFN(__pa(p));
+    165 		} else {
+    166 			/*
+    167 			 * When a PTE/PMD entry is freed from the init_mm
+    168 			 * there's a free_pages() call to this page allocated
+    169 			 * above. Thus this get_page() is paired with the
+    170 			 * put_page_testzero() on the freeing path.
+    171 			 * This can only called by certain ZONE_DEVICE path,
+    172 			 * and through vmemmap_populate_compound_pages() when
+    173 			 * slab is available.
+    174 			 */
+    175 			if (flags & VMEMMAP_POPULATE_PAGEREF)
+    176 				get_page(pfn_to_page(ptpfn));
+    177 		}
+    178 		entry = pfn_pte(ptpfn, PAGE_KERNEL);
+>>  179 		set_pte_at(&init_mm, addr, pte, entry);
+    180 	}
+    181 	return pte;
+    182 }
+    183 
+    184 static void * __meminit vmemmap_alloc_block_zero(unsigned long size, int node)
+    185 {
+    186 	void *p = vmemmap_alloc_block(size, node);
+    187 
+    188 	if (!p)
+    189 		return NULL;
+    190 	memset(p, 0, size);
+    191 
+====================================================================================================
+[20] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/vmalloc.c:135  函数 vmap_pte_range  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    110 	if (!pte)
+    111 		return -ENOMEM;
+    112 
+    113 	lazy_mmu_mode_enable();
+    114 
+    115 	do {
+    116 		if (unlikely(!pte_none(ptep_get(pte)))) {
+    117 			if (pfn_valid(pfn)) {
+    118 				page = pfn_to_page(pfn);
+    119 				dump_page(page, "remapping already mapped page");
+    120 			}
+    121 			BUG();
+    122 		}
+    123 
+    124 #ifdef CONFIG_HUGETLB_PAGE
+    125 		size = arch_vmap_pte_range_map_size(addr, end, pfn, max_page_shift);
+    126 		if (size != PAGE_SIZE) {
+    127 			pte_t entry = pfn_pte(pfn, prot);
+    128 
+    129 			entry = arch_make_huge_pte(entry, ilog2(size), 0);
+    130 			set_huge_pte_at(&init_mm, addr, pte, entry, size);
+    131 			pfn += PFN_DOWN(size);
+    132 			continue;
+    133 		}
+    134 #endif
+>>  135 		set_pte_at(&init_mm, addr, pte, pfn_pte(pfn, prot));
+    136 		pfn++;
+    137 	} while (pte += PFN_DOWN(size), addr += size, addr != end);
+    138 
+    139 	lazy_mmu_mode_disable();
+    140 	*mask |= PGTBL_PTE_MODIFIED;
+    141 	return 0;
+    142 }
+    143 
+    144 static int vmap_try_huge_pmd(pmd_t *pmd, unsigned long addr, unsigned long end,
+    145 			phys_addr_t phys_addr, pgprot_t prot,
+    146 			unsigned int max_page_shift)
+    147 {
+====================================================================================================
+[21] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/vmalloc.c:582  函数 vmap_pages_pte_range  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+    557 	 * callers keep track of where we're up to.
+    558 	 */
+    559 
+    560 	pte = pte_alloc_kernel_track(pmd, addr, mask);
+    561 	if (!pte)
+    562 		return -ENOMEM;
+    563 
+    564 	lazy_mmu_mode_enable();
+    565 
+    566 	do {
+    567 		struct page *page = pages[*nr];
+    568 
+    569 		if (WARN_ON(!pte_none(ptep_get(pte)))) {
+    570 			err = -EBUSY;
+    571 			break;
+    572 		}
+    573 		if (WARN_ON(!page)) {
+    574 			err = -ENOMEM;
+    575 			break;
+    576 		}
+    577 		if (WARN_ON(!pfn_valid(page_to_pfn(page)))) {
+    578 			err = -EINVAL;
+    579 			break;
+    580 		}
+    581 
+>>  582 		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+    583 		(*nr)++;
+    584 	} while (pte++, addr += PAGE_SIZE, addr != end);
+    585 
+    586 	lazy_mmu_mode_disable();
+    587 	*mask |= PGTBL_PTE_MODIFIED;
+    588 
+    589 	return err;
+    590 }
+    591 
+    592 static int vmap_pages_pmd_range(pud_t *pud, unsigned long addr,
+    593 		unsigned long end, pgprot_t prot, struct page **pages, int *nr,
+    594 		pgtbl_mod_mask *mask)
+====================================================================================================
+[22] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/vmalloc.c:2796  函数 free_vmap_block  写法 free_vmap_area_noflush
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+   2771 	 * side.
+   2772 	 */
+   2773 	vbq = per_cpu_ptr(&vmap_block_queue, vb->cpu);
+   2774 	spin_lock(&vbq->lock);
+   2775 	list_add_tail_rcu(&vb->free_list, &vbq->free);
+   2776 	spin_unlock(&vbq->lock);
+   2777 
+   2778 	return vaddr;
+   2779 }
+   2780 
+   2781 static void free_vmap_block(struct vmap_block *vb)
+   2782 {
+   2783 	struct vmap_node *vn;
+   2784 	struct vmap_block *tmp;
+   2785 	struct xarray *xa;
+   2786 
+   2787 	xa = addr_to_vb_xa(vb->va->va_start);
+   2788 	tmp = xa_erase(xa, addr_to_vb_idx(vb->va->va_start));
+   2789 	BUG_ON(tmp != vb);
+   2790 
+   2791 	vn = addr_to_node(vb->va->va_start);
+   2792 	spin_lock(&vn->busy.lock);
+   2793 	unlink_va(vb->va, &vn->busy.root);
+   2794 	spin_unlock(&vn->busy.lock);
+   2795 
+>> 2796 	free_vmap_area_noflush(vb->va);
+   2797 	kfree_rcu(vb, rcu_head);
+   2798 }
+   2799 
+   2800 static bool purge_fragmented_block(struct vmap_block *vb,
+   2801 		struct list_head *purge_list, bool force_purge)
+   2802 {
+   2803 	struct vmap_block_queue *vbq = &per_cpu(vmap_block_queue, vb->cpu);
+   2804 
+   2805 	if (vb->free + vb->dirty != VMAP_BBMAP_BITS ||
+   2806 	    vb->dirty == VMAP_BBMAP_BITS)
+   2807 		return false;
+   2808 
+====================================================================================================
+[23] 公共侧：建立或修改内核映射后，这个函数和它的调用者里都没有找到 flush_cache_vmap / flush_tlb_kernel_range 等刷新
+    mm/vmalloc.c:3618  函数 vmap_pfn_apply  写法 set_pte_at(&init_mm)
+    相关钩子不为空的架构：arc, arm, m68k, mips, nios2, riscv, sh, sparc, um, xtensa
+   3593 	if (flags & VM_MAP_PUT_PAGES) {
+   3594 		area->pages = pages;
+   3595 		area->nr_pages = count;
+   3596 	}
+   3597 	return area->addr;
+   3598 }
+   3599 EXPORT_SYMBOL(vmap);
+   3600 
+   3601 #ifdef CONFIG_VMAP_PFN
+   3602 struct vmap_pfn_data {
+   3603 	unsigned long	*pfns;
+   3604 	pgprot_t	prot;
+   3605 	unsigned int	idx;
+   3606 };
+   3607 
+   3608 static int vmap_pfn_apply(pte_t *pte, unsigned long addr, void *private)
+   3609 {
+   3610 	struct vmap_pfn_data *data = private;
+   3611 	unsigned long pfn = data->pfns[data->idx];
+   3612 	pte_t ptent;
+   3613 
+   3614 	if (WARN_ON_ONCE(pfn_valid(pfn)))
+   3615 		return -EINVAL;
+   3616 
+   3617 	ptent = pte_mkspecial(pfn_pte(pfn, data->prot));
+>> 3618 	set_pte_at(&init_mm, addr, pte, ptent);
+   3619 
+   3620 	data->idx++;
+   3621 	return 0;
+   3622 }
+   3623 
+   3624 /**
+   3625  * vmap_pfn - map an array of PFNs into virtually contiguous space
+   3626  * @pfns: array of PFNs
+   3627  * @count: number of pages to map
+   3628  * @prot: page protection for the mapping
+   3629  *
+   3630  * Maps @count PFNs from @pfns into contiguous kernel virtual space and returns

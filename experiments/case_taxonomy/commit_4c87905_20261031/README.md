@@ -1,0 +1,3 @@
+# 提交4c87905（记录轮）
+
+用户要求“提交”。在分支sjy_test上提交`4c87905`：函数识别库函数修正（candidate_bridge.py、sibling_pairs.py及两个测试文件）与ab88e25之后新增的12个记录目录，另含p1prime_20261029与sibling_adjudication_20261029两个README末尾的补记。提交前发现补记脚本在Windows下把4个README改成了CRLF换行，已改回LF，两个已有README的diff只剩追加的4行。未推送。5个旧修改文件（README.md、linux_bug_analyze/fast_screen_cli.py、linux_bug_analyze/fast_screening.py、pyproject.toml、tests/test_fast_screening.py）未提交。

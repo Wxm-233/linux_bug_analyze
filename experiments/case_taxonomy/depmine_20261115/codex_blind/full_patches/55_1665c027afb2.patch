@@ -1,0 +1,45 @@
+commit 1665c027afb225882a5a0b014c45e84290b826c2
+Author:     Michael Ellerman <mpe@ellerman.id.au>
+AuthorDate: Tue Jan 31 22:14:07 2023 +1100
+Commit:     Michael Ellerman <mpe@ellerman.id.au>
+CommitDate: Thu Feb 2 13:25:47 2023 +1100
+
+    powerpc/64s: Reconnect tlb_flush() to hash__tlb_flush()
+    
+    Commit baf1ed24b27d ("powerpc/mm: Remove empty hash__ functions")
+    removed some empty hash MMU flushing routines, but got a bit overeager
+    and also removed the call to hash__tlb_flush() from tlb_flush().
+    
+    In regular use this doesn't lead to any noticable breakage, which is a
+    little concerning. Presumably there are flushes happening via other
+    paths such as arch_leave_lazy_mmu_mode(), and/or a bit of luck.
+    
+    Fix it by reinstating the call to hash__tlb_flush().
+    
+    Fixes: baf1ed24b27d ("powerpc/mm: Remove empty hash__ functions")
+    Signed-off-by: Michael Ellerman <mpe@ellerman.id.au>
+    Link: https://lore.kernel.org/r/20230131111407.806770-1-mpe@ellerman.id.au
+
+diff --git a/arch/powerpc/include/asm/book3s/64/tlbflush.h b/arch/powerpc/include/asm/book3s/64/tlbflush.h
+index dd39313242b4..d5cd16270c5d 100644
+--- a/arch/powerpc/include/asm/book3s/64/tlbflush.h
++++ b/arch/powerpc/include/asm/book3s/64/tlbflush.h
+@@ -92,16 +92,18 @@ static inline void local_flush_tlb_page_psize(struct mm_struct *mm,
+ 	if (radix_enabled())
+ 		radix__local_flush_tlb_page_psize(mm, vmaddr, psize);
+ }
+ 
+ static inline void tlb_flush(struct mmu_gather *tlb)
+ {
+ 	if (radix_enabled())
+ 		radix__tlb_flush(tlb);
++
++	return hash__tlb_flush(tlb);
+ }
+ 
+ #ifdef CONFIG_SMP
+ static inline void flush_tlb_mm(struct mm_struct *mm)
+ {
+ 	if (radix_enabled())
+ 		radix__flush_tlb_mm(mm);
+ }

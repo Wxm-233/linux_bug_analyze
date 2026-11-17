@@ -1,0 +1,42 @@
+########## 第20条  编号 B419  提交 8b79d4e99407  日期 2024-02-14
+
+【提交说明】
+tty: hvc: Don't enable the RISC-V SBI console by default
+
+The new SBI console has the same problem as the old one: there's only
+one shared backing hardware and no synchronization, so the two drivers
+end up stepping on each other.  This was the same issue the old SBI-0.1
+console drivers had, but that was disabled by default when SBI-0.1 was.
+
+So just mark the new driver as nonportable.
+
+Fixes: 88ead68e764c ("tty: Add SBI debug console support to HVC SBI driver")
+
+【改动统计】
+ drivers/tty/hvc/Kconfig | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/drivers/tty/hvc/Kconfig b/drivers/tty/hvc/Kconfig
+index 6e05c5c7bca1..c2a4e88b328f 100644
+--- a/drivers/tty/hvc/Kconfig
++++ b/drivers/tty/hvc/Kconfig
+@@ -108,13 +108,15 @@ config HVC_DCC_SERIALIZE_SMP
+ 
+ config HVC_RISCV_SBI
+ 	bool "RISC-V SBI console support"
+-	depends on RISCV_SBI
++	depends on RISCV_SBI && NONPORTABLE
+ 	select HVC_DRIVER
+ 	help
+ 	  This enables support for console output via RISC-V SBI calls, which
+-	  is normally used only during boot to output printk.
++	  is normally used only during boot to output printk.  This driver
++	  conflicts with real console drivers and should not be enabled on
++	  systems that directly access the console.
+ 
+-	  If you don't know what do to here, say Y.
++	  If you don't know what do to here, say N.
+ 
+ config HVCS
+ 	tristate "IBM Hypervisor Virtual Console Server support"

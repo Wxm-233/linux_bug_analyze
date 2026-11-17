@@ -1,0 +1,1224 @@
+
+##### A025
+=== b8b2711336f0 A 2023-12-13 +1/-1
+riscv: Fix set_direct_map_default_noflush() to reset _PAGE_EXEC
+
+When resetting the linear mapping permissions, we must make sure that we
+clear the X bit so that do not end up with WX mappings (since we set
+PAGE_KERNEL).
+
+Fixes: 395a21ff859c ("riscv: add ARCH_HAS_SET_DIRECT_MAP support")
+functions: arch/riscv/mm/pageattr.c:set_direct_map_default_noflush
+fixes: 395a21ff859c(riscv)
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index 96cbda683936..01398fee5cf8 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -384,5 +384,5 @@ int set_direct_map_default_noflush(struct page *page)
+ {
+ 	return __set_memory((unsigned long)page_address(page), 1,
+-			    PAGE_KERNEL, __pgprot(0));
++			    PAGE_KERNEL, __pgprot(_PAGE_EXEC));
+ }
+ 
+
+##### A026
+=== 420370f3ae3d A 2023-12-14 +15/-1
+riscv: Check if the code to patch lies in the exit section
+
+Otherwise we fall through to vmalloc_to_page() which panics since the
+address does not lie in the vmalloc region.
+
+Fixes: 043cb41a85de ("riscv: introduce interfaces to patch kernel code")
+functions: arch/riscv/kernel/patch.c:patch_map
+fixes: 043cb41a85de(riscv)
+ arch/riscv/include/asm/sections.h   |  1 +
+ arch/riscv/kernel/patch.c           | 11 ++++++++++-
+ arch/riscv/kernel/vmlinux-xip.lds.S |  2 ++
+ arch/riscv/kernel/vmlinux.lds.S     |  2 ++
+ 4 files changed, 15 insertions(+), 1 deletion(-)
+diff --git a/arch/riscv/include/asm/sections.h b/arch/riscv/include/asm/sections.h
+index 32336e8a17cb..a393d5035c54 100644
+--- a/arch/riscv/include/asm/sections.h
++++ b/arch/riscv/include/asm/sections.h
+@@ -14,4 +14,5 @@ extern char __init_data_begin[], __init_data_end[];
+ extern char __init_text_begin[], __init_text_end[];
+ extern char __alt_start[], __alt_end[];
++extern char __exittext_begin[], __exittext_end[];
+ 
+ static inline bool is_va_kernel_text(uintptr_t va)
+diff --git a/arch/riscv/kernel/patch.c b/arch/riscv/kernel/patch.c
+index 13ee7bf589a1..37e87fdcf6a0 100644
+--- a/arch/riscv/kernel/patch.c
++++ b/arch/riscv/kernel/patch.c
+@@ -15,4 +15,5 @@
+ #include <asm/ftrace.h>
+ #include <asm/patch.h>
++#include <asm/sections.h>
+ 
+ struct patch_insn {
+@@ -26,4 +27,12 @@ int riscv_patch_in_stop_machine = false;
+ 
+ #ifdef CONFIG_MMU
++
++static inline bool is_kernel_exittext(uintptr_t addr)
++{
++	return system_state < SYSTEM_RUNNING &&
++		addr >= (uintptr_t)__exittext_begin &&
++		addr < (uintptr_t)__exittext_end;
++}
++
+ /*
+  * The fix_to_virt(, idx) needs a const value (not a dynamic variable of
+@@ -36,5 +45,5 @@ static __always_inline void *patch_map(void *addr, const unsigned int fixmap)
+ 	struct page *page;
+ 
+-	if (core_kernel_text(uintaddr))
++	if (core_kernel_text(uintaddr) || is_kernel_exittext(uintaddr))
+ 		page = phys_to_page(__pa_symbol(addr));
+ 	else if (IS_ENABLED(CONFIG_STRICT_MODULE_RWX))
+diff --git a/arch/riscv/kernel/vmlinux-xip.lds.S b/arch/riscv/kernel/vmlinux-xip.lds.S
+index 50767647fbc6..8c3daa1b0531 100644
+--- a/arch/riscv/kernel/vmlinux-xip.lds.S
++++ b/arch/riscv/kernel/vmlinux-xip.lds.S
+@@ -30,8 +30,10 @@ SECTIONS
+ 	INIT_TEXT_SECTION(PAGE_SIZE)
+ 	/* we have to discard exit text and such at runtime, not link time */
++	__exittext_begin = .;
+ 	.exit.text :
+ 	{
+ 		EXIT_TEXT
+ 	}
++	__exittext_end = .;
+ 
+ 	.text : {
+diff --git a/arch/riscv/kernel/vmlinux.lds.S b/arch/riscv/kernel/vmlinux.lds.S
+index 492dd4b8f3d6..002ca58dd998 100644
+--- a/arch/riscv/kernel/vmlinux.lds.S
++++ b/arch/riscv/kernel/vmlinux.lds.S
+@@ -70,8 +70,10 @@ SECTIONS
+... (10 more diff lines)
+
+##### A027
+=== 13dddf931980 A 2023-12-15 +1/-1
+RISC-V: Update AT_VECTOR_SIZE_ARCH for new AT_MINSIGSTKSZ
+
+"riscv: signal: Report signal frame size to userspace via auxv" (e92f469)
+has added new constant AT_MINSIGSTKSZ but failed to increment the size of
+auxv, keeping AT_VECTOR_SIZE_ARCH at 9.
+This fix correctly increments AT_VECTOR_SIZE_ARCH to 10, following the
+approach in the commit 94b07c1 ("arm64: signal: Report signal frame size
+to userspace via auxv").
+
+Fixes: e92f469b0771 ("riscv: signal: Report signal frame size to userspace via auxv")
+functions: 
+fixes: e92f469b0771(riscv)
+diff --git a/arch/riscv/include/uapi/asm/auxvec.h b/arch/riscv/include/uapi/asm/auxvec.h
+index 10aaa83db89e..95050ebe9ad0 100644
+--- a/arch/riscv/include/uapi/asm/auxvec.h
++++ b/arch/riscv/include/uapi/asm/auxvec.h
+@@ -35,5 +35,5 @@
+ 
+ /* entries in ARCH_DLINFO */
+-#define AT_VECTOR_SIZE_ARCH	9
++#define AT_VECTOR_SIZE_ARCH	10
+ #define AT_MINSIGSTKSZ		51
+ 
+
+##### A028
+=== 9a9e8d8d2b6e A 2023-12-15 +3/-1
+riscv: errata: Make ERRATA_STARFIVE_JH7100 depend on !DMA_DIRECT_REMAP
+
+Similar to the Renesas RZ/Five[1] the JH7100 SoC needs the non-portable
+CONFIG_DMA_GLOBAL_POOL enabled which is incompatible with DMA_DIRECT_REMAP
+selected by RISCV_ISA_ZICBOM.
+
+[1]: commit 31b2daea0764 ("soc: renesas: Make RZ/Five depend on !DMA_DIRECT_REMAP")
+
+Fixes: 64fc984a8a54 ("riscv: errata: Add StarFive JH7100 errata")
+functions: 
+fixes: 64fc984a8a54(riscv)
+diff --git a/arch/riscv/Kconfig.errata b/arch/riscv/Kconfig.errata
+index 692de149141f..f5c432b005e7 100644
+--- a/arch/riscv/Kconfig.errata
++++ b/arch/riscv/Kconfig.errata
+@@ -56,5 +56,7 @@ config ERRATA_SIFIVE_CIP_1200
+ config ERRATA_STARFIVE_JH7100
+ 	bool "StarFive JH7100 support"
+-	depends on ARCH_STARFIVE && NONPORTABLE
++	depends on ARCH_STARFIVE
++	depends on !DMA_DIRECT_REMAP
++	depends on NONPORTABLE
+ 	select DMA_GLOBAL_POOL
+ 	select RISCV_DMA_NONCOHERENT
+
+##### A029
+=== 8246601a7d39 A 2023-12-20 +17/-3
+riscv: tlb: fix __p*d_free_tlb()
+
+If non-leaf PTEs I.E pmd, pud or p4d is modified, a sfence.vma is
+a must for safe, imagine if an implementation caches the non-leaf
+translation in TLB, although I didn't meet this HW so far, but it's
+possible in theory.
+
+Fixes: c5e9b2c2ae82 ("riscv: Improve tlb_flush()")
+functions: 
+fixes: c5e9b2c2ae82(riscv)
+diff --git a/arch/riscv/include/asm/pgalloc.h b/arch/riscv/include/asm/pgalloc.h
+index d169a4f41a2e..c80bb9990d32 100644
+--- a/arch/riscv/include/asm/pgalloc.h
++++ b/arch/riscv/include/asm/pgalloc.h
+@@ -96,5 +96,11 @@ static inline void pud_free(struct mm_struct *mm, pud_t *pud)
+ }
+ 
+-#define __pud_free_tlb(tlb, pud, addr)  pud_free((tlb)->mm, pud)
++#define __pud_free_tlb(tlb, pud, addr)					\
++do {									\
++	if (pgtable_l4_enabled) {					\
++		pagetable_pud_dtor(virt_to_ptdesc(pud));		\
++		tlb_remove_page_ptdesc((tlb), virt_to_ptdesc(pud));	\
++	}								\
++} while (0)
+ 
+ #define p4d_alloc_one p4d_alloc_one
+@@ -125,5 +131,9 @@ static inline void p4d_free(struct mm_struct *mm, p4d_t *p4d)
+ }
+ 
+-#define __p4d_free_tlb(tlb, p4d, addr)  p4d_free((tlb)->mm, p4d)
++#define __p4d_free_tlb(tlb, p4d, addr)					\
++do {									\
++	if (pgtable_l5_enabled)						\
++		tlb_remove_page_ptdesc((tlb), virt_to_ptdesc(p4d));	\
++} while (0)
+ #endif /* __PAGETABLE_PMD_FOLDED */
+ 
+@@ -150,5 +160,9 @@ static inline pgd_t *pgd_alloc(struct mm_struct *mm)
+ #ifndef __PAGETABLE_PMD_FOLDED
+ 
+-#define __pmd_free_tlb(tlb, pmd, addr)  pmd_free((tlb)->mm, pmd)
++#define __pmd_free_tlb(tlb, pmd, addr)				\
++do {								\
++	pagetable_pmd_dtor(virt_to_ptdesc(pmd));		\
++	tlb_remove_page_ptdesc((tlb), virt_to_ptdesc(pmd));	\
++} while (0)
+ 
+ #endif /* __PAGETABLE_PMD_FOLDED */
+
+##### A030
+=== 5f449e245e5b A 2023-12-22 +1/-1
+riscv: mm: Fixup compat mode boot failure
+
+In COMPAT mode, the STACK_TOP is DEFAULT_MAP_WINDOW (0x80000000), but
+the TASK_SIZE is 0x7fff000. When the user stack is upon 0x7fff000, it
+will cause a user segment fault. Sometimes, it would cause boot
+failure when the whole rootfs is rv32.
+
+Freeing unused kernel image (initmem) memory: 2236K
+Run /sbin/init as init process
+Starting init: /sbin/init exists but couldn't execute it (error -14)
+Run /etc/init as init process
+...
+
+Increase the TASK_SIZE to cover STACK_TOP.
+
+Fixes: add2cc6b6515 ("RISC-V: mm: Restrict address space for sv39,sv48,sv57")
+functions: 
+fixes: add2cc6b6515(riscv)
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 294044429e8e..4342e142eea9 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -882,5 +882,5 @@ static inline pte_t pte_swp_clear_exclusive(pte_t pte)
+ 
+ #ifdef CONFIG_COMPAT
+-#define TASK_SIZE_32	(_AC(0x80000000, UL) - PAGE_SIZE)
++#define TASK_SIZE_32	(_AC(0x80000000, UL))
+ #define TASK_SIZE	(test_thread_flag(TIF_32BIT) ? \
+ 			 TASK_SIZE_32 : TASK_SIZE_64)
+
+##### A031
+=== 97b7ac69be2e A 2023-12-22 +1/-1
+riscv: mm: Fixup compat arch_get_mmap_end
+
+When the task is in COMPAT mode, the arch_get_mmap_end should be 2GB,
+not TASK_SIZE_64. The TASK_SIZE has contained is_compat_mode()
+detection, so change the definition of STACK_TOP_MAX to TASK_SIZE
+directly.
+
+Fixes: add2cc6b6515 ("RISC-V: mm: Restrict address space for sv39,sv48,sv57")
+functions: 
+fixes: add2cc6b6515(riscv)
+diff --git a/arch/riscv/include/asm/processor.h b/arch/riscv/include/asm/processor.h
+index f19f861cda54..e1944ff0757a 100644
+--- a/arch/riscv/include/asm/processor.h
++++ b/arch/riscv/include/asm/processor.h
+@@ -17,5 +17,5 @@
+ #ifdef CONFIG_64BIT
+ #define DEFAULT_MAP_WINDOW	(UL(1) << (MMAP_VA_BITS - 1))
+-#define STACK_TOP_MAX		TASK_SIZE_64
++#define STACK_TOP_MAX		TASK_SIZE
+ 
+ #define arch_get_mmap_end(addr, len, flags)			\
+
+##### A032
+=== 46e714c729c8 A 2023-12-26 +11/-0
+arch/mm/fault: fix major fault accounting when retrying under per-VMA lock
+
+A test [1] in Android test suite started failing after [2] was merged.  It
+turns out that after handling a major fault under per-VMA lock, the
+process major fault counter does not register that fault as major.  Before
+[2] read faults would be done under mmap_lock, in which case
+FAULT_FLAG_TRIED flag is set before retrying.  That in turn causes
+mm_account_fault() to account the fault as major once retry completes. 
+With per-VMA locks we often retry because a fault can't be handled without
+locking the whole mm using mmap_lock.  Therefore such retries do not set
+FAULT_FLAG_TRIED flag.  This logic does not work after [2] because we can
+now handle read major faults under per-VMA lock and upon retry the fact
+there was a major fault gets lost.  Fix this by setting FAULT_FLAG_TRIED
+after retrying under per-VMA lock if VM_FAULT_MAJOR was returned.  Ideally
+we would use an additional VM_FAULT bit to indicate the reason for the
+retry (could not handle under per-VMA lock vs other reason) but this
+simpler solution seems to work, so keeping it simple.
+
+[1] https://cs.android.com/android/platform/superproject/+/master:test/vts-testcase/kernel/api/drop_caches_prop/drop_caches_test.cpp
+[2] https://lore.kernel.org/all/20231006195318.4087158-6-willy@infradead.org/
+
+Fixes: 12214eba1992 ("mm: handle read faults under the VMA lock")
+functions: arch/arm64/mm/fault.c:do_page_fault, arch/powerpc/mm/fault.c:___do_page_fault, arch/riscv/mm/fault.c:handle_page_fault, arch/s390/mm/fault.c:do_exception, arch/x86/mm/fault.c:do_user_addr_fault
+fixes: 12214eba1992(common)
+diff --git a/arch/arm64/mm/fault.c b/arch/arm64/mm/fault.c
+index 460d799e1296..55f6455a8284 100644
+--- a/arch/arm64/mm/fault.c
++++ b/arch/arm64/mm/fault.c
+@@ -608,4 +608,6 @@ static int __kprobes do_page_fault(unsigned long far, unsigned long esr,
+ 	}
+ 	count_vm_vma_lock_event(VMA_LOCK_RETRY);
++	if (fault & VM_FAULT_MAJOR)
++		mm_flags |= FAULT_FLAG_TRIED;
+ 
+ 	/* Quick path to respond to signals */
+diff --git a/arch/powerpc/mm/fault.c b/arch/powerpc/mm/fault.c
+index 9e49ede2bc1c..53335ae21a40 100644
+--- a/arch/powerpc/mm/fault.c
++++ b/arch/powerpc/mm/fault.c
+@@ -498,4 +498,6 @@ static int ___do_page_fault(struct pt_regs *regs, unsigned long address,
+ 	}
+ 	count_vm_vma_lock_event(VMA_LOCK_RETRY);
++	if (fault & VM_FAULT_MAJOR)
++		flags |= FAULT_FLAG_TRIED;
+ 
+ 	if (fault_signal_pending(fault, regs))
+diff --git a/arch/riscv/mm/fault.c b/arch/riscv/mm/fault.c
+index 90d4ba36d1d0..081339ddf47e 100644
+--- a/arch/riscv/mm/fault.c
++++ b/arch/riscv/mm/fault.c
+@@ -305,4 +305,6 @@ void handle_page_fault(struct pt_regs *regs)
+ 	}
+ 	count_vm_vma_lock_event(VMA_LOCK_RETRY);
++	if (fault & VM_FAULT_MAJOR)
++		flags |= FAULT_FLAG_TRIED;
+ 
+ 	if (fault_signal_pending(fault, regs)) {
+diff --git a/arch/s390/mm/fault.c b/arch/s390/mm/fault.c
+index 249aefcf7c4e..ab4098886e56 100644
+--- a/arch/s390/mm/fault.c
++++ b/arch/s390/mm/fault.c
+@@ -338,4 +338,7 @@ static void do_exception(struct pt_regs *regs, int access)
+ 	}
+ 	count_vm_vma_lock_event(VMA_LOCK_RETRY);
++	if (fault & VM_FAULT_MAJOR)
++		flags |= FAULT_FLAG_TRIED;
++
+ 	/* Quick path to respond to signals */
+ 	if (fault_signal_pending(fault, regs)) {
+diff --git a/arch/x86/mm/fault.c b/arch/x86/mm/fault.c
+index ab778eac1952..679b09cfe241 100644
+--- a/arch/x86/mm/fault.c
++++ b/arch/x86/mm/fault.c
+@@ -1371,4 +1371,6 @@ void do_user_addr_fault(struct pt_regs *regs,
+ 	}
+ 	count_vm_vma_lock_event(VMA_LOCK_RETRY);
++	if (fault & VM_FAULT_MAJOR)
++		flags |= FAULT_FLAG_TRIED;
+ 
+ 	/* Quick path to respond to signals */
+
+##### A033
+=== 4b38b36bfbd8 A 2024-01-04 +7/-3
+riscv: Correctly free relocation hashtable on error
+
+When there is not enough allocatable memory for the relocation
+hashtable, module loading should exit gracefully. Previously, this was
+attempted to be accomplished by checking if an unsigned number is less
+than zero which does not work. Instead have the caller check if the
+hashtable was correctly allocated and add a comment explaining that
+hashtable_bits that is 0 is valid.
+
+Fixes: d8792a5734b0 ("riscv: Safely remove entries from relocation list")
+functions: arch/riscv/kernel/module.c:initialize_relocation_hashtable, arch/riscv/kernel/module.c:apply_relocate_add
+fixes: d8792a5734b0(riscv)
+diff --git a/arch/riscv/kernel/module.c b/arch/riscv/kernel/module.c
+index 21c7a773a8ef..32743180e8ef 100644
+--- a/arch/riscv/kernel/module.c
++++ b/arch/riscv/kernel/module.c
+@@ -748,4 +748,8 @@ initialize_relocation_hashtable(unsigned int num_relocations,
+ 	/* Can safely assume that bits is not greater than sizeof(long) */
+ 	unsigned long hashtable_size = roundup_pow_of_two(num_relocations);
++	/*
++	 * When hashtable_size == 1, hashtable_bits == 0.
++	 * This is valid because the hashing algorithm returns 0 in this case.
++	 */
+ 	unsigned int hashtable_bits = ilog2(hashtable_size);
+ 
+@@ -764,5 +768,5 @@ initialize_relocation_hashtable(unsigned int num_relocations,
+ 					      GFP_KERNEL);
+ 	if (!*relocation_hashtable)
+-		return -ENOMEM;
++		return 0;
+ 
+ 	__hash_init(*relocation_hashtable, hashtable_size);
+@@ -790,6 +794,6 @@ int apply_relocate_add(Elf_Shdr *sechdrs, const char *strtab,
+ 							 &relocation_hashtable);
+ 
+-	if (hashtable_bits < 0)
+-		return hashtable_bits;
++	if (!relocation_hashtable)
++		return -ENOMEM;
+ 
+ 	INIT_LIST_HEAD(&used_buckets_list);
+
+##### A034
+=== caadf876bb74 A 2024-01-04 +12/-12
+KVM: introduce CONFIG_KVM_COMMON
+
+CONFIG_HAVE_KVM is currently used by some architectures to either
+enabled the KVM config proper, or to enable host-side code that is
+not part of the KVM module.  However, CONFIG_KVM's "select" statement
+in virt/kvm/Kconfig corresponds to a third meaning, namely to
+enable common Kconfigs required by all architectures that support
+KVM.
+
+These three meanings can be replaced respectively by an
+architecture-specific Kconfig, by IS_ENABLED(CONFIG_KVM), or by
+a new Kconfig symbol that is in turn selected by the
+architecture-specific "config KVM".
+
+Start by introducing such a new Kconfig symbol, CONFIG_KVM_COMMON.
+Unlike CONFIG_HAVE_KVM, it is selected by CONFIG_KVM, not by
+architecture code, and it brings in all dependencies of common
+KVM code.  In particular, INTERVAL_TREE was missing in loongarch
+and riscv, so that is another thing that is fixed.
+
+Fixes: 8132d887a702 ("KVM: remove CONFIG_HAVE_KVM_EVENTFD", 2023-12-08)
+functions: 
+fixes: 8132d887a702(riscv)
+ arch/arm64/kvm/Kconfig     | 3 +--
+ arch/loongarch/kvm/Kconfig | 2 +-
+ arch/mips/kvm/Kconfig      | 3 +--
+ arch/powerpc/kvm/Kconfig   | 3 +--
+ arch/riscv/kvm/Kconfig     | 2 +-
+ arch/s390/kvm/Kconfig      | 3 +--
+ arch/x86/kvm/Kconfig       | 3 +--
+ virt/kvm/Kconfig           | 5 +++++
+ 8 files changed, 12 insertions(+), 12 deletions(-)
+diff --git a/arch/arm64/kvm/Kconfig b/arch/arm64/kvm/Kconfig
+index b07c60c9737d..6c3c8ca73e7f 100644
+--- a/arch/arm64/kvm/Kconfig
++++ b/arch/arm64/kvm/Kconfig
+@@ -22,7 +22,7 @@ menuconfig KVM
+ 	bool "Kernel-based Virtual Machine (KVM) support"
+ 	depends on HAVE_KVM
++	select KVM_COMMON
+ 	select KVM_GENERIC_HARDWARE_ENABLING
+ 	select KVM_GENERIC_MMU_NOTIFIER
+-	select PREEMPT_NOTIFIERS
+ 	select HAVE_KVM_CPU_RELAX_INTERCEPT
+ 	select KVM_MMIO
+@@ -40,5 +40,4 @@ menuconfig KVM
+ 	select SCHED_INFO
+ 	select GUEST_PERF_EVENTS if PERF_EVENTS
+-	select INTERVAL_TREE
+ 	select XARRAY_MULTI
+ 	help
+diff --git a/arch/loongarch/kvm/Kconfig b/arch/loongarch/kvm/Kconfig
+index daba4cd5e87d..61f7e33b1f95 100644
+--- a/arch/loongarch/kvm/Kconfig
++++ b/arch/loongarch/kvm/Kconfig
+@@ -24,4 +24,5 @@ config KVM
+ 	select HAVE_KVM_DIRTY_RING_ACQ_REL
+ 	select HAVE_KVM_VCPU_ASYNC_IOCTL
++	select KVM_COMMON
+ 	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
+ 	select KVM_GENERIC_HARDWARE_ENABLING
+@@ -29,5 +30,4 @@ config KVM
+ 	select KVM_MMIO
+ 	select KVM_XFER_TO_GUEST_WORK
+-	select PREEMPT_NOTIFIERS
+ 	help
+ 	  Support hosting virtualized guest machines using
+diff --git a/arch/mips/kvm/Kconfig b/arch/mips/kvm/Kconfig
+index 428141b0b48f..18e7a17d5115 100644
+--- a/arch/mips/kvm/Kconfig
++++ b/arch/mips/kvm/Kconfig
+@@ -21,10 +21,9 @@ config KVM
+ 	depends on MIPS_FP_SUPPORT
+ 	select EXPORT_UASM
+-	select PREEMPT_NOTIFIERS
++	select KVM_COMMON
+ 	select KVM_GENERIC_DIRTYLOG_READ_PROTECT
+ 	select HAVE_KVM_VCPU_ASYNC_IOCTL
+ 	select KVM_MMIO
+ 	select KVM_GENERIC_MMU_NOTIFIER
+-	select INTERVAL_TREE
+ 	select KVM_GENERIC_HARDWARE_ENABLING
+ 	help
+diff --git a/arch/powerpc/kvm/Kconfig b/arch/powerpc/kvm/Kconfig
+index b47196085a42..074263429faf 100644
+--- a/arch/powerpc/kvm/Kconfig
++++ b/arch/powerpc/kvm/Kconfig
+@@ -20,10 +20,9 @@ if VIRTUALIZATION
+ config KVM
+ 	bool
+-	select PREEMPT_NOTIFIERS
++	select KVM_COMMON
+... (76 more diff lines)
+
+##### A035
+=== 1458eb2c9d88 A 2024-01-17 +40/-2
+riscv: Fix set_huge_pte_at() for NAPOT mapping
+
+As stated by the privileged specification, we must clear a NAPOT
+mapping and emit a sfence.vma before setting a new translation.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+functions: arch/riscv/mm/hugetlbpage.c:set_huge_pte_at
+fixes: 82a1a1f3bfb6(riscv)
+ arch/riscv/mm/hugetlbpage.c | 42 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 40 insertions(+), 2 deletions(-)
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 431596c0e20e..865ac5c7d159 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -178,4 +178,27 @@ pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags)
+ }
+ 
++static void clear_flush(struct mm_struct *mm,
++			unsigned long addr,
++			pte_t *ptep,
++			unsigned long pgsize,
++			unsigned long ncontig)
++{
++	struct vm_area_struct vma = TLB_FLUSH_VMA(mm, 0);
++	unsigned long i, saddr = addr;
++
++	for (i = 0; i < ncontig; i++, addr += pgsize, ptep++)
++		ptep_get_and_clear(mm, addr, ptep);
++
++	flush_tlb_range(&vma, saddr, addr);
++}
++
++/*
++ * When dealing with NAPOT mappings, the privileged specification indicates that
++ * "if an update needs to be made, the OS generally should first mark all of the
++ * PTEs invalid, then issue SFENCE.VMA instruction(s) covering all 4 KiB regions
++ * within the range, [...] then update the PTE(s), as described in Section
++ * 4.2.1.". That's the equivalent of the Break-Before-Make approach used by
++ * arm64.
++ */
+ void set_huge_pte_at(struct mm_struct *mm,
+ 		     unsigned long addr,
+@@ -184,5 +207,5 @@ void set_huge_pte_at(struct mm_struct *mm,
+ 		     unsigned long sz)
+ {
+-	unsigned long hugepage_shift;
++	unsigned long hugepage_shift, pgsize;
+ 	int i, pte_num;
+ 
+@@ -199,5 +222,20 @@ void set_huge_pte_at(struct mm_struct *mm,
+ 
+ 	pte_num = sz >> hugepage_shift;
+-	for (i = 0; i < pte_num; i++, ptep++, addr += (1 << hugepage_shift))
++	pgsize = 1 << hugepage_shift;
++
++	if (!pte_present(pte)) {
++		for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
++			set_ptes(mm, addr, ptep, pte, 1);
++		return;
++	}
++
++	if (!pte_napot(pte)) {
++		set_ptes(mm, addr, ptep, pte, 1);
++		return;
++	}
++
++	clear_flush(mm, addr, ptep, pgsize, pte_num);
++
++	for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
+ 		set_pte_at(mm, addr, ptep, pte);
+... (1 more diff lines)
+
+##### A036
+=== a179a4bfb694 A 2024-01-17 +20/-0
+riscv: Fix hugetlb_mask_last_page() when NAPOT is enabled
+
+When NAPOT is enabled, a new hugepage size is available and then we need
+to make hugetlb_mask_last_page() aware of that.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+functions: 
+fixes: 82a1a1f3bfb6(riscv)
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 865ac5c7d159..87406b26c3da 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -126,4 +126,24 @@ pte_t *huge_pte_offset(struct mm_struct *mm,
+ }
+ 
++unsigned long hugetlb_mask_last_page(struct hstate *h)
++{
++	unsigned long hp_size = huge_page_size(h);
++
++	switch (hp_size) {
++#ifndef __PAGETABLE_PMD_FOLDED
++	case PUD_SIZE:
++		return P4D_SIZE - PUD_SIZE;
++#endif
++	case PMD_SIZE:
++		return PUD_SIZE - PMD_SIZE;
++	case napot_cont_size(NAPOT_CONT64KB_ORDER):
++		return PMD_SIZE - napot_cont_size(NAPOT_CONT64KB_ORDER);
++	default:
++		break;
++	}
++
++	return 0UL;
++}
++
+ static pte_t get_clear_contig(struct mm_struct *mm,
+ 			      unsigned long addr,
+
+##### A037
+=== d9807d60c145 A 2024-01-17 +7/-1
+riscv: mm: execute local TLB flush after populating vmemmap
+
+The spare_init() calls memmap_populate() many times to create VA to PA
+mapping for the VMEMMAP area, where all "struct page" are located once
+CONFIG_SPARSEMEM_VMEMMAP is defined. These "struct page" are later
+initialized in the zone_sizes_init() function. However, during this
+process, no sfence.vma instruction is executed for this VMEMMAP area.
+This omission may cause the hart to fail to perform page table walk
+because some data related to the address translation is invisible to the
+hart. To solve this issue, the local_flush_tlb_kernel_range() is called
+right after the sparse_init() to execute a sfence.vma instruction for this
+VMEMMAP area, ensuring that all data related to the address translation
+is visible to the hart.
+
+Fixes: d95f1a542c3d ("RISC-V: Implement sparsemem")
+Fixes: 7a92fc8b4d20 ("mm: Introduce flush_cache_vmap_early()")
+functions: arch/riscv/mm/init.c:misc_mem_init, arch/riscv/mm/tlbflush.c:local_flush_tlb_kernel_range
+fixes: d95f1a542c3d(riscv), 7a92fc8b4d20(riscv)
+diff --git a/arch/riscv/include/asm/tlbflush.h b/arch/riscv/include/asm/tlbflush.h
+index 928f096dca21..4112cc8d1d69 100644
+--- a/arch/riscv/include/asm/tlbflush.h
++++ b/arch/riscv/include/asm/tlbflush.h
+@@ -76,4 +76,5 @@ static inline void flush_tlb_kernel_range(unsigned long start,
+ #define flush_tlb_mm(mm) flush_tlb_all()
+ #define flush_tlb_mm_range(mm, start, end, page_size) flush_tlb_all()
++#define local_flush_tlb_kernel_range(start, end) flush_tlb_all()
+ #endif /* !CONFIG_SMP || !CONFIG_MMU */
+ 
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 32cad6a65ccd..fa34cf55037b 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -1386,4 +1386,8 @@ void __init misc_mem_init(void)
+ 	arch_numa_init();
+ 	sparse_init();
++#ifdef CONFIG_SPARSEMEM_VMEMMAP
++	/* The entire VMEMMAP region has been populated. Flush TLB for this region */
++	local_flush_tlb_kernel_range(VMEMMAP_START, VMEMMAP_END);
++#endif
+ 	zone_sizes_init();
+ 	arch_reserve_crashkernel();
+diff --git a/arch/riscv/mm/tlbflush.c b/arch/riscv/mm/tlbflush.c
+index 8d12b26f5ac3..dffb0e5bd942 100644
+--- a/arch/riscv/mm/tlbflush.c
++++ b/arch/riscv/mm/tlbflush.c
+@@ -67,7 +67,8 @@ static inline void local_flush_tlb_range_asid(unsigned long start,
+ }
+ 
++/* Flush a range of kernel pages without broadcasting */
+ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
+ {
+-	local_flush_tlb_range_asid(start, end, PAGE_SIZE, FLUSH_TLB_NO_ASID);
++	local_flush_tlb_range_asid(start, end - start, PAGE_SIZE, FLUSH_TLB_NO_ASID);
+ }
+ 
+
+##### A038
+=== 66f962d8939f A 2024-01-18 +4/-0
+riscv: Fix build error on rv32 + XIP
+
+commit 66f1e6809397 ("riscv: Make XIP bootable again") restricted page
+offset to the sv39 page offset instead of the default sv57, which makes
+sense since probably the platforms that target XIP kernels do not
+support anything else than sv39 and we do not try to find out the
+largest address space supported on XIP kernels (ie set_satp_mode()).
+
+But PAGE_OFFSET_L3 is not defined for rv32, so fix the build error by
+restoring the previous behaviour which picks CONFIG_PAGE_OFFSET for rv32.
+
+Fixes: 66f1e6809397 ("riscv: Make XIP bootable again")
+functions: arch/riscv/mm/init.c:setup_vm
+fixes: 66f1e6809397(riscv)
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index f533dd667a83..32cad6a65ccd 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -1061,5 +1061,9 @@ asmlinkage void __init setup_vm(uintptr_t dtb_pa)
+ 
+ #ifdef CONFIG_XIP_KERNEL
++#ifdef CONFIG_64BIT
+ 	kernel_map.page_offset = PAGE_OFFSET_L3;
++#else
++	kernel_map.page_offset = _AC(CONFIG_PAGE_OFFSET, UL);
++#endif
+ 	kernel_map.xiprom = (uintptr_t)CONFIG_XIP_PHYS_ADDR;
+ 	kernel_map.xiprom_sz = (uintptr_t)(&_exiprom) - (uintptr_t)(&_xiprom);
+
+##### A039
+=== 1732ebc4a261 A 2024-01-23 +3/-2
+riscv, bpf: Fix unpredictable kernel crash about RV64 struct_ops
+
+We encountered a kernel crash triggered by the bpf_tcp_ca testcase as
+show below:
+
+Unable to handle kernel paging request at virtual address ff60000088554500
+Oops [#1]
+...
+CPU: 3 PID: 458 Comm: test_progs Tainted: G           OE      6.8.0-rc1-kselftest_plain #1
+Hardware name: riscv-virtio,qemu (DT)
+epc : 0xff60000088554500
+ ra : tcp_ack+0x288/0x1232
+epc : ff60000088554500 ra : ffffffff80cc7166 sp : ff2000000117ba50
+ gp : ffffffff82587b60 tp : ff60000087be0040 t0 : ff60000088554500
+ t1 : ffffffff801ed24e t2 : 0000000000000000 s0 : ff2000000117bbc0
+ s1 : 0000000000000500 a0 : ff20000000691000 a1 : 0000000000000018
+ a2 : 0000000000000001 a3 : ff60000087be03a0 a4 : 0000000000000000
+ a5 : 0000000000000000 a6 : 0000000000000021 a7 : ffffffff8263f880
+ s2 : 000000004ac3c13b s3 : 000000004ac3c13a s4 : 0000000000008200
+ s5 : 0000000000000001 s6 : 0000000000000104 s7 : ff2000000117bb00
+ s8 : ff600000885544c0 s9 : 0000000000000000 s10: ff60000086ff0b80
+ s11: 000055557983a9c0 t3 : 0000000000000000 t4 : 000000000000ffc4
+ t5 : ffffffff8154f170 t6 : 0000000000000030
+status: 0000000200000120 badaddr: ff60000088554500 cause: 000000000000000c
+Code: c796 67d7 0000 0000 0052 0002 c13b 4ac3 0000 0000 (0001) 0000
+---[ end trace 0000000000000000 ]---
+
+The reason is that commit 2cd3e3772e41 ("x86/cfi,bpf: Fix bpf_struct_ops
+CFI") changes the func_addr of arch_prepare_bpf_trampoline in struct_ops
+from NULL to non-NULL, while we use func_addr on RV64 to differentiate
+between struct_ops and regular trampoline. When the struct_ops testcase
+is triggered, it emits wrong prologue and epilogue, and lead to
+unpredictable issues. After commit 2cd3e3772e41, we can use
+BPF_TRAMP_F_INDIRECT to distinguish them as it always be set in
+struct_ops.
+
+Fixes: 2cd3e3772e41 ("x86/cfi,bpf: Fix bpf_struct_ops CFI")
+functions: arch/riscv/net/bpf_jit_comp64.c:__arch_prepare_bpf_trampoline
+fixes: 2cd3e3772e41(common)
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index 58dc64dd94a8..719a97e7edb2 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -796,4 +796,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	struct bpf_tramp_links *fexit = &tlinks[BPF_TRAMP_FEXIT];
+ 	struct bpf_tramp_links *fmod_ret = &tlinks[BPF_TRAMP_MODIFY_RETURN];
++	bool is_struct_ops = flags & BPF_TRAMP_F_INDIRECT;
+ 	void *orig_call = func_addr;
+ 	bool save_ret;
+@@ -879,5 +880,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	stack_size = round_up(stack_size, 16);
+ 
+-	if (func_addr) {
++	if (!is_struct_ops) {
+ 		/* For the trampoline called from function entry,
+ 		 * the frame of traced function and the frame of
+@@ -999,5 +1000,5 @@ static int __arch_prepare_bpf_trampoline(struct bpf_tramp_image *im,
+ 	emit_ld(RV_REG_S1, -sreg_off, RV_REG_FP, ctx);
+ 
+-	if (func_addr) {
++	if (!is_struct_ops) {
+ 		/* trampoline called from function entry */
+ 		emit_ld(RV_REG_T0, stack_size - 8, RV_REG_SP, ctx);
+
+##### A040
+=== ebd4acc0cbea A 2024-01-23 +1/-1
+riscv: Fix wrong size passed to local_flush_tlb_range_asid()
+
+local_flush_tlb_range_asid() takes the size as argument, not the end of
+the range to flush, so fix this by computing the size from the end and
+the start of the range.
+
+Fixes: 7a92fc8b4d20 ("mm: Introduce flush_cache_vmap_early()")
+functions: arch/riscv/mm/tlbflush.c:local_flush_tlb_kernel_range
+fixes: 7a92fc8b4d20(riscv)
+diff --git a/arch/riscv/mm/tlbflush.c b/arch/riscv/mm/tlbflush.c
+index 8d12b26f5ac3..9619965f6501 100644
+--- a/arch/riscv/mm/tlbflush.c
++++ b/arch/riscv/mm/tlbflush.c
+@@ -69,5 +69,5 @@ static inline void local_flush_tlb_range_asid(unsigned long start,
+ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
+ {
+-	local_flush_tlb_range_asid(start, end, PAGE_SIZE, FLUSH_TLB_NO_ASID);
++	local_flush_tlb_range_asid(start, end - start, PAGE_SIZE, FLUSH_TLB_NO_ASID);
+ }
+ 
+
+##### A041
+=== 3aff0c459e77 A 2024-01-25 +0/-1
+RISC-V: Drop invalid test from CONFIG_AS_HAS_OPTION_ARCH
+
+Commit e4bb020f3dbb ("riscv: detect assembler support for .option arch")
+added two tests, one for a valid value to '.option arch' that should
+succeed and one for an invalid value that is expected to fail to make
+sure that support for '.option arch' is properly detected because Clang
+does not error when '.option arch' is not supported:
+
+  $ clang --target=riscv64-linux-gnu -Werror -x assembler -c -o /dev/null <(echo '.option arch, +m')
+  /dev/fd/63:1:9: warning: unknown option, expected 'push', 'pop', 'rvc', 'norvc', 'relax' or 'norelax'
+  .option arch, +m
+          ^
+  $ echo $?
+  0
+
+Unfortunately, the invalid test started being accepted by Clang after
+the linked llvm-project change, which causes CONFIG_AS_HAS_OPTION_ARCH
+and configurations that depend on it to be silently disabled, even
+though those versions do support '.option arch'.
+
+The invalid test can be avoided altogether by using
+'-Wa,--fatal-warnings', which will turn all assembler warnings into
+errors, like '-Werror' does for the compiler:
+
+  $ clang --target=riscv64-linux-gnu -Werror -Wa,--fatal-warnings -x assembler -c -o /dev/null <(echo '.option arch, +m')
+  /dev/fd/63:1:9: error: unknown option, expected 'push', 'pop', 'rvc', 'norvc', 'relax' or 'norelax'
+  .option arch, +m
+          ^
+  $ echo $?
+  1
+
+The as-instr macros have been updated to make use of this flag, so
+remove the invalid test, which allows CONFIG_AS_HAS_OPTION_ARCH to work
+for all compiler versions.
+
+Fixes: e4bb020f3dbb ("riscv: detect assembler support for .option arch")
+functions: 
+fixes: e4bb020f3dbb(riscv)
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bffbd869a068..e3142ce531a0 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -316,5 +316,4 @@ config AS_HAS_OPTION_ARCH
+ 	def_bool y
+ 	depends on $(as-instr, .option arch$(comma) +m)
+-	depends on !$(as-instr, .option arch$(comma) -i)
+ 
+ source "arch/riscv/Kconfig.socs"
+
+##### A042
+=== 97cf301fa42e A 2024-01-28 +1/-1
+riscv: Flush the tlb when a page directory is freed
+
+The riscv privileged specification mandates to flush the TLB whenever a
+page directory is modified, so add that to tlb_flush().
+
+Fixes: c5e9b2c2ae82 ("riscv: Improve tlb_flush()")
+functions: 
+fixes: c5e9b2c2ae82(riscv)
+diff --git a/arch/riscv/include/asm/tlb.h b/arch/riscv/include/asm/tlb.h
+index 1eb5682b2af6..50b63b5c15bd 100644
+--- a/arch/riscv/include/asm/tlb.h
++++ b/arch/riscv/include/asm/tlb.h
+@@ -17,5 +17,5 @@ static inline void tlb_flush(struct mmu_gather *tlb)
+ {
+ #ifdef CONFIG_MMU
+-	if (tlb->fullmm || tlb->need_flush_all)
++	if (tlb->fullmm || tlb->need_flush_all || tlb->freed_tables)
+ 		flush_tlb_mm(tlb->mm);
+ 	else
+
+##### A043
+=== 3951f6add519 A 2024-01-30 +1/-0
+riscv: Fix arch_tlbbatch_flush() by clearing the batch cpumask
+
+We must clear the cpumask once we have flushed the batch, otherwise cpus
+get accumulated and we end sending IPIs to more cpus than needed.
+
+Fixes: 54d7431af73e ("riscv: Add support for BATCHED_UNMAP_TLB_FLUSH")
+functions: arch/riscv/mm/tlbflush.c:arch_tlbbatch_flush
+fixes: 54d7431af73e(riscv)
+diff --git a/arch/riscv/mm/tlbflush.c b/arch/riscv/mm/tlbflush.c
+index dffb0e5bd942..893566e004b7 100644
+--- a/arch/riscv/mm/tlbflush.c
++++ b/arch/riscv/mm/tlbflush.c
+@@ -235,3 +235,4 @@ void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch)
+ 	__flush_tlb_range(&batch->cpumask, FLUSH_TLB_NO_ASID, 0,
+ 			  FLUSH_TLB_MAX_SIZE, PAGE_SIZE);
++	cpumask_clear(&batch->cpumask);
+ }
+
+##### A044
+=== ce68c035457b A 2024-01-30 +16/-3
+riscv: Fix arch_hugetlb_migration_supported() for NAPOT
+
+arch_hugetlb_migration_supported() must be reimplemented to add support
+for NAPOT hugepages, which is done here.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+functions: 
+fixes: 82a1a1f3bfb6(riscv)
+diff --git a/arch/riscv/include/asm/hugetlb.h b/arch/riscv/include/asm/hugetlb.h
+index 4c5b0e929890..20f9c3ba2341 100644
+--- a/arch/riscv/include/asm/hugetlb.h
++++ b/arch/riscv/include/asm/hugetlb.h
+@@ -12,4 +12,7 @@ static inline void arch_clear_hugepage_flags(struct page *page)
+ #define arch_clear_hugepage_flags arch_clear_hugepage_flags
+ 
++bool arch_hugetlb_migration_supported(struct hstate *h);
++#define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
++
+ #ifdef CONFIG_RISCV_ISA_SVNAPOT
+ #define __HAVE_ARCH_HUGE_PTE_CLEAR
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 87406b26c3da..29c7606414d2 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -365,5 +365,5 @@ void huge_pte_clear(struct mm_struct *mm,
+ }
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	unsigned long order;
+@@ -393,5 +393,5 @@ arch_initcall(napot_hugetlbpages_init);
+ #else
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	return false;
+@@ -410,5 +410,5 @@ int pmd_huge(pmd_t pmd)
+ }
+ 
+-bool __init arch_hugetlb_valid_size(unsigned long size)
++static bool __hugetlb_valid_size(unsigned long size)
+ {
+ 	if (size == HPAGE_SIZE)
+@@ -422,4 +422,14 @@ bool __init arch_hugetlb_valid_size(unsigned long size)
+ }
+ 
++bool __init arch_hugetlb_valid_size(unsigned long size)
++{
++	return __hugetlb_valid_size(size);
++}
++
++bool arch_hugetlb_migration_supported(struct hstate *h)
++{
++	return __hugetlb_valid_size(huge_page_size(h));
++}
++
+ #ifdef CONFIG_CONTIG_ALLOC
+ static __init int gigantic_pages_init(void)
+
+##### A045
+=== 17c8e9ac95d8 A 2024-01-31 +1/-1
+RISC-V: paravirt: steal_time should be static
+
+steal_time is not used outside paravirt.c, make it static,
+as sparse suggested.
+
+Fixes: fdf68acccfc6 ("RISC-V: paravirt: Implement steal-time support")
+functions: 
+fixes: fdf68acccfc6(riscv)
+diff --git a/arch/riscv/kernel/paravirt.c b/arch/riscv/kernel/paravirt.c
+index 8e114f5930ce..15c5d4048db5 100644
+--- a/arch/riscv/kernel/paravirt.c
++++ b/arch/riscv/kernel/paravirt.c
+@@ -42,5 +42,5 @@ static int __init parse_no_stealacc(char *arg)
+ early_param("no-steal-acc", parse_no_stealacc);
+ 
+-DEFINE_PER_CPU(struct sbi_sta_struct, steal_time) __aligned(64);
++static DEFINE_PER_CPU(struct sbi_sta_struct, steal_time) __aligned(64);
+ 
+ static bool __init has_pv_steal_clock(void)
+
+##### A046
+=== d6cfd1770f20 A 2024-01-31 +38/-3
+membarrier: riscv: Add full memory barrier in switch_mm()
+
+The membarrier system call requires a full memory barrier after storing
+to rq->curr, before going back to user-space.  The barrier is only
+needed when switching between processes: the barrier is implied by
+mmdrop() when switching from kernel to userspace, and it's not needed
+when switching from userspace to kernel.
+
+Rely on the feature/mechanism ARCH_HAS_MEMBARRIER_CALLBACKS and on the
+primitive membarrier_arch_switch_mm(), already adopted by the PowerPC
+architecture, to insert the required barrier.
+
+Fixes: fab957c11efe2f ("RISC-V: Atomic and Locking Code")
+functions: arch/riscv/mm/context.c:switch_mm, kernel/sched/core.c:__schedule
+fixes: fab957c11efe(riscv)
+ MAINTAINERS                         |  2 +-
+ arch/riscv/Kconfig                  |  1 +
+ arch/riscv/include/asm/membarrier.h | 31 +++++++++++++++++++++++++++++++
+ arch/riscv/mm/context.c             |  2 ++
+ kernel/sched/core.c                 |  5 +++--
+ 5 files changed, 38 insertions(+), 3 deletions(-)
+diff --git a/MAINTAINERS b/MAINTAINERS
+index 8d1052fa6a69..2450e88d3e2c 100644
+--- a/MAINTAINERS
++++ b/MAINTAINERS
+@@ -14040,5 +14040,5 @@ M:	"Paul E. McKenney" <paulmck@kernel.org>
+ L:	linux-kernel@vger.kernel.org
+ S:	Supported
+-F:	arch/powerpc/include/asm/membarrier.h
++F:	arch/*/include/asm/membarrier.h
+ F:	include/uapi/linux/membarrier.h
+ F:	kernel/sched/membarrier.c
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index bffbd869a068..087abf9e51c6 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -28,4 +28,5 @@ config RISCV
+ 	select ARCH_HAS_GIGANTIC_PAGE
+ 	select ARCH_HAS_KCOV
++	select ARCH_HAS_MEMBARRIER_CALLBACKS
+ 	select ARCH_HAS_MMIOWB
+ 	select ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE
+diff --git a/arch/riscv/include/asm/membarrier.h b/arch/riscv/include/asm/membarrier.h
+new file mode 100644
+index 000000000000..6c016ebb5020
+--- /dev/null
++++ b/arch/riscv/include/asm/membarrier.h
+@@ -0,0 +1,31 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _ASM_RISCV_MEMBARRIER_H
++#define _ASM_RISCV_MEMBARRIER_H
++
++static inline void membarrier_arch_switch_mm(struct mm_struct *prev,
++					     struct mm_struct *next,
++					     struct task_struct *tsk)
++{
++	/*
++	 * Only need the full barrier when switching between processes.
++	 * Barrier when switching from kernel to userspace is not
++	 * required here, given that it is implied by mmdrop(). Barrier
++	 * when switching from userspace to kernel is not needed after
++	 * store to rq->curr.
++	 */
++	if (IS_ENABLED(CONFIG_SMP) &&
++	    likely(!(atomic_read(&next->membarrier_state) &
++		     (MEMBARRIER_STATE_PRIVATE_EXPEDITED |
++		      MEMBARRIER_STATE_GLOBAL_EXPEDITED)) || !prev))
++		return;
++
++	/*
++	 * The membarrier system call requires a full memory barrier
++	 * after storing to rq->curr, before going back to user-space.
++	 * Matches a full barrier in the proximity of the membarrier
++	 * system call entry.
++	 */
++	smp_mb();
++}
++
++#endif /* _ASM_RISCV_MEMBARRIER_H */
+diff --git a/arch/riscv/mm/context.c b/arch/riscv/mm/context.c
+index 217fd4de6134..ba8eb3944687 100644
+... (23 more diff lines)
+
+##### A047
+=== 680341382da5 A 2024-02-02 +55/-0
+riscv: add CALLER_ADDRx support
+
+CALLER_ADDRx returns caller's address at specified level, they are used
+for several tracers. These macros eventually use
+__builtin_return_address(n) to get the caller's address if arch doesn't
+define their own implementation.
+
+In RISC-V, __builtin_return_address(n) only works when n == 0, we need
+to walk the stack frame to get the caller's address at specified level.
+
+data.level started from 'level + 3' due to the call flow of getting
+caller's address in RISC-V implementation. If we don't have additional
+three iteration, the level is corresponding to follows:
+
+callsite -> return_address -> arch_stack_walk -> walk_stackframe
+|           |                 |                  |
+level 3     level 2           level 1            level 0
+
+Fixes: 10626c32e382 ("riscv/ftrace: Add basic support")
+functions: 
+fixes: 10626c32e382(riscv)
+ arch/riscv/include/asm/ftrace.h    |  5 +++++
+ arch/riscv/kernel/Makefile         |  2 ++
+ arch/riscv/kernel/return_address.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 55 insertions(+)
+diff --git a/arch/riscv/include/asm/ftrace.h b/arch/riscv/include/asm/ftrace.h
+index 329172122952..15055f9df4da 100644
+--- a/arch/riscv/include/asm/ftrace.h
++++ b/arch/riscv/include/asm/ftrace.h
+@@ -26,4 +26,9 @@
+ #define ARCH_SUPPORTS_FTRACE_OPS 1
+ #ifndef __ASSEMBLY__
++
++extern void *return_address(unsigned int level);
++
++#define ftrace_return_address(n) return_address(n)
++
+ void MCOUNT_NAME(void);
+ static inline unsigned long ftrace_call_adjust(unsigned long addr)
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index f71910718053..604d6bf7e476 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -8,4 +8,5 @@ CFLAGS_REMOVE_ftrace.o	= $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_patch.o	= $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_sbi.o	= $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_return_address.o	= $(CC_FLAGS_FTRACE)
+ endif
+ CFLAGS_syscall_table.o	+= $(call cc-option,-Wno-override-init,)
+@@ -47,4 +48,5 @@ obj-y	+= process.o
+ obj-y	+= ptrace.o
+ obj-y	+= reset.o
++obj-y	+= return_address.o
+ obj-y	+= setup.o
+ obj-y	+= signal.o
+diff --git a/arch/riscv/kernel/return_address.c b/arch/riscv/kernel/return_address.c
+new file mode 100644
+index 000000000000..c8115ec8fb30
+--- /dev/null
++++ b/arch/riscv/kernel/return_address.c
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * This code come from arch/arm64/kernel/return_address.c
++ *
++ * Copyright (C) 2023 SiFive.
++ */
++
++#include <linux/export.h>
++#include <linux/kprobes.h>
++#include <linux/stacktrace.h>
++
++struct return_address_data {
++	unsigned int level;
++	void *addr;
++};
++
++static bool save_return_addr(void *d, unsigned long pc)
++{
++	struct return_address_data *data = d;
++
++	if (!data->level) {
++		data->addr = (void *)pc;
++		return false;
++	}
+... (24 more diff lines)
+
+##### A048
+=== fc325b1a915f A 2024-02-11 +4/-0
+riscv: Fix build error if !CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
+
+The new riscv specific arch_hugetlb_migration_supported() must be
+guarded with a #ifdef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION to avoid
+the following build error:
+
+In file included from include/linux/hugetlb.h:851,
+                    from kernel/fork.c:52:
+>> arch/riscv/include/asm/hugetlb.h:15:42: error: static declaration of 'arch_hugetlb_migration_supported' follows non-static declaration
+      15 | #define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
+         |                                          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   include/linux/hugetlb.h:916:20: note: in expansion of macro 'arch_hugetlb_migration_supported'
+     916 | static inline bool arch_hugetlb_migration_supported(struct hstate *h)
+         |                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   arch/riscv/include/asm/hugetlb.h:14:6: note: previous declaration of 'arch_hugetlb_migration_supported' with type 'bool(struct hstate *)' {aka '_Bool(struct hstate *)'}
+      14 | bool arch_hugetlb_migration_supported(struct hstate *h);
+         |      ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Fixes: ce68c035457b ("riscv: Fix arch_hugetlb_migration_supported() for NAPOT")
+functions: arch/riscv/mm/hugetlbpage.c:arch_hugetlb_migration_supported
+fixes: ce68c035457b(riscv)
+diff --git a/arch/riscv/include/asm/hugetlb.h b/arch/riscv/include/asm/hugetlb.h
+index 20f9c3ba2341..22deb7a2a6ec 100644
+--- a/arch/riscv/include/asm/hugetlb.h
++++ b/arch/riscv/include/asm/hugetlb.h
+@@ -12,6 +12,8 @@ static inline void arch_clear_hugepage_flags(struct page *page)
+ #define arch_clear_hugepage_flags arch_clear_hugepage_flags
+ 
++#ifdef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
+ bool arch_hugetlb_migration_supported(struct hstate *h);
+ #define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
++#endif
+ 
+ #ifdef CONFIG_RISCV_ISA_SVNAPOT
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 29c7606414d2..5ef2a6891158 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -427,8 +427,10 @@ bool __init arch_hugetlb_valid_size(unsigned long size)
+ }
+ 
++#ifdef CONFIG_ARCH_ENABLE_HUGEPAGE_MIGRATION
+ bool arch_hugetlb_migration_supported(struct hstate *h)
+ {
+ 	return __hugetlb_valid_size(huge_page_size(h));
+ }
++#endif
+ 
+ #ifdef CONFIG_CONTIG_ALLOC
+
+##### A049
+=== d808f0b1be48 A 2024-02-13 +13/-0
+RISC-V: KVM: Forward SEED CSR access to user space
+
+The SEED CSR access from VS/VU mode (guest) will always trap to
+HS-mode (KVM) when Zkr extension is available to the Guest/VM.
+
+Forward this CSR access to KVM user space so that it can be
+emulated based on the method chosen by VMM.
+
+Fixes: f370b4e668f0 ("RISC-V: KVM: Allow scalar crypto extensions for Guest/VM")
+functions: 
+fixes: f370b4e668f0(riscv)
+diff --git a/arch/riscv/kvm/vcpu_insn.c b/arch/riscv/kvm/vcpu_insn.c
+index 7a6abed41bc1..ee7215f4071f 100644
+--- a/arch/riscv/kvm/vcpu_insn.c
++++ b/arch/riscv/kvm/vcpu_insn.c
+@@ -8,4 +8,6 @@
+ #include <linux/kvm_host.h>
+ 
++#include <asm/cpufeature.h>
++
+ #define INSN_OPCODE_MASK	0x007c
+ #define INSN_OPCODE_SHIFT	2
+@@ -214,7 +216,18 @@ struct csr_func {
+ };
+ 
++static int seed_csr_rmw(struct kvm_vcpu *vcpu, unsigned int csr_num,
++			unsigned long *val, unsigned long new_val,
++			unsigned long wr_mask)
++{
++	if (!riscv_isa_extension_available(vcpu->arch.isa, ZKR))
++		return KVM_INSN_ILLEGAL_TRAP;
++
++	return KVM_INSN_EXIT_TO_USER_SPACE;
++}
++
+ static const struct csr_func csr_funcs[] = {
+ 	KVM_RISCV_VCPU_AIA_CSR_FUNCS
+ 	KVM_RISCV_VCPU_HPMCOUNTER_CSR_FUNCS
++	{ .base = CSR_SEED, .count = 1, .func = seed_csr_rmw },
+ };
+ 

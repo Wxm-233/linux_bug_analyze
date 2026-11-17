@@ -1,0 +1,215 @@
+{
+ "n": 40,
+ "cross": {
+  "agreement": 0.825,
+  "kappa": 0.65,
+  "table": {
+   "R/R": 14,
+   "C/C": 19,
+   "C/R": 1,
+   "R/C": 6
+  }
+ },
+ "mechanism": {
+  "agreement": 0.725,
+  "kappa": 0.685
+ },
+ "reference_line": "一致性较好",
+ "disagreements": [
+  {
+   "id": "A022",
+   "first": [
+    "X1",
+    "R"
+   ],
+   "second": [
+    "X2",
+    "R"
+   ],
+   "second_counterpart": "",
+   "second_reason": "XIP_FIXUP_FLASH_OFFSET把__data_loc误装入随后被覆盖的t1而非后续相加所用的t0，属于局部汇编寄存器笔误，无可指明的共享约定。"
+  },
+  {
+   "id": "A079",
+   "first": [
+    "M7",
+    "C"
+   ],
+   "second": [
+    "M7",
+    "R"
+   ],
+   "second_counterpart": "",
+   "second_reason": "次级idle线程启动栈顶未为pt_regs保留空间而覆盖寄存器状态，修复的是栈边界；材料只给出RISC-V主hart参照，未能确定其他架构处理同一条件的对应物。"
+  },
+  {
+   "id": "A102",
+   "first": [
+    "M5",
+    "R"
+   ],
+   "second": [
+    "M5",
+    "C"
+   ],
+   "second_counterpart": "arch/arm64/kernel/pi/Makefile（为MMU映射建立前运行的启动代码关闭ftrace/KASAN插桩）",
+   "second_reason": "首次内存映射建立前执行的代码不能依赖插桩运行环境或仅适用于虚拟地址的重定位，早期SBI调用未遵守与其他架构早期引导相同的上下文限制；对应物位置未核实。"
+  },
+  {
+   "id": "A144",
+   "first": [
+    "M9",
+    "R"
+   ],
+   "second": [
+    "M8",
+    "C"
+   ],
+   "second_counterpart": "include/linux/ftrace.h:struct ftrace_regs; kernel/trace/Kconfig:FUNCTION_GRAPH_TRACER",
+   "second_reason": "公共fgraph将返回寄存器接口改成ftrace_regs后，RISC-V未同步把HAVE_FUNCTION_GRAPH_TRACER的选择限于具备HAVE_DYNAMIC_FTRACE_WITH_ARGS的配置。"
+  },
+  {
+   "id": "A158",
+   "first": [
+    "M5",
+    "R"
+   ],
+   "second": [
+    "M5",
+    "C"
+   ],
+   "second_counterpart": "arch/arm/mm/alignment.c:do_alignment（用户态未对齐异常中先开中断再进行可能缺页的用户访问）",
+   "second_reason": "未对齐异常处理时中断关闭，不能调用可能睡眠的copy_from_user/copy_to_user，改用nofault访问符合各架构异常上下文限制；对应物位置未核实。"
+  },
+  {
+   "id": "A176",
+   "first": [
+    "X1",
+    "R"
+   ],
+   "second": [
+    "M4",
+    "R"
+   ],
+   "second_counterpart": "",
+   "second_reason": "HGEI所有者查找与IMSIC VS-file状态分别受不同锁保护，读取关联状态再访问CSR缺少统一同步，属于本地操作原子性问题，未能确定其他架构处理同一条件的对应物。"
+  },
+  {
+   "id": "A234",
+   "first": [
+    "X1",
+    "R"
+   ],
+   "second": [
+    "M6",
+    "R"
+   ],
+   "second_counterpart": "",
+   "second_reason": "探测后移到late_initcall而派生static key仍在arch_initcall_sync设置，导致在结果就绪前初始化状态，属于本地初始化时序和状态初始化缺陷。"
+  },
+  {
+   "id": "A238",
+   "first": [
+    "X1",
+    "R"
+   ],
+   "second": [
+    "M9",
+    "C"
+   ],
+   "second_counterpart": "include/linux/cfi_types.h:SYM_TYPED_FUNC_START",
+   "second_reason": "启用CFI时从C间接调用的汇编入口必须携带匹配的类型信息，RISC-V改成间接调用后仍使用无类型入口宏，漏考虑了CFI配置要求。"
+  },
+  {
+   "id": "A288",
+   "first": [
+    "M6",
+    "C"
+   ],
+   "second": [
+    "M10",
+    "C"
+   ],
+   "second_counterpart": "mm/vmalloc.c:__vunmap; arch/arm64/kernel/module.c:module_alloc",
+   "second_reason": "module_alloc接口分配的模块内存在释放时须恢复线性别名权限，RISC-V漏传VM_FLUSH_RESET_PERMS使公共vfree路径遗漏恢复步骤并留下WX映射。"
+  },
+  {
+   "id": "A331",
+   "first": [
+    "M7",
+    "R"
+   ],
+   "second": [
+    "X2",
+    "R"
+   ],
+   "second_counterpart": "",
+   "second_reason": "仅把ISA位图相等比较改用专门的bitmap_equal辅助函数，材料未指出无效尾位等实际行为差异，按辅助函数规范化处理。"
+  },
+  {
+   "id": "B414",
+   "first": [
+    "M6",
+    "C"
+   ],
+   "second": [
+    "M10",
+    "C"
+   ],
+   "second_counterpart": "kernel/crash_core.c:reserve_crashkernel_generic/reserve_crashkernel_low",
+   "second_reason": "通用crashkernel预留代码在System RAM父资源建立前插入子资源，违反iomem资源树先父后子的插入顺序，在RISC-V和arm64的初始化次序下使父资源消失。"
+  },
+  {
+   "id": "B464",
+   "first": [
+    "M5",
+    "R"
+   ],
+   "second": [
+    "M5",
+    "C"
+   ],
+   "second_counterpart": "include/linux/smp.h:get_cpu/put_cpu; lib/smp_processor_id.c:check_preemption_disabled",
+   "second_reason": "smp_processor_id接口要求调用期间CPU身份稳定，设置当前CPU的PMU快照时须禁止抢占以防迁移，原探测路径违反了公共执行上下文约束。"
+  },
+  {
+   "id": "B494",
+   "first": [
+    "M7",
+    "C"
+   ],
+   "second": [
+    "M8",
+    "C"
+   ],
+   "second_counterpart": "drivers/base/cpu.c:cpu_dev_register_generic; drivers/cpuidle/sysfs.c:cpuidle_add_sysfs",
+   "second_reason": "公共CPU设备注册已改为仅注册present CPU，cpuidle注册接口依赖相应CPU设备存在，各架构驱动仍遍历possible CPU而未跟上这一公共语义变化。"
+  },
+  {
+   "id": "B531",
+   "first": [
+    "M1",
+    "C"
+   ],
+   "second": [
+    "M9",
+    "C"
+   ],
+   "second_counterpart": "scripts/Makefile.vmlinux:remove-symbols",
+   "second_reason": "公共构建规则漏考虑KASAN与可重定位内核组合会保留指向设备表符号的重定位，强制strip-symbol因此失败，须只移除没有引用的符号。"
+  },
+  {
+   "id": "B559",
+   "first": [
+    "X1",
+    "R"
+   ],
+   "second": [
+    "M6",
+    "C"
+   ],
+   "second_counterpart": "drivers/acpi/arm64/iort.c:iort_iommu_xlate（为IOMMU消费者建立device link以维持消费者先移除的顺序）",
+   "second_reason": "IOMMU供应者须存活到其消费者关闭或移除之后，单靠EPROBE_DEFER只保证探测顺序而不保证生命周期依赖，因此须建立device link；对应物位置未核实。"
+  }
+ ]
+}

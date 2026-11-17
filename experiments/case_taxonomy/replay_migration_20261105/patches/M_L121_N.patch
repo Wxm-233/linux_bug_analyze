@@ -1,0 +1,61 @@
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -1,3 +1,38 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+  * BPF JIT compiler for LoongArch
+@@ -40,3 +40,38 @@ static const int regmap[] = {
+ 	[BPF_REG_AX] = LOONGARCH_GPR_T0,
+ };
+ 
++/*
++ * Sign-extend (or zero-extend) the return value according to the
++ * function model and the LoongArch ABI.
++ */
++static int sign_extend_ret(struct jit_ctx *ctx, u8 rd, u8 rs, u8 sz, bool sign)
++{
++	switch (sz) {
++	case 1:
++		if (sign)
++			emit_insn(ctx, extwb, rd, rs);
++		else
++			emit_insn(ctx, bstrpickd, rd, rs, 7, 0);
++		break;
++	case 2:
++		if (sign)
++			emit_insn(ctx, extwh, rd, rs);
++		else
++			emit_insn(ctx, bstrpickd, rd, rs, 15, 0);
++		break;
++	case 4:
++		emit_insn(ctx, addw, rd, rs, LOONGARCH_GPR_ZERO);
++		break;
++	case 8:
++		if (rd != rs)
++			move_reg(ctx, rd, rs);
++		break;
++	default:
++		pr_err("bpf-jit: invalid size %d for sign_extend_ret\n", sz);
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
+ static void prepare_bpf_tail_call_cnt(struct jit_ctx *ctx, int *store_offset)
+ 
+ /* ... */
+@@ -1,3 +1,3 @@
+ 	if (save_ret) {
+-		emit_insn(ctx, ldd, LOONGARCH_GPR_A0, LOONGARCH_GPR_FP, -retval_off);
+ 		emit_insn(ctx, ldd, regmap[BPF_REG_0], LOONGARCH_GPR_FP, -(retval_off - 8));
++		if (is_struct_ops) {
++			ret = sign_extend_ret(ctx, LOONGARCH_GPR_A0, regmap[BPF_REG_0],
++					      m->ret_size, m->ret_flags & BTF_FMODEL_SIGNED_ARG);
++			if (ret)
++				goto out;
++		} else {
++			emit_insn(ctx, ldd, LOONGARCH_GPR_A0, LOONGARCH_GPR_FP, -retval_off);
++		}
+ 	}

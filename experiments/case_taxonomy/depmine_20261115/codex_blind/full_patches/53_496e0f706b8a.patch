@@ -1,0 +1,117 @@
+commit 496e0f706b8ad7831bf7189ff9deb8701d2ebc2b
+Author:     Claudio Imbrenda <imbrenda@linux.ibm.com>
+AuthorDate: Mon Aug 3 14:40:28 2026 +0200
+Commit:     Claudio Imbrenda <imbrenda@linux.ibm.com>
+CommitDate: Mon Aug 3 15:39:05 2026 +0200
+
+    KVM: s390: Fix unlikely NULL gmap dereference
+    
+    When creating a new vCPU, kvm_vm_ioctl_create_vcpu() will call
+    kvm_arch_vcpu_postcreate() after the file descriptor for the new vCPU
+    has been created. The new file descriptor has not been returned yet,
+    but a malicious userspace program could try to guess it.
+    
+    If a malicious userspace program manages to start the newly created vCPU
+    before kvm_arch_vcpu_postcreate() is called, __vcpu_run() will try to
+    dereference vcpu->arch.gmap and trigger a NULL pointer dereference.
+    
+    Fix this by adding a new field to struct kvm_vcpu_arch to keep track of
+    the initialization status of the vCPU. Refuse to run a vCPU that is not
+    fully initialized.
+    
+    Fixes: dafd032a15f8 ("KVM: s390: move vcpu specific initalization to a later point")
+    Fixes: e38c884df921 ("KVM: s390: Switch to new gmap")
+    Reviewed-by: Steffen Eiden <seiden@linux.ibm.com>
+    Reviewed-by: Janosch Frank <frankja@linux.ibm.com>
+    Reviewed-by: Christian Borntraeger <borntraeger@linux.ibm.com>
+    Signed-off-by: Claudio Imbrenda <imbrenda@linux.ibm.com>
+    Message-ID: <20260803124040.126471-2-imbrenda@linux.ibm.com>
+
+diff --git a/arch/s390/include/asm/kvm_host.h b/arch/s390/include/asm/kvm_host.h
+index c172f9b212d1..b4182ca4435f 100644
+--- a/arch/s390/include/asm/kvm_host.h
++++ b/arch/s390/include/asm/kvm_host.h
+@@ -435,16 +435,17 @@ struct kvm_vcpu_arch {
+ 	 * values and to start/stop/enable/disable cpu timer accounting.
+ 	 */
+ 	seqcount_t cputm_seqcount;
+ 	__u64 cputm_start;
+ 	bool gs_enabled;
+ 	bool skey_enabled;
+ 	/* Indicator if the access registers have been loaded from guest */
+ 	bool acrs_loaded;
++	bool initialized;
+ 	struct kvm_s390_pv_vcpu pv;
+ 	union diag318_info diag318_info;
+ 	struct kvm_s390_mmu_cache *mc;
+ };
+ 
+ struct kvm_vm_stat {
+ 	struct kvm_vm_stat_generic generic;
+ 	u64 inject_io;
+diff --git a/arch/s390/kvm/kvm-s390.c b/arch/s390/kvm/kvm-s390.c
+index 150b5dd2170e..f86b4b0b356f 100644
+--- a/arch/s390/kvm/kvm-s390.c
++++ b/arch/s390/kvm/kvm-s390.c
+@@ -3608,16 +3608,19 @@ void kvm_arch_vcpu_postcreate(struct kvm_vcpu *vcpu)
+ 	mutex_unlock(&vcpu->kvm->lock);
+ 	if (!kvm_is_ucontrol(vcpu->kvm)) {
+ 		vcpu->arch.gmap = vcpu->kvm->arch.gmap;
+ 		sca_add_vcpu(vcpu);
+ 	}
+ 	if (test_kvm_facility(vcpu->kvm, 74) || vcpu->kvm->arch.user_instr0 ||
+ 	    vcpu->kvm->arch.user_operexec)
+ 		vcpu->arch.sie_block->ictl |= ICTL_OPEREXC;
++
++	/* Pairs with smp_load_acquire() in kvm_arch_vcpu_ioctl_run() and kvm_arch_vcpu_ioctl() */
++	smp_store_release(&vcpu->arch.initialized, true);
+ }
+ 
+ static bool kvm_has_pckmo_subfunc(struct kvm *kvm, unsigned long nr)
+ {
+ 	if (test_bit_inv(nr, (unsigned long *)&kvm->arch.model.subfuncs.pckmo) &&
+ 	    test_bit_inv(nr, (unsigned long *)&kvm_s390_available_subfunc.pckmo))
+ 		return true;
+ 	return false;
+@@ -5034,16 +5037,20 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
+ 
+ 	if (!vcpu->wants_to_run)
+ 		return -EINTR;
+ 
+ 	if (kvm_run->kvm_valid_regs & ~KVM_SYNC_S390_VALID_FIELDS ||
+ 	    kvm_run->kvm_dirty_regs & ~KVM_SYNC_S390_VALID_FIELDS)
+ 		return -EINVAL;
+ 
++	/* Pairs with smp_store_release() in kvm_arch_vcpu_postcreate() */
++	if (!smp_load_acquire(&vcpu->arch.initialized))
++		return -EINVAL;
++
+ 	vcpu_load(vcpu);
+ 
+ 	if (guestdbg_exit_pending(vcpu)) {
+ 		kvm_s390_prepare_debug_exit(vcpu);
+ 		rc = 0;
+ 		goto out;
+ 	}
+ 
+@@ -5518,16 +5525,20 @@ long kvm_arch_vcpu_ioctl(struct file *filp,
+ 			 unsigned int ioctl, unsigned long arg)
+ {
+ 	struct kvm_vcpu *vcpu = filp->private_data;
+ 	void __user *argp = (void __user *)arg;
+ 	int idx;
+ 	long r;
+ 	u16 rc, rrc;
+ 
++	/* Pairs with smp_store_release() in kvm_arch_vcpu_postcreate() */
++	if (!smp_load_acquire(&vcpu->arch.initialized))
++		return -EINVAL;
++
+ 	vcpu_load(vcpu);
+ 
+ 	switch (ioctl) {
+ 	case KVM_S390_STORE_STATUS:
+ 		idx = srcu_read_lock(&vcpu->kvm->srcu);
+ 		r = kvm_s390_store_status_unloaded(vcpu, arg);
+ 		srcu_read_unlock(&vcpu->kvm->srcu, idx);
+ 		break;

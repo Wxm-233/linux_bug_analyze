@@ -1,0 +1,607 @@
+{
+ "groups": [
+  {
+   "key": "K1",
+   "verdict": "real",
+   "note": "K1"
+  },
+  {
+   "key": "text_poke_lockdep",
+   "verdict": "real",
+   "note": "lockdep_assert_held(&text_mutex) then mutex_lock(&text_mutex); common callers do not hold text_mutex"
+  },
+  {
+   "key": "K4_ro_insns",
+   "verdict": "real",
+   "note": "K4"
+  },
+  {
+   "key": "K3_rv32_text_copy",
+   "verdict": "real",
+   "note": "K3"
+  },
+  {
+   "key": "comp32_pc_relative",
+   "verdict": "not_issue",
+   "note": "RV32 emit_call jumps to an absolute address with lui/jalr; comp32 never uses ctx->insns for addresses"
+  },
+  {
+   "key": "kzalloc_whole",
+   "verdict": "real",
+   "note": "kzalloc(len) of up to one pack (2MB); upstream fills page by page"
+  },
+  {
+   "key": "icache_before_finalize",
+   "verdict": "not_issue",
+   "note": "finalize copies through bpf_arch_text_copy -> patch_text_nosync, which calls flush_icache_range afterwards"
+  },
+  {
+   "key": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "note": "bpf_jit_binary_pack_finalize frees both headers itself on failure"
+  },
+  {
+   "key": "kallsyms_verify_off",
+   "verdict": "not_issue",
+   "note": "bpf_prog_kallsyms_verify_off exists in the base"
+  },
+  {
+   "key": "jit_free_finalize",
+   "verdict": "not_issue",
+   "note": "same pattern as x86 and upstream RISC-V"
+  },
+  {
+   "key": "free_pack_size_copy",
+   "verdict": "not_issue",
+   "note": "required by the x86 fix 676b2daabaf9"
+  },
+  {
+   "key": "trampoline_rx_write",
+   "verdict": "not_issue",
+   "note": "the trampoline image is still writable while it is prepared"
+  },
+  {
+   "key": "free_exec_mismatch",
+   "verdict": "not_issue",
+   "note": "arch/riscv/net/bpf_jit_core.c defines bpf_jit_free_exec"
+  }
+ ],
+ "summary": {
+  "P_step4": {
+   "distinct": 8,
+   "real": 4,
+   "groups": {
+    "K3_rv32_text_copy": {
+     "runs": 3,
+     "verdict": "real"
+    },
+    "K4_ro_insns": {
+     "runs": 3,
+     "verdict": "real"
+    },
+    "finalize_fail_leak": {
+     "runs": 3,
+     "verdict": "not_issue"
+    },
+    "free_pack_size_copy": {
+     "runs": 2,
+     "verdict": "not_issue"
+    },
+    "icache_before_finalize": {
+     "runs": 3,
+     "verdict": "not_issue"
+    },
+    "jit_free_finalize": {
+     "runs": 3,
+     "verdict": "not_issue"
+    },
+    "kzalloc_whole": {
+     "runs": 3,
+     "verdict": "real"
+    },
+    "text_poke_lockdep": {
+     "runs": 3,
+     "verdict": "real"
+    }
+   }
+  },
+  "P_step8": {
+   "distinct": 10,
+   "real": 2,
+   "groups": {
+    "comp32_pc_relative": {
+     "runs": 1,
+     "verdict": "not_issue"
+    },
+    "finalize_fail_leak": {
+     "runs": 3,
+     "verdict": "not_issue"
+    },
+    "free_exec_mismatch": {
+     "runs": 1,
+     "verdict": "not_issue"
+    },
+    "free_pack_size_copy": {
+     "runs": 1,
+     "verdict": "not_issue"
+    },
+    "icache_before_finalize": {
+     "runs": 3,
+     "verdict": "not_issue"
+    },
+    "jit_free_finalize": {
+     "runs": 3,
+     "verdict": "not_issue"
+    },
+    "kallsyms_verify_off": {
+     "runs": 1,
+     "verdict": "not_issue"
+    },
+    "kzalloc_whole": {
+     "runs": 1,
+     "verdict": "real"
+    },
+    "text_poke_lockdep": {
+     "runs": 3,
+     "verdict": "real"
+    },
+    "trampoline_rx_write": {
+     "runs": 1,
+     "verdict": "not_issue"
+    }
+   }
+  },
+  "U_step3": {
+   "distinct": 1,
+   "real": 0,
+   "groups": {
+    "comp32_pc_relative": {
+     "runs": 2,
+     "verdict": "not_issue"
+    }
+   }
+  }
+ },
+ "rows": [
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "text_poke_lockdep",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_poke",
+   "mechanism": "M5",
+   "issue": "同一函数先 lockdep_assert_held(&text_mutex) 又 mutex_lock(&text_mutex)，二次加锁死锁，且调用者未持锁时 lockdep 告警"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "K4_ro_insns",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M10",
+   "issue": "分配 pack 后没有设置 ctx->ro_insns（保持 NULL），导致 emit_addr/emit_call/extable/bpf_func 全部基于 NULL 计算"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "icache_before_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M3",
+   "issue": "icache 刷新放在 finalize（拷贝到 RX）之前，拷贝后没有刷新"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M6",
+   "issue": "finalize 失败路径 goto out_offset 后 kfree(jit_data)，pack 的 header/rw_header 泄漏"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "jit_free_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "M6",
+   "issue": "自定义 bpf_jit_free 对 jit_data 残留的 header 做 finalize 后又走通用释放，finalize 失败时不释放 header，且可能重复释放"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "free_pack_size_copy",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free_pack",
+   "mechanism": "M6",
+   "issue": "释放前向 RO 头多余地拷贝 size，与参照路径不一致"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "K3_rv32_text_copy",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp32.c / kernel/bpf/core.c",
+   "mechanism": "M10",
+   "issue": "RV32 未实现 bpf_arch_text_copy/bpf_arch_text_invalidate，也未设置 ro_insns，共享的 bpf_jit_core.c 在 RV32 上 finalize 总是失败"
+  },
+  {
+   "call": "L_P_step4_r1",
+   "version": "P_step4",
+   "run": "r1",
+   "group": "kzalloc_whole",
+   "verdict": "real",
+   "location": "arch/riscv/kernel/patch.c:patch_text_set_nosync",
+   "mechanism": "M6",
+   "issue": "为填充零分配与 len 等大的缓冲区（可达整个 pack），失败时只返回 -ENOMEM，释放 pack 时触发 WARN 且 pack 不被清理"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "K4_ro_insns",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M10",
+   "issue": "pack_alloc 后 ctx->ro_insns 从未赋值（为 NULL），导致 PC 相对计算、bpf_func、extable 都基于 NULL"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "text_poke_lockdep",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_poke",
+   "mechanism": "M5",
+   "issue": "开头新增 lockdep_assert_held(&text_mutex)，而函数内部又 mutex_lock(&text_mutex)，调用者并不持锁，触发 lockdep 警告"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "K3_rv32_text_copy",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp32.c / bpf_jit_core.c",
+   "mechanism": "M10",
+   "issue": "RV32 没有实现 bpf_arch_text_copy/invalidate 和 ro_insns，而共用的 bpf_jit_core.c 已改用 pack 接口，__weak 默认实现使 finalize 失败，RV32 JIT 全部失败"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "icache_before_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M3",
+   "issue": "bpf_flush_icache 在 finalize 复制代码到 RO 之前执行，复制后的内容没有刷新，并且对 RO 区域刷新时其内容还是填充值"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M6",
+   "issue": "finalize 失败后直接 goto out_offset，没有释放 header/rw_header；且 finalize 失败时内部已经释放，可能重复释放"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "jit_free_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "M6",
+   "issue": "对残留 jit_data 调用 finalize 而不是释放；失败时 header/rw_header 泄漏；并且 jit_data 随后被 kfree 使置 NULL 毫无意义"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "kzalloc_whole",
+   "verdict": "real",
+   "location": "arch/riscv/kernel/patch.c:patch_text_set_nosync",
+   "mechanism": "M6",
+   "issue": "对最大 2MB 的 pack 用 kzalloc 申请同等大小缓冲区，大块申请失败时 invalidate 失败而没有退路（分块写入）"
+  },
+  {
+   "call": "L_P_step4_r2",
+   "version": "P_step4",
+   "run": "r2",
+   "group": "K4_ro_insns",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:add_exception_handler",
+   "mechanism": "M10",
+   "issue": "rw_ex 由 ro_insns 差值计算，ro_insns 为 NULL 时偏移错误，写入越界的 RW 地址"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "text_poke_lockdep",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_poke",
+   "mechanism": "M5",
+   "issue": "新增lockdep_assert_held(&text_mutex)，函数内部又mutex_lock(&text_mutex)，非递归锁，会死锁或触发lockdep告警"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "K4_ro_insns",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M10",
+   "issue": "ctx->ro_insns从未被设置为jit_data->image，保持NULL；PC相对计算、extable、prog->bpf_func均基于NULL"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "icache_before_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M3",
+   "issue": "bpf_flush_icache在finalize之前、以RO header为起点刷新，RX区此时尚未写入，范围也不含extable"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M6",
+   "issue": "finalize失败时直接goto out_offset，未释放pack与rw_header，造成泄漏（参照补丁此处BUG_ON）"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "jit_free_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "M6",
+   "issue": "对残留jit_data做finalize而非释放；finalize成功后又用bpf_jit_binary_pack_hdr(prog)释放，存在重复释放，且bpf_func为NULL时出错"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "free_pack_size_copy",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free_pack",
+   "mechanism": "M6",
+   "issue": "通过bpf_arch_text_copy向RO header写size，多余且在pack_free之前写入，错误被忽略"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "K3_rv32_text_copy",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_copy/bpf_arch_text_invalidate",
+   "mechanism": "M10",
+   "issue": "仅在comp64实现；bpf_jit_core.c为RV32/RV64共用，RV32走__weak默认实现使pack finalize失败，且comp32未设置ro_insns"
+  },
+  {
+   "call": "L_P_step4_r3",
+   "version": "P_step4",
+   "run": "r3",
+   "group": "kzalloc_whole",
+   "verdict": "real",
+   "location": "arch/riscv/kernel/patch.c:patch_text_set_nosync",
+   "mechanism": "M6",
+   "issue": "按len一次性kzalloc(最大约2MB)，失败时返回-ENOMEM而pack_free仍清除bitmap，旧代码残留；应分块"
+  },
+  {
+   "call": "L_P_step8_r1",
+   "version": "P_step8",
+   "run": "r1",
+   "group": "text_poke_lockdep",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_poke",
+   "mechanism": "M5",
+   "issue": "函数开头新增lockdep_assert_held(&text_mutex)，而后面又mutex_lock(&text_mutex)，要么死锁要么lockdep告警"
+  },
+  {
+   "call": "L_P_step8_r1",
+   "version": "P_step8",
+   "run": "r1",
+   "group": "icache_before_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M3",
+   "issue": "icache刷新发生在finalize（真正写入RX区）之前，写入RX后没有刷新指令缓存"
+  },
+  {
+   "call": "L_P_step8_r1",
+   "version": "P_step8",
+   "run": "r1",
+   "group": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M6",
+   "issue": "finalize失败时直接goto out_offset，RW和RO头都未释放，造成泄漏"
+  },
+  {
+   "call": "L_P_step8_r1",
+   "version": "P_step8",
+   "run": "r1",
+   "group": "jit_free_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "M6",
+   "issue": "jit_data存在时无条件对header/rw_header调用finalize，header可能为NULL导致空指针解引用，且finalize失败时没有释放"
+  },
+  {
+   "call": "L_P_step8_r1",
+   "version": "P_step8",
+   "run": "r1",
+   "group": "free_pack_size_copy",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free_pack",
+   "mechanism": "M6",
+   "issue": "在释放前手工向RO头写size，与bpf_jit_binary_pack_free自身处理重复，且在header尚未写入有效内容时依赖text_copy"
+  },
+  {
+   "call": "L_P_step8_r1",
+   "version": "P_step8",
+   "run": "r1",
+   "group": "kallsyms_verify_off",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "其他",
+   "issue": "使用基线中可能不存在的bpf_prog_kallsyms_verify_off，有编译失败风险"
+  },
+  {
+   "call": "L_P_step8_r2",
+   "version": "P_step8",
+   "run": "r2",
+   "group": "text_poke_lockdep",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_poke",
+   "mechanism": "其他",
+   "issue": "函数开头断言已持有text_mutex,后面又mutex_lock(&text_mutex),导致lockdep警告或自死锁"
+  },
+  {
+   "call": "L_P_step8_r2",
+   "version": "P_step8",
+   "run": "r2",
+   "group": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M6",
+   "issue": "pack_finalize失败时直接goto out_offset并kfree(jit_data),header/rw_header泄漏"
+  },
+  {
+   "call": "L_P_step8_r2",
+   "version": "P_step8",
+   "run": "r2",
+   "group": "icache_before_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M3",
+   "issue": "icache刷新发生在finalize之前,此时RO区尚未写入代码,真正写入后没有跨核icache刷新"
+  },
+  {
+   "call": "L_P_step8_r2",
+   "version": "P_step8",
+   "run": "r2",
+   "group": "jit_free_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "M6",
+   "issue": "jit_data仍存在时finalize失败,header被丢弃并kfree jit_data;随后又用pack_hdr释放可能重复/不一致"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "text_poke_lockdep",
+   "verdict": "real",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:bpf_arch_text_poke",
+   "mechanism": "M5",
+   "issue": "先 lockdep_assert_held(&text_mutex) 又 mutex_lock(&text_mutex)，调用者持锁则死锁，不持锁则 lockdep 警告"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "trampoline_rx_write",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_comp64.c:arch_prepare_bpf_trampoline",
+   "mechanism": "M10",
+   "issue": "trampoline 直接向 RX 地址 image 写入指令，没有走可写缓冲区加 bpf_arch_text_copy"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "comp32_pc_relative",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_comp32.c",
+   "mechanism": "M10",
+   "issue": "RV32 的 JIT 未把 PC 相对计算改成 ro_insns，分支和调用偏移按可写缓冲区地址计算会出错（该文件其余代码未给出）"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "finalize_fail_leak",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M6",
+   "issue": "bpf_jit_binary_pack_finalize 失败时直接 goto out_offset，header 与 rw_header 未释放就 kfree(jit_data)，造成泄漏"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "icache_before_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_int_jit_compile",
+   "mechanism": "M3",
+   "issue": "bpf_flush_icache 在 finalize（实际写入 RX 区）之前对 RO 区域刷新，刷到的是旧填充内容"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "jit_free_finalize",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_core.c:bpf_jit_free",
+   "mechanism": "M6",
+   "issue": "jit_data 非空分支里对未完成的程序调用 finalize，且 jited 路径与 kallsyms 处理与通用约定不一致（verify_off 取代 kallsyms_del，linfo 未释放）"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "free_exec_mismatch",
+   "verdict": "not_issue",
+   "location": "kernel/bpf/core.c:bpf_prog_pack_free / arch/riscv/net/bpf_jit_core.c",
+   "mechanism": "M6",
+   "issue": "补丁把释放改成 bpf_jit_free_exec，但 RISC-V 补丁中未见其实现，默认实现可能与 __vmalloc_node_range 分配不匹配"
+  },
+  {
+   "call": "L_P_step8_r3",
+   "version": "P_step8",
+   "run": "r3",
+   "group": "kzalloc_whole",
+   "verdict": "real",
+   "location": "arch/riscv/kernel/patch.c:patch_text_set_nosync",
+   "mechanism": "M6",
+   "issue": "按 len 整块 kzalloc，pack 释放时 len 可达 2MB，分配失败没有退路，导致 invalidate 失败并触发 WARN_ONCE"
+  },
+  {
+   "call": "L_U_step3_r1",
+   "version": "U_step3",
+   "run": "r1",
+   "group": "comp32_pc_relative",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_comp32.c:emit_call（未随补丁修改，与 bpf_jit_core.c 共用）",
+   "mechanism": "M10",
+   "issue": "RV32 变体没有改用 ro_insns，而共用的 bpf_jit_core.c 已切换到 RW/RX 双缓冲区，RV32 的调用目标偏移按可写缓冲区地址计算，运行时会跳错。"
+  },
+  {
+   "call": "L_U_step3_r2",
+   "version": "U_step3",
+   "run": "r2",
+   "group": "comp32_pc_relative",
+   "verdict": "not_issue",
+   "location": "arch/riscv/net/bpf_jit_comp32.c:emit_call 等依赖 ctx->insns 计算 PC 的代码(补丁未改动)",
+   "mechanism": "M10",
+   "issue": "RV32 的 JIT 与 bpf_jit_core.c 共用 prog pack 流程，但 comp32.c 未改成用 ctx->ro_insns 计算 PC 相对偏移，最终运行映像中的调用/跳转目标偏移会算错。"
+  }
+ ]
+}

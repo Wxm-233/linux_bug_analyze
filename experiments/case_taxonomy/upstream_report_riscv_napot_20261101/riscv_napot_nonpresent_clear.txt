@@ -1,0 +1,205 @@
+To: Alexandre Ghiti <alex@ghiti.fr>, Paul Walmsley <pjw@kernel.org>, Palmer Dabbelt <palmer@dabbelt.com>, Albert Ou <aou@eecs.berkeley.edu>
+Cc: Ryan Roberts <ryan.roberts@arm.com>, Andrew Morton <akpm@linux-foundation.org>, Muchun Song <muchun.song@linux.dev>, Oscar Salvador <osalvador@suse.de>, David Hildenbrand <david@kernel.org>, "Mike Rapoport (Microsoft)" <rppt@kernel.org>, yunhui cui <cuiyunhui@bytedance.com>, linux-riscv@lists.infradead.org, linux-mm@kvack.org, linux-kernel@vger.kernel.org
+Subject: [BUG] riscv: hugetlb: non-present NAPOT entries are only partially cleared
+
+Hi,
+
+On riscv with Svnapot, clearing a non-present 64K NAPOT hugetlb entry
+(migration entry, hwpoison entry or PTE marker) clears only the first
+of its 16 PTEs. The other 15 non-present PTEs stay in the page table
+after munmap() or mremap(), and a later normal mapping at that address
+sees them. With a PTE_MARKER_POISONED left behind, fresh anonymous
+memory raises SIGBUS on pages 1..15 instead of reading zeroes.
+
+Analysis (mainline, arch/riscv/mm/hugetlbpage.c is unchanged between
+df2908090cda, which I tested, and master cbbddb6b08cc):
+
+set_huge_pte_at() handles a non-present pte by writing it to all
+num_contig_ptes_from_size(sz) PTEs. The clear side does not mirror
+this:
+
+  pte_t huge_ptep_get_and_clear(mm, addr, ptep, sz)
+  {
+          pte_t orig_pte = ptep_get(ptep);
+          ...
+          if (!pte_napot(orig_pte))
+                  return ptep_get_and_clear(mm, addr, ptep);
+          pte_num = num_contig_ptes_from_size(sz, &pgsize);
+          ...
+  }
+
+  void huge_pte_clear(mm, addr, ptep, sz)
+  {
+          pte_t pte = ptep_get(ptep);
+          ...
+          if (!pte_napot(pte)) {
+                  pte_clear(mm, addr, ptep);
+                  return;
+          }
+          pte_num = num_contig_ptes_from_size(sz, &pgsize);
+          ...
+  }
+
+A swap-format pte never has _PAGE_NAPOT (bit 63) set: __swp_entry()
+puts the offset at bit 12, and migration/hwpoison offsets are PFNs,
+markers are small. So for every non-present entry the pte_napot()
+check sends us to the single-PTE path, and the sz-based count is
+never used.
+
+This looks like an incomplete port of the arm64 fix. Commit
+49c87f767774 ("arm64: hugetlb: Fix huge_ptep_get_and_clear() for
+non-present ptes") removed the pte_cont() check and always uses sz.
+Commit 83d78ac677b9 ("riscv: Fix hugetlb retrieval of number of ptes
+in case of !present pte") says the arm64 fix applies to riscv and
+switches the count to sz, but keeps the pte_napot() check in front of
+it, so the !present case it describes is still not handled.
+
+Core callers that pass non-present entries here:
+ - __unmap_hugepage_range(): !pte_present() branch -> huge_pte_clear()
+ - move_huge_pte() (mremap): huge_ptep_get_and_clear() on any entry
+ - hugetlb_change_protection(): uffd-wp marker resolve -> huge_pte_clear()
+
+Reproducer (below): QEMU 8.2 "virt", -cpu rv64,svnapot=on, kernel
+df2908090cda riscv defconfig + CONFIG_USERFAULTFD, command line
+"hugepagesz=64K hugepages=16". It poisons a 64K hugetlb page with
+UFFDIO_POISON, munmap()s it and maps anonymous memory at the same
+address; a populated neighbour page keeps the PTE table alive.
+
+  unmodified:      page 0 ok, pages 1..15 SIGBUS
+  with the change: all 16 pages ok
+
+The same happens when the poisoned page is moved away with mremap()
+instead of munmap(). I have only tested PTE markers; migration entries
+go through the same code but I did not construct that case. Nothing
+was run on real hardware. No WARN/BUG in the kernel log in either run.
+
+The change I tested simply drops the two pte_napot() checks, as arm64
+did. I have not checked it beyond the reproducer and the scenarios
+above, so please treat it as a suggestion:
+
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -307,12 +307,8 @@
+ 			      pte_t *ptep, unsigned long sz)
+ {
+ 	size_t pgsize;
+-	pte_t orig_pte = ptep_get(ptep);
+ 	int pte_num;
+ 
+-	if (!pte_napot(orig_pte))
+-		return ptep_get_and_clear(mm, addr, ptep);
+-
+ 	pte_num = num_contig_ptes_from_size(sz, &pgsize);
+ 
+ 	return get_clear_contig(mm, addr, ptep, pte_num);
+@@ -364,14 +360,8 @@
+ 		    unsigned long sz)
+ {
+ 	size_t pgsize;
+-	pte_t pte = ptep_get(ptep);
+ 	int i, pte_num;
+ 
+-	if (!pte_napot(pte)) {
+-		pte_clear(mm, addr, ptep);
+-		return;
+-	}
+-
+ 	pte_num = num_contig_ptes_from_size(sz, &pgsize);
+ 
+ 	for (i = 0; i < pte_num; i++, addr += pgsize, ptep++)
+
+Related pending work I found on patchwork (I could not search lore):
+ - "Merge arm64/riscv hugetlbfs contpte support" v5 (2025-03) would
+   move riscv to common helpers that always use the size, which would
+   also fix this; it does not seem to have been merged.
+ - "riscv: add Svnapot PTE folding support" v2 (2026-07), patch 02/15,
+   keeps the pte_napot() checks in both functions and derives the
+   count from the pte again (napot_cont_order()), so it would not fix
+   this either. Cc'ing the author for that reason.
+
+Reproducer:
+
+// SPDX-License-Identifier: GPL-2.0
+#define _GNU_SOURCE
+#include <fcntl.h>
+#include <linux/userfaultfd.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#define SZ4K	0x1000UL
+#define SZ64K	0x10000UL
+#define SZ2M	0x200000UL
+#define MAP_HUGE_64KB	(16U << 26)
+
+static sigjmp_buf env;
+
+static void on_sigbus(int sig)
+{
+	siglongjmp(env, 1);
+}
+
+static int readable(volatile char *p)
+{
+	if (sigsetjmp(env, 1))
+		return 0;
+	(void)*p;
+	return 1;
+}
+
+int main(void)
+{
+	struct uffdio_api api = { .api = UFFD_API };
+	struct uffdio_register reg = { .mode = UFFDIO_REGISTER_MODE_MISSING };
+	struct uffdio_poison poison = { 0 };
+	char *res, *a, *huge;
+	int uffd, i, bad = 0;
+
+	signal(SIGBUS, on_sigbus);
+	res = mmap(NULL, 2 * SZ2M, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+	a = (char *)(((uintptr_t)res + SZ2M - 1) & ~(SZ2M - 1));
+	huge = a + SZ64K;
+
+	/* A populated neighbour keeps the PTE table alive across munmap(). */
+	mmap(a, SZ64K, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	a[0] = 1;
+	if (mmap(huge, SZ64K, PROT_READ | PROT_WRITE,
+		 MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_HUGE_64KB, -1, 0) == MAP_FAILED) {
+		perror("mmap 64K hugetlb");
+		return 2;
+	}
+
+	/* Install a PTE_MARKER_POISONED: set_huge_pte_at() writes all 16 PTEs. */
+	uffd = syscall(SYS_userfaultfd, O_CLOEXEC);
+	reg.range.start = poison.range.start = (uintptr_t)huge;
+	reg.range.len = poison.range.len = SZ64K;
+	if (uffd < 0 || ioctl(uffd, UFFDIO_API, &api) || ioctl(uffd, UFFDIO_REGISTER, &reg) ||
+	    ioctl(uffd, UFFDIO_POISON, &poison)) {
+		perror("userfaultfd poison");
+		return 2;
+	}
+
+	/* huge_pte_clear() sees !pte_napot() and clears only the first PTE. */
+	munmap(huge, SZ64K);
+	mmap(huge, SZ64K, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	for (i = 0; i < 16; i++) {
+		int ok = readable(huge + i * SZ4K);
+
+		printf("page %2d: %s\n", i, ok ? "ok" : "SIGBUS");
+		bad += !ok;
+	}
+	printf("%s: %d of 16 pages fault on fresh anonymous memory\n", bad ? "FAIL" : "PASS", bad);
+	return bad ? 1 : 0;
+}
+
+If this analysis is right I can turn the change into a proper patch
+(Fixes: 83d78ac677b9), or leave it to whoever prefers to fold it into
+the pending series.
+
+Thanks,
+<name>

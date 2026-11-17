@@ -1,0 +1,20 @@
+commit 950b879b7f0251317d26bae0687e72592d607532
+Subject: riscv: Fixup race condition on PG_dcache_clean in flush_icache_pte
+
+
+diff --git a/arch/riscv/mm/cacheflush.c b/arch/riscv/mm/cacheflush.c
+index 3cc07ed45aeb..fcd6145fbead 100644
+--- a/arch/riscv/mm/cacheflush.c
++++ b/arch/riscv/mm/cacheflush.c
+@@ -90,8 +90,10 @@ void flush_icache_pte(pte_t pte)
+ 	if (PageHuge(page))
+ 		page = compound_head(page);
+ 
+-	if (!test_and_set_bit(PG_dcache_clean, &page->flags))
++	if (!test_bit(PG_dcache_clean, &page->flags)) {
+ 		flush_icache_all();
++		set_bit(PG_dcache_clean, &page->flags);
++	}
+ }
+ #endif /* CONFIG_MMU */
+ 

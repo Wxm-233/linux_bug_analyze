@@ -1,0 +1,31 @@
+diff --git a/arch/loongarch/include/asm/kvm_host.h b/arch/loongarch/include/asm/kvm_host.h
+--- a/arch/loongarch/include/asm/kvm_host.h
++++ b/arch/loongarch/include/asm/kvm_host.h
+@@ -30,6 +30,9 @@
+ #define KVM_HALT_POLL_NS_DEFAULT	500000
+ #define KVM_REQ_TLB_FLUSH_GPA		KVM_ARCH_REQ(0)
+ 
++#define KVM_DIRTY_LOG_MANUAL_CAPS	\
++	(KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE | KVM_DIRTY_LOG_INITIALLY_SET)
++
+ #define KVM_GUESTDBG_SW_BP_MASK		\
+ 	(KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP)
+ #define KVM_GUESTDBG_VALID_MASK		\
+diff --git a/arch/loongarch/kvm/mmu.c b/arch/loongarch/kvm/mmu.c
+--- a/arch/loongarch/kvm/mmu.c
++++ b/arch/loongarch/kvm/mmu.c
+@@ -xxx,7 +xxx,13 @@
+ 	 * MOVE/DELETE:	The old mappings will already have been cleaned up by
+ 	 *		kvm_arch_flush_shadow_memslot()
+ 	 */
+-	if (!(old_flags & KVM_MEM_LOG_DIRTY_PAGES) && log_dirty_pages) {
++	if (!(old_flags & KVM_MEM_LOG_DIRTY_PAGES) && log_dirty_pages &&
++	    /*
++	     * With initial-all-set, all pages are reported dirty already,
++	     * so no need to write protect them now; userspace clears the
++	     * dirty log gradually in small chunks.
++	     */
++	    !kvm_dirty_log_manual_protect_and_init_set(kvm)) {
+ 		spin_lock(&kvm->mmu_lock);
+ 		/* Write protect GPA page table entries */
+ 		needs_flush = kvm_mkclean_gpa_pt(kvm, new->base_gfn,

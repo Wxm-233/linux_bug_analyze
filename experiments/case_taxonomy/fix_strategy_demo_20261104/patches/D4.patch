@@ -1,0 +1,109 @@
+diff --git a/arch/riscv/include/asm/kvm_gstage.h b/arch/riscv/include/asm/kvm_gstage.h
+index aaf080ba1b77..98ce64aa2b24 100644
+--- a/arch/riscv/include/asm/kvm_gstage.h
++++ b/arch/riscv/include/asm/kvm_gstage.h
+@@ -82,6 +82,9 @@ bool kvm_riscv_gstage_unmap_range(struct kvm_gstage *gstage,
+ 
+ bool kvm_riscv_gstage_wp_range(struct kvm_gstage *gstage, gpa_t start, gpa_t end);
+ 
++bool kvm_riscv_gstage_test_young_range(struct kvm_gstage *gstage, gpa_t start, gpa_t end,
++				       bool mkold);
++
+ bool kvm_riscv_gstage_wp_pt_masked(struct kvm_gstage *gstage, gfn_t base_gfn,
+ 				   unsigned long mask);
+ 
+diff --git a/arch/riscv/kvm/gstage.c b/arch/riscv/kvm/gstage.c
+index e5002cb9cbef..880f1991b080 100644
+--- a/arch/riscv/kvm/gstage.c
++++ b/arch/riscv/kvm/gstage.c
+@@ -485,6 +485,39 @@ bool kvm_riscv_gstage_wp_range(struct kvm_gstage *gstage, gpa_t start, gpa_t end
+ 	return flush;
+ }
+ 
++/*
++ * Test, and clear if @mkold, the accessed bit of every leaf PTE that maps
++ * [@start, @end); the range need not be exactly one page or block.
++ */
++bool kvm_riscv_gstage_test_young_range(struct kvm_gstage *gstage, gpa_t start, gpa_t end,
++				       bool mkold)
++{
++	int ret;
++	pte_t *ptep;
++	u32 ptep_level;
++	bool found_leaf;
++	gpa_t addr = start;
++	unsigned long page_size;
++	bool young = false;
++
++	while (addr < end) {
++		found_leaf = kvm_riscv_gstage_get_leaf(gstage, addr, &ptep, &ptep_level);
++		ret = gstage_level_to_page_size(gstage, ptep_level, &page_size);
++		if (ret)
++			break;
++
++		if (found_leaf) {
++			if (mkold)
++				young |= ptep_test_and_clear_young(NULL, 0, ptep);
++			else
++				young |= pte_young(ptep_get(ptep));
++		}
++		addr = ALIGN(addr + 1, page_size);
++	}
++
++	return young;
++}
++
+ static inline void clear_huge_mask(unsigned long *mask, unsigned long page_size,
+ 				   gfn_t base_gfn, gpa_t addr)
+ {
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index 6035b5ec9503..8d5c8cab7aad 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -351,42 +351,26 @@ bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range)
+ 
+ bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
+ {
+-	pte_t *ptep;
+-	u32 ptep_level = 0;
+-	u64 size = (range->end - range->start) << PAGE_SHIFT;
+ 	struct kvm_gstage gstage;
+ 
+ 	if (!kvm->arch.pgd)
+ 		return false;
+ 
+-	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);
+-
+ 	kvm_riscv_gstage_init(&gstage, kvm);
+-	if (!kvm_riscv_gstage_get_leaf(&gstage, range->start << PAGE_SHIFT,
+-				       &ptep, &ptep_level))
+-		return false;
+-
+-	return ptep_test_and_clear_young(NULL, 0, ptep);
++	return kvm_riscv_gstage_test_young_range(&gstage, range->start << PAGE_SHIFT,
++						 range->end << PAGE_SHIFT, true);
+ }
+ 
+ bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
+ {
+-	pte_t *ptep;
+-	u32 ptep_level = 0;
+-	u64 size = (range->end - range->start) << PAGE_SHIFT;
+ 	struct kvm_gstage gstage;
+ 
+ 	if (!kvm->arch.pgd)
+ 		return false;
+ 
+-	WARN_ON(size != PAGE_SIZE && size != PMD_SIZE && size != PUD_SIZE);
+-
+ 	kvm_riscv_gstage_init(&gstage, kvm);
+-	if (!kvm_riscv_gstage_get_leaf(&gstage, range->start << PAGE_SHIFT,
+-				       &ptep, &ptep_level))
+-		return false;
+-
+-	return pte_young(ptep_get(ptep));
++	return kvm_riscv_gstage_test_young_range(&gstage, range->start << PAGE_SHIFT,
++						 range->end << PAGE_SHIFT, false);
+ }
+ 
+ static bool fault_supports_gstage_huge_mapping(struct kvm_memory_slot *memslot,

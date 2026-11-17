@@ -1,0 +1,57 @@
+commit e68b823ab0ba03323805e54743d16200ba0224d4
+Author:     Baolin Wang <baolin.wang@linux.alibaba.com>
+AuthorDate: Fri May 27 12:51:38 2022 +0800
+Commit:     Linus Torvalds <torvalds@linux-foundation.org>
+CommitDate: Fri May 27 10:56:35 2022 -0700
+
+    arm64/hugetlb: Fix building errors in huge_ptep_clear_flush()
+    
+    Fix the arm64 build error which was caused by commit ae07562909f3 ("mm:
+    change huge_ptep_clear_flush() to return the original pte") interacting
+    with commit fb396bb459c1 ("arm64/hugetlb: Drop TLB flush from
+    get_clear_flush()"):
+    
+      arch/arm64/mm/hugetlbpage.c: In function ‘huge_ptep_clear_flush’:
+      arch/arm64/mm/hugetlbpage.c:515:9: error: implicit declaration of function ‘get_clear_flush’; did you mean ‘ptep_clear_flush’? [-Werror=implicit-function-declaration]
+        515 |  return get_clear_flush(vma->vm_mm, addr, ptep, pgsize, ncontig);
+            |         ^~~~~~~~~~~~~~~
+            |         ptep_clear_flush
+    
+    Due to the new get_clear_contig() has dropped TLB flush, we should add
+    an explicit TLB flush in huge_ptep_clear_flush() to keep original
+    semantics when changing to use new get_clear_contig().
+    
+    Fixes: fb396bb459c1 ("arm64/hugetlb: Drop TLB flush from get_clear_flush()").
+    Fixes: ae07562909f3 ("mm: change huge_ptep_clear_flush() to return the original pte")
+    Reported-and-tested-by: Linux Kernel Functional Testing <lkft@linaro.org>
+    Reported-by: Sudip Mukherjee <sudipm.mukherjee@gmail.com>
+    Suggested-by: Catalin Marinas <catalin.marinas@arm.com>
+    Signed-off-by: Baolin Wang <baolin.wang@linux.alibaba.com>
+    Reviewed-by: Gavin Shan <gshan@redhat.com>
+    Reviewed-by: Anshuman Khandual <anshuman.khandual@arm.com>
+    Cc: Catalin Marinas <catalin.marinas@arm.com>
+    Cc: Anshuman Khandual <anshuman.khandual@arm.com>
+    Cc: Andrew Morton <akpm@linux-foundation.org>
+    Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/arch/arm64/mm/hugetlbpage.c b/arch/arm64/mm/hugetlbpage.c
+index 0f0c17dfeb9c..e2a5ec9fdc0d 100644
+--- a/arch/arm64/mm/hugetlbpage.c
++++ b/arch/arm64/mm/hugetlbpage.c
+@@ -507,12 +507,15 @@ pte_t huge_ptep_clear_flush(struct vm_area_struct *vma,
+ {
+ 	size_t pgsize;
+ 	int ncontig;
++	pte_t orig_pte;
+ 
+ 	if (!pte_cont(READ_ONCE(*ptep)))
+ 		return ptep_clear_flush(vma, addr, ptep);
+ 
+ 	ncontig = find_num_contig(vma->vm_mm, addr, ptep, &pgsize);
+-	return get_clear_flush(vma->vm_mm, addr, ptep, pgsize, ncontig);
++	orig_pte = get_clear_contig(vma->vm_mm, addr, ptep, pgsize, ncontig);
++	flush_tlb_range(vma, addr, addr + pgsize * ncontig);
++	return orig_pte;
+ }
+ 
+ static int __init hugetlbpage_init(void)

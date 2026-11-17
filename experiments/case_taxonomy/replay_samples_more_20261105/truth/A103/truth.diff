@@ -1,0 +1,37 @@
+commit 68571a63f25e44291af472d079eb4f906dea08e2
+Subject: LoongArch: BPF: Inline bpf_get_smp_processor_id() helper
+
+
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 66e8c1d2d5cb..ad7e28375aa9 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -5,6 +5,7 @@
+  * Copyright (C) 2022 Loongson Technology Corporation Limited
+  */
+ #include <linux/memory.h>
++#include <asm/asm-offsets.h>
+ #include "bpf_jit.h"
+ 
+ #define LOONGARCH_MAX_REG_ARGS 8
+@@ -1168,6 +1169,12 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			break;
+ 		}
+ 
++		/* Implement helper call to bpf_get_smp_processor_id() inline */
++		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
++			emit_insn(ctx, ldwu, regmap[BPF_REG_0], LOONGARCH_GPR_TP, TI_CPU);
++			break;
++		}
++
+ 		ret = bpf_jit_get_func_addr(ctx->prog, insn, extra_pass,
+ 					    &func_addr, &func_addr_fixed);
+ 		if (ret < 0)
+@@ -2394,6 +2401,7 @@ bool bpf_jit_inlines_helper_call(s32 imm)
+ 	switch (imm) {
+ 	case BPF_FUNC_get_current_task:
+ 	case BPF_FUNC_get_current_task_btf:
++	case BPF_FUNC_get_smp_processor_id:
+ 		return true;
+ 	default:
+ 		return false;

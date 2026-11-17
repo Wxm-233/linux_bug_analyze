@@ -1,0 +1,55 @@
+099dd6878b9b [A] mm/swap: fix pte_same_as_swp() not removing uffd-wp bit when compare
+  我：不是：比较交换项时没去掉 uffd-wp 位，公共逻辑错误，所有支持 uffd-wp 的架构都一样
+  Codex：是（c2a，x86_64（该版本 HAVE_ARCH_USERFAULTFD_WP 的唯一选择者））：公共 swapoff 代码假定清掉 soft-dirty 后即可用 pte_same() 判断交换项身份，遗漏了架构 PTE 的另一个附加状态位。修复前 x86 的 pte_same() 是原始位相等比较，uffd-wp 由 _PAGE_SWP_UFFD_WP 编码，因而仅有类型和偏移相同并不保证比较成功；源码中的架构配置限定了触发范围。
+
+bd1f2b2ace84 [A] mm/rmap: handle device-exclusive entries correctly in page_vma_mkclean_one()
+  我：不是：device-exclusive 条目没处理，公共逻辑
+  Codex：是（c2a，x86_64、arm64（补读源码得到的标志复用与前置条件例证））：公共 mkclean 路径假定 RMAP 返回的任何 PTE 都可用普通 dirty/write 帮助函数解释。父版本 x86 将交换项 soft-dirty 复用到 _PAGE_RW，arm64 明确注明这些帮助函数仅对 present PTE 有定义，因此该假设会把架构交换编码当成 CPU 权限；补丁增加 present 过滤。
+
+ad1ac596e8a8 [A] mm/migration: fix potential pte_unmap on an not mapped pte
+  我：说不清：公共层假设 ptep 总是由 pte_offset_map 映射过，对 hugetlb 的 ptep 调 pte_unmap。后果只在 HIGHPTE（32 位）配置上出现，但提交说明没提架构
+  Codex：是（c2a，支持 CONFIG_HIGHPTE 的 32 位 x86、ARM；无 HIGHPTE 时 pte_unmap 为无操作）：公共迁移等待路径把 HugeTLB 指针也当作已经映射的普通 PTE 处理，隐含要求 pte_unmap() 对它无害。父版本源码显示 HIGHPTE 下它实际调用 kunmap_atomic()，其他配置才是无操作；新增专用等待路径以 NULL 指示不应解除映射。
+
+3faa3ebc89c1 [A] mm/page_idle: handle device-exclusive entries correctly in page_idle_clear_pte_refs_one()
+  我：不是：device-exclusive 条目没处理，公共逻辑
+  Codex：是（c2a，arm64（PTE_AF 与交换类型位复用）；x86_64 为不同编码的对照）：公共 page_idle 路径假定对设备独占的 PFN swap PTE 清 young 位也安全。父版本 arm64 的 PTE_AF 位于第 10 位，而交换类型位占第 6～10 位，ptep_test_and_clear_young() 不自行检查 present，会改动交换类型；x86_64 的 accessed 位不在交换类型字段中，说明不能假定所有实现同样无害。
+
+dde30854bddf [B] mm/debug_vm_pgtable: clear page table entries at destroy_args()
+  我：不是：页表测试退出时没清页表项；在 ppc64 上观察到，但问题是通用的
+  Codex：是（c2a，PowerPC Book3S64 hash MMU（页表 slab 复用）；x86 为清零分配的对照）：公共页表自测手工释放了子表，却留下父条目，隐含依赖后续架构分配或释放过程消除旧条目。提交报告 ppc64 上复用后发生重复释放；父版本 PowerPC hash 的 pgd_alloc()/pgd_free() 使用 slab 且通常不逐次清零，与 x86 的通用清零分配路径不同，故补丁补齐 *_clear()。
+
+65529295607f [B] mm/rmap: handle device-exclusive entries correctly in try_to_unmap_one()
+  我：不是：device-exclusive 条目没处理，公共逻辑
+  Codex：是（c2a，x86_64、arm64（不同交换项编码的源码例证））：公共 try_to_unmap_one() 对 RMAP 返回的设备独占项仍调用 pte_pfn()、pte_dirty()、pte_soft_dirty() 等普通 PTE 帮助函数。父版本 x86_64 的交换偏移采用反码及不同移位，arm64 也有独立交换字段，故不能把该 pte_t 当作普通映射；完整补丁分别解码 PFN、清项并保留 swap 标志。
+
+382e6e177bc1 [B] irqchip/gic-v3: Workaround inconsistent PMR setting on NMI entry
+  我：不是：arm64 entry 与 GICv3 驱动之间的 PMR 设置，都只在 arm 上
+  Codex：是（c2a，arm64（GICv3 伪 NMI））：提交明确指出 arm64 入口设置的 PMR 实际允许普通 IRQ 被确认，而公共 irqchip 驱动按 NMI 上下文继续读取 IAR。NMI 消失且普通 IRQ 待处理时，这一隐式上下文约定失效；补丁在驱动侧按保存的中断状态收紧 PMR、执行 isb() 后再确认。
+
+9add2cc22de6 [B] mm/migrate_device: fix cache flush when replacing huge zero PMD
+  我：是：公共层给 flush_cache_page() 传错了参数和范围；只在 flush_cache_* 非空的架构（如 32 位 ARM）有后果，提交说明称目前没有架构同时开 THP 迁移，属潜在问题
+  Codex：不是（None，None）：补丁修复 flush_cache_page() 的 PFN 实参误传和单页/PMD 范围选择错误。提交明确指出当前启用 ARCH_ENABLE_THP_MIGRATION 的架构均采用空操作，而有实际缓存维护的 32 位 ARM 不启用该路径，所以尚不能满足“该假设在部分可达架构上不成立”的条件。
+
+58661a30f1bc [C] riscv: Flush the instruction cache during SMP bringup
+  我：说不清：riscv 的指令缓存刷新 IPI 只发给在线 CPU，新上线的 CPU 可能看到旧指令。是否算公共层约定（代码修改对新 CPU 可见）说不清
+  Codex：不是（None，None）：RISC-V 的远程指令缓存刷新不覆盖未上线 CPU，启动路径又漏做上线后的本地刷新。提交修复的是该架构自身 I-cache 刷新与 SMP bringup 的衔接，未显示公共层调用架构接口时依赖了哪项不同于其他架构的未声明效果。
+
+b7d9d2e3a8ab [C] arm64: mm: __ptep_set_access_flags must hint correct TTL
+  我：不是：arm64 TLB 刷新的级别提示，调用者是 arm64 自己的大页辅助函数，架构内部
+  Codex：是（a2c，arm64（THP、PMD/PUD HugeTLB））：公共 MM 调用 pmdp_set_access_flags()/huge_ptep_set_access_flags() 时依赖架构在需要时清除旧权限翻译。arm64 把大页条目转换为 pte_t 后复用固定 L3 的内部刷新，破坏该效果并造成重复缺页循环；补丁传入实际 pgsize，再选择正确 TTL 和范围。
+
+b49f700668ff [C] riscv: mm: fix regression due to update_mmu_cache change
+  我：不是：riscv update_mmu_cache 在某款 SoC 上的回退，架构内部
+  Codex：说不清（a2c，RISC-V，已报告 Renesas RZ/Five SoC）：补丁把 update_mmu_cache() 的 per-ASID/可能远程刷新改回本地刷新，确实关联到特定 RISC-V 平台回退。保留的注释说明公共内核对无效 TLB 项的假设，但它在修改前后都存在；仅凭此提交及刷新实现，不能确定本次回退源于该公共边界假设，还是架构内部 ASID、远程刷新或硬件规避路径的问题。
+
+1665c027afb2 [C] powerpc/64s: Reconnect tlb_flush() to hash__tlb_flush()
+  我：不是：powerpc hash MMU 的 tlb_flush 被误删，架构内部
+  Codex：是（a2c，PowerPC64 Book3S hash MMU（区别于 radix 模式））：公共 mmu_gather 在释放页面前调用架构 tlb_flush()，隐含要求该钩子已清掉会继续访问旧页的翻译。此前清理误删了 hash 模式的实际调用，只保留 radix 分支；补丁恢复 hash__tlb_flush()，父版本实现也明确说明待释放页面前必须排空批次。
+
+835e5ac3f98e [C] riscv: Fix huge_ptep_set_wrprotect when PTE is a NAPOT
+  我：不是：riscv NAPOT 写保护要先清再刷，架构内部（提交说明提到 arm64 也这样做，是横向线索）
+  Codex：是（a2c，RISC-V Svnapot；arm64 连续项实现为提交给出的参照）：公共 HugeTLB 通过一个 huge_ptep_set_wrprotect() 操作逻辑大页，依赖架构封装该大页的所有底层项更新。RISC-V Svnapot 的旧实现逐项写保护但不先失效整组，不能提供该一致效果；补丁加入 get_clear_contig_flush() 后重建整组，父版本公共 hugetlb fork 路径确实调用此钩子。
+
+410982303772 [C] arm64: hugetlb: Restore TLB invalidation for BBM on contiguous ptes
+  我：不是：arm64 大页 BBM 序列内部漏了 TLB 失效，架构内部
+  Codex：是（a2c，arm64（连续 PTE/PMD HugeTLB））：提交明确说明架构层曾因公共 TLB 代码已能覆盖连续大页范围而删除内部刷新。公共层稍后的刷新虽覆盖同一范围，却无法满足架构 BBM 的中间时序要求；补丁在架构访问标志及写保护钩子内部恢复清除后的立即失效。

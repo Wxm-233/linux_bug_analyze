@@ -1,0 +1,41 @@
+commit c862626e19efdc26b26481515470b160e8fe52f3
+Subject: KVM: arm64: Support enabling dirty log gradually in small chunks
+
+
+diff --git a/arch/arm64/include/asm/kvm_host.h b/arch/arm64/include/asm/kvm_host.h
+index 32c8a675e5a4..a723f84fab83 100644
+--- a/arch/arm64/include/asm/kvm_host.h
++++ b/arch/arm64/include/asm/kvm_host.h
+@@ -46,6 +46,9 @@
+ #define KVM_REQ_RECORD_STEAL	KVM_ARCH_REQ(3)
+ #define KVM_REQ_RELOAD_GICv4	KVM_ARCH_REQ(4)
+ 
++#define KVM_DIRTY_LOG_MANUAL_CAPS   (KVM_DIRTY_LOG_MANUAL_PROTECT_ENABLE | \
++				     KVM_DIRTY_LOG_INITIALLY_SET)
++
+ DECLARE_STATIC_KEY_FALSE(userspace_irqchip_in_use);
+ 
+ extern unsigned int kvm_sve_max_vl;
+diff --git a/arch/arm64/kvm/mmu.c b/arch/arm64/kvm/mmu.c
+index 66eb8e3f6e8c..ddf85bf21897 100644
+--- a/arch/arm64/kvm/mmu.c
++++ b/arch/arm64/kvm/mmu.c
+@@ -2277,8 +2277,16 @@ void kvm_arch_commit_memory_region(struct kvm *kvm,
+ 	 * allocated dirty_bitmap[], dirty pages will be tracked while the
+ 	 * memory slot is write protected.
+ 	 */
+-	if (change != KVM_MR_DELETE && mem->flags & KVM_MEM_LOG_DIRTY_PAGES)
+-		kvm_mmu_wp_memory_region(kvm, mem->slot);
++	if (change != KVM_MR_DELETE && mem->flags & KVM_MEM_LOG_DIRTY_PAGES) {
++		/*
++		 * If we're with initial-all-set, we don't need to write
++		 * protect any pages because they're all reported as dirty.
++		 * Huge pages and normal pages will be write protect gradually.
++		 */
++		if (!kvm_dirty_log_manual_protect_and_init_set(kvm)) {
++			kvm_mmu_wp_memory_region(kvm, mem->slot);
++		}
++	}
+ }
+ 
+ int kvm_arch_prepare_memory_region(struct kvm *kvm,

@@ -1,0 +1,1050 @@
+==========================================================================================
+[1] fs/squashfs/file.c:580  函数 squashfs_readahead  形态 C 掩码截断：64 位的值 & ~(32/64 位可变的值 …)，32 位架构上会清掉高 32 位  位置 mask
+    32 位组合：arm32, i386, riscv32, mips32
+    555 		}
+    556 	}
+    557 
+    558 	for (i = 0; i < pages; i++) {
+    559 		unlock_page(page[i]);
+    560 		put_page(page[i]);
+    561 	}
+    562 
+    563 	squashfs_cache_put(buffer);
+    564 	return 0;
+    565 
+    566 failed:
+    567 	squashfs_page_actor_free(actor);
+    568 
+    569 out:
+    570 	squashfs_cache_put(buffer);
+    571 	return 1;
+    572 }
+    573 
+    574 static void squashfs_readahead(struct readahead_control *ractl)
+    575 {
+    576 	struct inode *inode = ractl->mapping->host;
+    577 	struct squashfs_sb_info *msblk = inode->i_sb->s_fs_info;
+    578 	size_t mask = (1UL << msblk->block_log) - 1;
+    579 	unsigned short shift = msblk->block_log - PAGE_SHIFT;
+>>  580 	loff_t start = readahead_pos(ractl) & ~mask;
+    581 	size_t len = readahead_length(ractl) + readahead_pos(ractl) - start;
+    582 	struct squashfs_page_actor *actor;
+    583 	unsigned int nr_pages = 0;
+    584 	struct page **pages;
+    585 	int i;
+    586 	loff_t file_end = i_size_read(inode) >> msblk->block_log;
+==========================================================================================
+[2] fs/ntfs3/dir.c:581  函数 ntfs_readdir  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:indx_read_ra#2
+    32 位组合：arm32, i386, riscv32, mips32
+    556 		if (err)
+    557 			goto out_unlock;
+    558 		bit = 0;
+    559 	}
+    560 
+    561 	/*
+    562 	 * Enumerate indexes until the end of dir.
+    563 	 */
+    564 	for (; bit < max_bit; bit += 1) {
+    565 		/* Get the next used index. */
+    566 		err = indx_used_bit(&ni->dir, ni, &bit);
+    567 		if (err)
+    568 			goto out_unlock;
+    569 
+    570 		if (bit == MINUS_ONE_T) {
+    571 			/* no more used indexes. end of dir. */
+    572 			break;
+    573 		}
+    574 
+    575 		if (bit >= max_bit) {
+    576 			/* Corrupted directory. */
+    577 			err = -EINVAL;
+    578 			goto out_unlock;
+    579 		}
+    580 
+>>  581 		err = indx_read_ra(&ni->dir, ni, bit << ni->dir.idx2vbn_bits,
+    582 				   &node, &file->f_ra);
+    583 		if (err)
+    584 			goto out_unlock;
+    585 
+    586 		/*
+    587 		 * Add each name from index in 'ctx'.
+==========================================================================================
+[3] fs/ntfs3/dir.c:706  函数 ntfs_dir_count  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:indx_read#2
+    32 位组合：arm32, i386, riscv32, mips32
+    681 			if (is_empty) {
+    682 				*is_empty = false;
+    683 				if (!dirs && !files)
+    684 					goto out;
+    685 			}
+    686 
+    687 			if (fname->dup.fa & FILE_ATTRIBUTE_DIRECTORY)
+    688 				drs += 1;
+    689 			else
+    690 				fles += 1;
+    691 		}
+    692 
+    693 		if (bit >= max_indx)
+    694 			goto out;
+    695 
+    696 		err = indx_used_bit(&ni->dir, ni, &bit);
+    697 		if (err)
+    698 			goto out;
+    699 
+    700 		if (bit == MINUS_ONE_T)
+    701 			goto out;
+    702 
+    703 		if (bit >= max_indx)
+    704 			goto out;
+    705 
+>>  706 		err = indx_read(&ni->dir, ni, bit << ni->dir.idx2vbn_bits,
+    707 				&node);
+    708 		if (err)
+    709 			goto out;
+    710 
+    711 		hdr = &node->index->ihdr;
+    712 		bit += 1;
+==========================================================================================
+[4] fs/ntfs3/index.c:1443  函数 indx_find_raw  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:next_used_vbn
+    32 位组合：arm32, i386, riscv32, mips32
+   1418 				continue;
+   1419 			}
+   1420 
+   1421 			/* Continue with next index. */
+   1422 			next_vbn = le64_to_cpu(n->index->vbn) +
+   1423 				   root->index_block_clst;
+   1424 		}
+   1425 
+   1426 next:
+   1427 		/* Release current index. */
+   1428 		if (n) {
+   1429 			fnd_pop(fnd);
+   1430 			put_indx_node(n);
+   1431 			n = NULL;
+   1432 		}
+   1433 
+   1434 		/* Skip all free indexes. */
+   1435 		bit = next_vbn >> indx->idx2vbn_bits;
+   1436 		err = indx_used_bit(indx, ni, &bit);
+   1437 		if (err == -ENOENT || bit == MINUS_ONE_T) {
+   1438 			/* No used indexes. */
+   1439 			*entry = NULL;
+   1440 			return 0;
+   1441 		}
+   1442 
+>> 1443 		next_used_vbn = bit << indx->idx2vbn_bits;
+   1444 
+   1445 		/* Read buffer into memory. */
+   1446 		err = indx_read(indx, ni, next_used_vbn, &n);
+   1447 		if (err)
+   1448 			return err;
+   1449 
+==========================================================================================
+[5] fs/orangefs/dir.c:157  函数 parse_readdir  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:od->end
+    32 位组合：arm32, i386, riscv32, mips32
+    132 static int parse_readdir(struct orangefs_dir *od,
+    133     struct orangefs_kernel_op_s *op)
+    134 {
+    135 	struct orangefs_dir_part *part, *new;
+    136 	size_t count;
+    137 
+    138 	count = 1;
+    139 	part = od->part;
+    140 	while (part) {
+    141 		count++;
+    142 		if (part->next)
+    143 			part = part->next;
+    144 		else
+    145 			break;
+    146 	}
+    147 
+    148 	new = (void *)op->downcall.trailer_buf;
+    149 	new->next = NULL;
+    150 	new->len = op->downcall.trailer_size -
+    151 	    sizeof(struct orangefs_readdir_response_s);
+    152 	if (!od->part)
+    153 		od->part = new;
+    154 	else
+    155 		part->next = new;
+    156 	count++;
+>>  157 	od->end = count << PART_SHIFT;
+    158 
+    159 	return 0;
+    160 }
+    161 
+    162 static int orangefs_dir_more(struct orangefs_dir *od, struct inode *inode)
+    163 {
+==========================================================================================
+[6] fs/proc/meminfo.c:30  函数 show_val_kb  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 arg:seq_put_decimal_ull_width#2
+    32 位组合：arm32, i386, riscv32, mips32
+      5 #include <linux/mm.h>
+      6 #include <linux/hugetlb.h>
+      7 #include <linux/mman.h>
+      8 #include <linux/mmzone.h>
+      9 #include <linux/memblock.h>
+     10 #include <linux/proc_fs.h>
+     11 #include <linux/percpu.h>
+     12 #include <linux/seq_file.h>
+     13 #include <linux/swap.h>
+     14 #include <linux/vmstat.h>
+     15 #include <linux/atomic.h>
+     16 #include <linux/vmalloc.h>
+     17 #ifdef CONFIG_CMA
+     18 #include <linux/cma.h>
+     19 #endif
+     20 #include <linux/zswap.h>
+     21 #include <asm/page.h>
+     22 #include "internal.h"
+     23 
+     24 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
+     25 {
+     26 }
+     27 
+     28 static void show_val_kb(struct seq_file *m, const char *s, unsigned long num)
+     29 {
+>>   30 	seq_put_decimal_ull_width(m, s, num << (PAGE_SHIFT - 10), 8);
+     31 	seq_write(m, " kB\n", 4);
+     32 }
+     33 
+     34 static int meminfo_proc_show(struct seq_file *m, void *v)
+     35 {
+     36 	struct sysinfo i;
+==========================================================================================
+[7] fs/proc/task_mmu.c:2063  函数 pte_to_pagemap_entry  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:frame
+    32 位组合：arm32, i386, riscv32, mips32
+   2038 		page = vm_normal_page(vma, addr, pte);
+   2039 		if (pte_soft_dirty(pte))
+   2040 			flags |= PM_SOFT_DIRTY;
+   2041 		if (pte_uffd(pte))
+   2042 			flags |= PM_UFFD_WP;
+   2043 	} else {
+   2044 		softleaf_t entry;
+   2045 
+   2046 		if (pte_swp_soft_dirty(pte))
+   2047 			flags |= PM_SOFT_DIRTY;
+   2048 		if (pte_swp_uffd(pte))
+   2049 			flags |= PM_UFFD_WP;
+   2050 		entry = softleaf_from_pte(pte);
+   2051 		if (pm->show_pfn) {
+   2052 			pgoff_t offset;
+   2053 
+   2054 			/*
+   2055 			 * For PFN swap offsets, keeping the offset field
+   2056 			 * to be PFN only to be compatible with old smaps.
+   2057 			 */
+   2058 			if (softleaf_has_pfn(entry))
+   2059 				offset = softleaf_to_pfn(entry);
+   2060 			else
+   2061 				offset = swp_offset(entry);
+   2062 			frame = swp_type(entry) |
+>> 2063 			    (offset << MAX_SWAPFILES_SHIFT);
+   2064 		}
+   2065 		flags |= PM_SWAP;
+   2066 		if (softleaf_has_pfn(entry))
+   2067 			page = softleaf_to_page(entry);
+   2068 		if (softleaf_is_uffd_wp_marker(entry))
+   2069 			flags |= PM_UFFD_WP;
+==========================================================================================
+[8] fs/ufs/dir.c:445  函数 ufs_readdir  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:ctx->pos
+    32 位组合：arm32, i386, riscv32, mips32
+    420 	unsigned chunk_mask = ~(UFS_SB(sb)->s_uspi->s_dirblksize - 1);
+    421 	bool need_revalidate = !inode_eq_iversion(inode, *(u64 *)file->private_data);
+    422 	unsigned flags = UFS_SB(sb)->s_flags;
+    423 
+    424 	UFSD("BEGIN\n");
+    425 
+    426 	if (pos > inode->i_size - UFS_DIR_REC_LEN(1))
+    427 		return 0;
+    428 
+    429 	for ( ; n < npages; n++, offset = 0) {
+    430 		struct ufs_dir_entry *de;
+    431 		struct folio *folio;
+    432 		char *kaddr = ufs_get_folio(inode, n, &folio);
+    433 		char *limit;
+    434 
+    435 		if (IS_ERR(kaddr)) {
+    436 			ufs_error(sb, __func__,
+    437 				  "bad page in #%llu",
+    438 				  inode->i_ino);
+    439 			ctx->pos += PAGE_SIZE - offset;
+    440 			return PTR_ERR(kaddr);
+    441 		}
+    442 		if (unlikely(need_revalidate)) {
+    443 			if (offset) {
+    444 				offset = ufs_validate_entry(sb, kaddr, offset, chunk_mask);
+>>  445 				ctx->pos = (n<<PAGE_SHIFT) + offset;
+    446 			}
+    447 			*(u64 *)file->private_data = inode_query_iversion(inode);
+    448 			need_revalidate = false;
+    449 		}
+    450 		de = (struct ufs_dir_entry *)(kaddr+offset);
+    451 		limit = kaddr + ufs_last_byte(inode, n) - UFS_DIR_REC_LEN(1);
+==========================================================================================
+[9] kernel/bpf/arena.c:867  函数 arena_free_pages  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:uaddr_end
+    32 位组合：arm32, i386, riscv32, mips32
+    842 	}
+    843 	mutex_unlock(&arena->lock);
+    844 	mutex_unlock(&arena->zap_mutex);
+    845 }
+    846 
+    847 static void arena_free_pages(struct bpf_arena *arena, long uaddr, long page_cnt, bool sleepable)
+    848 {
+    849 	struct mem_cgroup *new_memcg, *old_memcg;
+    850 	u64 full_uaddr, uaddr_end;
+    851 	long kaddr, pgoff;
+    852 	struct page *page;
+    853 	struct llist_head free_pages;
+    854 	struct llist_node *pos, *t;
+    855 	struct arena_free_span *s;
+    856 	struct clear_range_data cdata;
+    857 	unsigned long flags;
+    858 	int ret = 0;
+    859 
+    860 	/* only aligned lower 32-bit are relevant */
+    861 	uaddr = (u32)uaddr;
+    862 	uaddr &= PAGE_MASK;
+    863 	kaddr = bpf_arena_get_kern_vm_start(arena) + uaddr;
+    864 	full_uaddr = clear_lo32(arena->user_vm_start) + uaddr;
+    865 	if (full_uaddr < arena->user_vm_start)
+    866 		return;
+>>  867 	uaddr_end = min(arena->user_vm_end, full_uaddr + (page_cnt << PAGE_SHIFT));
+    868 	if (full_uaddr >= uaddr_end)
+    869 		return;
+    870 
+    871 	page_cnt = (uaddr_end - full_uaddr) >> PAGE_SHIFT;
+    872 	pgoff = compute_pgoff(arena, uaddr);
+    873 	bpf_map_memcg_enter(&arena->map, &old_memcg, &new_memcg);
+==========================================================================================
+[10] kernel/bpf/stackmap.c:165  函数 stack_map_build_id_offset  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 return:return
+    32 位组合：arm32, i386, riscv32, mips32
+    140 
+    141 	return &smap->map;
+    142 
+    143 put_buffers:
+    144 	put_callchain_buffers();
+    145 free_smap:
+    146 	bpf_map_area_free(smap);
+    147 	return ERR_PTR(err);
+    148 }
+    149 
+    150 static int fetch_build_id(struct vm_area_struct *vma, unsigned char *build_id, bool may_fault)
+    151 {
+    152 	return may_fault ? build_id_parse(vma, build_id, NULL)
+    153 			 : build_id_parse_nofault(vma, build_id, NULL);
+    154 }
+    155 
+    156 static inline void stack_map_build_id_set_ip(struct bpf_stack_build_id *id)
+    157 {
+    158 	id->status = BPF_STACK_BUILD_ID_IP;
+    159 	memset(id->build_id, 0, BUILD_ID_SIZE_MAX);
+    160 }
+    161 
+    162 static inline u64 stack_map_build_id_offset(unsigned long vm_pgoff,
+    163 					    unsigned long vm_start, u64 ip)
+    164 {
+>>  165 	return (vm_pgoff << PAGE_SHIFT) + ip - vm_start;
+    166 }
+    167 
+    168 static inline void stack_map_build_id_set_valid(struct bpf_stack_build_id *id,
+    169 						u64 offset,
+    170 						const unsigned char *build_id)
+    171 {
+==========================================================================================
+[11] kernel/events/uprobes.c:2453  函数 find_active_uprobe_speculative  形态 B 移位溢出：32/64 位可变的值先左移，再当 64 位用  位置 assign:offset
+    32 位组合：arm32, i386, riscv32, mips32
+   2428 	struct vm_area_struct *vma;
+   2429 	struct file *vm_file;
+   2430 	loff_t offset;
+   2431 	unsigned int seq;
+   2432 
+   2433 	guard(rcu)();
+   2434 
+   2435 	if (!mmap_lock_speculate_try_begin(mm, &seq))
+   2436 		return NULL;
+   2437 
+   2438 	vma = vma_lookup(mm, bp_vaddr);
+   2439 	if (!vma)
+   2440 		return NULL;
+   2441 
+   2442 	/*
+   2443 	 * vm_file memory can be reused for another instance of struct file,
+   2444 	 * but can't be freed from under us, so it's safe to read fields from
+   2445 	 * it, even if the values are some garbage values; ultimately
+   2446 	 * find_uprobe_rcu() + mmap_lock_speculation_end() check will ensure
+   2447 	 * that whatever we speculatively found is correct
+   2448 	 */
+   2449 	vm_file = READ_ONCE(vma->vm_file);
+   2450 	if (!vm_file)
+   2451 		return NULL;
+   2452 
+>> 2453 	offset = (loff_t)(vma_start_pgoff(vma) << PAGE_SHIFT) +
+   2454 		(bp_vaddr - vma->vm_start);
+   2455 	uprobe = find_uprobe_rcu(vm_file->f_inode, offset);
+   2456 	if (!uprobe)
+   2457 		return NULL;
+   2458 
+   2459 	/* now double check that nothing about MM changed */
+==========================================================================================
+[12] arch/arc/mm/init.c:61  函数 early_init_dt_add_memory_arch  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_add_node#0
+    32 位组合：arm32, i386, riscv32, mips32
+     36 	return low_mem_sz;
+     37 }
+     38 
+     39 /* User can over-ride above with "mem=nnn[KkMm]" in cmdline */
+     40 static int __init setup_mem_sz(char *str)
+     41 {
+     42 	low_mem_sz = memparse(str, NULL) & PAGE_MASK;
+     43 
+     44 	/* early console might not be setup yet - it will show up later */
+     45 	pr_info("\"mem=%s\": mem sz set to %ldM\n", str, TO_MB(low_mem_sz));
+     46 
+     47 	return 0;
+     48 }
+     49 early_param("mem", setup_mem_sz);
+     50 
+     51 void __init early_init_dt_add_memory_arch(u64 base, u64 size)
+     52 {
+     53 	int in_use = 0;
+     54 
+     55 	if (!low_mem_sz) {
+     56 		if (base != low_mem_start)
+     57 			panic("CONFIG_LINUX_RAM_BASE != DT memory { }");
+     58 
+     59 		low_mem_sz = size;
+     60 		in_use = 1;
+>>   61 		memblock_add_node(base, size, 0, MEMBLOCK_NONE);
+     62 	} else {
+     63 #ifdef CONFIG_HIGHMEM
+     64 		high_mem_start = base;
+     65 		high_mem_sz = size;
+     66 		in_use = 1;
+     67 		memblock_add_node(base, size, 1, MEMBLOCK_NONE);
+==========================================================================================
+[13] arch/arc/mm/init.c:67  函数 early_init_dt_add_memory_arch  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_add_node#0
+    32 位组合：arm32, i386, riscv32, mips32
+     42 	low_mem_sz = memparse(str, NULL) & PAGE_MASK;
+     43 
+     44 	/* early console might not be setup yet - it will show up later */
+     45 	pr_info("\"mem=%s\": mem sz set to %ldM\n", str, TO_MB(low_mem_sz));
+     46 
+     47 	return 0;
+     48 }
+     49 early_param("mem", setup_mem_sz);
+     50 
+     51 void __init early_init_dt_add_memory_arch(u64 base, u64 size)
+     52 {
+     53 	int in_use = 0;
+     54 
+     55 	if (!low_mem_sz) {
+     56 		if (base != low_mem_start)
+     57 			panic("CONFIG_LINUX_RAM_BASE != DT memory { }");
+     58 
+     59 		low_mem_sz = size;
+     60 		in_use = 1;
+     61 		memblock_add_node(base, size, 0, MEMBLOCK_NONE);
+     62 	} else {
+     63 #ifdef CONFIG_HIGHMEM
+     64 		high_mem_start = base;
+     65 		high_mem_sz = size;
+     66 		in_use = 1;
+>>   67 		memblock_add_node(base, size, 1, MEMBLOCK_NONE);
+     68 		memblock_reserve(base, size);
+     69 #endif
+     70 	}
+     71 
+     72 	pr_info("Memory @ %llx [%lldM] %s\n",
+     73 		base, TO_MB(size), !in_use ? "Not used":"");
+==========================================================================================
+[14] arch/arc/mm/init.c:68  函数 early_init_dt_add_memory_arch  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_reserve#0
+    32 位组合：arm32, i386, riscv32, mips32
+     43 
+     44 	/* early console might not be setup yet - it will show up later */
+     45 	pr_info("\"mem=%s\": mem sz set to %ldM\n", str, TO_MB(low_mem_sz));
+     46 
+     47 	return 0;
+     48 }
+     49 early_param("mem", setup_mem_sz);
+     50 
+     51 void __init early_init_dt_add_memory_arch(u64 base, u64 size)
+     52 {
+     53 	int in_use = 0;
+     54 
+     55 	if (!low_mem_sz) {
+     56 		if (base != low_mem_start)
+     57 			panic("CONFIG_LINUX_RAM_BASE != DT memory { }");
+     58 
+     59 		low_mem_sz = size;
+     60 		in_use = 1;
+     61 		memblock_add_node(base, size, 0, MEMBLOCK_NONE);
+     62 	} else {
+     63 #ifdef CONFIG_HIGHMEM
+     64 		high_mem_start = base;
+     65 		high_mem_sz = size;
+     66 		in_use = 1;
+     67 		memblock_add_node(base, size, 1, MEMBLOCK_NONE);
+>>   68 		memblock_reserve(base, size);
+     69 #endif
+     70 	}
+     71 
+     72 	pr_info("Memory @ %llx [%lldM] %s\n",
+     73 		base, TO_MB(size), !in_use ? "Not used":"");
+     74 }
+==========================================================================================
+[15] arch/arm/kernel/setup.c:1018  函数 reserve_crashkernel  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_phys_alloc_range#0
+    32 位组合：arm32, i386, riscv32, mips32
+    993  *
+    994  * This function reserves memory area given in "crashkernel=" kernel command
+    995  * line parameter. The memory reserved is used by a dump capture kernel when
+    996  * primary kernel is crashing.
+    997  */
+    998 static void __init reserve_crashkernel(void)
+    999 {
+   1000 	unsigned long long crash_size, crash_base;
+   1001 	unsigned long long total_mem;
+   1002 	int ret;
+   1003 
+   1004 	total_mem = get_total_mem();
+   1005 	ret = parse_crashkernel(boot_command_line, total_mem,
+   1006 				&crash_size, &crash_base,
+   1007 				NULL, NULL, NULL);
+   1008 	/* invalid value specified or crashkernel=0 */
+   1009 	if (ret || !crash_size)
+   1010 		return;
+   1011 
+   1012 	if (crash_base <= 0) {
+   1013 		unsigned long long crash_max = idmap_to_phys((u32)~0);
+   1014 		unsigned long long lowmem_max = __pa(high_memory - 1) + 1;
+   1015 		if (crash_max > lowmem_max)
+   1016 			crash_max = lowmem_max;
+   1017 
+>> 1018 		crash_base = memblock_phys_alloc_range(crash_size, CRASH_ALIGN,
+   1019 						       CRASH_ALIGN, crash_max);
+   1020 		if (!crash_base) {
+   1021 			pr_err("crashkernel reservation failed - No suitable area found.\n");
+   1022 			return;
+   1023 		}
+   1024 	} else {
+==========================================================================================
+[16] arch/arm/kernel/setup.c:1028  函数 reserve_crashkernel  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_phys_alloc_range#0
+    32 位组合：arm32, i386, riscv32, mips32
+   1003 
+   1004 	total_mem = get_total_mem();
+   1005 	ret = parse_crashkernel(boot_command_line, total_mem,
+   1006 				&crash_size, &crash_base,
+   1007 				NULL, NULL, NULL);
+   1008 	/* invalid value specified or crashkernel=0 */
+   1009 	if (ret || !crash_size)
+   1010 		return;
+   1011 
+   1012 	if (crash_base <= 0) {
+   1013 		unsigned long long crash_max = idmap_to_phys((u32)~0);
+   1014 		unsigned long long lowmem_max = __pa(high_memory - 1) + 1;
+   1015 		if (crash_max > lowmem_max)
+   1016 			crash_max = lowmem_max;
+   1017 
+   1018 		crash_base = memblock_phys_alloc_range(crash_size, CRASH_ALIGN,
+   1019 						       CRASH_ALIGN, crash_max);
+   1020 		if (!crash_base) {
+   1021 			pr_err("crashkernel reservation failed - No suitable area found.\n");
+   1022 			return;
+   1023 		}
+   1024 	} else {
+   1025 		unsigned long long crash_max = crash_base + crash_size;
+   1026 		unsigned long long start;
+   1027 
+>> 1028 		start = memblock_phys_alloc_range(crash_size, SECTION_SIZE,
+   1029 						  crash_base, crash_max);
+   1030 		if (!start) {
+   1031 			pr_err("crashkernel reservation failed - memory is in use.\n");
+   1032 			return;
+   1033 		}
+   1034 	}
+==========================================================================================
+[17] arch/arm/kernel/setup.c:1057  函数 reserve_crashkernel  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:crashk_boot_res.end
+    32 位组合：arm32, i386, riscv32, mips32
+   1032 			return;
+   1033 		}
+   1034 	}
+   1035 
+   1036 	pr_info("Reserving %ldMB of memory at %ldMB for crashkernel (System RAM: %ldMB)\n",
+   1037 		(unsigned long)(crash_size >> 20),
+   1038 		(unsigned long)(crash_base >> 20),
+   1039 		(unsigned long)(total_mem >> 20));
+   1040 
+   1041 	/* The crashk resource must always be located in normal mem */
+   1042 	crashk_res.start = crash_base;
+   1043 	crashk_res.end = crash_base + crash_size - 1;
+   1044 	insert_resource(&iomem_resource, &crashk_res);
+   1045 
+   1046 	if (arm_has_idmap_alias()) {
+   1047 		/*
+   1048 		 * If we have a special RAM alias for use at boot, we
+   1049 		 * need to advertise to kexec tools where the alias is.
+   1050 		 */
+   1051 		static struct resource crashk_boot_res = {
+   1052 			.name = "Crash kernel (boot alias)",
+   1053 			.flags = IORESOURCE_BUSY | IORESOURCE_MEM,
+   1054 		};
+   1055 
+   1056 		crashk_boot_res.start = phys_to_idmap(crash_base);
+>> 1057 		crashk_boot_res.end = crashk_boot_res.start + crash_size - 1;
+   1058 		insert_resource(&iomem_resource, &crashk_boot_res);
+   1059 	}
+   1060 }
+   1061 #else
+   1062 static inline void reserve_crashkernel(void) {}
+   1063 #endif /* CONFIG_CRASH_RESERVE*/
+==========================================================================================
+[18] arch/arm/kernel/sys_oabi-compat.c:128  函数 cp_oldabi_stat64  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:tmp.__st_ino
+    32 位组合：arm32, i386, riscv32, mips32
+    103 	unsigned int	__pad2;
+    104 
+    105 	long long	st_size;
+    106 	unsigned long	st_blksize;
+    107 	unsigned long long st_blocks;
+    108 
+    109 	unsigned long	st_atime;
+    110 	unsigned long	st_atime_nsec;
+    111 
+    112 	unsigned long	st_mtime;
+    113 	unsigned long	st_mtime_nsec;
+    114 
+    115 	unsigned long	st_ctime;
+    116 	unsigned long	st_ctime_nsec;
+    117 
+    118 	unsigned long long st_ino;
+    119 } __attribute__ ((packed,aligned(4)));
+    120 
+    121 static long cp_oldabi_stat64(struct kstat *stat,
+    122 			     struct oldabi_stat64 __user *statbuf)
+    123 {
+    124 	struct oldabi_stat64 tmp;
+    125 
+    126 	tmp.st_dev = huge_encode_dev(stat->dev);
+    127 	tmp.__pad1 = 0;
+>>  128 	tmp.__st_ino = stat->ino;
+    129 	tmp.st_mode = stat->mode;
+    130 	tmp.st_nlink = stat->nlink;
+    131 	tmp.st_uid = from_kuid_munged(current_user_ns(), stat->uid);
+    132 	tmp.st_gid = from_kgid_munged(current_user_ns(), stat->gid);
+    133 	tmp.st_rdev = huge_encode_dev(stat->rdev);
+    134 	tmp.st_size = stat->size;
+==========================================================================================
+[19] arch/arm/kernel/sys_oabi-compat.c:138  函数 cp_oldabi_stat64  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:tmp.st_atime
+    32 位组合：arm32, i386, riscv32, mips32
+    113 	unsigned long	st_mtime_nsec;
+    114 
+    115 	unsigned long	st_ctime;
+    116 	unsigned long	st_ctime_nsec;
+    117 
+    118 	unsigned long long st_ino;
+    119 } __attribute__ ((packed,aligned(4)));
+    120 
+    121 static long cp_oldabi_stat64(struct kstat *stat,
+    122 			     struct oldabi_stat64 __user *statbuf)
+    123 {
+    124 	struct oldabi_stat64 tmp;
+    125 
+    126 	tmp.st_dev = huge_encode_dev(stat->dev);
+    127 	tmp.__pad1 = 0;
+    128 	tmp.__st_ino = stat->ino;
+    129 	tmp.st_mode = stat->mode;
+    130 	tmp.st_nlink = stat->nlink;
+    131 	tmp.st_uid = from_kuid_munged(current_user_ns(), stat->uid);
+    132 	tmp.st_gid = from_kgid_munged(current_user_ns(), stat->gid);
+    133 	tmp.st_rdev = huge_encode_dev(stat->rdev);
+    134 	tmp.st_size = stat->size;
+    135 	tmp.st_blocks = stat->blocks;
+    136 	tmp.__pad2 = 0;
+    137 	tmp.st_blksize = stat->blksize;
+>>  138 	tmp.st_atime = stat->atime.tv_sec;
+    139 	tmp.st_atime_nsec = stat->atime.tv_nsec;
+    140 	tmp.st_mtime = stat->mtime.tv_sec;
+    141 	tmp.st_mtime_nsec = stat->mtime.tv_nsec;
+    142 	tmp.st_ctime = stat->ctime.tv_sec;
+    143 	tmp.st_ctime_nsec = stat->ctime.tv_nsec;
+    144 	tmp.st_ino = stat->ino;
+==========================================================================================
+[20] arch/arm/kernel/sys_oabi-compat.c:140  函数 cp_oldabi_stat64  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:tmp.st_mtime
+    32 位组合：arm32, i386, riscv32, mips32
+    115 	unsigned long	st_ctime;
+    116 	unsigned long	st_ctime_nsec;
+    117 
+    118 	unsigned long long st_ino;
+    119 } __attribute__ ((packed,aligned(4)));
+    120 
+    121 static long cp_oldabi_stat64(struct kstat *stat,
+    122 			     struct oldabi_stat64 __user *statbuf)
+    123 {
+    124 	struct oldabi_stat64 tmp;
+    125 
+    126 	tmp.st_dev = huge_encode_dev(stat->dev);
+    127 	tmp.__pad1 = 0;
+    128 	tmp.__st_ino = stat->ino;
+    129 	tmp.st_mode = stat->mode;
+    130 	tmp.st_nlink = stat->nlink;
+    131 	tmp.st_uid = from_kuid_munged(current_user_ns(), stat->uid);
+    132 	tmp.st_gid = from_kgid_munged(current_user_ns(), stat->gid);
+    133 	tmp.st_rdev = huge_encode_dev(stat->rdev);
+    134 	tmp.st_size = stat->size;
+    135 	tmp.st_blocks = stat->blocks;
+    136 	tmp.__pad2 = 0;
+    137 	tmp.st_blksize = stat->blksize;
+    138 	tmp.st_atime = stat->atime.tv_sec;
+    139 	tmp.st_atime_nsec = stat->atime.tv_nsec;
+>>  140 	tmp.st_mtime = stat->mtime.tv_sec;
+    141 	tmp.st_mtime_nsec = stat->mtime.tv_nsec;
+    142 	tmp.st_ctime = stat->ctime.tv_sec;
+    143 	tmp.st_ctime_nsec = stat->ctime.tv_nsec;
+    144 	tmp.st_ino = stat->ino;
+    145 	return copy_to_user(statbuf,&tmp,sizeof(tmp)) ? -EFAULT : 0;
+    146 }
+==========================================================================================
+[21] arch/arm/kernel/sys_oabi-compat.c:142  函数 cp_oldabi_stat64  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:tmp.st_ctime
+    32 位组合：arm32, i386, riscv32, mips32
+    117 
+    118 	unsigned long long st_ino;
+    119 } __attribute__ ((packed,aligned(4)));
+    120 
+    121 static long cp_oldabi_stat64(struct kstat *stat,
+    122 			     struct oldabi_stat64 __user *statbuf)
+    123 {
+    124 	struct oldabi_stat64 tmp;
+    125 
+    126 	tmp.st_dev = huge_encode_dev(stat->dev);
+    127 	tmp.__pad1 = 0;
+    128 	tmp.__st_ino = stat->ino;
+    129 	tmp.st_mode = stat->mode;
+    130 	tmp.st_nlink = stat->nlink;
+    131 	tmp.st_uid = from_kuid_munged(current_user_ns(), stat->uid);
+    132 	tmp.st_gid = from_kgid_munged(current_user_ns(), stat->gid);
+    133 	tmp.st_rdev = huge_encode_dev(stat->rdev);
+    134 	tmp.st_size = stat->size;
+    135 	tmp.st_blocks = stat->blocks;
+    136 	tmp.__pad2 = 0;
+    137 	tmp.st_blksize = stat->blksize;
+    138 	tmp.st_atime = stat->atime.tv_sec;
+    139 	tmp.st_atime_nsec = stat->atime.tv_nsec;
+    140 	tmp.st_mtime = stat->mtime.tv_sec;
+    141 	tmp.st_mtime_nsec = stat->mtime.tv_nsec;
+>>  142 	tmp.st_ctime = stat->ctime.tv_sec;
+    143 	tmp.st_ctime_nsec = stat->ctime.tv_nsec;
+    144 	tmp.st_ino = stat->ino;
+    145 	return copy_to_user(statbuf,&tmp,sizeof(tmp)) ? -EFAULT : 0;
+    146 }
+    147 
+    148 asmlinkage long sys_oabi_stat64(const char __user * filename,
+==========================================================================================
+[22] arch/arm/mm/dma-mapping.c:1663  函数 arm_setup_iommu_dma_ops  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:arm_iommu_create_mapping#1
+    32 位组合：arm32, i386, riscv32, mips32
+   1638 
+   1639 	mapping = to_dma_iommu_mapping(dev);
+   1640 	if (!mapping) {
+   1641 		dev_warn(dev, "Not attached\n");
+   1642 		return;
+   1643 	}
+   1644 
+   1645 	iommu_detach_device(mapping->domain, dev);
+   1646 	kref_put(&mapping->kref, release_iommu_mapping);
+   1647 	to_dma_iommu_mapping(dev) = NULL;
+   1648 	set_dma_ops(dev, NULL);
+   1649 
+   1650 	pr_debug("Detached IOMMU controller from %s device.\n", dev_name(dev));
+   1651 }
+   1652 EXPORT_SYMBOL_GPL(arm_iommu_detach_device);
+   1653 
+   1654 static void arm_setup_iommu_dma_ops(struct device *dev)
+   1655 {
+   1656 	struct dma_iommu_mapping *mapping;
+   1657 	u64 dma_base = 0, size = 1ULL << 32;
+   1658 
+   1659 	if (dev->dma_range_map) {
+   1660 		dma_base = dma_range_map_min(dev->dma_range_map);
+   1661 		size = dma_range_map_max(dev->dma_range_map) - dma_base;
+   1662 	}
+>> 1663 	mapping = arm_iommu_create_mapping(dev, dma_base, size);
+   1664 	if (IS_ERR(mapping)) {
+   1665 		pr_warn("Failed to create %llu-byte IOMMU mapping for device %s\n",
+   1666 				size, dev_name(dev));
+   1667 		return;
+   1668 	}
+   1669 
+==========================================================================================
+[23] arch/arm/mm/flush.c:235  函数 __flush_dcache_folio  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:flush_pfn_alias#1
+    32 位组合：arm32, i386, riscv32, mips32
+    210 		unsigned long i;
+    211 		if (cache_is_vipt_nonaliasing()) {
+    212 			for (i = 0; i < folio_nr_pages(folio); i++) {
+    213 				void *addr = kmap_local_folio(folio,
+    214 								i * PAGE_SIZE);
+    215 				__cpuc_flush_dcache_area(addr, PAGE_SIZE);
+    216 				kunmap_local(addr);
+    217 			}
+    218 		} else {
+    219 			for (i = 0; i < folio_nr_pages(folio); i++) {
+    220 				void *addr = kmap_high_get(folio_page(folio, i));
+    221 				if (addr) {
+    222 					__cpuc_flush_dcache_area(addr, PAGE_SIZE);
+    223 					kunmap_high(folio_page(folio, i));
+    224 				}
+    225 			}
+    226 		}
+    227 	}
+    228 
+    229 	/*
+    230 	 * If this is a page cache folio, and we have an aliasing VIPT cache,
+    231 	 * we only need to do one flush - which would be at the relevant
+    232 	 * userspace colour, which is congruent with folio->index.
+    233 	 */
+    234 	if (mapping && cache_is_vipt_aliasing())
+>>  235 		flush_pfn_alias(folio_pfn(folio), folio_pos(folio));
+    236 }
+    237 
+    238 static void __flush_dcache_aliases(struct address_space *mapping, struct folio *folio)
+    239 {
+    240 	struct mm_struct *mm = current->active_mm;
+    241 	struct vm_area_struct *vma;
+==========================================================================================
+[24] arch/arm/mm/mmu.c:1155  函数 early_vmalloc  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:vmalloc_reserve
+    32 位组合：arm32, i386, riscv32, mips32
+   1130 #ifdef CONFIG_DEBUG_LL
+   1131 void __init debug_ll_io_init(void)
+   1132 {
+   1133 	struct map_desc map;
+   1134 
+   1135 	debug_ll_addr(&map.pfn, &map.virtual);
+   1136 	if (!map.pfn || !map.virtual)
+   1137 		return;
+   1138 	map.pfn = __phys_to_pfn(map.pfn);
+   1139 	map.virtual &= PAGE_MASK;
+   1140 	map.length = PAGE_SIZE;
+   1141 	map.type = MT_DEVICE;
+   1142 	iotable_init(&map, 1);
+   1143 }
+   1144 #endif
+   1145 
+   1146 static unsigned long __initdata vmalloc_size = 240 * SZ_1M;
+   1147 
+   1148 /*
+   1149  * vmalloc=size forces the vmalloc area to be exactly 'size'
+   1150  * bytes. This can be used to increase (or decrease) the vmalloc
+   1151  * area - the default is 240MiB.
+   1152  */
+   1153 static int __init early_vmalloc(char *arg)
+   1154 {
+>> 1155 	unsigned long vmalloc_reserve = memparse(arg, NULL);
+   1156 	unsigned long vmalloc_max;
+   1157 
+   1158 	if (vmalloc_reserve < SZ_16M) {
+   1159 		vmalloc_reserve = SZ_16M;
+   1160 		pr_warn("vmalloc area is too small, limiting to %luMiB\n",
+   1161 			vmalloc_reserve >> 20);
+==========================================================================================
+[25] arch/loongarch/kernel/mem.c:32  函数 memblock_init  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_add#0
+    32 位组合：arm32, i386, riscv32, mips32
+      7 #include <linux/memblock.h>
+      8 
+      9 #include <asm/bootinfo.h>
+     10 #include <asm/loongson.h>
+     11 #include <asm/sections.h>
+     12 
+     13 void __init memblock_init(void)
+     14 {
+     15 	u32 mem_type;
+     16 	u64 mem_start, mem_size;
+     17 	efi_memory_desc_t *md;
+     18 
+     19 	/* Parse memory information */
+     20 	for_each_efi_memory_desc(md) {
+     21 		mem_type = md->type;
+     22 		mem_start = md->phys_addr;
+     23 		mem_size = md->num_pages << EFI_PAGE_SHIFT;
+     24 
+     25 		switch (mem_type) {
+     26 		case EFI_LOADER_CODE:
+     27 		case EFI_LOADER_DATA:
+     28 		case EFI_BOOT_SERVICES_CODE:
+     29 		case EFI_BOOT_SERVICES_DATA:
+     30 		case EFI_PERSISTENT_MEMORY:
+     31 		case EFI_CONVENTIONAL_MEMORY:
+>>   32 			memblock_add(mem_start, mem_size);
+     33 			break;
+     34 		case EFI_PAL_CODE:
+     35 		case EFI_UNUSABLE_MEMORY:
+     36 		case EFI_ACPI_RECLAIM_MEMORY:
+     37 			memblock_add(mem_start, mem_size);
+     38 			fallthrough;
+==========================================================================================
+[26] arch/loongarch/kernel/mem.c:37  函数 memblock_init  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_add#0
+    32 位组合：arm32, i386, riscv32, mips32
+     12 
+     13 void __init memblock_init(void)
+     14 {
+     15 	u32 mem_type;
+     16 	u64 mem_start, mem_size;
+     17 	efi_memory_desc_t *md;
+     18 
+     19 	/* Parse memory information */
+     20 	for_each_efi_memory_desc(md) {
+     21 		mem_type = md->type;
+     22 		mem_start = md->phys_addr;
+     23 		mem_size = md->num_pages << EFI_PAGE_SHIFT;
+     24 
+     25 		switch (mem_type) {
+     26 		case EFI_LOADER_CODE:
+     27 		case EFI_LOADER_DATA:
+     28 		case EFI_BOOT_SERVICES_CODE:
+     29 		case EFI_BOOT_SERVICES_DATA:
+     30 		case EFI_PERSISTENT_MEMORY:
+     31 		case EFI_CONVENTIONAL_MEMORY:
+     32 			memblock_add(mem_start, mem_size);
+     33 			break;
+     34 		case EFI_PAL_CODE:
+     35 		case EFI_UNUSABLE_MEMORY:
+     36 		case EFI_ACPI_RECLAIM_MEMORY:
+>>   37 			memblock_add(mem_start, mem_size);
+     38 			fallthrough;
+     39 		case EFI_RESERVED_TYPE:
+     40 		case EFI_RUNTIME_SERVICES_CODE:
+     41 		case EFI_RUNTIME_SERVICES_DATA:
+     42 		case EFI_MEMORY_MAPPED_IO:
+     43 		case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+==========================================================================================
+[27] arch/loongarch/kernel/mem.c:44  函数 memblock_init  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:memblock_reserve#0
+    32 位组合：arm32, i386, riscv32, mips32
+     19 	/* Parse memory information */
+     20 	for_each_efi_memory_desc(md) {
+     21 		mem_type = md->type;
+     22 		mem_start = md->phys_addr;
+     23 		mem_size = md->num_pages << EFI_PAGE_SHIFT;
+     24 
+     25 		switch (mem_type) {
+     26 		case EFI_LOADER_CODE:
+     27 		case EFI_LOADER_DATA:
+     28 		case EFI_BOOT_SERVICES_CODE:
+     29 		case EFI_BOOT_SERVICES_DATA:
+     30 		case EFI_PERSISTENT_MEMORY:
+     31 		case EFI_CONVENTIONAL_MEMORY:
+     32 			memblock_add(mem_start, mem_size);
+     33 			break;
+     34 		case EFI_PAL_CODE:
+     35 		case EFI_UNUSABLE_MEMORY:
+     36 		case EFI_ACPI_RECLAIM_MEMORY:
+     37 			memblock_add(mem_start, mem_size);
+     38 			fallthrough;
+     39 		case EFI_RESERVED_TYPE:
+     40 		case EFI_RUNTIME_SERVICES_CODE:
+     41 		case EFI_RUNTIME_SERVICES_DATA:
+     42 		case EFI_MEMORY_MAPPED_IO:
+     43 		case EFI_MEMORY_MAPPED_IO_PORT_SPACE:
+>>   44 			memblock_reserve(mem_start, mem_size);
+     45 			break;
+     46 		}
+     47 	}
+     48 
+     49 	max_pfn = PFN_DOWN(memblock_end_of_DRAM());
+     50 	max_low_pfn = min(PFN_DOWN(HIGHMEM_START), max_pfn);
+==========================================================================================
+[28] arch/loongarch/kernel/time.c:128  函数 get_loops_per_jiffy  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 return:return
+    32 位组合：arm32, i386, riscv32, mips32
+    103 
+    104 	return 0;
+    105 }
+    106 
+    107 static int arch_timer_starting(unsigned int cpu)
+    108 {
+    109 	set_csr_ecfg(ECFGF_TIMER);
+    110 
+    111 	return 0;
+    112 }
+    113 
+    114 static int arch_timer_dying(unsigned int cpu)
+    115 {
+    116 	/* Clear Timer Interrupt */
+    117 	write_csr_tintclear(CSR_TINTCLR_TI);
+    118 
+    119 	return 0;
+    120 }
+    121 
+    122 static unsigned long get_loops_per_jiffy(void)
+    123 {
+    124 	u64 lpj = const_clock_freq;
+    125 
+    126 	do_div(lpj, HZ);
+    127 
+>>  128 	return lpj;
+    129 }
+    130 
+    131 static long init_offset;
+    132 
+    133 void save_counter(void)
+    134 {
+==========================================================================================
+[29] arch/loongarch/mm/tlb.c:152  函数 __update_hugetlb  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 assign:lo
+    32 位组合：arm32, i386, riscv32, mips32
+    127 
+    128 /*
+    129  * This one is only used for pages with the global bit set so we don't care
+    130  * much about the ASID.
+    131  */
+    132 void local_flush_tlb_one(unsigned long page)
+    133 {
+    134 	page &= (PAGE_MASK << 1);
+    135 	invtlb_addr(INVTLB_ADDR_GTRUE_OR_ASID, 0, page);
+    136 }
+    137 
+    138 static void __update_hugetlb(struct vm_area_struct *vma, unsigned long address, pte_t *ptep)
+    139 {
+    140 #ifdef CONFIG_HUGETLB_PAGE
+    141 	int idx;
+    142 	unsigned long lo;
+    143 	unsigned long flags;
+    144 
+    145 	local_irq_save(flags);
+    146 
+    147 	address &= (PAGE_MASK << 1);
+    148 	write_csr_entryhi(address);
+    149 	tlb_probe();
+    150 	idx = read_csr_tlbidx();
+    151 	write_csr_pagesize(PS_HUGE_SIZE);
+>>  152 	lo = pmd_to_entrylo(pte_val(*ptep));
+    153 	write_csr_entrylo0(lo);
+    154 	write_csr_entrylo1(lo + (HPAGE_SIZE >> 1));
+    155 
+    156 	if (idx < 0)
+    157 		tlb_write_random();
+    158 	else
+==========================================================================================
+[30] arch/mips/kernel/ptrace32.c:73  函数 compat_arch_ptrace  形态 A 窄化：恒 64 位的值交给在 32 位架构上只有 32 位的类型  位置 arg:ptrace_access_vm#1
+    32 位组合：arm32, i386, riscv32, mips32
+     48 	int ret;
+     49 
+     50 	switch (request) {
+     51 
+     52 	/*
+     53 	 * Read 4 bytes of the other process' storage
+     54 	 *  data is a pointer specifying where the user wants the
+     55 	 *	4 bytes copied into
+     56 	 *  addr is a pointer in the user's storage that contains an 8 byte
+     57 	 *	address in the other process of the 4 bytes that is to be read
+     58 	 * (this is run in a 32-bit process looking at a 64-bit process)
+     59 	 * when I and D space are separate, these will need to be fixed.
+     60 	 */
+     61 	case PTRACE_PEEKTEXT_3264:
+     62 	case PTRACE_PEEKDATA_3264: {
+     63 		u32 tmp;
+     64 		int copied;
+     65 		u32 __user * addrOthers;
+     66 
+     67 		ret = -EIO;
+     68 
+     69 		/* Get the addr in the other process that we want to read */
+     70 		if (get_user(addrOthers, (u32 __user * __user *) (unsigned long) addr) != 0)
+     71 			break;
+     72 
+>>   73 		copied = ptrace_access_vm(child, (u64)addrOthers, &tmp,
+     74 				sizeof(tmp), FOLL_FORCE);
+     75 		if (copied != sizeof(tmp))
+     76 			break;
+     77 		ret = put_user(tmp, (u32 __user *) (unsigned long) data);
+     78 		break;
+     79 	}

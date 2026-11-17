@@ -1,0 +1,2644 @@
+########## 第1条  编号 A062  提交 a9ad73295cc1  日期 2024-03-11
+
+【提交说明】
+riscv: Fix syscall wrapper for >word-size arguments
+
+The current syscall wrapper macros break 64-bit arguments on
+rv32 because they only guarantee the first N input registers are
+passed to syscalls that accept N arguments. According to the
+calling convention, values twice the word size reside in register
+pairs and as a result, syscall arguments don't always have a
+direct register mapping on rv32.
+
+Instead of using `__MAP(x,__SC_LONG,__VA_ARGS__)` to declare the
+type of the `__se(_compat)_sys_*` functions on rv32, change the
+function declarations to accept `ulong` arguments and alias them
+to the actual syscall implementations, similarly to the existing
+macros in include/linux/syscalls.h. This matches previous
+behavior and ensures registers are passed to syscalls as-is, no
+matter which argument types they expect.
+
+Fixes: 08d0ce30e0e4 ("riscv: Implement syscall wrappers")
+
+【改动统计】
+ arch/riscv/include/asm/syscall_wrapper.h | 53 ++++++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 39 insertions(+), 14 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/syscall_wrapper.h b/arch/riscv/include/asm/syscall_wrapper.h
+index eeec04b7dae6..980094c2e976 100644
+--- a/arch/riscv/include/asm/syscall_wrapper.h
++++ b/arch/riscv/include/asm/syscall_wrapper.h
+@@ -12,25 +12,51 @@
+ 
+ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ 
+-#define SC_RISCV_REGS_TO_ARGS(x, ...)				\
+-	__MAP(x,__SC_ARGS					\
+-	      ,,regs->orig_a0,,regs->a1,,regs->a2		\
++#ifdef CONFIG_64BIT
++
++#define __SYSCALL_SE_DEFINEx(x, prefix, name, ...)					\
++	static long __se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
++	static long __se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
++
++#define SC_RISCV_REGS_TO_ARGS(x, ...)							\
++	__MAP(x,__SC_ARGS								\
++	      ,,regs->orig_a0,,regs->a1,,regs->a2					\
+ 	      ,,regs->a3,,regs->a4,,regs->a5,,regs->a6)
+ 
++#else
++/*
++ * Use type aliasing to ensure registers a0-a6 are correctly passed to the syscall
++ * implementation when >word-size arguments are used.
++ */
++#define __SYSCALL_SE_DEFINEx(x, prefix, name, ...)					\
++	__diag_push();									\
++	__diag_ignore(GCC, 8, "-Wattribute-alias",					\
++			"Type aliasing is used to sanitize syscall arguments");		\
++	static long __se_##prefix##name(ulong, ulong, ulong, ulong, ulong, ulong, 	\
++					ulong)						\
++			__attribute__((alias(__stringify(___se_##prefix##name))));	\
++	__diag_pop();									\
++	static long noinline ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__));	\
++	static long ___se_##prefix##name(__MAP(x,__SC_LONG,__VA_ARGS__))
++
++#define SC_RISCV_REGS_TO_ARGS(x, ...) \
++	regs->orig_a0,regs->a1,regs->a2,regs->a3,regs->a4,regs->a5,regs->a6
++
++#endif /* CONFIG_64BIT */
++
+ #ifdef CONFIG_COMPAT
+ 
+ #define COMPAT_SYSCALL_DEFINEx(x, name, ...)						\
+ 	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs);		\
+ 	ALLOW_ERROR_INJECTION(__riscv_compat_sys##name, ERRNO);				\
+-	static long __se_compat_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
+ 	static inline long __do_compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__));	\
+-	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs)		\
++	__SYSCALL_SE_DEFINEx(x, compat_sys, name, __VA_ARGS__)				\
+ 	{										\
+-		return __se_compat_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
++		return __do_compat_sys##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
+ 	}										\
+-	static long __se_compat_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__))		\
++	asmlinkage long __riscv_compat_sys##name(const struct pt_regs *regs)		\
+ 	{										\
+-		return __do_compat_sys##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
++		return __se_compat_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
+ 	}										\
+ 	static inline long __do_compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))
+ 
+@@ -51,19 +77,18 @@ asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *);
+ #define __SYSCALL_DEFINEx(x, name, ...)						\
+ 	asmlinkage long __riscv_sys##name(const struct pt_regs *regs);		\
+ 	ALLOW_ERROR_INJECTION(__riscv_sys##name, ERRNO);			\
+-	static long __se_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__));		\
+ 	static inline long __do_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__));	\
+-	asmlinkage long __riscv_sys##name(const struct pt_regs *regs)		\
+-	{									\
+-		return __se_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
+-	}									\
+-	static long __se_sys##name(__MAP(x,__SC_LONG,__VA_ARGS__))		\
++	__SYSCALL_SE_DEFINEx(x, sys, name, __VA_ARGS__)				\
+ 	{									\
+ 		long ret = __do_sys##name(__MAP(x,__SC_CAST,__VA_ARGS__));	\
+ 		__MAP(x,__SC_TEST,__VA_ARGS__);					\
+ 		__PROTECT(x, ret,__MAP(x,__SC_ARGS,__VA_ARGS__));		\
+ 		return ret;							\
+ 	}									\
++	asmlinkage long __riscv_sys##name(const struct pt_regs *regs)		\
++	{									\
++		return __se_sys##name(SC_RISCV_REGS_TO_ARGS(x,__VA_ARGS__));	\
++	}									\
+ 	static inline long __do_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))
+ 
+ #define SYSCALL_DEFINE0(sname)							\
+
+
+########## 第2条  编号 A392  提交 5fc6e7d45373  日期 2026-06-29
+
+【提交说明】
+riscv: kexec_file: Fix crashk_low_res not exclude bug
+
+As done in commit 944a45abfabc ("arm64: kdump: Reimplement crashkernel=X")
+and commit 4831be702b95 ("arm64/kexec: Fix missing extra range for
+crashkres_low.") for arm64, while implementing crashkernel=X,[high,low],
+riscv should have excluded the "crashk_low_res" reserved ranges from
+the crash kernel memory to prevent them from being exported through
+/proc/vmcore, and the exclusion would need an extra crash_mem range.
+
+Just simply tested on qemu with crashkernel=4G with kexec in [1] mentioned
+in [2]. And the second kernel can be started normally.
+
+	# dmesg | grep crash
+	[    0.000000] crashkernel low memory reserved: 0xf8000000 - 0x100000000 (128 MB)
+	[    0.000000] crashkernel reserved: 0x000000017fe00000 - 0x000000027fe00000 (4096 MB)
+
+[1]: https://github.com/chenjh005/kexec-tools/tree/build-test-riscv-v2
+[2]: https://lore.kernel.org/all/20230726175000.2536220-1-chenjiahao16@huawei.com/
+
+Fixes: 5882e5acf18d ("riscv: kdump: Implement crashkernel=X,[high,low]")
+
+【改动统计】
+ arch/riscv/kernel/machine_kexec_file.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/machine_kexec_file.c b/arch/riscv/kernel/machine_kexec_file.c
+index 59d4bbc848a8..fa2946aa9b8f 100644
+--- a/arch/riscv/kernel/machine_kexec_file.c
++++ b/arch/riscv/kernel/machine_kexec_file.c
+@@ -62,7 +62,7 @@ static int prepare_elf_headers(void **addr, unsigned long *sz)
+ 	unsigned int nr_ranges;
+ 	int ret;
+ 
+-	nr_ranges = 1; /* For exclusion of crashkernel region */
++	nr_ranges = 2; /* For exclusion of crashkernel region */
+ 	walk_system_ram_res(0, -1, &nr_ranges, get_nr_ram_ranges_callback);
+ 
+ 	cmem = kmalloc_flex(*cmem, ranges, nr_ranges);
+@@ -77,8 +77,16 @@ static int prepare_elf_headers(void **addr, unsigned long *sz)
+ 
+ 	/* Exclude crashkernel region */
+ 	ret = crash_exclude_mem_range(cmem, crashk_res.start, crashk_res.end);
+-	if (!ret)
+-		ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
++	if (ret)
++		goto out;
++
++	if (crashk_low_res.end) {
++		ret = crash_exclude_mem_range(cmem, crashk_low_res.start, crashk_low_res.end);
++		if (ret)
++			goto out;
++	}
++
++	ret = crash_prepare_elf64_headers(cmem, true, addr, sz);
+ 
+ out:
+ 	kfree(cmem);
+
+
+########## 第3条  编号 A396  提交 e971f19e4c82  日期 2026-07-16
+
+【提交说明】
+KVM: riscv: Fix infinite loop in NACL hfence entry allocation
+
+try_count is initialized to 5 but never decremented in the retry path,
+making the `if (try_count)` check always true. If all NACL shared memory
+hfence entries remain in the pending state after sync, the function loops
+forever, causing a soft lockup. Decrement try_count on each retry so the
+fallback warning and return become reachable.
+
+Fixes: d466c19cead5 ("RISC-V: KVM: Add common nested acceleration support")
+
+【改动统计】
+ arch/riscv/kvm/nacl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/nacl.c b/arch/riscv/kvm/nacl.c
+index 6f9f8963e9dd..9aff03c4f667 100644
+--- a/arch/riscv/kvm/nacl.c
++++ b/arch/riscv/kvm/nacl.c
+@@ -33,7 +33,7 @@ void __kvm_riscv_nacl_hfence(void *shmem,
+ 	}
+ 
+ 	if (ent < 0) {
+-		if (try_count) {
++		if (try_count--) {
+ 			nacl_sync_hfence(-1UL);
+ 			goto again;
+ 		} else {
+
+
+########## 第4条  编号 B498  提交 e9d86b8e17e7  日期 2025-04-08
+
+【提交说明】
+scripts: Do not strip .rela.dyn section
+
+The .rela.dyn section contains runtime relocations and is only emitted
+for a relocatable kernel.
+
+riscv uses this section to relocate the kernel at runtime but that section
+is stripped from vmlinux. That prevents kexec to successfully load vmlinux
+since it does not contain the relocations info needed.
+
+Fixes: 559d1e45a16d ("riscv: Use --emit-relocs in order to move .rela.dyn in init")
+
+【改动统计】
+ scripts/Makefile.vmlinux | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/scripts/Makefile.vmlinux b/scripts/Makefile.vmlinux
+index b0a6cd5b818c..85d60d986401 100644
+--- a/scripts/Makefile.vmlinux
++++ b/scripts/Makefile.vmlinux
+@@ -13,7 +13,7 @@ ifdef CONFIG_ARCH_VMLINUX_NEEDS_RELOCS
+ vmlinux-final := vmlinux.unstripped
+ 
+ quiet_cmd_strip_relocs = RSTRIP  $@
+-      cmd_strip_relocs = $(OBJCOPY) --remove-section='.rel*' $< $@
++      cmd_strip_relocs = $(OBJCOPY) --remove-section='.rel*' --remove-section=!'.rel*.dyn' $< $@
+ 
+ vmlinux: $(vmlinux-final) FORCE
+ 	$(call if_changed,strip_relocs)
+
+
+########## 第5条  编号 A047  提交 680341382da5  日期 2024-02-02
+
+【提交说明】
+riscv: add CALLER_ADDRx support
+
+CALLER_ADDRx returns caller's address at specified level, they are used
+for several tracers. These macros eventually use
+__builtin_return_address(n) to get the caller's address if arch doesn't
+define their own implementation.
+
+In RISC-V, __builtin_return_address(n) only works when n == 0, we need
+to walk the stack frame to get the caller's address at specified level.
+
+data.level started from 'level + 3' due to the call flow of getting
+caller's address in RISC-V implementation. If we don't have additional
+three iteration, the level is corresponding to follows:
+
+callsite -> return_address -> arch_stack_walk -> walk_stackframe
+|           |                 |                  |
+level 3     level 2           level 1            level 0
+
+Fixes: 10626c32e382 ("riscv/ftrace: Add basic support")
+
+【改动统计】
+ arch/riscv/include/asm/ftrace.h    |  5 +++++
+ arch/riscv/kernel/Makefile         |  2 ++
+ arch/riscv/kernel/return_address.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 55 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/ftrace.h b/arch/riscv/include/asm/ftrace.h
+index 329172122952..15055f9df4da 100644
+--- a/arch/riscv/include/asm/ftrace.h
++++ b/arch/riscv/include/asm/ftrace.h
+@@ -25,6 +25,11 @@
+ 
+ #define ARCH_SUPPORTS_FTRACE_OPS 1
+ #ifndef __ASSEMBLY__
++
++extern void *return_address(unsigned int level);
++
++#define ftrace_return_address(n) return_address(n)
++
+ void MCOUNT_NAME(void);
+ static inline unsigned long ftrace_call_adjust(unsigned long addr)
+ {
+diff --git a/arch/riscv/kernel/Makefile b/arch/riscv/kernel/Makefile
+index f71910718053..604d6bf7e476 100644
+--- a/arch/riscv/kernel/Makefile
++++ b/arch/riscv/kernel/Makefile
+@@ -7,6 +7,7 @@ ifdef CONFIG_FTRACE
+ CFLAGS_REMOVE_ftrace.o	= $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_patch.o	= $(CC_FLAGS_FTRACE)
+ CFLAGS_REMOVE_sbi.o	= $(CC_FLAGS_FTRACE)
++CFLAGS_REMOVE_return_address.o	= $(CC_FLAGS_FTRACE)
+ endif
+ CFLAGS_syscall_table.o	+= $(call cc-option,-Wno-override-init,)
+ CFLAGS_compat_syscall_table.o += $(call cc-option,-Wno-override-init,)
+@@ -46,6 +47,7 @@ obj-y	+= irq.o
+ obj-y	+= process.o
+ obj-y	+= ptrace.o
+ obj-y	+= reset.o
++obj-y	+= return_address.o
+ obj-y	+= setup.o
+ obj-y	+= signal.o
+ obj-y	+= syscall_table.o
+diff --git a/arch/riscv/kernel/return_address.c b/arch/riscv/kernel/return_address.c
+new file mode 100644
+index 000000000000..c8115ec8fb30
+--- /dev/null
++++ b/arch/riscv/kernel/return_address.c
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * This code come from arch/arm64/kernel/return_address.c
++ *
++ * Copyright (C) 2023 SiFive.
++ */
++
++#include <linux/export.h>
++#include <linux/kprobes.h>
++#include <linux/stacktrace.h>
++
++struct return_address_data {
++	unsigned int level;
++	void *addr;
++};
++
++static bool save_return_addr(void *d, unsigned long pc)
++{
++	struct return_address_data *data = d;
++
++	if (!data->level) {
++		data->addr = (void *)pc;
++		return false;
++	}
++
++	--data->level;
++
++	return true;
++}
++NOKPROBE_SYMBOL(save_return_addr);
++
++noinline void *return_address(unsigned int level)
++{
++	struct return_address_data data;
++
++	data.level = level + 3;
++	data.addr = NULL;
++
++	arch_stack_walk(save_return_addr, &data, current, NULL);
++
++	if (!data.level)
++		return data.addr;
++	else
++		return NULL;
++
++}
++EXPORT_SYMBOL_GPL(return_address);
++NOKPROBE_SYMBOL(return_address);
+
+
+########## 第6条  编号 A281  提交 767423658d53  日期 2023-09-07
+
+【提交说明】
+riscv: kexec: Align the kexeced kernel entry
+
+The current riscv boot protocol requires 2MB alignment for RV64
+and 4MB alignment for RV32.
+
+In KEXEC_FILE path, the elf_find_pbase() function should align
+the kexeced kernel entry according to the requirement, otherwise
+the kexeced kernel would silently BUG at the setup_vm().
+
+Fixes: 8acea455fafa ("RISC-V: Support for kexec_file on panic")
+
+【改动统计】
+ arch/riscv/kernel/elf_kexec.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/elf_kexec.c b/arch/riscv/kernel/elf_kexec.c
+index 5372b708fae2..9a81d6926ac6 100644
+--- a/arch/riscv/kernel/elf_kexec.c
++++ b/arch/riscv/kernel/elf_kexec.c
+@@ -98,7 +98,13 @@ static int elf_find_pbase(struct kimage *image, unsigned long kernel_len,
+ 	kbuf.image = image;
+ 	kbuf.buf_min = lowest_paddr;
+ 	kbuf.buf_max = ULONG_MAX;
+-	kbuf.buf_align = PAGE_SIZE;
++
++	/*
++	 * Current riscv boot protocol requires 2MB alignment for
++	 * RV64 and 4MB alignment for RV32
++	 *
++	 */
++	kbuf.buf_align = PMD_SIZE;
+ 	kbuf.mem = KEXEC_BUF_MEM_UNKNOWN;
+ 	kbuf.memsz = ALIGN(kernel_len, PAGE_SIZE);
+ 	kbuf.top_down = false;
+
+
+########## 第7条  编号 B560  提交 511361fe7a88  日期 2026-03-09
+
+【提交说明】
+selftests: riscv: Add braces around EXPECT_EQ()
+
+EXPECT_EQ() expands to multiple lines, breaking up one-line if
+statements. This issue was not present in the patch on the mailing list
+but was instead introduced by the maintainer when attempting to fix up
+checkpatch warnings. Add braces around EXPECT_EQ() to avoid the error
+even though checkpatch suggests them to be removed:
+
+validate_v_ptrace.c:626:17: error: ‘else’ without a previous ‘if’
+
+Fixes: 3789d5eecd5a ("selftests: riscv: verify syscalls discard vector context")
+Fixes: 30eb191c895b ("selftests: riscv: verify ptrace rejects invalid vector csr inputs")
+Fixes: 849f05ae1ea6 ("selftests: riscv: verify ptrace accepts valid vector csr values")
+Reviewed-and-tested-by: Sergey Matyukevich <geomatsi@gmail.com>
+
+【改动统计】
+ tools/testing/selftests/riscv/vector/validate_v_ptrace.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+【改动内容】
+diff --git a/tools/testing/selftests/riscv/vector/validate_v_ptrace.c b/tools/testing/selftests/riscv/vector/validate_v_ptrace.c
+index 7ae6fede496f..74b6f6bcf067 100644
+--- a/tools/testing/selftests/riscv/vector/validate_v_ptrace.c
++++ b/tools/testing/selftests/riscv/vector/validate_v_ptrace.c
+@@ -290,10 +290,11 @@ TEST(ptrace_v_syscall_clobbering)
+ 
+ 		/* verify initial vsetvli settings */
+ 
+-		if (is_xtheadvector_supported())
++		if (is_xtheadvector_supported()) {
+ 			EXPECT_EQ(5UL, regset_data->vtype);
+-		else
++		} else {
+ 			EXPECT_EQ(9UL, regset_data->vtype);
++		}
+ 
+ 		EXPECT_EQ(regset_data->vlenb, regset_data->vl);
+ 		EXPECT_EQ(vlenb, regset_data->vlenb);
+@@ -619,10 +620,11 @@ TEST_F(v_csr_invalid, ptrace_v_invalid_values)
+ 
+ 		/* verify initial vsetvli settings */
+ 
+-		if (is_xtheadvector_supported())
++		if (is_xtheadvector_supported()) {
+ 			EXPECT_EQ(5UL, regset_data->vtype);
+-		else
++		} else {
+ 			EXPECT_EQ(9UL, regset_data->vtype);
++		}
+ 
+ 		EXPECT_EQ(regset_data->vlenb, regset_data->vl);
+ 		EXPECT_EQ(vlenb, regset_data->vlenb);
+@@ -827,10 +829,11 @@ TEST_F(v_csr_valid, ptrace_v_valid_values)
+ 
+ 		/* verify initial vsetvli settings */
+ 
+-		if (is_xtheadvector_supported())
++		if (is_xtheadvector_supported()) {
+ 			EXPECT_EQ(5UL, regset_data->vtype);
+-		else
++		} else {
+ 			EXPECT_EQ(9UL, regset_data->vtype);
++		}
+ 
+ 		EXPECT_EQ(regset_data->vlenb, regset_data->vl);
+ 		EXPECT_EQ(vlenb, regset_data->vlenb);
+
+
+########## 第8条  编号 A014  提交 82180b1fae24  日期 2023-11-22
+
+【提交说明】
+Support rv32 ULEB128 test
+
+Use opcodes available to both rv32 and rv64 in uleb128 module linking
+test.
+
+Fixes: af71bc194916 ("riscv: Add tests for riscv module loading")
+
+【改动统计】
+ arch/riscv/kernel/tests/module_test/test_uleb128.S | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/tests/module_test/test_uleb128.S b/arch/riscv/kernel/tests/module_test/test_uleb128.S
+index 90f22049d553..8515ed7cd8c1 100644
+--- a/arch/riscv/kernel/tests/module_test/test_uleb128.S
++++ b/arch/riscv/kernel/tests/module_test/test_uleb128.S
+@@ -6,13 +6,13 @@
+ .text
+ .global test_uleb_basic
+ test_uleb_basic:
+-	ld	a0, second
++	lw	a0, second
+ 	addi	a0, a0, -127
+ 	ret
+ 
+ .global test_uleb_large
+ test_uleb_large:
+-	ld	a0, fourth
++	lw	a0, fourth
+ 	addi	a0, a0, -0x07e8
+ 	ret
+ 
+@@ -22,10 +22,10 @@ first:
+ second:
+ 	.reloc second, R_RISCV_SET_ULEB128, second
+ 	.reloc second, R_RISCV_SUB_ULEB128, first
+-	.dword 0
++	.word 0
+ third:
+ 	.space 1000
+ fourth:
+ 	.reloc fourth, R_RISCV_SET_ULEB128, fourth
+ 	.reloc fourth, R_RISCV_SUB_ULEB128, third
+-	.dword 0
++	.word 0
+
+
+########## 第9条  编号 A398  提交 e8f3e9ba146a  日期 2026-07-18
+
+【提交说明】
+RISC-V: KVM: Allow memslots ending at the GPA limit
+
+KVM memslots describe half-open ranges [base_gfn, base_gfn + npages). A
+slot ending exactly at the guest physical-address limit has its final page
+below that limit and is valid.
+
+The current greater-than-or-equal comparison rejects a valid boundary case.
+Use a strict greater-than comparison, matching equivalent KVM architecture
+checks.
+
+Fixes: 9d05c1fee837 ("RISC-V: KVM: Implement stage2 page table programming")
+
+【改动统计】
+ arch/riscv/kvm/mmu.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/mmu.c b/arch/riscv/kvm/mmu.c
+index d9040c394933..6035b5ec9503 100644
+--- a/arch/riscv/kvm/mmu.c
++++ b/arch/riscv/kvm/mmu.c
+@@ -272,7 +272,7 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
+ 	 * Prevent userspace from creating a memory region outside of the GPA
+ 	 * space addressable by the KVM guest GPA space.
+ 	 */
+-	if ((new->base_gfn + new->npages) >=
++	if ((new->base_gfn + new->npages) >
+ 	     kvm_riscv_gstage_gpa_size(kvm->arch.pgd_levels) >> PAGE_SHIFT)
+ 		return -EFAULT;
+ 
+
+
+########## 第10条  编号 A382  提交 4d2b03699460  日期 2026-04-09
+
+【提交说明】
+riscv: errata: Fix bitwise vs logical AND in MIPS errata patching
+
+The condition checking whether a specific errata needs patching uses
+logical AND (&&) instead of bitwise AND (&). Since logical AND only
+checks that both operands are non-zero, this causes all errata patches
+to be applied whenever any single errata is detected, rather than only
+applying the matching one.
+
+The SiFive errata implementation correctly uses bitwise AND for the same
+check.
+
+Fixes: 0b0ca959d206 ("riscv: errata: Fix the PAUSE Opcode for MIPS P8700")
+Assisted-by: Cursor:claude-4.6-opus-high-thinking
+[pjw@kernel.org: fixed checkpatch warning]
+
+【改动统计】
+ arch/riscv/errata/mips/errata.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/errata/mips/errata.c b/arch/riscv/errata/mips/errata.c
+index e984a8152208..2c3dc2259e93 100644
+--- a/arch/riscv/errata/mips/errata.c
++++ b/arch/riscv/errata/mips/errata.c
+@@ -57,7 +57,7 @@ void mips_errata_patch_func(struct alt_entry *begin, struct alt_entry *end,
+ 		}
+ 
+ 		tmp = (1U << alt->patch_id);
+-		if (cpu_req_errata && tmp) {
++		if (cpu_req_errata & tmp) {
+ 			mutex_lock(&text_mutex);
+ 			patch_text_nosync(ALT_OLD_PTR(alt), ALT_ALT_PTR(alt),
+ 					  alt->alt_len);
+
+
+########## 第11条  编号 B478  提交 7e86490c5dee  日期 2024-11-13
+
+【提交说明】
+pinctrl: k210: Undef K210_PC_DEFAULT
+
+When the temporary macro K210_PC_DEFAULT is not needed anymore,
+use its name in the #undef statement instead of
+the incorrect "DEFAULT" name.
+
+Fixes: d4c34d09ab03 ("pinctrl: Add RISC-V Canaan Kendryte K210 FPIOA driver")
+
+【改动统计】
+ drivers/pinctrl/pinctrl-k210.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/drivers/pinctrl/pinctrl-k210.c b/drivers/pinctrl/pinctrl-k210.c
+index caf20215aaba..eddb01796a83 100644
+--- a/drivers/pinctrl/pinctrl-k210.c
++++ b/drivers/pinctrl/pinctrl-k210.c
+@@ -181,7 +181,7 @@ static const u32 k210_pinconf_mode_id_to_mode[] = {
+ 	[K210_PC_DEFAULT_INT13] = K210_PC_MODE_IN | K210_PC_PU,
+ };
+ 
+-#undef DEFAULT
++#undef K210_PC_DEFAULT
+ 
+ /*
+  * Pin functions configuration information.
+
+
+########## 第12条  编号 A328  提交 c796e1872012  日期 2024-12-09
+
+【提交说明】
+riscv: Fix wrong usage of __pa() on a fixmap address
+
+riscv uses fixmap addresses to map the dtb so we can't use __pa() which
+is reserved for linear mapping addresses.
+
+Fixes: b2473a359763 ("of/fdt: add dt_phys arg to early_init_dt_scan and early_init_dt_verify")
+
+【改动统计】
+ arch/riscv/kernel/setup.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index 016b48fcd6f2..45010e71df86 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -227,7 +227,7 @@ static void __init init_resources(void)
+ static void __init parse_dtb(void)
+ {
+ 	/* Early scan of device tree from init memory */
+-	if (early_init_dt_scan(dtb_early_va, __pa(dtb_early_va))) {
++	if (early_init_dt_scan(dtb_early_va, dtb_early_pa)) {
+ 		const char *name = of_flat_dt_get_machine_name();
+ 
+ 		if (name) {
+
+
+########## 第13条  编号 A339  提交 2d117e67f318  日期 2025-03-17
+
+【提交说明】
+RISC-V: KVM: Teardown riscv specific bits after kvm_exit
+
+During a module removal, kvm_exit invokes arch specific disable
+call which disables AIA. However, we invoke aia_exit before kvm_exit
+resulting in the following warning. KVM kernel module can't be inserted
+afterwards due to inconsistent state of IRQ.
+
+[25469.031389] percpu IRQ 31 still enabled on CPU0!
+[25469.031732] WARNING: CPU: 3 PID: 943 at kernel/irq/manage.c:2476 __free_percpu_irq+0xa2/0x150
+[25469.031804] Modules linked in: kvm(-)
+[25469.031848] CPU: 3 UID: 0 PID: 943 Comm: rmmod Not tainted 6.14.0-rc5-06947-g91c763118f47-dirty #2
+[25469.031905] Hardware name: riscv-virtio,qemu (DT)
+[25469.031928] epc : __free_percpu_irq+0xa2/0x150
+[25469.031976]  ra : __free_percpu_irq+0xa2/0x150
+[25469.032197] epc : ffffffff8007db1e ra : ffffffff8007db1e sp : ff2000000088bd50
+[25469.032241]  gp : ffffffff8131cef8 tp : ff60000080b96400 t0 : ff2000000088baf8
+[25469.032285]  t1 : fffffffffffffffc t2 : 5249207570637265 s0 : ff2000000088bd90
+[25469.032329]  s1 : ff60000098b21080 a0 : 037d527a15eb4f00 a1 : 037d527a15eb4f00
+[25469.032372]  a2 : 0000000000000023 a3 : 0000000000000001 a4 : ffffffff8122dbf8
+[25469.032410]  a5 : 0000000000000fff a6 : 0000000000000000 a7 : ffffffff8122dc10
+[25469.032448]  s2 : ff60000080c22eb0 s3 : 0000000200000022 s4 : 000000000000001f
+[25469.032488]  s5 : ff60000080c22e00 s6 : ffffffff80c351c0 s7 : 0000000000000000
+[25469.032582]  s8 : 0000000000000003 s9 : 000055556b7fb490 s10: 00007ffff0e12fa0
+[25469.032621]  s11: 00007ffff0e13e9a t3 : ffffffff81354ac7 t4 : ffffffff81354ac7
+[25469.032664]  t5 : ffffffff81354ac8 t6 : ffffffff81354ac7
+[25469.032698] status: 0000000200000100 badaddr: ffffffff8007db1e cause: 0000000000000003
+[25469.032738] [<ffffffff8007db1e>] __free_percpu_irq+0xa2/0x150
+[25469.032797] [<ffffffff8007dbfc>] free_percpu_irq+0x30/0x5e
+[25469.032856] [<ffffffff013a57dc>] kvm_riscv_aia_exit+0x40/0x42 [kvm]
+[25469.033947] [<ffffffff013b4e82>] cleanup_module+0x10/0x32 [kvm]
+[25469.035300] [<ffffffff8009b150>] __riscv_sys_delete_module+0x18e/0x1fc
+[25469.035374] [<ffffffff8000c1ca>] syscall_handler+0x3a/0x46
+[25469.035456] [<ffffffff809ec9a4>] do_trap_ecall_u+0x72/0x134
+[25469.035536] [<ffffffff809f5e18>] handle_exception+0x148/0x156
+
+Invoke aia_exit and other arch specific cleanup functions after kvm_exit
+so that disable gets a chance to be called first before exit.
+
+Fixes: 54e43320c2ba ("RISC-V: KVM: Initial skeletal support for AIA")
+Fixes: eded6754f398 ("riscv: KVM: add basic support for host vs guest profiling")
+
+【改动统计】
+ arch/riscv/kvm/main.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/main.c b/arch/riscv/kvm/main.c
+index 1fa8be5ee509..4b24705dc63a 100644
+--- a/arch/riscv/kvm/main.c
++++ b/arch/riscv/kvm/main.c
+@@ -172,8 +172,8 @@ module_init(riscv_kvm_init);
+ 
+ static void __exit riscv_kvm_exit(void)
+ {
+-	kvm_riscv_teardown();
+-
+ 	kvm_exit();
++
++	kvm_riscv_teardown();
+ }
+ module_exit(riscv_kvm_exit);
+
+
+########## 第14条  编号 B463  提交 b14e40f5dc7c  日期 2024-08-25
+
+【提交说明】
+reset: k210: fix OF node leak in probe() error path
+
+Driver is leaking OF node reference on memory allocation failure.
+Acquire the OF node reference after memory allocation to fix this and
+keep it simple.
+
+Fixes: 5a2308da9f60 ("riscv: Add Canaan Kendryte K210 reset controller")
+
+【改动统计】
+ drivers/reset/reset-k210.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/drivers/reset/reset-k210.c b/drivers/reset/reset-k210.c
+index b62a2fd44e4e..e77e4cca377d 100644
+--- a/drivers/reset/reset-k210.c
++++ b/drivers/reset/reset-k210.c
+@@ -90,7 +90,7 @@ static const struct reset_control_ops k210_rst_ops = {
+ static int k210_rst_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+-	struct device_node *parent_np = of_get_parent(dev->of_node);
++	struct device_node *parent_np;
+ 	struct k210_rst *ksr;
+ 
+ 	dev_info(dev, "K210 reset controller\n");
+@@ -99,6 +99,7 @@ static int k210_rst_probe(struct platform_device *pdev)
+ 	if (!ksr)
+ 		return -ENOMEM;
+ 
++	parent_np = of_get_parent(dev->of_node);
+ 	ksr->map = syscon_node_to_regmap(parent_np);
+ 	of_node_put(parent_np);
+ 	if (IS_ERR(ksr->map))
+
+
+########## 第15条  编号 A105  提交 cfb10de18538  日期 2024-09-17
+
+【提交说明】
+riscv: Fix kernel stack size when KASAN is enabled
+
+We use Kconfig to select the kernel stack size, doubling the default
+size if KASAN is enabled.
+
+But that actually only works if KASAN is selected from the beginning,
+meaning that if KASAN config is added later (for example using
+menuconfig), CONFIG_THREAD_SIZE_ORDER won't be updated, keeping the
+default size, which is not enough for KASAN as reported in [1].
+
+So fix this by moving the logic to compute the right kernel stack into a
+header.
+
+Fixes: a7555f6b62e7 ("riscv: stack: Add config of thread stack size")
+
+【改动统计】
+ arch/riscv/Kconfig                   | 3 +--
+ arch/riscv/include/asm/thread_info.h | 7 ++++++-
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 22dc5ea4196c..62545946ecf4 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -777,8 +777,7 @@ config IRQ_STACKS
+ config THREAD_SIZE_ORDER
+ 	int "Kernel stack size (in power-of-two numbers of page size)" if VMAP_STACK && EXPERT
+ 	range 0 4
+-	default 1 if 32BIT && !KASAN
+-	default 3 if 64BIT && KASAN
++	default 1 if 32BIT
+ 	default 2
+ 	help
+ 	  Specify the Pages of thread stack size (from 4KB to 64KB), which also
+diff --git a/arch/riscv/include/asm/thread_info.h b/arch/riscv/include/asm/thread_info.h
+index ebe52f96da34..9c10fb180f43 100644
+--- a/arch/riscv/include/asm/thread_info.h
++++ b/arch/riscv/include/asm/thread_info.h
+@@ -13,7 +13,12 @@
+ #include <linux/sizes.h>
+ 
+ /* thread information allocation */
+-#define THREAD_SIZE_ORDER	CONFIG_THREAD_SIZE_ORDER
++#ifdef CONFIG_KASAN
++#define KASAN_STACK_ORDER	1
++#else
++#define KASAN_STACK_ORDER	0
++#endif
++#define THREAD_SIZE_ORDER	(CONFIG_THREAD_SIZE_ORDER + KASAN_STACK_ORDER)
+ #define THREAD_SIZE		(PAGE_SIZE << THREAD_SIZE_ORDER)
+ 
+ /*
+
+
+########## 第16条  编号 B446  提交 d3882564a77c  日期 2024-06-20
+
+【提交说明】
+syscalls: fix compat_sys_io_pgetevents_time64 usage
+
+Using sys_io_pgetevents() as the entry point for compat mode tasks
+works almost correctly, but misses the sign extension for the min_nr
+and nr arguments.
+
+This was addressed on parisc by switching to
+compat_sys_io_pgetevents_time64() in commit 6431e92fc827 ("parisc:
+io_pgetevents_time64() needs compat syscall in 32-bit compat mode"),
+as well as by using more sophisticated system call wrappers on x86 and
+s390. However, arm64, mips, powerpc, sparc and riscv still have the
+same bug.
+
+Change all of them over to use compat_sys_io_pgetevents_time64()
+like parisc already does. This was clearly the intention when the
+function was originally added, but it got hooked up incorrectly in
+the tables.
+
+Fixes: 48166e6ea47d ("y2038: add 64-bit time_t syscalls to all 32-bit architectures")
+
+【改动统计】
+ arch/arm64/include/asm/unistd32.h         | 2 +-
+ arch/mips/kernel/syscalls/syscall_n32.tbl | 2 +-
+ arch/mips/kernel/syscalls/syscall_o32.tbl | 2 +-
+ arch/powerpc/kernel/syscalls/syscall.tbl  | 2 +-
+ arch/s390/kernel/syscalls/syscall.tbl     | 2 +-
+ arch/sparc/kernel/syscalls/syscall.tbl    | 2 +-
+ arch/x86/entry/syscalls/syscall_32.tbl    | 2 +-
+ include/uapi/asm-generic/unistd.h         | 2 +-
+ kernel/sys_ni.c                           | 2 +-
+ 9 files changed, 9 insertions(+), 9 deletions(-)
+
+【改动内容】
+diff --git a/arch/arm64/include/asm/unistd32.h b/arch/arm64/include/asm/unistd32.h
+index 266b96acc014..1386e8e751f2 100644
+--- a/arch/arm64/include/asm/unistd32.h
++++ b/arch/arm64/include/asm/unistd32.h
+@@ -840,7 +840,7 @@ __SYSCALL(__NR_pselect6_time64, compat_sys_pselect6_time64)
+ #define __NR_ppoll_time64 414
+ __SYSCALL(__NR_ppoll_time64, compat_sys_ppoll_time64)
+ #define __NR_io_pgetevents_time64 416
+-__SYSCALL(__NR_io_pgetevents_time64, sys_io_pgetevents)
++__SYSCALL(__NR_io_pgetevents_time64, compat_sys_io_pgetevents_time64)
+ #define __NR_recvmmsg_time64 417
+ __SYSCALL(__NR_recvmmsg_time64, compat_sys_recvmmsg_time64)
+ #define __NR_mq_timedsend_time64 418
+diff --git a/arch/mips/kernel/syscalls/syscall_n32.tbl b/arch/mips/kernel/syscalls/syscall_n32.tbl
+index cc869f5d5693..953f5b7dc723 100644
+--- a/arch/mips/kernel/syscalls/syscall_n32.tbl
++++ b/arch/mips/kernel/syscalls/syscall_n32.tbl
+@@ -354,7 +354,7 @@
+ 412	n32	utimensat_time64		sys_utimensat
+ 413	n32	pselect6_time64			compat_sys_pselect6_time64
+ 414	n32	ppoll_time64			compat_sys_ppoll_time64
+-416	n32	io_pgetevents_time64		sys_io_pgetevents
++416	n32	io_pgetevents_time64		compat_sys_io_pgetevents_time64
+ 417	n32	recvmmsg_time64			compat_sys_recvmmsg_time64
+ 418	n32	mq_timedsend_time64		sys_mq_timedsend
+ 419	n32	mq_timedreceive_time64		sys_mq_timedreceive
+diff --git a/arch/mips/kernel/syscalls/syscall_o32.tbl b/arch/mips/kernel/syscalls/syscall_o32.tbl
+index 81428a2eb660..2439a2491cff 100644
+--- a/arch/mips/kernel/syscalls/syscall_o32.tbl
++++ b/arch/mips/kernel/syscalls/syscall_o32.tbl
+@@ -403,7 +403,7 @@
+ 412	o32	utimensat_time64		sys_utimensat			sys_utimensat
+ 413	o32	pselect6_time64			sys_pselect6			compat_sys_pselect6_time64
+ 414	o32	ppoll_time64			sys_ppoll			compat_sys_ppoll_time64
+-416	o32	io_pgetevents_time64		sys_io_pgetevents		sys_io_pgetevents
++416	o32	io_pgetevents_time64		sys_io_pgetevents		compat_sys_io_pgetevents_time64
+ 417	o32	recvmmsg_time64			sys_recvmmsg			compat_sys_recvmmsg_time64
+ 418	o32	mq_timedsend_time64		sys_mq_timedsend		sys_mq_timedsend
+ 419	o32	mq_timedreceive_time64		sys_mq_timedreceive		sys_mq_timedreceive
+diff --git a/arch/powerpc/kernel/syscalls/syscall.tbl b/arch/powerpc/kernel/syscalls/syscall.tbl
+index 3656f1ca7a21..c6b0546b284d 100644
+--- a/arch/powerpc/kernel/syscalls/syscall.tbl
++++ b/arch/powerpc/kernel/syscalls/syscall.tbl
+@@ -502,7 +502,7 @@
+ 412	32	utimensat_time64		sys_utimensat			sys_utimensat
+ 413	32	pselect6_time64			sys_pselect6			compat_sys_pselect6_time64
+ 414	32	ppoll_time64			sys_ppoll			compat_sys_ppoll_time64
+-416	32	io_pgetevents_time64		sys_io_pgetevents		sys_io_pgetevents
++416	32	io_pgetevents_time64		sys_io_pgetevents		compat_sys_io_pgetevents_time64
+ 417	32	recvmmsg_time64			sys_recvmmsg			compat_sys_recvmmsg_time64
+ 418	32	mq_timedsend_time64		sys_mq_timedsend		sys_mq_timedsend
+ 419	32	mq_timedreceive_time64		sys_mq_timedreceive		sys_mq_timedreceive
+diff --git a/arch/s390/kernel/syscalls/syscall.tbl b/arch/s390/kernel/syscalls/syscall.tbl
+index bd0fee24ad10..01071182763e 100644
+--- a/arch/s390/kernel/syscalls/syscall.tbl
++++ b/arch/s390/kernel/syscalls/syscall.tbl
+@@ -418,7 +418,7 @@
+ 412	32	utimensat_time64	-				sys_utimensat
+ 413	32	pselect6_time64		-				compat_sys_pselect6_time64
+ 414	32	ppoll_time64		-				compat_sys_ppoll_time64
+-416	32	io_pgetevents_time64	-				sys_io_pgetevents
++416	32	io_pgetevents_time64	-				compat_sys_io_pgetevents_time64
+ 417	32	recvmmsg_time64		-				compat_sys_recvmmsg_time64
+ 418	32	mq_timedsend_time64	-				sys_mq_timedsend
+ 419	32	mq_timedreceive_time64	-				sys_mq_timedreceive
+diff --git a/arch/sparc/kernel/syscalls/syscall.tbl b/arch/sparc/kernel/syscalls/syscall.tbl
+index ac6c281ccfe0..b354139b40be 100644
+--- a/arch/sparc/kernel/syscalls/syscall.tbl
++++ b/arch/sparc/kernel/syscalls/syscall.tbl
+@@ -461,7 +461,7 @@
+ 412	32	utimensat_time64		sys_utimensat			sys_utimensat
+ 413	32	pselect6_time64			sys_pselect6			compat_sys_pselect6_time64
+ 414	32	ppoll_time64			sys_ppoll			compat_sys_ppoll_time64
+-416	32	io_pgetevents_time64		sys_io_pgetevents		sys_io_pgetevents
++416	32	io_pgetevents_time64		sys_io_pgetevents		compat_sys_io_pgetevents_time64
+ 417	32	recvmmsg_time64			sys_recvmmsg			compat_sys_recvmmsg_time64
+ 418	32	mq_timedsend_time64		sys_mq_timedsend		sys_mq_timedsend
+ 419	32	mq_timedreceive_time64		sys_mq_timedreceive		sys_mq_timedreceive
+diff --git a/arch/x86/entry/syscalls/syscall_32.tbl b/arch/x86/entry/syscalls/syscall_32.tbl
+index 7fd1f57ad3d3..d6ebcab1d8b2 100644
+--- a/arch/x86/entry/syscalls/syscall_32.tbl
++++ b/arch/x86/entry/syscalls/syscall_32.tbl
+@@ -420,7 +420,7 @@
+ 412	i386	utimensat_time64	sys_utimensat
+ 413	i386	pselect6_time64		sys_pselect6			compat_sys_pselect6_time64
+ 414	i386	ppoll_time64		sys_ppoll			compat_sys_ppoll_time64
+-416	i386	io_pgetevents_time64	sys_io_pgetevents
++416	i386	io_pgetevents_time64	sys_io_pgetevents		compat_sys_io_pgetevents_time64
+ 417	i386	recvmmsg_time64		sys_recvmmsg			compat_sys_recvmmsg_time64
+ 418	i386	mq_timedsend_time64	sys_mq_timedsend
+ 419	i386	mq_timedreceive_time64	sys_mq_timedreceive
+diff --git a/include/uapi/asm-generic/unistd.h b/include/uapi/asm-generic/unistd.h
+index d983c48a3b6a..d4cc26932ff4 100644
+--- a/include/uapi/asm-generic/unistd.h
++++ b/include/uapi/asm-generic/unistd.h
+@@ -737,7 +737,7 @@ __SC_COMP(__NR_pselect6_time64, sys_pselect6, compat_sys_pselect6_time64)
+ #define __NR_ppoll_time64 414
+ __SC_COMP(__NR_ppoll_time64, sys_ppoll, compat_sys_ppoll_time64)
+ #define __NR_io_pgetevents_time64 416
+-__SYSCALL(__NR_io_pgetevents_time64, sys_io_pgetevents)
++__SC_COMP(__NR_io_pgetevents_time64, sys_io_pgetevents, compat_sys_io_pgetevents_time64)
+ #define __NR_recvmmsg_time64 417
+ __SC_COMP(__NR_recvmmsg_time64, sys_recvmmsg, compat_sys_recvmmsg_time64)
+ #define __NR_mq_timedsend_time64 418
+diff --git a/kernel/sys_ni.c b/kernel/sys_ni.c
+index d7eee421d4bc..b696b85ac63e 100644
+--- a/kernel/sys_ni.c
++++ b/kernel/sys_ni.c
+@@ -46,8 +46,8 @@ COND_SYSCALL(io_getevents_time32);
+ COND_SYSCALL(io_getevents);
+ COND_SYSCALL(io_pgetevents_time32);
+ COND_SYSCALL(io_pgetevents);
+-COND_SYSCALL_COMPAT(io_pgetevents_time32);
+ COND_SYSCALL_COMPAT(io_pgetevents);
++COND_SYSCALL_COMPAT(io_pgetevents_time64);
+ COND_SYSCALL(io_uring_setup);
+ COND_SYSCALL(io_uring_enter);
+ COND_SYSCALL(io_uring_register);
+
+
+########## 第17条  编号 A042  提交 97cf301fa42e  日期 2024-01-28
+
+【提交说明】
+riscv: Flush the tlb when a page directory is freed
+
+The riscv privileged specification mandates to flush the TLB whenever a
+page directory is modified, so add that to tlb_flush().
+
+Fixes: c5e9b2c2ae82 ("riscv: Improve tlb_flush()")
+
+【改动统计】
+ arch/riscv/include/asm/tlb.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/tlb.h b/arch/riscv/include/asm/tlb.h
+index 1eb5682b2af6..50b63b5c15bd 100644
+--- a/arch/riscv/include/asm/tlb.h
++++ b/arch/riscv/include/asm/tlb.h
+@@ -16,7 +16,7 @@ static void tlb_flush(struct mmu_gather *tlb);
+ static inline void tlb_flush(struct mmu_gather *tlb)
+ {
+ #ifdef CONFIG_MMU
+-	if (tlb->fullmm || tlb->need_flush_all)
++	if (tlb->fullmm || tlb->need_flush_all || tlb->freed_tables)
+ 		flush_tlb_mm(tlb->mm);
+ 	else
+ 		flush_tlb_mm_range(tlb->mm, tlb->start, tlb->end,
+
+
+########## 第18条  编号 A001  提交 559fe94a449c  日期 2023-08-09
+
+【提交说明】
+riscv: mm: Update the comment of CONFIG_PAGE_OFFSET
+
+Since the commit 011f09d12052 set sv57 as default for CONFIG_64BIT,
+the comment of CONFIG_PAGE_OFFSET should be updated too.
+
+Fixes: 011f09d12052 ("riscv: mm: Set sv57 on defaultly")
+
+【改动统计】
+ arch/riscv/include/asm/page.h | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/page.h b/arch/riscv/include/asm/page.h
+index 5488ecc337b6..57e887bfa34c 100644
+--- a/arch/riscv/include/asm/page.h
++++ b/arch/riscv/include/asm/page.h
+@@ -33,8 +33,8 @@
+ #define PAGE_OFFSET		_AC(CONFIG_PAGE_OFFSET, UL)
+ #endif
+ /*
+- * By default, CONFIG_PAGE_OFFSET value corresponds to SV48 address space so
+- * define the PAGE_OFFSET value for SV39.
++ * By default, CONFIG_PAGE_OFFSET value corresponds to SV57 address space so
++ * define the PAGE_OFFSET value for SV48 and SV39.
+  */
+ #define PAGE_OFFSET_L4		_AC(0xffffaf8000000000, UL)
+ #define PAGE_OFFSET_L3		_AC(0xffffffd800000000, UL)
+
+
+########## 第19条  编号 A122  提交 b3431a8bb336  日期 2024-12-09
+
+【提交说明】
+riscv: Fix IPIs usage in kfence_protect_page()
+
+flush_tlb_kernel_range() may use IPIs to flush the TLBs of all the
+cores, which triggers the following warning when the irqs are disabled:
+
+[    3.455330] WARNING: CPU: 1 PID: 0 at kernel/smp.c:815 smp_call_function_many_cond+0x452/0x520
+[    3.456647] Modules linked in:
+[    3.457218] CPU: 1 UID: 0 PID: 0 Comm: swapper/1 Not tainted 6.12.0-rc7-00010-g91d3de7240b8 #1
+[    3.457416] Hardware name: QEMU QEMU Virtual Machine, BIOS
+[    3.457633] epc : smp_call_function_many_cond+0x452/0x520
+[    3.457736]  ra : on_each_cpu_cond_mask+0x1e/0x30
+[    3.457786] epc : ffffffff800b669a ra : ffffffff800b67c2 sp : ff2000000000bb50
+[    3.457824]  gp : ffffffff815212b8 tp : ff6000008014f080 t0 : 000000000000003f
+[    3.457859]  t1 : ffffffff815221e0 t2 : 000000000000000f s0 : ff2000000000bc10
+[    3.457920]  s1 : 0000000000000040 a0 : ffffffff815221e0 a1 : 0000000000000001
+[    3.457953]  a2 : 0000000000010000 a3 : 0000000000000003 a4 : 0000000000000000
+[    3.458006]  a5 : 0000000000000000 a6 : ffffffffffffffff a7 : 0000000000000000
+[    3.458042]  s2 : ffffffff815223be s3 : 00fffffffffff000 s4 : ff600001ffe38fc0
+[    3.458076]  s5 : ff600001ff950d00 s6 : 0000000200000120 s7 : 0000000000000001
+[    3.458109]  s8 : 0000000000000001 s9 : ff60000080841ef0 s10: 0000000000000001
+[    3.458141]  s11: ffffffff81524812 t3 : 0000000000000001 t4 : ff60000080092bc0
+[    3.458172]  t5 : 0000000000000000 t6 : ff200000000236d0
+[    3.458203] status: 0000000200000100 badaddr: ffffffff800b669a cause: 0000000000000003
+[    3.458373] [<ffffffff800b669a>] smp_call_function_many_cond+0x452/0x520
+[    3.458593] [<ffffffff800b67c2>] on_each_cpu_cond_mask+0x1e/0x30
+[    3.458625] [<ffffffff8000e4ca>] __flush_tlb_range+0x118/0x1ca
+[    3.458656] [<ffffffff8000e6b2>] flush_tlb_kernel_range+0x1e/0x26
+[    3.458683] [<ffffffff801ea56a>] kfence_protect+0xc0/0xce
+[    3.458717] [<ffffffff801e9456>] kfence_guarded_free+0xc6/0x1c0
+[    3.458742] [<ffffffff801e9d6c>] __kfence_free+0x62/0xc6
+[    3.458764] [<ffffffff801c57d8>] kfree+0x106/0x32c
+[    3.458786] [<ffffffff80588cf2>] detach_buf_split+0x188/0x1a8
+[    3.458816] [<ffffffff8058708c>] virtqueue_get_buf_ctx+0xb6/0x1f6
+[    3.458839] [<ffffffff805871da>] virtqueue_get_buf+0xe/0x16
+[    3.458880] [<ffffffff80613d6a>] virtblk_done+0x5c/0xe2
+[    3.458908] [<ffffffff8058766e>] vring_interrupt+0x6a/0x74
+[    3.458930] [<ffffffff800747d8>] __handle_irq_event_percpu+0x7c/0xe2
+[    3.458956] [<ffffffff800748f0>] handle_irq_event+0x3c/0x86
+[    3.458978] [<ffffffff800786cc>] handle_simple_irq+0x9e/0xbe
+[    3.459004] [<ffffffff80073934>] generic_handle_domain_irq+0x1c/0x2a
+[    3.459027] [<ffffffff804bf87c>] imsic_handle_irq+0xba/0x120
+[    3.459056] [<ffffffff80073934>] generic_handle_domain_irq+0x1c/0x2a
+[    3.459080] [<ffffffff804bdb76>] riscv_intc_aia_irq+0x24/0x34
+[    3.459103] [<ffffffff809d0452>] handle_riscv_irq+0x2e/0x4c
+[    3.459133] [<ffffffff809d923e>] call_on_irq_stack+0x32/0x40
+
+So only flush the local TLB and let the lazy kfence page fault handling
+deal with the faults which could happen when a core has an old protected
+pte version cached in its TLB. That leads to potential inaccuracies which
+can be tolerated when using kfence.
+
+Fixes: 47513f243b45 ("riscv: Enable KFENCE for riscv64")
+
+【改动统计】
+ arch/riscv/include/asm/kfence.h | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/kfence.h b/arch/riscv/include/asm/kfence.h
+index 7388edd88986..d08bf7fb3aee 100644
+--- a/arch/riscv/include/asm/kfence.h
++++ b/arch/riscv/include/asm/kfence.h
+@@ -22,7 +22,9 @@ static inline bool kfence_protect_page(unsigned long addr, bool protect)
+ 	else
+ 		set_pte(pte, __pte(pte_val(ptep_get(pte)) | _PAGE_PRESENT));
+ 
+-	flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++	preempt_disable();
++	local_flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++	preempt_enable();
+ 
+ 	return true;
+ }
+
+
+########## 第20条  编号 B419  提交 8b79d4e99407  日期 2024-02-14
+
+【提交说明】
+tty: hvc: Don't enable the RISC-V SBI console by default
+
+The new SBI console has the same problem as the old one: there's only
+one shared backing hardware and no synchronization, so the two drivers
+end up stepping on each other.  This was the same issue the old SBI-0.1
+console drivers had, but that was disabled by default when SBI-0.1 was.
+
+So just mark the new driver as nonportable.
+
+Fixes: 88ead68e764c ("tty: Add SBI debug console support to HVC SBI driver")
+
+【改动统计】
+ drivers/tty/hvc/Kconfig | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/drivers/tty/hvc/Kconfig b/drivers/tty/hvc/Kconfig
+index 6e05c5c7bca1..c2a4e88b328f 100644
+--- a/drivers/tty/hvc/Kconfig
++++ b/drivers/tty/hvc/Kconfig
+@@ -108,13 +108,15 @@ config HVC_DCC_SERIALIZE_SMP
+ 
+ config HVC_RISCV_SBI
+ 	bool "RISC-V SBI console support"
+-	depends on RISCV_SBI
++	depends on RISCV_SBI && NONPORTABLE
+ 	select HVC_DRIVER
+ 	help
+ 	  This enables support for console output via RISC-V SBI calls, which
+-	  is normally used only during boot to output printk.
++	  is normally used only during boot to output printk.  This driver
++	  conflicts with real console drivers and should not be enabled on
++	  systems that directly access the console.
+ 
+-	  If you don't know what do to here, say Y.
++	  If you don't know what do to here, say N.
+ 
+ config HVCS
+ 	tristate "IBM Hypervisor Virtual Console Server support"
+
+
+########## 第21条  编号 B482  提交 537a2525eaf7  日期 2024-11-27
+
+【提交说明】
+tools: Override makefile ARCH variable if defined, but empty
+
+There are a number of tools (bpftool, selftests), that require a
+"bootstrap" build. Here, a bootstrap build is a build host variant of
+a target. E.g., assume that you're performing a bpftool cross-build on
+x86 to riscv, a bootstrap build would then be an x86 variant of
+bpftool. The typical way to perform the host build variant, is to pass
+"ARCH=" in a sub-make. However, if a variable has been set with a
+command argument, then ordinary assignments in the makefile are
+ignored.
+
+This side-effect results in that ARCH, and variables depending on ARCH
+are not set. Workaround by overriding ARCH to the host arch, if ARCH
+is empty.
+
+Fixes: 8859b0da5aac ("tools/bpftool: Fix cross-build")
+
+【改动统计】
+ tools/scripts/Makefile.arch | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/tools/scripts/Makefile.arch b/tools/scripts/Makefile.arch
+index f6a50f06dfc4..eabfe9f411d9 100644
+--- a/tools/scripts/Makefile.arch
++++ b/tools/scripts/Makefile.arch
+@@ -7,8 +7,8 @@ HOSTARCH := $(shell uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ \
+                                   -e s/sh[234].*/sh/ -e s/aarch64.*/arm64/ \
+                                   -e s/riscv.*/riscv/ -e s/loongarch.*/loongarch/)
+ 
+-ifndef ARCH
+-ARCH := $(HOSTARCH)
++ifeq ($(strip $(ARCH)),)
++override ARCH := $(HOSTARCH)
+ endif
+ 
+ SRCARCH := $(ARCH)
+
+
+########## 第22条  编号 A044  提交 ce68c035457b  日期 2024-01-30
+
+【提交说明】
+riscv: Fix arch_hugetlb_migration_supported() for NAPOT
+
+arch_hugetlb_migration_supported() must be reimplemented to add support
+for NAPOT hugepages, which is done here.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+
+【改动统计】
+ arch/riscv/include/asm/hugetlb.h |  3 +++
+ arch/riscv/mm/hugetlbpage.c      | 16 +++++++++++++---
+ 2 files changed, 16 insertions(+), 3 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/hugetlb.h b/arch/riscv/include/asm/hugetlb.h
+index 4c5b0e929890..20f9c3ba2341 100644
+--- a/arch/riscv/include/asm/hugetlb.h
++++ b/arch/riscv/include/asm/hugetlb.h
+@@ -11,6 +11,9 @@ static inline void arch_clear_hugepage_flags(struct page *page)
+ }
+ #define arch_clear_hugepage_flags arch_clear_hugepage_flags
+ 
++bool arch_hugetlb_migration_supported(struct hstate *h);
++#define arch_hugetlb_migration_supported arch_hugetlb_migration_supported
++
+ #ifdef CONFIG_RISCV_ISA_SVNAPOT
+ #define __HAVE_ARCH_HUGE_PTE_CLEAR
+ void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 87406b26c3da..29c7606414d2 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -364,7 +364,7 @@ void huge_pte_clear(struct mm_struct *mm,
+ 		pte_clear(mm, addr, ptep);
+ }
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	unsigned long order;
+ 
+@@ -392,7 +392,7 @@ arch_initcall(napot_hugetlbpages_init);
+ 
+ #else
+ 
+-static __init bool is_napot_size(unsigned long size)
++static bool is_napot_size(unsigned long size)
+ {
+ 	return false;
+ }
+@@ -409,7 +409,7 @@ int pmd_huge(pmd_t pmd)
+ 	return pmd_leaf(pmd);
+ }
+ 
+-bool __init arch_hugetlb_valid_size(unsigned long size)
++static bool __hugetlb_valid_size(unsigned long size)
+ {
+ 	if (size == HPAGE_SIZE)
+ 		return true;
+@@ -421,6 +421,16 @@ bool __init arch_hugetlb_valid_size(unsigned long size)
+ 		return false;
+ }
+ 
++bool __init arch_hugetlb_valid_size(unsigned long size)
++{
++	return __hugetlb_valid_size(size);
++}
++
++bool arch_hugetlb_migration_supported(struct hstate *h)
++{
++	return __hugetlb_valid_size(huge_page_size(h));
++}
++
+ #ifdef CONFIG_CONTIG_ALLOC
+ static __init int gigantic_pages_init(void)
+ {
+
+
+########## 第23条  编号 B576  提交 e4d3386b74fb  日期 2026-05-17
+
+【提交说明】
+ALSA: pcm: Don't setup bogus iov_iter for silencing
+
+At transition to the iov_iter for PCM data transfer, we blindly
+applied the iov_iter setup also for silencing (i.e. data = NULL), and
+it leads to a calculation of bogus iov_iter.  Fortunately this didn't
+cause troubles on most of architectures but it goes wrong on RISC-V
+now, causing a NULL dereference.
+
+Handle the NULL data case to treat the silencing in interleaved_copy()
+for addressing the bug above.  noninterleaved_copy() has already the
+NULL data handling, so it doesn't need changes.
+
+Fixes: cf393babb37a ("ALSA: pcm: Add copy ops with iov_iter")
+
+【改动统计】
+ sound/core/pcm_lib.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+【改动内容】
+diff --git a/sound/core/pcm_lib.c b/sound/core/pcm_lib.c
+index 09c421cd9319..fe597f7d522d 100644
+--- a/sound/core/pcm_lib.c
++++ b/sound/core/pcm_lib.c
+@@ -2138,6 +2138,9 @@ static int interleaved_copy(struct snd_pcm_substream *substream,
+ 	off = frames_to_bytes(runtime, off);
+ 	frames = frames_to_bytes(runtime, frames);
+ 
++	if (!data)
++		return fill_silence(substream, 0, hwoff, NULL, frames);
++
+ 	return do_transfer(substream, 0, hwoff, data + off, frames, transfer,
+ 			   in_kernel);
+ }
+
+
+########## 第24条  编号 A085  提交 3b6564427aea  日期 2024-06-22
+
+【提交说明】
+riscv: Fix linear mapping checks for non-contiguous memory regions
+
+The RISC-V kernel already has checks to ensure that memory which would
+lie outside of the linear mapping is not used. However those checks
+use memory_limit, which is used to implement the mem= kernel command
+line option (to limit the total amount of memory, not its address
+range). When memory is made up of two or more non-contiguous memory
+banks this check is incorrect.
+
+Two changes are made here:
+ - add a call in setup_bootmem() to memblock_cap_memory_range() which
+   will cause any memory which falls outside the linear mapping to be
+   removed from the memory regions.
+ - remove the check in create_linear_mapping_page_table() which was
+   intended to remove memory which is outside the liner mapping based
+   on memory_limit, as it is no longer needed. Note a check for
+   mapping more memory than memory_limit (to implement mem=) is
+   unnecessary because of the existing call to
+   memblock_enforce_memory_limit().
+
+This issue was seen when booting on a SV39 platform with two memory
+banks:
+  0x00,80000000 1GiB
+  0x20,00000000 32GiB
+This memory range is 158GiB from top to bottom, but the linear mapping
+is limited to 128GiB, so the lower block of RAM will be mapped at
+PAGE_OFFSET, and the upper block straddles the top of the linear
+mapping.
+
+This causes the following Oops:
+[    0.000000] Linux version 6.10.0-rc2-gd3b8dd5b51dd-dirty (stuart.menefy@codasip.com) (riscv64-codasip-linux-gcc (GCC) 13.2.0, GNU ld (GNU Binutils) 2.41.0.20231213) #20 SMP Sat Jun 22 11:34:22 BST 2024
+[    0.000000] memblock_add: [0x0000000080000000-0x00000000bfffffff] early_init_dt_add_memory_arch+0x4a/0x52
+[    0.000000] memblock_add: [0x0000002000000000-0x00000027ffffffff] early_init_dt_add_memory_arch+0x4a/0x52
+...
+[    0.000000] memblock_alloc_try_nid: 23724 bytes align=0x8 nid=-1 from=0x0000000000000000 max_addr=0x0000000000000000 early_init_dt_alloc_memory_arch+0x1e/0x48
+[    0.000000] memblock_reserve: [0x00000027ffff5350-0x00000027ffffaffb] memblock_alloc_range_nid+0xb8/0x132
+[    0.000000] Unable to handle kernel paging request at virtual address fffffffe7fff5350
+[    0.000000] Oops [#1]
+[    0.000000] Modules linked in:
+[    0.000000] CPU: 0 PID: 0 Comm: swapper Not tainted 6.10.0-rc2-gd3b8dd5b51dd-dirty #20
+[    0.000000] Hardware name: codasip,a70x (DT)
+[    0.000000] epc : __memset+0x8c/0x104
+[    0.000000]  ra : memblock_alloc_try_nid+0x74/0x84
+[    0.000000] epc : ffffffff805e88c8 ra : ffffffff806148f6 sp : ffffffff80e03d50
+[    0.000000]  gp : ffffffff80ec4158 tp : ffffffff80e0bec0 t0 : fffffffe7fff52f8
+[    0.000000]  t1 : 00000027ffffb000 t2 : 5f6b636f6c626d65 s0 : ffffffff80e03d90
+[    0.000000]  s1 : 0000000000005cac a0 : fffffffe7fff5350 a1 : 0000000000000000
+[    0.000000]  a2 : 0000000000005cac a3 : fffffffe7fffaff8 a4 : 000000000000002c
+[    0.000000]  a5 : ffffffff805e88c8 a6 : 0000000000005cac a7 : 0000000000000030
+[    0.000000]  s2 : fffffffe7fff5350 s3 : ffffffffffffffff s4 : 0000000000000000
+[    0.000000]  s5 : ffffffff8062347e s6 : 0000000000000000 s7 : 0000000000000001
+[    0.000000]  s8 : 0000000000002000 s9 : 00000000800226d0 s10: 0000000000000000
+[    0.000000]  s11: 0000000000000000 t3 : ffffffff8080a928 t4 : ffffffff8080a928
+[    0.000000]  t5 : ffffffff8080a928 t6 : ffffffff8080a940
+[    0.000000] status: 0000000200000100 badaddr: fffffffe7fff5350 cause: 000000000000000f
+[    0.000000] [<ffffffff805e88c8>] __memset+0x8c/0x104
+[    0.000000] [<ffffffff8062349c>] early_init_dt_alloc_memory_arch+0x1e/0x48
+[    0.000000] [<ffffffff8043e892>] __unflatten_device_tree+0x52/0x114
+[    0.000000] [<ffffffff8062441e>] unflatten_device_tree+0x9e/0xb8
+[    0.000000] [<ffffffff806046fe>] setup_arch+0xd4/0x5bc
+[    0.000000] [<ffffffff806007aa>] start_kernel+0x76/0x81a
+[    0.000000] Code: b823 02b2 bc23 02b2 b023 04b2 b423 04b2 b823 04b2 (bc23) 04b2
+[    0.000000] ---[ end trace 0000000000000000 ]---
+[    0.000000] Kernel panic - not syncing: Attempted to kill the idle task!
+[    0.000000] ---[ end Kernel panic - not syncing: Attempted to kill the idle task! ]---
+
+The problem is that memblock (unaware that some physical memory cannot
+be used) has allocated memory from the top of memory but which is
+outside the linear mapping region.
+
+Fixes: c99127c45248 ("riscv: Make sure the linear mapping does not use the kernel mapping")
+
+【改动统计】
+ arch/riscv/mm/init.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index bfa2dea95354..8b698d9609e7 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -234,8 +234,6 @@ static void __init setup_bootmem(void)
+ 	 */
+ 	memblock_reserve(vmlinux_start, vmlinux_end - vmlinux_start);
+ 
+-	phys_ram_end = memblock_end_of_DRAM();
+-
+ 	/*
+ 	 * Make sure we align the start of the memory on a PMD boundary so that
+ 	 * at worst, we map the linear mapping with PMD mappings.
+@@ -250,6 +248,16 @@ static void __init setup_bootmem(void)
+ 	if (IS_ENABLED(CONFIG_64BIT) && IS_ENABLED(CONFIG_MMU))
+ 		kernel_map.va_pa_offset = PAGE_OFFSET - phys_ram_base;
+ 
++	/*
++	 * The size of the linear page mapping may restrict the amount of
++	 * usable RAM.
++	 */
++	if (IS_ENABLED(CONFIG_64BIT)) {
++		max_mapped_addr = __pa(PAGE_OFFSET) + KERN_VIRT_SIZE;
++		memblock_cap_memory_range(phys_ram_base,
++					  max_mapped_addr - phys_ram_base);
++	}
++
+ 	/*
+ 	 * Reserve physical address space that would be mapped to virtual
+ 	 * addresses greater than (void *)(-PAGE_SIZE) because:
+@@ -266,6 +274,7 @@ static void __init setup_bootmem(void)
+ 		memblock_reserve(max_mapped_addr, (phys_addr_t)-max_mapped_addr);
+ 	}
+ 
++	phys_ram_end = memblock_end_of_DRAM();
+ 	min_low_pfn = PFN_UP(phys_ram_base);
+ 	max_low_pfn = max_pfn = PFN_DOWN(phys_ram_end);
+ 	high_memory = (void *)(__va(PFN_PHYS(max_low_pfn)));
+@@ -1284,8 +1293,6 @@ static void __init create_linear_mapping_page_table(void)
+ 		if (start <= __pa(PAGE_OFFSET) &&
+ 		    __pa(PAGE_OFFSET) < end)
+ 			start = __pa(PAGE_OFFSET);
+-		if (end >= __pa(PAGE_OFFSET) + memory_limit)
+-			end = __pa(PAGE_OFFSET) + memory_limit;
+ 
+ 		create_linear_mapping_range(start, end, 0, NULL);
+ 	}
+
+
+########## 第25条  编号 A142  提交 67a5ba8f742f  日期 2025-03-17
+
+【提交说明】
+riscv: fgraph: Fix stack layout to match __arch_ftrace_regs argument of ftrace_return_to_handler
+
+Naresh Kamboju reported a "Bad frame pointer" kernel warning while
+running LTP trace ftrace_stress_test.sh in riscv. We can reproduce the
+same issue with the following command:
+
+```
+$ cd /sys/kernel/debug/tracing
+$ echo 'f:myprobe do_nanosleep%return args1=$retval' > dynamic_events
+$ echo 1 > events/fprobes/enable
+$ echo 1 > tracing_on
+$ sleep 1
+```
+
+And we can get the following kernel warning:
+
+[  127.692888] ------------[ cut here ]------------
+[  127.693755] Bad frame pointer: expected ff2000000065be50, received ba34c141e9594000
+[  127.693755]   from func do_nanosleep return to ffffffff800ccb16
+[  127.698699] WARNING: CPU: 1 PID: 129 at kernel/trace/fgraph.c:755 ftrace_return_to_handler+0x1b2/0x1be
+[  127.699894] Modules linked in:
+[  127.700908] CPU: 1 UID: 0 PID: 129 Comm: sleep Not tainted 6.14.0-rc3-g0ab191c74642 #32
+[  127.701453] Hardware name: riscv-virtio,qemu (DT)
+[  127.701859] epc : ftrace_return_to_handler+0x1b2/0x1be
+[  127.702032]  ra : ftrace_return_to_handler+0x1b2/0x1be
+[  127.702151] epc : ffffffff8013b5e0 ra : ffffffff8013b5e0 sp : ff2000000065bd10
+[  127.702221]  gp : ffffffff819c12f8 tp : ff60000080853100 t0 : 6e00000000000000
+[  127.702284]  t1 : 0000000000000020 t2 : 6e7566206d6f7266 s0 : ff2000000065bd80
+[  127.702346]  s1 : ff60000081262000 a0 : 000000000000007b a1 : ffffffff81894f20
+[  127.702408]  a2 : 0000000000000010 a3 : fffffffffffffffe a4 : 0000000000000000
+[  127.702470]  a5 : 0000000000000000 a6 : 0000000000000008 a7 : 0000000000000038
+[  127.702530]  s2 : ba34c141e9594000 s3 : 0000000000000000 s4 : ff2000000065bdd0
+[  127.702591]  s5 : 00007fff8adcf400 s6 : 000055556dc1d8c0 s7 : 0000000000000068
+[  127.702651]  s8 : 00007fff8adf5d10 s9 : 000000000000006d s10: 0000000000000001
+[  127.702710]  s11: 00005555737377c8 t3 : ffffffff819d899e t4 : ffffffff819d899e
+[  127.702769]  t5 : ffffffff819d89a0 t6 : ff2000000065bb18
+[  127.702826] status: 0000000200000120 badaddr: 0000000000000000 cause: 0000000000000003
+[  127.703292] [<ffffffff8013b5e0>] ftrace_return_to_handler+0x1b2/0x1be
+[  127.703760] [<ffffffff80017bce>] return_to_handler+0x16/0x26
+[  127.704009] [<ffffffff80017bb8>] return_to_handler+0x0/0x26
+[  127.704057] [<ffffffff800d3352>] common_nsleep+0x42/0x54
+[  127.704117] [<ffffffff800d44a2>] __riscv_sys_clock_nanosleep+0xba/0x10a
+[  127.704176] [<ffffffff80901c56>] do_trap_ecall_u+0x188/0x218
+[  127.704295] [<ffffffff8090cc3e>] handle_exception+0x14a/0x156
+[  127.705436] ---[ end trace 0000000000000000 ]---
+
+The reason is that the stack layout for constructing argument for the
+ftrace_return_to_handler in the return_to_handler does not match the
+__arch_ftrace_regs structure of riscv, leading to unexpected results.
+
+Fixes: a3ed4157b7d8 ("fgraph: Replace fgraph_ret_regs with ftrace_regs")
+
+【改动统计】
+ arch/riscv/kernel/mcount.S | 24 +++++++++++-------------
+ 1 file changed, 11 insertions(+), 13 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/mcount.S b/arch/riscv/kernel/mcount.S
+index 068168046e0e..da4a4000e57e 100644
+--- a/arch/riscv/kernel/mcount.S
++++ b/arch/riscv/kernel/mcount.S
+@@ -12,8 +12,6 @@
+ #include <asm/asm-offsets.h>
+ #include <asm/ftrace.h>
+ 
+-#define ABI_SIZE_ON_STACK	80
+-
+ 	.text
+ 
+ 	.macro SAVE_ABI_STATE
+@@ -28,12 +26,12 @@
+ 	 * register if a0 was not saved.
+ 	 */
+ 	.macro SAVE_RET_ABI_STATE
+-	addi	sp, sp, -ABI_SIZE_ON_STACK
+-	REG_S	ra, 1*SZREG(sp)
+-	REG_S	s0, 8*SZREG(sp)
+-	REG_S	a0, 10*SZREG(sp)
+-	REG_S	a1, 11*SZREG(sp)
+-	addi	s0, sp, ABI_SIZE_ON_STACK
++	addi	sp, sp, -FREGS_SIZE_ON_STACK
++	REG_S	ra, FREGS_RA(sp)
++	REG_S	s0, FREGS_S0(sp)
++	REG_S	a0, FREGS_A0(sp)
++	REG_S	a1, FREGS_A1(sp)
++	addi	s0, sp, FREGS_SIZE_ON_STACK
+ 	.endm
+ 
+ 	.macro RESTORE_ABI_STATE
+@@ -43,11 +41,11 @@
+ 	.endm
+ 
+ 	.macro RESTORE_RET_ABI_STATE
+-	REG_L	ra, 1*SZREG(sp)
+-	REG_L	s0, 8*SZREG(sp)
+-	REG_L	a0, 10*SZREG(sp)
+-	REG_L	a1, 11*SZREG(sp)
+-	addi	sp, sp, ABI_SIZE_ON_STACK
++	REG_L	ra, FREGS_RA(sp)
++	REG_L	s0, FREGS_S0(sp)
++	REG_L	a0, FREGS_A0(sp)
++	REG_L	a1, FREGS_A1(sp)
++	addi	sp, sp, FREGS_SIZE_ON_STACK
+ 	.endm
+ 
+ SYM_TYPED_FUNC_START(ftrace_stub)
+
+
+########## 第26条  编号 B584  提交 5a799714e8ca  日期 2026-06-30
+
+【提交说明】
+net/mlx5e: Fix publication race for priv->channel_stats[]
+
+mlx5e_channel_stats_alloc() publishes a new entry to
+priv->channel_stats[] and then increments priv->stats_nch as a
+publication token, but neither store carries any memory barrier:
+
+	priv->channel_stats[ix] = kvzalloc_node(...);
+	if (!priv->channel_stats[ix])
+		return -ENOMEM;
+	priv->stats_nch++;
+
+Concurrent readers compute the loop bound from priv->stats_nch and
+then dereference priv->channel_stats[i] using plain accesses, e.g.
+
+	for (i = 0; i < priv->stats_nch; i++) {
+		struct mlx5e_channel_stats *cs = priv->channel_stats[i];
+		... cs->rq.packets ...
+	}
+
+On weakly-ordered architectures (ARM, PowerPC, RISC-V) the writes to
+channel_stats[ix] and stats_nch may become visible to other CPUs out
+of program order. A reader can observe stats_nch == N while still
+seeing channel_stats[N-1] == NULL, leading to a NULL pointer
+dereference in the channel_stats loop.
+
+This has been observed in production on BlueField-3 DPUs (arm64),
+where ovs-vswitchd queries netdev statistics over netlink during NIC
+bringup, racing mlx5e_open_channel() -> mlx5e_channel_stats_alloc()
+on another CPU:
+
+  Unable to handle kernel NULL pointer dereference at virtual address 0x840
+  Hardware name: BlueField-3 DPU
+  pc : mlx5e_fold_sw_stats64+0x30/0x180 [mlx5_core]
+  Call trace:
+   mlx5e_fold_sw_stats64+0x30/0x180 [mlx5_core]
+   dev_get_stats+0x50/0xc0
+   ovs_vport_get_stats+0x38/0xac [openvswitch]
+   ovs_vport_cmd_fill_info+0x194/0x290 [openvswitch]
+   ovs_vport_cmd_get+0xbc/0x10c [openvswitch]
+   genl_family_rcv_msg_doit+0xd0/0x160
+   genl_rcv_msg+0xec/0x1f0
+   netlink_rcv_skb+0x64/0x130
+   genl_rcv+0x40/0x60
+   netlink_unicast+0x2fc/0x370
+   netlink_sendmsg+0x1dc/0x454
+   ...
+   __arm64_sys_sendmsg+0x2c/0x40
+
+Add mlx5e_stats_nch_write() and mlx5e_stats_nch_read() helpers in en.h
+that wrap the smp_store_release()/smp_load_acquire() pair on stats_nch.
+The release/acquire pair establishes the contract:
+
+  stats_nch == N  =>  channel_stats[0..N-1] are visible and non-NULL.
+
+Publish the stats_nch increment via mlx5e_stats_nch_write() in the
+writer (mlx5e_channel_stats_alloc()), and read stats_nch via
+mlx5e_stats_nch_read() in all readers: mlx5e RX/TX queue stats,
+mlx5e_get_base_stats(), ethtool channels stats, IPoIB stats, the
+sw_stats fold and the HV VHCA stats agent.
+
+Fixes: fa691d0c9c08 ("net/mlx5e: Allocate per-channel stats dynamically at first usage")
+
+【改动统计】
+ drivers/net/ethernet/mellanox/mlx5/core/en.h               | 12 ++++++++++++
+ drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c | 10 ++++++----
+ drivers/net/ethernet/mellanox/mlx5/core/en_main.c          | 14 ++++++++------
+ drivers/net/ethernet/mellanox/mlx5/core/en_stats.c         |  9 +++++----
+ drivers/net/ethernet/mellanox/mlx5/core/ipoib/ipoib.c      |  3 ++-
+ 5 files changed, 33 insertions(+), 15 deletions(-)
+
+【改动内容】
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en.h b/drivers/net/ethernet/mellanox/mlx5/core/en.h
+index 2270e2e550dd..d507289096c2 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en.h
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en.h
+@@ -987,6 +987,18 @@ struct mlx5e_priv {
+ 	struct ethtool_fec_hist_range *fec_ranges;
+ };
+ 
++static inline u16 mlx5e_stats_nch_read(const struct mlx5e_priv *priv)
++{
++	/* Pairs with smp_store_release in mlx5e_stats_nch_write(). */
++	return smp_load_acquire(&priv->stats_nch);
++}
++
++static inline void mlx5e_stats_nch_write(struct mlx5e_priv *priv, u16 n)
++{
++	/* Pairs with smp_load_acquire in mlx5e_stats_nch_read(). */
++	smp_store_release(&priv->stats_nch, n);
++}
++
+ struct mlx5e_dev {
+ 	struct net_device *netdev;
+ 	struct devlink_port dl_port;
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c b/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
+index cdaf77650164..631f802105d5 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en/hv_vhca_stats.c
+@@ -33,9 +33,10 @@ mlx5e_hv_vhca_fill_ring_stats(struct mlx5e_priv *priv, int ch,
+ static void mlx5e_hv_vhca_fill_stats(struct mlx5e_priv *priv, void *data,
+ 				     int buf_len)
+ {
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int ch, i = 0;
+ 
+-	for (ch = 0; ch < priv->stats_nch; ch++) {
++	for (ch = 0; ch < nch; ch++) {
+ 		void *buf = data + i;
+ 
+ 		if (WARN_ON_ONCE(buf +
+@@ -50,8 +51,9 @@ static void mlx5e_hv_vhca_fill_stats(struct mlx5e_priv *priv, void *data,
+ 
+ static int mlx5e_hv_vhca_stats_buf_size(struct mlx5e_priv *priv)
+ {
+-	return (sizeof(struct mlx5e_hv_vhca_per_ring_stats) *
+-		priv->stats_nch);
++	u16 nch = mlx5e_stats_nch_read(priv);
++
++	return sizeof(struct mlx5e_hv_vhca_per_ring_stats) * nch;
+ }
+ 
+ static int mlx5e_hv_vhca_stats_buf_max_size(struct mlx5e_priv *priv)
+@@ -106,7 +108,7 @@ static void mlx5e_hv_vhca_stats_control(struct mlx5_hv_vhca_agent *agent,
+ 	sagent = &priv->stats_agent;
+ 
+ 	block->version = MLX5_HV_VHCA_STATS_VERSION;
+-	block->rings   = priv->stats_nch;
++	block->rings   = mlx5e_stats_nch_read(priv);
+ 
+ 	if (!block->command) {
+ 		cancel_delayed_work_sync(&priv->stats_agent.work);
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+index 775f0c6e55c9..aa8610cedaa8 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+@@ -2773,7 +2773,7 @@ static int mlx5e_channel_stats_alloc(struct mlx5e_priv *priv, int ix, int cpu)
+ 						GFP_KERNEL, cpu_to_node(cpu));
+ 	if (!priv->channel_stats[ix])
+ 		return -ENOMEM;
+-	priv->stats_nch++;
++	mlx5e_stats_nch_write(priv, priv->stats_nch + 1);
+ 
+ 	return 0;
+ }
+@@ -4040,9 +4040,10 @@ static int mlx5e_setup_tc(struct net_device *dev, enum tc_setup_type type,
+ 
+ void mlx5e_fold_sw_stats64(struct mlx5e_priv *priv, struct rtnl_link_stats64 *s)
+ {
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int i;
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats = priv->channel_stats[i];
+ 		struct mlx5e_rq_stats *xskrq_stats = &channel_stats->xskrq;
+ 		struct mlx5e_rq_stats *rq_stats = &channel_stats->rq;
+@@ -5488,7 +5489,7 @@ static void mlx5e_get_queue_stats_rx(struct net_device *dev, int i,
+ 	struct mlx5e_rq_stats *xskrq_stats;
+ 	struct mlx5e_rq_stats *rq_stats;
+ 
+-	if (mlx5e_is_uplink_rep(priv) || !priv->stats_nch)
++	if (mlx5e_is_uplink_rep(priv) || !mlx5e_stats_nch_read(priv))
+ 		return;
+ 
+ 	channel_stats = priv->channel_stats[i];
+@@ -5512,7 +5513,7 @@ static void mlx5e_get_queue_stats_tx(struct net_device *dev, int i,
+ 	struct mlx5e_priv *priv = netdev_priv(dev);
+ 	struct mlx5e_sq_stats *sq_stats;
+ 
+-	if (!priv->stats_nch)
++	if (!mlx5e_stats_nch_read(priv))
+ 		return;
+ 
+ 	/* no special case needed for ptp htb etc since txq2sq_stats is kept up
+@@ -5538,6 +5539,7 @@ static void mlx5e_get_base_stats(struct net_device *dev,
+ 				 struct netdev_queue_stats_tx *tx)
+ {
+ 	struct mlx5e_priv *priv = netdev_priv(dev);
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	struct mlx5e_ptp *ptp_channel;
+ 	int i, tc;
+ 
+@@ -5549,7 +5551,7 @@ static void mlx5e_get_base_stats(struct net_device *dev,
+ 		rx->hw_gro_wire_packets = 0;
+ 		rx->hw_gro_wire_bytes = 0;
+ 
+-		for (i = priv->channels.params.num_channels; i < priv->stats_nch; i++) {
++		for (i = priv->channels.params.num_channels; i < nch; i++) {
+ 			struct netdev_queue_stats_rx rx_i = {0};
+ 
+ 			mlx5e_get_queue_stats_rx(dev, i, &rx_i);
+@@ -5585,7 +5587,7 @@ static void mlx5e_get_base_stats(struct net_device *dev,
+ 	tx->stop = 0;
+ 	tx->wake = 0;
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats = priv->channel_stats[i];
+ 
+ 		/* handle two cases:
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c b/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c
+index 7f33261ba655..de38b60806c2 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en_stats.c
+@@ -515,6 +515,7 @@ static void mlx5e_stats_update_stats_rq_page_pool(struct mlx5e_channel *c)
+ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(sw)
+ {
+ 	struct mlx5e_sw_stats *s = &priv->stats.sw;
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	int i;
+ 
+ 	memset(s, 0, sizeof(*s));
+@@ -522,7 +523,7 @@ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(sw)
+ 	for (i = 0; i < priv->channels.num; i++) /* for active channels only */
+ 		mlx5e_stats_update_stats_rq_page_pool(priv->channels.c[i]);
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats =
+ 			priv->channel_stats[i];
+ 
+@@ -2614,7 +2615,7 @@ static MLX5E_DECLARE_STATS_GRP_OP_UPDATE_STATS(ptp) { return; }
+ 
+ static MLX5E_DECLARE_STATS_GRP_OP_NUM_STATS(channels)
+ {
+-	int max_nch = priv->stats_nch;
++	int max_nch = mlx5e_stats_nch_read(priv);
+ 
+ 	return (NUM_RQ_STATS * max_nch) +
+ 	       (NUM_CH_STATS * max_nch) +
+@@ -2627,8 +2628,8 @@ static MLX5E_DECLARE_STATS_GRP_OP_NUM_STATS(channels)
+ 
+ static MLX5E_DECLARE_STATS_GRP_OP_FILL_STRS(channels)
+ {
++	int max_nch = mlx5e_stats_nch_read(priv);
+ 	bool is_xsk = priv->xsk.ever_used;
+-	int max_nch = priv->stats_nch;
+ 	int i, j, tc;
+ 
+ 	for (i = 0; i < max_nch; i++)
+@@ -2660,8 +2661,8 @@ static MLX5E_DECLARE_STATS_GRP_OP_FILL_STRS(channels)
+ 
+ static MLX5E_DECLARE_STATS_GRP_OP_FILL_STATS(channels)
+ {
++	int max_nch = mlx5e_stats_nch_read(priv);
+ 	bool is_xsk = priv->xsk.ever_used;
+-	int max_nch = priv->stats_nch;
+ 	int i, j, tc;
+ 
+ 	for (i = 0; i < max_nch; i++)
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/ipoib/ipoib.c b/drivers/net/ethernet/mellanox/mlx5/core/ipoib/ipoib.c
+index 0a6003fe60e9..674bed721e63 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/ipoib/ipoib.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/ipoib/ipoib.c
+@@ -135,10 +135,11 @@ void mlx5i_cleanup(struct mlx5e_priv *priv)
+ 
+ static void mlx5i_grp_sw_update_stats(struct mlx5e_priv *priv)
+ {
++	u16 nch = mlx5e_stats_nch_read(priv);
+ 	struct rtnl_link_stats64 s = {};
+ 	int i, j;
+ 
+-	for (i = 0; i < priv->stats_nch; i++) {
++	for (i = 0; i < nch; i++) {
+ 		struct mlx5e_channel_stats *channel_stats;
+ 		struct mlx5e_rq_stats *rq_stats;
+ 
+
+
+########## 第27条  编号 A378  提交 3033b2b1e394  日期 2026-03-23
+
+【提交说明】
+riscv: Reset pmm when PR_TAGGED_ADDR_ENABLE is not set
+
+In set_tagged_addr_ctrl(), when PR_TAGGED_ADDR_ENABLE is not set, pmlen
+is correctly set to 0, but it forgets to reset pmm. This results in the
+CPU pmm state not corresponding to the software pmlen state.
+
+Fix this by resetting pmm along with pmlen.
+
+Fixes: 2e1743085887 ("riscv: Add support for the tagged address ABI")
+
+【改动统计】
+ arch/riscv/kernel/process.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/process.c b/arch/riscv/kernel/process.c
+index aacb23978f93..5957effab57c 100644
+--- a/arch/riscv/kernel/process.c
++++ b/arch/riscv/kernel/process.c
+@@ -347,8 +347,10 @@ long set_tagged_addr_ctrl(struct task_struct *task, unsigned long arg)
+ 	if (arg & PR_TAGGED_ADDR_ENABLE && (tagged_addr_disabled || !pmlen))
+ 		return -EINVAL;
+ 
+-	if (!(arg & PR_TAGGED_ADDR_ENABLE))
++	if (!(arg & PR_TAGGED_ADDR_ENABLE)) {
+ 		pmlen = PMLEN_0;
++		pmm = ENVCFG_PMM_PMLEN_0;
++	}
+ 
+ 	if (mmap_write_lock_killable(mm))
+ 		return -EINTR;
+
+
+########## 第28条  编号 A035  提交 1458eb2c9d88  日期 2024-01-17
+
+【提交说明】
+riscv: Fix set_huge_pte_at() for NAPOT mapping
+
+As stated by the privileged specification, we must clear a NAPOT
+mapping and emit a sfence.vma before setting a new translation.
+
+Fixes: 82a1a1f3bfb6 ("riscv: mm: support Svnapot in hugetlb page")
+
+【改动统计】
+ arch/riscv/mm/hugetlbpage.c | 42 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 40 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/mm/hugetlbpage.c b/arch/riscv/mm/hugetlbpage.c
+index 431596c0e20e..865ac5c7d159 100644
+--- a/arch/riscv/mm/hugetlbpage.c
++++ b/arch/riscv/mm/hugetlbpage.c
+@@ -177,13 +177,36 @@ pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags)
+ 	return entry;
+ }
+ 
++static void clear_flush(struct mm_struct *mm,
++			unsigned long addr,
++			pte_t *ptep,
++			unsigned long pgsize,
++			unsigned long ncontig)
++{
++	struct vm_area_struct vma = TLB_FLUSH_VMA(mm, 0);
++	unsigned long i, saddr = addr;
++
++	for (i = 0; i < ncontig; i++, addr += pgsize, ptep++)
++		ptep_get_and_clear(mm, addr, ptep);
++
++	flush_tlb_range(&vma, saddr, addr);
++}
++
++/*
++ * When dealing with NAPOT mappings, the privileged specification indicates that
++ * "if an update needs to be made, the OS generally should first mark all of the
++ * PTEs invalid, then issue SFENCE.VMA instruction(s) covering all 4 KiB regions
++ * within the range, [...] then update the PTE(s), as described in Section
++ * 4.2.1.". That's the equivalent of the Break-Before-Make approach used by
++ * arm64.
++ */
+ void set_huge_pte_at(struct mm_struct *mm,
+ 		     unsigned long addr,
+ 		     pte_t *ptep,
+ 		     pte_t pte,
+ 		     unsigned long sz)
+ {
+-	unsigned long hugepage_shift;
++	unsigned long hugepage_shift, pgsize;
+ 	int i, pte_num;
+ 
+ 	if (sz >= PGDIR_SIZE)
+@@ -198,7 +221,22 @@ void set_huge_pte_at(struct mm_struct *mm,
+ 		hugepage_shift = PAGE_SHIFT;
+ 
+ 	pte_num = sz >> hugepage_shift;
+-	for (i = 0; i < pte_num; i++, ptep++, addr += (1 << hugepage_shift))
++	pgsize = 1 << hugepage_shift;
++
++	if (!pte_present(pte)) {
++		for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
++			set_ptes(mm, addr, ptep, pte, 1);
++		return;
++	}
++
++	if (!pte_napot(pte)) {
++		set_ptes(mm, addr, ptep, pte, 1);
++		return;
++	}
++
++	clear_flush(mm, addr, ptep, pgsize, pte_num);
++
++	for (i = 0; i < pte_num; i++, ptep++, addr += pgsize)
+ 		set_pte_at(mm, addr, ptep, pte);
+ }
+ 
+
+
+########## 第29条  编号 A312  提交 b75a22e7d4f2  日期 2024-07-18
+
+【提交说明】
+riscv: cpufeature: Do not drop Linux-internal extensions
+
+The Linux-internal Xlinuxenvcfg ISA extension is omitted from the
+riscv_isa_ext array because it has no DT binding and should not appear
+in /proc/cpuinfo. The logic added in commit 625034abd52a ("riscv: add
+ISA extensions validation callback") assumes all extensions are included
+in riscv_isa_ext, and so riscv_resolve_isa() wrongly drops Xlinuxenvcfg
+from the final ISA string. Instead, accept such Linux-internal ISA
+extensions as if they have no validation callback.
+
+Fixes: 625034abd52a ("riscv: add ISA extensions validation callback")
+
+【改动统计】
+ arch/riscv/kernel/cpufeature.c | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/cpufeature.c b/arch/riscv/kernel/cpufeature.c
+index 8f20607adb40..b427188b28fc 100644
+--- a/arch/riscv/kernel/cpufeature.c
++++ b/arch/riscv/kernel/cpufeature.c
+@@ -432,28 +432,26 @@ static void __init riscv_resolve_isa(unsigned long *source_isa,
+ 		bitmap_copy(prev_resolved_isa, resolved_isa, RISCV_ISA_EXT_MAX);
+ 		for_each_set_bit(bit, source_isa, RISCV_ISA_EXT_MAX) {
+ 			ext = riscv_get_isa_ext_data(bit);
+-			if (!ext)
+-				continue;
+ 
+-			if (ext->validate) {
++			if (ext && ext->validate) {
+ 				ret = ext->validate(ext, resolved_isa);
+ 				if (ret == -EPROBE_DEFER) {
+ 					loop = true;
+ 					continue;
+ 				} else if (ret) {
+ 					/* Disable the extension entirely */
+-					clear_bit(ext->id, source_isa);
++					clear_bit(bit, source_isa);
+ 					continue;
+ 				}
+ 			}
+ 
+-			set_bit(ext->id, resolved_isa);
++			set_bit(bit, resolved_isa);
+ 			/* No need to keep it in source isa now that it is enabled */
+-			clear_bit(ext->id, source_isa);
++			clear_bit(bit, source_isa);
+ 
+ 			/* Single letter extensions get set in hwcap */
+-			if (ext->id < RISCV_ISA_EXT_BASE)
+-				*this_hwcap |= isa2hwcap[ext->id];
++			if (bit < RISCV_ISA_EXT_BASE)
++				*this_hwcap |= isa2hwcap[bit];
+ 		}
+ 	} while (loop && memcmp(prev_resolved_isa, resolved_isa, sizeof(prev_resolved_isa)));
+ }
+
+
+########## 第30条  编号 A054  提交 05ab803d1ad8  日期 2024-02-27
+
+【提交说明】
+riscv: Save/restore envcfg CSR during CPU suspend
+
+The value of the [ms]envcfg CSR is lost when entering a nonretentive
+idle state, so the CSR must be rewritten when resuming the CPU.
+
+Fixes: 43c16d51a19b ("RISC-V: Enable cbo.zero in usermode")
+
+【改动统计】
+ arch/riscv/include/asm/suspend.h | 1 +
+ arch/riscv/kernel/suspend.c      | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/include/asm/suspend.h b/arch/riscv/include/asm/suspend.h
+index 02f87867389a..491296a335d0 100644
+--- a/arch/riscv/include/asm/suspend.h
++++ b/arch/riscv/include/asm/suspend.h
+@@ -14,6 +14,7 @@ struct suspend_context {
+ 	struct pt_regs regs;
+ 	/* Saved and restored by high-level functions */
+ 	unsigned long scratch;
++	unsigned long envcfg;
+ 	unsigned long tvec;
+ 	unsigned long ie;
+ #ifdef CONFIG_MMU
+diff --git a/arch/riscv/kernel/suspend.c b/arch/riscv/kernel/suspend.c
+index 239509367e42..299795341e8a 100644
+--- a/arch/riscv/kernel/suspend.c
++++ b/arch/riscv/kernel/suspend.c
+@@ -15,6 +15,8 @@
+ void suspend_save_csrs(struct suspend_context *context)
+ {
+ 	context->scratch = csr_read(CSR_SCRATCH);
++	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_XLINUXENVCFG))
++		context->envcfg = csr_read(CSR_ENVCFG);
+ 	context->tvec = csr_read(CSR_TVEC);
+ 	context->ie = csr_read(CSR_IE);
+ 
+@@ -36,6 +38,8 @@ void suspend_save_csrs(struct suspend_context *context)
+ void suspend_restore_csrs(struct suspend_context *context)
+ {
+ 	csr_write(CSR_SCRATCH, context->scratch);
++	if (riscv_cpu_has_extension_unlikely(smp_processor_id(), RISCV_ISA_EXT_XLINUXENVCFG))
++		csr_write(CSR_ENVCFG, context->envcfg);
+ 	csr_write(CSR_TVEC, context->tvec);
+ 	csr_write(CSR_IE, context->ie);
+ 
+
+
+########## 第31条  编号 A370  提交 5c1bb0787111  日期 2026-02-27
+
+【提交说明】
+RISC-V: KVM: fix off-by-one array access in SBI PMU
+
+The indexed array only has RISCV_KVM_MAX_COUNTERS elements.
+The out-of-bound access could have been performed by a guest,
+but it could only access another guest accessible data.
+
+Fixes: 8f0153ecd3bf ("RISC-V: KVM: Add skeleton support for perf")
+
+【改动统计】
+ arch/riscv/kvm/vcpu_pmu.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu_pmu.c b/arch/riscv/kvm/vcpu_pmu.c
+index 4d8d5e9aa53d..aec6b293968b 100644
+--- a/arch/riscv/kvm/vcpu_pmu.c
++++ b/arch/riscv/kvm/vcpu_pmu.c
+@@ -520,7 +520,7 @@ int kvm_riscv_vcpu_pmu_ctr_info(struct kvm_vcpu *vcpu, unsigned long cidx,
+ {
+ 	struct kvm_pmu *kvpmu = vcpu_to_pmu(vcpu);
+ 
+-	if (cidx > RISCV_KVM_MAX_COUNTERS || cidx == 1) {
++	if (cidx >= RISCV_KVM_MAX_COUNTERS || cidx == 1) {
+ 		retdata->err_val = SBI_ERR_INVALID_PARAM;
+ 		return 0;
+ 	}
+
+
+########## 第32条  编号 A100  提交 5ba7a75a53df  日期 2024-08-19
+
+【提交说明】
+riscv: Fix toolchain vector detection
+
+A recent change to gcc flags rv64iv as no longer valid:
+
+   cc1: sorry, unimplemented: Currently the 'V' implementation
+   requires the 'M' extension
+
+and as a result vector support is disabled. Fix this by adding m
+to our toolchain vector detection code.
+
+Fixes: fa8e7cce55da ("riscv: Enable Vector code to be built")
+
+【改动统计】
+ arch/riscv/Kconfig | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 0f3cd7c3a436..939ea7f6a228 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -552,8 +552,8 @@ config RISCV_ISA_SVPBMT
+ config TOOLCHAIN_HAS_V
+ 	bool
+ 	default y
+-	depends on !64BIT || $(cc-option,-mabi=lp64 -march=rv64iv)
+-	depends on !32BIT || $(cc-option,-mabi=ilp32 -march=rv32iv)
++	depends on !64BIT || $(cc-option,-mabi=lp64 -march=rv64imv)
++	depends on !32BIT || $(cc-option,-mabi=ilp32 -march=rv32imv)
+ 	depends on LLD_VERSION >= 140000 || LD_VERSION >= 23800
+ 	depends on AS_HAS_OPTION_ARCH
+ 
+
+
+########## 第33条  编号 A387  提交 5eb6d68fe24d  日期 2026-05-25
+
+【提交说明】
+RISC-V: KVM: Fix ebreak self test failure
+
+The ebreak self test enables/disables guest debugging as a part of the
+test. However the KVM_SET_GUEST_DEBUG ioctl doesn't actually do it.
+Fixing it by calling kvm_riscv_vcpu_config_guest_debug.
+
+Fixes: 6ed523e2b612 ("RISC-V: KVM: Factor-out VCPU config into separate sources")
+
+【改动统计】
+ arch/riscv/kvm/vcpu.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+【改动内容】
+diff --git a/arch/riscv/kvm/vcpu.c b/arch/riscv/kvm/vcpu.c
+index a73690eda84b..cf6e231e76e2 100644
+--- a/arch/riscv/kvm/vcpu.c
++++ b/arch/riscv/kvm/vcpu.c
+@@ -538,6 +538,7 @@ int kvm_arch_vcpu_ioctl_set_guest_debug(struct kvm_vcpu *vcpu,
+ 	else
+ 		vcpu->guest_debug = 0;
+ 
++	kvm_riscv_vcpu_config_guest_debug(vcpu);
+ 	return 0;
+ }
+ 
+
+
+########## 第34条  编号 A261  提交 45ebe4540817  日期 2026-07-16
+
+【提交说明】
+riscv/mm: use physical alignment for vmemmap_start_pfn
+
+RISC-V computes vmemmap_start_pfn by rounding phys_ram_base down to
+VMEMMAP_ADDR_ALIGN.  That alignment must therefore be expressed in the
+physical-address domain.
+
+Commit 476849b0fba4 ("riscv/mm: align vmemmap to maximal folio size")
+attempted to account for the maximal folio alignment by feeding
+MAX_FOLIO_VMEMMAP_ALIGN directly into VMEMMAP_ADDR_ALIGN.  However,
+MAX_FOLIO_VMEMMAP_ALIGN is measured in bytes of struct page storage,
+whereas VMEMMAP_ADDR_ALIGN is used to align a physical address.
+
+The mask-based compound_info encoding requires pfn_to_page(0) to be
+naturally aligned to MAX_FOLIO_VMEMMAP_ALIGN.  Commit 9f94db4c7eaa
+("mm/sparse: check memmap alignment for compound_info_has_mask()") added a
+check for that requirement and exposed the unit mismatch on systems such
+as QEMU virt, where the DRAM base is not aligned to MAX_FOLIO_NR_PAGES *
+PAGE_SIZE.
+
+Here is the log:
+[    0.000000][    C0] ------------[ cut here ]------------
+[    0.000000][    C0] WARNING: mm/sparse.c:365 at sparse_init+0x58a/0x6fe, CPU#0: swapper/0
+[    0.000000][    C0] Modules linked in:
+[    0.000000][    C0] CPU: 0 UID: 0 PID: 0 Comm: swapper Not tainted 7.2.0-rc3-g1d8304bdd65f #2 PREEMPT 
+[    0.000000][    C0] Hardware name: riscv-virtio,qemu (DT)
+[    0.000000][    C0] epc : sparse_init+0x58a/0x6fe
+[    0.000000][    C0]  ra : sparse_init+0x58a/0x6fe
+[    0.000000][    C0] epc : ffffffff86851c88 ra : ffffffff86851c88 sp : ffffffff88807a30
+[    0.000000][    C0]  gp : ffffffff8a3bf240 tp : ffffffff88842080 t0 : ff600000ffab6000
+[    0.000000][    C0]  t1 : 000000017fab6000 t2 : 65203a6573726363 s0 : ffffffff88807bc0
+[    0.000000][    C0]  s1 : 000000000e000000 a0 : 0000000000000007 a1 : 0000000000000000
+[    0.000000][    C0]  a2 : 0000000000000002 a3 : ffffffff86851c88 a4 : 0000000000000000
+[    0.000000][    C0]  a5 : ffffffff88843080 a6 : 0000000000000003 a7 : 0000000000000000
+[    0.000000][    C0]  s2 : ff60000000000000 s3 : 0040000000000000 s4 : 0004000000000000
+[    0.000000][    C0]  s5 : ffffffff8a4d92e0 s6 : ff600000ffab55e0 s7 : ffffffff88384d00
+[    0.000000][    C0]  s8 : 0000000000000003 s9 : ffffffff88384cc1 s10: ffffffff88384cc0
+[    0.000000][    C0]  s11: ffffffff8a4daae0 t3 : ffffffff915e8b20 t4 : ffffffff915e8b20
+[    0.000000][    C0]  t5 : ffffffff915e8b20 t6 : ffffffff915e8bc8 ssp : 0000000000000000
+[    0.000000][    C0] status: 0000000200000100 badaddr: ffffffff86851c88 cause: 0000000000000003
+[    0.000000][    C0] [<ffffffff86851c88>] sparse_init+0x58a/0x6fe
+[    0.000000][    C0] [<ffffffff8683d396>] mm_core_init_early+0x116/0x1e30
+[    0.000000][    C0] [<ffffffff86801edc>] start_kernel+0xd2/0x848
+
+Convert MAX_FOLIO_VMEMMAP_ALIGN to the equivalent physical alignment
+before using it in VMEMMAP_ADDR_ALIGN.  This keeps the existing
+round_down() logic while making the resulting vmemmap base satisfy the
+mask-alignment requirement.
+
+Fixes: 476849b0fba4 ("riscv/mm: align vmemmap to maximal folio size")
+Assisted-by: YuanSheng:DeepSeek-V4-Flash
+
+【改动统计】
+ arch/riscv/mm/init.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/mm/init.c b/arch/riscv/mm/init.c
+index 3e450890be07..422efa11824b 100644
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -63,7 +63,8 @@ EXPORT_SYMBOL(phys_ram_base);
+ 
+ #ifdef CONFIG_SPARSEMEM_VMEMMAP
+ #define VMEMMAP_ADDR_ALIGN	max(1ULL << SECTION_SIZE_BITS, \
+-				    MAX_FOLIO_VMEMMAP_ALIGN)
++				    PFN_PHYS(MAX_FOLIO_VMEMMAP_ALIGN / \
++					     sizeof(struct page)))
+ 
+ unsigned long vmemmap_start_pfn __ro_after_init;
+ EXPORT_SYMBOL(vmemmap_start_pfn);
+
+
+########## 第35条  编号 B553  提交 7217cee35aad  日期 2026-01-30
+
+【提交说明】
+iommu/riscv: Skip IRQ count check when using MSI interrupts
+
+In RISC-V IOMMU platform devices that use MSI interrupts (indicated by the
+presence of 'msi-parent' in the device tree), there are no wired interrupt
+lines, so calling platform_get_irq_count() returns 0 or -ENXIO, causing the
+driver to fail during probe.
+
+However, MSI interrupts are allocated dynamically via the MSI subsystem and
+do not appear in the device tree 'interrupts' property. Therefore, the
+driver should not require a non-zero IRQ count when 'msi-parent' is present.
+
+This patch fixes the bug where probe fails when using MSI interrupts
+ (which do not have an 'interrupts' property in the device tree)..
+
+Fixes: <d5f88acdd6ff> ("iommu/riscv: Add support for platform msi")
+
+【改动统计】
+ drivers/iommu/riscv/iommu-platform.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+【改动内容】
+diff --git a/drivers/iommu/riscv/iommu-platform.c b/drivers/iommu/riscv/iommu-platform.c
+index 83a28c83f991..8f15b06e8499 100644
+--- a/drivers/iommu/riscv/iommu-platform.c
++++ b/drivers/iommu/riscv/iommu-platform.c
+@@ -68,12 +68,7 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
+ 	iommu->caps = riscv_iommu_readq(iommu, RISCV_IOMMU_REG_CAPABILITIES);
+ 	iommu->fctl = riscv_iommu_readl(iommu, RISCV_IOMMU_REG_FCTL);
+ 
+-	iommu->irqs_count = platform_irq_count(pdev);
+-	if (iommu->irqs_count <= 0)
+-		return dev_err_probe(dev, -ENODEV,
+-				     "no IRQ resources provided\n");
+-	if (iommu->irqs_count > RISCV_IOMMU_INTR_COUNT)
+-		iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
++	iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
+ 
+ 	igs = FIELD_GET(RISCV_IOMMU_CAPABILITIES_IGS, iommu->caps);
+ 	switch (igs) {
+@@ -120,6 +115,13 @@ static int riscv_iommu_platform_probe(struct platform_device *pdev)
+ 		fallthrough;
+ 
+ 	case RISCV_IOMMU_CAPABILITIES_IGS_WSI:
++		iommu->irqs_count = platform_irq_count(pdev);
++		if (iommu->irqs_count <= 0)
++			return dev_err_probe(dev, -ENODEV,
++					     "no IRQ resources provided\n");
++		if (iommu->irqs_count > RISCV_IOMMU_INTR_COUNT)
++			iommu->irqs_count = RISCV_IOMMU_INTR_COUNT;
++
+ 		for (vec = 0; vec < iommu->irqs_count; vec++)
+ 			iommu->irqs[vec] = platform_get_irq(pdev, vec);
+ 
+
+
+########## 第36条  编号 B518  提交 cb9f6a40382c  日期 2025-08-02
+
+【提交说明】
+irqchip/riscv-imsic: Don't dereference before NULL pointer check
+
+smatch warns about a dereference before check:
+drivers/irqchip/irq-riscv-imsic-platform.c:317 imsic_irqdomain_init() warn: variable dereferenced before check 'imsic' (see line 311)    
+
+Cure it by moving the firmware not assignement after the checks.
+
+Fixes: 59422904dd98 ("irqchip/riscv-imsic: Convert to msi_create_parent_irq_domain() helper")
+ drivers/irqchip/irq-riscv-imsic-platform.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动统计】
+ drivers/irqchip/irq-riscv-imsic-platform.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/drivers/irqchip/irq-riscv-imsic-platform.c b/drivers/irqchip/irq-riscv-imsic-platform.c
+index 74a2a28f9403..643c8e459611 100644
+--- a/drivers/irqchip/irq-riscv-imsic-platform.c
++++ b/drivers/irqchip/irq-riscv-imsic-platform.c
+@@ -308,7 +308,6 @@ static const struct msi_parent_ops imsic_msi_parent_ops = {
+ int imsic_irqdomain_init(void)
+ {
+ 	struct irq_domain_info info = {
+-		.fwnode		= imsic->fwnode,
+ 		.ops		= &imsic_base_domain_ops,
+ 		.host_data	= imsic,
+ 	};
+@@ -325,6 +324,7 @@ int imsic_irqdomain_init(void)
+ 	}
+ 
+ 	/* Create Base IRQ domain */
++	info.fwnode = imsic->fwnode,
+ 	imsic->base_domain = msi_create_parent_irq_domain(&info, &imsic_msi_parent_ops);
+ 	if (!imsic->base_domain) {
+ 		pr_err("%pfwP: failed to create IMSIC base domain\n", imsic->fwnode);
+
+
+########## 第37条  编号 A076  提交 fb1cf0878328  日期 2024-05-15
+
+【提交说明】
+riscv: rewrite __kernel_map_pages() to fix sleeping in invalid context
+
+__kernel_map_pages() is a debug function which clears the valid bit in page
+table entry for deallocated pages to detect illegal memory accesses to
+freed pages.
+
+This function set/clear the valid bit using __set_memory(). __set_memory()
+acquires init_mm's semaphore, and this operation may sleep. This is
+problematic, because  __kernel_map_pages() can be called in atomic context,
+and thus is illegal to sleep. An example warning that this causes:
+
+BUG: sleeping function called from invalid context at kernel/locking/rwsem.c:1578
+in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 2, name: kthreadd
+preempt_count: 2, expected: 0
+CPU: 0 PID: 2 Comm: kthreadd Not tainted 6.9.0-g1d4c6d784ef6 #37
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+[<ffffffff800060dc>] dump_backtrace+0x1c/0x24
+[<ffffffff8091ef6e>] show_stack+0x2c/0x38
+[<ffffffff8092baf8>] dump_stack_lvl+0x5a/0x72
+[<ffffffff8092bb24>] dump_stack+0x14/0x1c
+[<ffffffff8003b7ac>] __might_resched+0x104/0x10e
+[<ffffffff8003b7f4>] __might_sleep+0x3e/0x62
+[<ffffffff8093276a>] down_write+0x20/0x72
+[<ffffffff8000cf00>] __set_memory+0x82/0x2fa
+[<ffffffff8000d324>] __kernel_map_pages+0x5a/0xd4
+[<ffffffff80196cca>] __alloc_pages_bulk+0x3b2/0x43a
+[<ffffffff8018ee82>] __vmalloc_node_range+0x196/0x6ba
+[<ffffffff80011904>] copy_process+0x72c/0x17ec
+[<ffffffff80012ab4>] kernel_clone+0x60/0x2fe
+[<ffffffff80012f62>] kernel_thread+0x82/0xa0
+[<ffffffff8003552c>] kthreadd+0x14a/0x1be
+[<ffffffff809357de>] ret_from_fork+0xe/0x1c
+
+Rewrite this function with apply_to_existing_page_range(). It is fine to
+not have any locking, because __kernel_map_pages() works with pages being
+allocated/deallocated and those pages are not changed by anyone else in the
+meantime.
+
+Fixes: 5fde3db5eb02 ("riscv: add ARCH_SUPPORTS_DEBUG_PAGEALLOC support")
+
+【改动统计】
+ arch/riscv/mm/pageattr.c | 28 ++++++++++++++++++++++------
+ 1 file changed, 22 insertions(+), 6 deletions(-)
+
+【改动内容】
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index 410056a50aa9..271d01a5ba4d 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -387,17 +387,33 @@ int set_direct_map_default_noflush(struct page *page)
+ }
+ 
+ #ifdef CONFIG_DEBUG_PAGEALLOC
++static int debug_pagealloc_set_page(pte_t *pte, unsigned long addr, void *data)
++{
++	int enable = *(int *)data;
++
++	unsigned long val = pte_val(ptep_get(pte));
++
++	if (enable)
++		val |= _PAGE_PRESENT;
++	else
++		val &= ~_PAGE_PRESENT;
++
++	set_pte(pte, __pte(val));
++
++	return 0;
++}
++
+ void __kernel_map_pages(struct page *page, int numpages, int enable)
+ {
+ 	if (!debug_pagealloc_enabled())
+ 		return;
+ 
+-	if (enable)
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(_PAGE_PRESENT), __pgprot(0));
+-	else
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(0), __pgprot(_PAGE_PRESENT));
++	unsigned long start = (unsigned long)page_address(page);
++	unsigned long size = PAGE_SIZE * numpages;
++
++	apply_to_existing_page_range(&init_mm, start, size, debug_pagealloc_set_page, &enable);
++
++	flush_tlb_kernel_range(start, start + size);
+ }
+ #endif
+ 
+
+
+########## 第38条  编号 A155  提交 e94eb7ea6f20  日期 2025-04-09
+
+【提交说明】
+riscv: Properly export reserved regions in /proc/iomem
+
+The /proc/iomem represents the kernel's memory map. Regions marked
+with "Reserved" tells the user that the range should not be tampered
+with. Kexec-tools, when using the older kexec_load syscall relies on
+the "Reserved" regions to build the memory segments, that will be the
+target of the new kexec'd kernel.
+
+The RISC-V port tries to expose all reserved regions to userland, but
+some regions were not properly exposed: Regions that resided in both
+the "regular" and reserved memory block, e.g. the EFI Memory Map. A
+missing entry could result in reserved memory being overwritten.
+
+It turns out, that arm64, and loongarch had a similar issue a while
+back:
+
+  commit d91680e687f4 ("arm64: Fix /proc/iomem for reserved but not memory regions")
+  commit 50d7ba36b916 ("arm64: export memblock_reserve()d regions via /proc/iomem")
+
+Similar to the other ports, resolve the issue by splitting the regions
+in an arch initcall, since we need a working allocator.
+
+Fixes: ffe0e5261268 ("RISC-V: Improve init_resources()")
+
+【改动统计】
+ arch/riscv/kernel/setup.c | 36 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 35 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/kernel/setup.c b/arch/riscv/kernel/setup.c
+index c174544eefc8..f7c9a1caa83e 100644
+--- a/arch/riscv/kernel/setup.c
++++ b/arch/riscv/kernel/setup.c
+@@ -66,6 +66,9 @@ static struct resource bss_res = { .name = "Kernel bss", };
+ static struct resource elfcorehdr_res = { .name = "ELF Core hdr", };
+ #endif
+ 
++static int num_standard_resources;
++static struct resource *standard_resources;
++
+ static int __init add_resource(struct resource *parent,
+ 				struct resource *res)
+ {
+@@ -139,7 +142,7 @@ static void __init init_resources(void)
+ 	struct resource *res = NULL;
+ 	struct resource *mem_res = NULL;
+ 	size_t mem_res_sz = 0;
+-	int num_resources = 0, res_idx = 0;
++	int num_resources = 0, res_idx = 0, non_resv_res = 0;
+ 	int ret = 0;
+ 
+ 	/* + 1 as memblock_alloc() might increase memblock.reserved.cnt */
+@@ -193,6 +196,7 @@ static void __init init_resources(void)
+ 	/* Add /memory regions to the resource tree */
+ 	for_each_mem_region(region) {
+ 		res = &mem_res[res_idx--];
++		non_resv_res++;
+ 
+ 		if (unlikely(memblock_is_nomap(region))) {
+ 			res->name = "Reserved";
+@@ -210,6 +214,9 @@ static void __init init_resources(void)
+ 			goto error;
+ 	}
+ 
++	num_standard_resources = non_resv_res;
++	standard_resources = &mem_res[res_idx + 1];
++
+ 	/* Clean-up any unused pre-allocated resources */
+ 	if (res_idx >= 0)
+ 		memblock_free(mem_res, (res_idx + 1) * sizeof(*mem_res));
+@@ -221,6 +228,33 @@ static void __init init_resources(void)
+ 	memblock_free(mem_res, mem_res_sz);
+ }
+ 
++static int __init reserve_memblock_reserved_regions(void)
++{
++	u64 i, j;
++
++	for (i = 0; i < num_standard_resources; i++) {
++		struct resource *mem = &standard_resources[i];
++		phys_addr_t r_start, r_end, mem_size = resource_size(mem);
++
++		if (!memblock_is_region_reserved(mem->start, mem_size))
++			continue;
++
++		for_each_reserved_mem_range(j, &r_start, &r_end) {
++			resource_size_t start, end;
++
++			start = max(PFN_PHYS(PFN_DOWN(r_start)), mem->start);
++			end = min(PFN_PHYS(PFN_UP(r_end)) - 1, mem->end);
++
++			if (start > mem->end || end < mem->start)
++				continue;
++
++			reserve_region_with_split(mem, start, end, "Reserved");
++		}
++	}
++
++	return 0;
++}
++arch_initcall(reserve_memblock_reserved_regions);
+ 
+ static void __init parse_dtb(void)
+ {
+
+
+########## 第39条  编号 A169  提交 6f49743af42c  日期 2025-06-12
+
+【提交说明】
+riscv: Require clang-17 or newer for kCFI
+
+After the combination of commit c217157bcd1d ("riscv: Implement
+HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS"), which starts using
+'-fpatchable-function-entry=M,N', and commit d0262e907e29 ("riscv:
+ftrace: support PREEMPT"), which allows CONFIG_DYNAMIC_FTRACE to be
+enabled by allmodconfig, allmodconfig builds with clang-16 begin
+crashing in the generic LLVM kCFI pass (see [1] for the stack trace).
+
+clang-17 avoids this crash by moving to target-specific lowering of the
+kCFI operand bundles [2]. Require clang-17 to select CONFIG_CFI_CLANG to
+avoid this crash.
+
+Fixes: c217157bcd1d ("riscv: Implement HAVE_DYNAMIC_FTRACE_WITH_CALL_OPS")
+
+【改动统计】
+ arch/riscv/Kconfig | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 36061f4732b7..d71ea0f4466f 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -63,7 +63,8 @@ config RISCV
+ 	select ARCH_OPTIONAL_KERNEL_RWX_DEFAULT
+ 	select ARCH_STACKWALK
+ 	select ARCH_SUPPORTS_ATOMIC_RMW
+-	select ARCH_SUPPORTS_CFI_CLANG
++	# clang >= 17: https://github.com/llvm/llvm-project/commit/62fa708ceb027713b386c7e0efda994f8bdc27e2
++	select ARCH_SUPPORTS_CFI_CLANG if CLANG_VERSION >= 170000
+ 	select ARCH_SUPPORTS_DEBUG_PAGEALLOC if MMU
+ 	select ARCH_SUPPORTS_HUGE_PFNMAP if TRANSPARENT_HUGEPAGE
+ 	select ARCH_SUPPORTS_HUGETLBFS if MMU
+
+
+########## 第40条  编号 B441  提交 0fc670d07d5d  日期 2024-06-03
+
+【提交说明】
+KVM: selftests: Fix RISC-V compilation
+
+Due to commit 2b7deea3ec7c ("Revert "kvm: selftests: move base
+kvm_util.h declarations to kvm_util_base.h"") kvm selftests now
+requires explicitly including ucall_common.h when needed. The commit
+added the directives everywhere they were needed at the time, but, by
+merge time, new places had been merged for RISC-V. Add those now to
+fix RISC-V's compilation.
+
+Fixes: dee7ea42a1eb ("Merge tag 'kvm-x86-selftests_utils-6.10' of https://github.com/kvm-x86/linux into HEAD")
+
+【改动统计】
+ tools/testing/selftests/kvm/lib/riscv/ucall.c    | 1 +
+ tools/testing/selftests/kvm/riscv/ebreak_test.c  | 1 +
+ tools/testing/selftests/kvm/riscv/sbi_pmu_test.c | 1 +
+ 3 files changed, 3 insertions(+)
+
+【改动内容】
+diff --git a/tools/testing/selftests/kvm/lib/riscv/ucall.c b/tools/testing/selftests/kvm/lib/riscv/ucall.c
+index 14ee17151a59..b5035c63d516 100644
+--- a/tools/testing/selftests/kvm/lib/riscv/ucall.c
++++ b/tools/testing/selftests/kvm/lib/riscv/ucall.c
+@@ -9,6 +9,7 @@
+ 
+ #include "kvm_util.h"
+ #include "processor.h"
++#include "sbi.h"
+ 
+ void *ucall_arch_get_ucall(struct kvm_vcpu *vcpu)
+ {
+diff --git a/tools/testing/selftests/kvm/riscv/ebreak_test.c b/tools/testing/selftests/kvm/riscv/ebreak_test.c
+index 823c132069b4..0e0712854953 100644
+--- a/tools/testing/selftests/kvm/riscv/ebreak_test.c
++++ b/tools/testing/selftests/kvm/riscv/ebreak_test.c
+@@ -6,6 +6,7 @@
+  *
+  */
+ #include "kvm_util.h"
++#include "ucall_common.h"
+ 
+ #define LABEL_ADDRESS(v) ((uint64_t)&(v))
+ 
+diff --git a/tools/testing/selftests/kvm/riscv/sbi_pmu_test.c b/tools/testing/selftests/kvm/riscv/sbi_pmu_test.c
+index 69bb94e6b227..f299cbfd23ca 100644
+--- a/tools/testing/selftests/kvm/riscv/sbi_pmu_test.c
++++ b/tools/testing/selftests/kvm/riscv/sbi_pmu_test.c
+@@ -15,6 +15,7 @@
+ #include "processor.h"
+ #include "sbi.h"
+ #include "arch_timer.h"
++#include "ucall_common.h"
+ 
+ /* Maximum counters(firmware + hardware) */
+ #define RISCV_MAX_PMU_COUNTERS 64

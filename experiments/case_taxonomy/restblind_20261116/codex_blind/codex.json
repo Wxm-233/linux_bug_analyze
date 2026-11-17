@@ -1,0 +1,164 @@
+[
+  {
+    "k": 1,
+    "loc": "mm/mprotect.c:745",
+    "verdict": "不可能",
+    "why": "唯一入口 mprotect_fixup:785-795 要求旧 VMA 带 PFNMAP/MIXEDMAP 且改成无访问权限；hugetlbfs_file_mmap 创建的 HugeTLB VMA 不带这两个标志，不能进入这个 hugetlb 回调。其余标出架构使用的 arch_has_pfn_modify_check 为 false，不能仅凭 HugeTLB 可以有迁移项或 uffd 标记就认定此调用可达。"
+  },
+  {
+    "k": 2,
+    "loc": "mm/rmap.c:2016",
+    "verdict": "不可能",
+    "why": "pvmw 不带 PVMW_MIGRATION，page_vma_mapped_walk 在持 huge PTE 锁后由 check_pte 核对映射，迁移、交换、uffd-wp 和 guard 标记均不匹配。check_pte 虽也接受 device-private/exclusive，但这两种接口不支持 hugetlb；所以这里读取的是受锁保护的 present HugeTLB 项，依据不只是前一行的 WARN。"
+  },
+  {
+    "k": 3,
+    "loc": "mm/rmap.c:2625",
+    "verdict": "不可能",
+    "why": "try_to_migrate_one 的 walk 使用 0 或 PVMW_SYNC，未设置 PVMW_MIGRATION；hugetlb 的 check_pte 会排除迁移项和软件标记，设备项的构造接口也排除 hugetlb。随后一直持有 huge PTE 锁，huge_ptep_clear_flush 返回清除前的 present 旧项，pte_dirty 没有读取清除后的值。"
+  },
+  {
+    "k": 4,
+    "loc": "mm/memory.c:6214",
+    "verdict": "不可能",
+    "why": "唯一调用者 do_numa_page 由 handle_pte_fault 在 pte_present(orig_pte) 且 pte_protnone 时进入，并在 PTL 下用 pte_same 复查。传入的是 pte_modify(old_pte, vma->vm_page_prot) 得到的映射项；迁移失败重取锁时也复查原项，交换项和软件标记不会作为 fault_pte 传入。"
+  },
+  {
+    "k": 5,
+    "loc": "mm/mprotect.c:85",
+    "verdict": "不可能",
+    "why": "共享分支的入口是 change_present_ptes 及 can_change_pte_writable：前者受 change_pte_range 的 pte_present 分支和 PTL 保护，后者的调用者传入 present 映射的修改值或 restore_exclusive_pte 新建的 mk_pte。非 present 项在 change_softleaf_pte 或故障处理的专门分支处理，不能到这里的 pte_pfn。"
+  },
+  {
+    "k": 6,
+    "loc": "mm/mprotect.c:85",
+    "verdict": "不可能",
+    "why": "传入共享可写性检查的 ptent 来自持锁的 present PTE 经 pte_modify 修改，或由 mk_pte 重建；NUMA/RWP 故障入口也先保证原项 present。这里的 pte_dirty 与 pte_pfn 使用同一份值，非 present 交换项、设备项和软件标记没有进入该告警表达式的路径。"
+  },
+  {
+    "k": 7,
+    "loc": "mm/mprotect.c:94",
+    "verdict": "不可能",
+    "why": "change_pte_range 只在 pte_present(oldpte) 的持锁分支调用 change_present_ptes，再把修改后的映射项交给本函数。其他调用链经 can_change_pte_writable 也传入重建的 present 映射；非 present 项由 change_softleaf_pte 等单独处理，因此此返回值没有使用非 present 编码。"
+  },
+  {
+    "k": 8,
+    "loc": "mm/rmap.c:747",
+    "verdict": "不可能",
+    "why": "两个实际调用点分别是 try_to_unmap_one:2337 和 try_to_migrate_one:2642，均在 pte_present(pteval) 分支中持 PTL 清除映射后调用。传入的是 get_and_clear_ptes/ptep_get_and_clear 返回的旧 present 项，设备软件项走另一个分支，不会用它们的编码设置 writable。"
+  },
+  {
+    "k": 9,
+    "loc": "mm/vmscan.c:3443",
+    "verdict": "不可能",
+    "why": "非 present PTE 确实可以先被 pte_pfn 做位提取，但紧接着的 !pte_present(pte) 会使函数固定返回 -1，并短路 is_zero_pfn。提取值不会传给 pfn_valid、节点检查或调用者，也没有被解引用，因此即使编码表所述提取错误也不影响结果。"
+  },
+  {
+    "k": 10,
+    "loc": "mm/huge_memory.c:1609",
+    "verdict": "不可能",
+    "why": "vmf_insert_folio_pmd 的现有调用者是 fs/device DAX（含 huge zero），vmf_insert_pfn_pmd 的调用者安装 special PFN PMD；这些映射不生成迁移或 device-private PMD。在这些非 HugeTLB VMA 中，交换、device-exclusive、uffd-wp/guard 软件标记在 PTE 层处理，不产生软件 PMD，因此没有符合判据的非 present 输入路径。"
+  },
+  {
+    "k": 11,
+    "loc": "mm/gup.c:725",
+    "verdict": "不可能",
+    "why": "唯一调用者 follow_pmd_mask 在取得 PMD 锁后于 gup.c:922 再次检查 pmd_present，并确认仍是 leaf 才调用 follow_huge_pmd。锁直到该函数返回后才释放，因此 pmdval 不可能在这里变成迁移或设备软件项。"
+  },
+  {
+    "k": 12,
+    "loc": "mm/huge_memory.c:1934",
+    "verdict": "不可能",
+    "why": "本调用位于 huge_memory.c:1920 的 pmd_present(pmd) && pmd_special(pmd) 分支内，读取的仍是进入分支时缓存的同一个 pmd 值。取得锁没有重新加载 pmd，非 present 项无法进入这条告警路径。"
+  },
+  {
+    "k": 13,
+    "loc": "mm/huge_memory.c:3183",
+    "verdict": "不可能",
+    "why": "调用者持 PMD 锁，本条处于非匿名 VMA 分支：特殊巨大映射在 3172 返回，迁移项在 3174 走专门分支。剩余普通文件 THP 不会生成 device-private PMD（设备迁移拒绝文件 folio，文件 PMD 的写时复制先拆到 PTE），uffd/guard 标记也不是 PMD 项，因此此处 old_pmd 是清除前的 present 映射。"
+  },
+  {
+    "k": 14,
+    "loc": "mm/huge_memory.c:3284",
+    "verdict": "不可能",
+    "why": "同一持锁函数已经分别处理 huge zero、迁移 PMD 和 device-private PMD，只有剩余 present 匿名巨大映射进入这个 else。pmdp_invalidate 返回被替换前的旧 PMD（pgtable-generic.c:205-207），没有把写入页表的失效值作为 old_pmd 返回。"
+  },
+  {
+    "k": 15,
+    "loc": "mm/huge_memory.c:3288",
+    "verdict": "不可能",
+    "why": "迁移和 device-private PMD 在前面的独立分支处理，进入此分支时 PMD 锁保护着 present 巨大映射。这里 pmd_write 读取的是 pmdp_invalidate 返回的旧映射；通用实现和 powerpc 覆盖实现均返回修改前的项，不是页表内新写入的失效项。"
+  },
+  {
+    "k": 16,
+    "loc": "mm/huge_memory.c:3523",
+    "verdict": "不可能",
+    "why": "唯一入口经 try_to_unmap_one 的 lazyfree PMD 回收分支进入，处理的是持 folio 锁的普通 LRU 匿名 folio；其非 MIGRATION walk 会拒绝迁移 PMD。walk 虽允许 device-private PMD，但它映射的是不进入该回收链的 ZONE_DEVICE folio，不能与此普通 folio 匹配；device-exclusive 和软件标记也不生成这种 PMD。"
+  },
+  {
+    "k": 17,
+    "loc": "mm/huge_memory.c:3555",
+    "verdict": "不可能",
+    "why": "调用链是 try_to_unmap_one 对普通 lazyfree 匿名 folio 的持锁 PMD 回收，非 MIGRATION walk 排除了迁移项，device-private 的 ZONE_DEVICE folio 不进入此回收链。orig_pmd 是 pmdp_huge_clear_flush 返回的清除前 present 项，第二次 pmd_dirty 也没有重读已清空的页表。"
+  },
+  {
+    "k": 18,
+    "loc": "mm/gup.c:689",
+    "verdict": "不可能",
+    "why": "can_follow_write_pmd 仅由 follow_huge_pmd 调用，而后者唯一入口 follow_pmd_mask 在持 PMD 锁后复查 pmd_present 和 pmd_leaf（gup.c:920-937）。传入参数是该锁保护下的 pmdval，迁移、device-private 及其他非 present 编码均已被调用者排除。"
+  },
+  {
+    "k": 19,
+    "loc": "mm/huge_memory.c:2246",
+    "verdict": "不可能",
+    "why": "三个调用者分别是 NUMA 故障、RWP 故障和 change_huge_pmd：前两者由故障入口保证 orig_pmd present，并在锁下用 pmd_same 复查，后者先分流有效 softleaf。传入的 pmd_modify 结果仍是映射项，交换/迁移/设备软件编码不会用于共享可写性的 dirty 判断。"
+  },
+  {
+    "k": 20,
+    "loc": "mm/huge_memory.c:2723",
+    "verdict": "不可能",
+    "why": "在唯一标出的 x86_64 上，本表达式先要求 pmd_protnone(*pmd)，这已经蕴含 Linux 的 pmd_present 为真。并且调用点持 PMD 锁，有效迁移/device-private softleaf 在 2714-2717 已分流，RWP 的 PAGE_NONE 映射不能当成交换编码。"
+  },
+  {
+    "k": 21,
+    "loc": "mm/huge_memory.c:3126",
+    "verdict": "不可能",
+    "why": "该函数只在持 PMD 锁的 __split_huge_pmd_locked 中由 is_huge_zero_pmd(*pmd) 为真时调用，而该谓词自身要求 pmd_present（huge_mm.h:570-572）。pmdp_huge_clear_flush 返回清除前的 huge-zero 映射，old_pmd 并非迁移项或软件标记。"
+  },
+  {
+    "k": 22,
+    "loc": "mm/huge_memory.c:3130",
+    "verdict": "不可能",
+    "why": "调用者在 PMD 锁下通过 is_huge_zero_pmd 保证了 present huge-zero 映射，old_pmd 来自 clear_flush 返回的原值。此处只是据原映射的 uffd 位恢复 RWP PAGE_NONE 权限，Linux 将这种 protnone 映射也视为 present，不存在读交换编码的路径。"
+  },
+  {
+    "k": 23,
+    "loc": "mm/huge_memory.c:3291",
+    "verdict": "不可能",
+    "why": "迁移和 device-private PMD 在 3209、3225 的分支使用 pmd_swp_uffd 读取，均不会落到本调用。这里的 old_pmd 是剩余 present 映射经 pmdp_invalidate 返回的旧值，失效的是页表中的新值，所以 pmd_uffd 没有读取非 present 软件项。"
+  },
+  {
+    "k": 24,
+    "loc": "include/linux/userfaultfd_k.h:241",
+    "verdict": "不可能",
+    "why": "逐一核对全部调用者：GUP、zap-present、do_wp_page 和 mprotect 传入受守卫的 present 项，swap-in/设备独占恢复传入 mk_pte 新建的映射；uprobes 由 folio_walk_start 在持 PTL 下保证 fw->pte present。非 present 交换项及 uffd/guard 标记由 softleaf、pte_swp_uffd_any 等专门路径处理，不会传给本 helper。"
+  },
+  {
+    "k": 25,
+    "loc": "include/linux/userfaultfd_k.h:247",
+    "verdict": "不可能",
+    "why": "全部调用点是 can_follow_write_pmd、can_change_pmd_writable 和 wp_huge_pmd，分别继承 GUP 持锁 present 复查、softleaf 分流后的映射重建以及故障入口的 present orig_pmd 守卫。没有调用者把迁移/device-private PMD 交给此 helper，PTE 软件标记也不能作为这里的 PMD 参数。"
+  },
+  {
+    "k": 26,
+    "loc": "include/linux/userfaultfd_k.h:253",
+    "verdict": "不可能",
+    "why": "唯一调用点 handle_pte_fault:6569 之前，6560-6561 已对 !pte_present(vmf->orig_pte) 转入 do_swap_page。helper 读取的是同一份 orig_pte 快照，且还受 pte_protnone 条件限制；RWP/NUMA 的 protnone 映射仍属 Linux present，交换项和软件标记不会到达。"
+  },
+  {
+    "k": 27,
+    "loc": "include/linux/userfaultfd_k.h:259",
+    "verdict": "不可能",
+    "why": "唯一调用点 __handle_mm_fault:6687 在 6677-6683 已把非 present orig_pmd 转到 device-private/迁移处理或直接返回。随后仅对同一份 present、trans_huge、protnone 的 orig_pmd 调用本 helper，不存在把非 present 软件编码解释成 uffd 位的路径。"
+  }
+]

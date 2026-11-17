@@ -1,0 +1,83 @@
+commit f0293cd1f4fcc4fbdcd65a5a7b3b318a6d471f78
+Author:     Mayuresh Chitale <mchitale@ventanamicro.com>
+AuthorDate: Mon Jan 30 13:18:15 2023 +0530
+Commit:     Palmer Dabbelt <palmer@rivosinc.com>
+CommitDate: Wed Feb 1 20:52:09 2023 -0800
+
+    riscv: mm: Implement pmdp_collapse_flush for THP
+    
+    When THP is enabled, 4K pages are collapsed into a single huge
+    page using the generic pmdp_collapse_flush() which will further
+    use flush_tlb_range() to shoot-down stale TLB entries. Unfortunately,
+    the generic pmdp_collapse_flush() only invalidates cached leaf PTEs
+    using address specific SFENCEs which results in repetitive (or
+    unpredictable) page faults on RISC-V implementations which cache
+    non-leaf PTEs.
+    
+    Provide a RISC-V specific pmdp_collapse_flush() which ensures both
+    cached leaf and non-leaf PTEs are invalidated by using non-address
+    specific SFENCEs as recommended by the RISC-V privileged specification.
+    
+    Fixes: e88b333142e4 ("riscv: mm: add THP support on 64-bit")
+    Signed-off-by: Mayuresh Chitale <mchitale@ventanamicro.com>
+    Link: https://lore.kernel.org/r/20230130074815.1694055-1-mchitale@ventanamicro.com
+    Signed-off-by: Palmer Dabbelt <palmer@rivosinc.com>
+
+diff --git a/arch/riscv/include/asm/pgtable.h b/arch/riscv/include/asm/pgtable.h
+index 4eba9a98d0e3..3e01f4f3ab08 100644
+--- a/arch/riscv/include/asm/pgtable.h
++++ b/arch/riscv/include/asm/pgtable.h
+@@ -716,16 +716,20 @@ static inline void pmdp_set_wrprotect(struct mm_struct *mm,
+ 
+ #define pmdp_establish pmdp_establish
+ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
+ 				unsigned long address, pmd_t *pmdp, pmd_t pmd)
+ {
+ 	page_table_check_pmd_set(vma->vm_mm, address, pmdp, pmd);
+ 	return __pmd(atomic_long_xchg((atomic_long_t *)pmdp, pmd_val(pmd)));
+ }
++
++#define pmdp_collapse_flush pmdp_collapse_flush
++extern pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
++				 unsigned long address, pmd_t *pmdp);
+ #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+ 
+ /*
+  * Encode and decode a swap entry
+  *
+  * Format of swap PTE:
+  *	bit            0:	_PAGE_PRESENT (zero)
+  *	bit       1 to 3:       _PAGE_LEAF (zero)
+diff --git a/arch/riscv/mm/pgtable.c b/arch/riscv/mm/pgtable.c
+index 6645ead1a7c1..fef4e7328e49 100644
+--- a/arch/riscv/mm/pgtable.c
++++ b/arch/riscv/mm/pgtable.c
+@@ -76,8 +76,28 @@ int pmd_free_pte_page(pmd_t *pmd, unsigned long addr)
+ 	pmd_clear(pmd);
+ 
+ 	flush_tlb_kernel_range(addr, addr + PMD_SIZE);
+ 	pte_free_kernel(NULL, pte);
+ 	return 1;
+ }
+ 
+ #endif /* CONFIG_HAVE_ARCH_HUGE_VMAP */
++#ifdef CONFIG_TRANSPARENT_HUGEPAGE
++pmd_t pmdp_collapse_flush(struct vm_area_struct *vma,
++					unsigned long address, pmd_t *pmdp)
++{
++	pmd_t pmd = pmdp_huge_get_and_clear(vma->vm_mm, address, pmdp);
++
++	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
++	VM_BUG_ON(pmd_trans_huge(*pmdp));
++	/*
++	 * When leaf PTE entries (regular pages) are collapsed into a leaf
++	 * PMD entry (huge page), a valid non-leaf PTE is converted into a
++	 * valid leaf PTE at the level 1 page table.  Since the sfence.vma
++	 * forms that specify an address only apply to leaf PTEs, we need a
++	 * global flush here.  collapse_huge_page() assumes these flushes are
++	 * eager, so just do the fence here.
++	 */
++	flush_tlb_mm(vma->vm_mm);
++	return pmd;
++}
++#endif /* CONFIG_TRANSPARENT_HUGEPAGE */

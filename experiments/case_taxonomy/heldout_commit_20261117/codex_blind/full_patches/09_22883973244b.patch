@@ -1,0 +1,38 @@
+commit 22883973244b1caaa26f9c6171a41ba843c8d4bd
+Author:     Kiryl Shutsemau <kas@kernel.org>
+AuthorDate: Wed Aug 9 17:46:00 2023 +0300
+Commit:     Linus Torvalds <torvalds@linux-foundation.org>
+CommitDate: Wed Aug 9 08:05:23 2023 -0700
+
+    mm: Fix access_remote_vm() regression on tagged addresses
+    
+    GDB uses /proc/PID/mem to access memory of the target process. GDB
+    doesn't untag addresses manually, but relies on kernel to do the right
+    thing.
+    
+    mem_rw() of procfs uses access_remote_vm() to get data from the target
+    process. It worked fine until recent changes in __access_remote_vm()
+    that now checks if there's VMA at target address using raw address.
+    
+    Untag the address before looking up the VMA.
+    
+    Signed-off-by: Kirill A. Shutemov <kirill.shutemov@linux.intel.com>
+    Reported-by: Christina Schimpe <christina.schimpe@intel.com>
+    Fixes: eee9c708cc89 ("gup: avoid stack expansion warning for known-good case")
+    Cc: stable@vger.kernel.org
+    Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+
+diff --git a/mm/memory.c b/mm/memory.c
+index 603b2f419948..1ec1ef3418bf 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -5705,6 +5705,9 @@ int __access_remote_vm(struct mm_struct *mm, unsigned long addr, void *buf,
+ 	if (mmap_read_lock_killable(mm))
+ 		return 0;
+ 
++	/* Untag the address before looking up the VMA */
++	addr = untagged_addr_remote(mm, addr);
++
+ 	/* Avoid triggering the temporary warning in __get_user_pages */
+ 	if (!vma_lookup(mm, addr) && !expand_stack(mm, addr))
+ 		return 0;

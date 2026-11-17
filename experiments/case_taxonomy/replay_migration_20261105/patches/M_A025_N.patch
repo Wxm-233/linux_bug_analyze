@@ -1,0 +1,107 @@
+diff --git a/arch/loongarch/include/asm/checksum.h b/arch/loongarch/include/asm/checksum.h
+new file mode 100644
+index 000000000000..2d5c1a3b7e10
+--- /dev/null
++++ b/arch/loongarch/include/asm/checksum.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __ASM_LOONGARCH_CHECKSUM_H
++#define __ASM_LOONGARCH_CHECKSUM_H
++
++#include <linux/types.h>
++
++extern unsigned int do_csum(const unsigned char *buff, int len);
++#define do_csum do_csum
++
++#include <asm-generic/checksum.h>
++
++#endif	/* __ASM_LOONGARCH_CHECKSUM_H */
+diff --git a/arch/loongarch/lib/Makefile b/arch/loongarch/lib/Makefile
+--- a/arch/loongarch/lib/Makefile
++++ b/arch/loongarch/lib/Makefile
+@@ -4,4 +4,4 @@
+ #
+ 
+ lib-y	+= delay.o memset.o memcpy.o memmove.o \
+-	   clear_user.o copy_user.o dump_tlb.o unaligned.o
++	   clear_user.o copy_user.o dump_tlb.o unaligned.o csum.o
+diff --git a/arch/loongarch/lib/csum.c b/arch/loongarch/lib/csum.c
+new file mode 100644
+index 000000000000..5c1e9a4d2b73
+--- /dev/null
++++ b/arch/loongarch/lib/csum.c
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Optimised do_csum() for LoongArch, based on the arm64 version.
++ */
++#include <linux/compiler.h>
++#include <linux/kasan-checks.h>
++#include <linux/kernel.h>
++
++#include <net/checksum.h>
++
++/* End-around-carry 64-bit add */
++static inline u64 accumulate(u64 sum, u64 data)
++{
++	sum += data;
++	return sum + (sum < data);
++}
++
++unsigned int do_csum(const unsigned char *buff, int len)
++{
++	unsigned int offset, shift, sum;
++	const u64 *ptr;
++	u64 data, sum64 = 0;
++
++	offset = (unsigned long)buff & 7;
++	/*
++	 * Rounding down cannot cross a page or cache line, so the aligned
++	 * head/tail reads are safe. Use unchecked reads for them and check
++	 * the real range up-front for KASAN.
++	 */
++	kasan_check_read(buff, len);
++	ptr = (u64 *)(buff - offset);
++	len = len + offset - 8;
++
++	/* Head: zero out leading bytes before the buffer */
++	shift = offset * 8;
++	data = READ_ONCE_NOCHECK(*ptr++);
++	data = (data >> shift) << shift;
++
++	/* Body: aligned 64-bit loads, tail excluded */
++	while (len > 32) {
++		u64 d1 = READ_ONCE_NOCHECK(ptr[0]);
++		u64 d2 = READ_ONCE_NOCHECK(ptr[1]);
++		u64 d3 = READ_ONCE_NOCHECK(ptr[2]);
++		u64 d4 = READ_ONCE_NOCHECK(ptr[3]);
++
++		len -= 32;
++		ptr += 4;
++
++		sum64 = accumulate(sum64, data);
++		sum64 = accumulate(sum64, d1);
++		sum64 = accumulate(sum64, d2);
++		sum64 = accumulate(sum64, d3);
++		data = d4;
++	}
++	while (len > 0) {
++		sum64 = accumulate(sum64, data);
++		data = READ_ONCE_NOCHECK(*ptr++);
++		len -= 8;
++	}
++
++	/* Tail: zero over-read bytes (len is in -7..0 here) */
++	shift = len * -8;
++	data = (data << shift) >> shift;
++	sum64 = accumulate(sum64, data);
++
++	/* Fold to 16 bits */
++	sum64 += (sum64 >> 32) | (sum64 << 32);
++	sum = sum64 >> 32;
++	sum += (sum >> 16) | (sum << 16);
++	if (offset & 1)
++		return (u16)swab32(sum);
++
++	return sum >> 16;
++}

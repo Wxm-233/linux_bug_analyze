@@ -1,0 +1,44 @@
+diff --git a/arch/loongarch/kernel/ptrace.c b/arch/loongarch/kernel/ptrace.c
+--- a/arch/loongarch/kernel/ptrace.c
++++ b/arch/loongarch/kernel/ptrace.c
+@@ -50,6 +50,20 @@
+ 	set_stopped_child_used_math(target);
+ }
+ 
++/*
++ * Make sure thread.fpu holds the latest register values when the target
++ * is the current task (e.g. while dumping core), since the live state is
++ * otherwise only saved at context switch.
++ */
++static void sync_fpu_state(struct task_struct *target)
++{
++	if (target != current)
++		return;
++
++	preempt_disable();
++	if (is_fpu_owner())
++		save_fp(current);
++	preempt_enable();
++}
++
+ /*
+  * Called by kernel/ptrace.c when detaching..
+  *
+@@ -150,6 +164,8 @@
+ {
+ 	int r;
+ 
++	sync_fpu_state(target);
++
+ 	if (sizeof(target->thread.fpu.fpr[0]) == sizeof(elf_fpreg_t))
+ 		r = gfpr_get(target, &to);
+ 	else
+@@ -255,6 +271,8 @@
+ {
+ 	const unsigned int wr_size = NUM_FPU_REGS * regset->size;
+ 
++	sync_fpu_state(target);
++
+ 	if (!tsk_used_math(target)) {
+ 		/* The task hasn't used FP or LSX, fill with 0xff */
+ 		copy_pad_fprs(target, regset, &to, 0);

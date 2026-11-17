@@ -1,0 +1,41 @@
+序号,编号,提交,机制,跨架构,对应物种类,对应物位置,理由
+1,A360,c42458fcf54b,M6,R,,,kvrealloc失败时覆盖原指针导致旧缓冲区无法释放，属于一般资源泄漏，未体现架构差异或共享接口语义的偏离。
+2,A158,61a74ad25462,M5,C,K2,arch/arm/mm/alignment.c:do_alignment（用户态未对齐异常中先开中断再进行可能缺页的用户访问）,未对齐异常处理时中断关闭，不能调用可能睡眠的copy_from_user/copy_to_user，改用nofault访问符合各架构异常上下文限制；对应物位置未核实。
+3,A225,2dda6a9e09ee,M7,C,K2,arch/x86/kvm/pmu.h:get_gp_pmc（对来宾控制的PMU索引使用array_index_nospec限制推测访问）,来宾控制的计数器下标即使通过普通边界检查也须屏蔽推测越界，RISC-V遗漏了与x86同类PMU访问相同的索引防护要求；对应物函数位置未核实。
+4,A250,f51fed61eea0,M6,R,,,异步kthread可能在free_initmem后继续执行标为__init的函数，属于代码生命周期错误，材料没有体现由架构差异造成的共享约定偏离。
+5,A176,4cec89db80ba,M4,R,,,HGEI所有者查找与IMSIC VS-file状态分别受不同锁保护，读取关联状态再访问CSR缺少统一同步，属于本地操作原子性问题，未能确定其他架构处理同一条件的对应物。
+6,A349,6aba0cb5bba6,X1,R,,,SBI RFENCE规范把size等于全一也定义为全地址空间刷新，原实现漏判这一RISC-V固件协议条件。
+7,A171,890ba5be6335,M7,C,K1,include/asm-generic/access_ok.h:__access_ok; mm/gup.c:get_user_pages_fast,access_ok接口的TASK_SIZE_MAX上界必须排除超出实际用户空间的地址，LONG_MAX使RISC-V地址空洞通过检查并被GUP接受，修复的是共享地址检查接口的数值边界。
+8,A288,749b94b08005,M10,C,K1,mm/vmalloc.c:__vunmap; arch/arm64/kernel/module.c:module_alloc,module_alloc接口分配的模块内存在释放时须恢复线性别名权限，RISC-V漏传VM_FLUSH_RESET_PERMS使公共vfree路径遗漏恢复步骤并留下WX映射。
+9,A277,f2aaa6215910,M7,C,K1,include/linux/filter.h:bpf_int_jit_compile; kernel/bpf/btf.c:btf_distill_func_proto,BPF JIT的kfunc调用须按BTF参数类型转换成本机C ABI，RV64对有符号一字节和两字节参数漏做符号扩展，属于跨调用约定的位宽转换错误。
+10,A063,d080a08b06b6,M6,R,,,__get/put_kernel_nofault的局部错误变量未初始化，未发生访问异常也可能误报失败，属于一般状态初始化缺陷。
+11,B559,9156585280f1,M6,C,K2,drivers/acpi/arm64/iort.c:iort_iommu_xlate（为IOMMU消费者建立device link以维持消费者先移除的顺序）,IOMMU供应者须存活到其消费者关闭或移除之后，单靠EPROBE_DEFER只保证探测顺序而不保证生命周期依赖，因此须建立device link；对应物位置未核实。
+12,B467,c625154993d0,M10,C,K1,include/linux/perf_event.h:struct pmu.event_init; kernel/events/core.c:perf_init_event,PMU event_init接口对不支持的事件须返回ENOENT以遵守公共PMU选择和错误语义，RISC-V在相同条件返回EINVAL或EOPNOTSUPP导致行为不一致。
+13,A166,265d6aba165c,X1,R,,,__switch_to只应恢复当前线程的SUM位，直接把保存的完整状态值交给csrs会置位其他CSR_STATUS字段，根源是RISC-V状态寄存器操作语义。
+14,A233,fe0cf82fdeb3,X2,R,,,仅删除公共调度初始化改动后遗留的过时注释，不改变执行行为。
+15,A098,5aa09297a3dc,M7,R,,,CSR模拟范围的count把32个计数器误写为31而漏掉hpmcounter31，属于RISC-V本地CSR表的差一错误，未体现跨架构表示差异。
+16,A336,bbb622488749,M10,C,K1,kernel/events/core.c:perf_event_create_kernel_counter; arch/x86/kvm/pmu.c:pmc_reprogram_counter,perf_event_create_kernel_counter接口在disabled为假时可立即调度事件，KVM配置阶段尚未收到启动请求就必须置disabled，RISC-V漏了这一创建与启用的步骤区分；其他架构函数位置未核实。
+17,A376,310e2096b082,M6,R,,,写入来宾共享区失败后释放sdata却未清空指针，销毁VCPU时再次释放，属于一般错误路径上的重复释放。
+18,A373,7120a9d9e023,M6,R,,,IMSIC属性查询未与初始化失败后的清理串行化，可在imsic_state释放时继续访问，属于一般资源生命周期和并发UAF问题。
+19,A144,e8eb8e1bdae9,M8,C,K1,include/linux/ftrace.h:struct ftrace_regs; kernel/trace/Kconfig:FUNCTION_GRAPH_TRACER,公共fgraph将返回寄存器接口改成ftrace_regs后，RISC-V未同步把HAVE_FUNCTION_GRAPH_TRACER的选择限于具备HAVE_DYNAMIC_FTRACE_WITH_ARGS的配置。
+20,A185,e61a12a4baf0,X2,R,,,仅将注释中的函数名改为实际的kvm_riscv_check_vcpu_requests，不改变行为。
+21,B464,2840dadf0dde,M5,C,K1,include/linux/smp.h:get_cpu/put_cpu; lib/smp_processor_id.c:check_preemption_disabled,smp_processor_id接口要求调用期间CPU身份稳定，设置当前CPU的PMU快照时须禁止抢占以防迁移，原探测路径违反了公共执行上下文约束。
+22,A036,a179a4bfb694,M1,C,K1,arch/arm64/mm/hugetlbpage.c:hugetlb_mask_last_page（对CONT_PTE_SIZE/CONT_PMD_SIZE等连续项大页分别计算掩码）,hugetlb_mask_last_page钩子须按大页所在页表层级给出正确末页掩码，通用默认未覆盖Svnapot新增的64KB连续PTE表示，需由RISC-V提供适配实现。
+23,A046,d6cfd1770f20,M4,C,K1,arch/powerpc/include/asm/membarrier.h:membarrier_arch_switch_mm; kernel/sched/core.c:__schedule,membarrier约定在存储rq->curr后且返回用户态前有完整内存屏障，RISC-V进程间switch_mm遗漏了这一跨架构内存顺序保证。
+24,A058,a11dd49dcb93,M7,C,K1,include/asm-generic/memory_model.h:__pfn_to_page/__page_to_pfn,公共PFN与struct page转换接口按物理PFN索引vmemmap，RISC-V未扣除物理RAM起始PFN使非零DRAM_BASE下索引越界，修复的是架构提供的基址偏移。
+25,A238,f2abc305aa93,M9,C,K1,include/linux/cfi_types.h:SYM_TYPED_FUNC_START,启用CFI时从C间接调用的汇编入口必须携带匹配的类型信息，RISC-V改成间接调用后仍使用无类型入口宏，漏考虑了CFI配置要求。
+26,B432,8933cf4651e0,M9,C,K3,init/Kconfig:config RUST,公共RUST配置未排除尚无稳定KCFI支持的rustc与CFI_CLANG组合，使RISC-V和arm64加载Rust模块时崩溃，属于编译器能力与配置条件不匹配。
+27,B531,b0f2942a1601,M9,C,K3,scripts/Makefile.vmlinux:remove-symbols,公共构建规则漏考虑KASAN与可重定位内核组合会保留指向设备表符号的重定位，强制strip-symbol因此失败，须只移除没有引用的符号。
+28,A112,1966db682f06,M10,C,K1,arch/arm64/include/asm/acpi.h:__acpi_map_table/__acpi_unmap_table,__acpi_map_table接口映射位于DRAM的ACPI表时须保持可缓存内存的一致性语义，RISC-V误用early_ioremap在SVPBMT下选择IO属性，改用early_memremap与对应实现一致。
+29,A083,23b2188920a2,M5,C,K1,arch/arm64/kernel/stacktrace.c:arch_stack_walk,arch_stack_walk作为ftrace和异常相关路径使用的栈遍历钩子须避免插桩递归，RISC-V遗漏noinstr；材料未给出参照修复与原实现的先后关系，按上下文限制归类。
+30,A022,5daa37264102,X2,R,,,XIP_FIXUP_FLASH_OFFSET把__data_loc误装入随后被覆盖的t1而非后续相加所用的t0，属于局部汇编寄存器笔误，无可指明的共享约定。
+31,A065,443574b03387,M7,C,K1,include/linux/filter.h:bpf_int_jit_compile; kernel/bpf/btf.c:btf_distill_func_proto,BPF JIT的kfunc调用接口须保持C参数值，BPF的32位零扩展与RV64对int和uint的符号扩展ABI不同，调用前漏做所需的32位符号扩展。
+32,A079,a638b0461b58,M7,R,,,次级idle线程启动栈顶未为pt_regs保留空间而覆盖寄存器状态，修复的是栈边界；材料只给出RISC-V主hart参照，未能确定其他架构处理同一条件的对应物。
+33,B494,68cb0139fec8,M8,C,K1,drivers/base/cpu.c:cpu_dev_register_generic; drivers/cpuidle/sysfs.c:cpuidle_add_sysfs,公共CPU设备注册已改为仅注册present CPU，cpuidle注册接口依赖相应CPU设备存在，各架构驱动仍遍历possible CPU而未跟上这一公共语义变化。
+34,B414,4a693ce65b18,M10,C,K3,kernel/crash_core.c:reserve_crashkernel_generic/reserve_crashkernel_low,通用crashkernel预留代码在System RAM父资源建立前插入子资源，违反iomem资源树先父后子的插入顺序，在RISC-V和arm64的初始化次序下使父资源消失。
+35,A026,420370f3ae3d,M10,C,K2,arch/arm64/kernel/patching.c:patch_map（用is_image_text把启动期仍存活的exit text按内核映像处理）,启动期尚未丢弃的exit text须按内核映像取物理页，RISC-V补丁映射的条件漏掉该区域而误送vmalloc_to_page；对应物位置未核实。
+36,A102,1ff95eb2bebd,M5,C,K2,arch/arm64/kernel/pi/Makefile（为MMU映射建立前运行的启动代码关闭ftrace/KASAN插桩）,首次内存映射建立前执行的代码不能依赖插桩运行环境或仅适用于虚拟地址的重定位，早期SBI调用未遵守与其他架构早期引导相同的上下文限制；对应物位置未核实。
+37,A327,b3134b8c1a1c,M5,C,K1,include/linux/jump_label.h:arch_jump_label_transform_queue; kernel/jump_label.c:__jump_label_update,arch_jump_label_transform_queue钩子可在early_boot_irqs_disabled阶段承担静态分支改写，不能经text_mutex调用正在被分步切换的锁实现，须使用符合早期补丁上下文的无锁路径。
+38,A069,a370c2419e46,M5,C,K2,arch/arm64/kernel/patching.c:aarch64_insn_write（持raw_spin_lock_irqsave完成临时fixmap代码写入，阻止任务迁移）,临时fixmap仅刷新当前CPU的TLB，映射使用期间必须禁止抢占以保持CPU不变，RISC-V文字补丁路径遗漏了同类代码改写所需的执行上下文保护。
+39,A234,aad60bdd0b5a,M6,R,,,探测后移到late_initcall而派生static key仍在arch_initcall_sync设置，导致在结果就绪前初始化状态，属于本地初始化时序和状态初始化缺陷。
+40,A331,c6ec1e1b078d,X2,R,,,仅把ISA位图相等比较改用专门的bitmap_equal辅助函数，材料未指出无效尾位等实际行为差异，按辅助函数规范化处理。

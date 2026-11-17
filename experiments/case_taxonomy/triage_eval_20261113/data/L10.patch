@@ -1,0 +1,36 @@
+commit 47e20d4b3da97ef3881d1e55e43545c22424f3fc
+Author: Pu Lehui <pulehui@huawei.com>
+Date:   Fri Jul 24 16:33:08 2026 +0800
+
+    LoongArch: BPF: Fix memory leak in bpf_jit_free()
+    
+    When bpf_int_jit_compile() is called for subprograms, it returns early
+    during the first pass (!prog->is_func || extra_pass is false), keeping
+    ctx->offset alive for the subsequent extra pass.
+    
+    If JIT compilation fails for a later subprogram, the BPF core aborts and
+    calls bpf_jit_free() to clean up the first subprogram. However,
+    bpf_jit_free() fails to free jit_data->ctx.offset, which causes a memory
+    leak of the JIT context offsets array.
+    
+    So fix this by adding the missing kvfree(jit_data->ctx.offset) in
+    bpf_jit_free().
+    
+    Reported-by: Sashiko <sashiko-bot@kernel.org>
+    Fixes: 4ab17e762b34 ("LoongArch: BPF: Use BPF prog pack allocator")
+    Acked-by: Tiezhu Yang <yangtiezhu@loongson.cn>
+    Signed-off-by: Pu Lehui <pulehui@huawei.com>
+    Signed-off-by: Huacai Chen <chenhuacai@loongson.cn>
+
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index c91d474faba7..29c281bef28e 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -2361,6 +2361,7 @@ void bpf_jit_free(struct bpf_prog *prog)
+ 		 */
+ 		if (jit_data) {
+ 			bpf_jit_binary_pack_finalize(jit_data->ro_header, jit_data->header);
++			kvfree(jit_data->ctx.offset);
+ 			kfree(jit_data);
+ 		}
+ 		hdr = bpf_jit_binary_pack_hdr(prog);

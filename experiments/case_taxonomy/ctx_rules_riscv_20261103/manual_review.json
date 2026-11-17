@@ -1,0 +1,32 @@
+{
+ "note": "First annotator's check (model Claude) of all 27 flags of the frozen run flags_run2.json (fewer than 40, so all are reviewed). a = suspected real problem, b = not, c = cannot tell. 'issue' groups flags that point at the same underlying problem.",
+ "rows": [
+  {"i": 0, "label": "a", "issue": "machine_shutdown", "reason": "irqs-off call to smp_shutdown_nonboot_cpus, confirmed in QEMU by riscv_kexec_shutdown_verify_20261102; not fixed upstream"},
+  {"i": 1, "label": "b", "issue": "die_console", "reason": "console_unblank does not take console_lock when oops_in_progress is set, and bust_spinlocks(1) sets it before"},
+  {"i": 2, "label": "b", "issue": "die_console", "reason": "same as 1"},
+  {"i": 3, "label": "a", "issue": "die_rt", "reason": "die() takes spinlock_t with irqs off in trap handling, which sleeps on PREEMPT_RT; fixed later by 6a97f4118ac0 (A118)"},
+  {"i": 4, "label": "a", "issue": "die_rt", "reason": "same as 3"},
+  {"i": 5, "label": "a", "issue": "die_rt", "reason": "same path through die_kernel_fault"},
+  {"i": 6, "label": "a", "issue": "die_rt", "reason": "same path through handle_break"},
+  {"i": 7, "label": "a", "issue": "die_rt", "reason": "same as 6"},
+  {"i": 8, "label": "c", "issue": "ecall_die", "reason": "the kernel-mode branch of do_trap_ecall_u that reaches die is not reachable in normal operation"},
+  {"i": 9, "label": "a", "issue": "misaligned_uaccess", "reason": "user memory access with irqs off in misaligned trap handling; fixed upstream (453805f0a28f, 2025-04; A158/A344)"},
+  {"i": 10, "label": "a", "issue": "die_rt", "reason": "die path from the misaligned load trap"},
+  {"i": 11, "label": "a", "issue": "misaligned_uaccess", "reason": "same as 9"},
+  {"i": 12, "label": "a", "issue": "die_rt", "reason": "same as 10"},
+  {"i": 13, "label": "a", "issue": "misaligned_uaccess", "reason": "store side of 9"},
+  {"i": 14, "label": "a", "issue": "die_rt", "reason": "die path from the misaligned store trap"},
+  {"i": 15, "label": "a", "issue": "misaligned_uaccess", "reason": "same as 13"},
+  {"i": 16, "label": "a", "issue": "die_rt", "reason": "same as 14"},
+  {"i": 17, "label": "b", "issue": "ftrace_cond_resched", "reason": "ftrace_replace_code calls cond_resched only with FTRACE_MODIFY_MAY_SLEEP_FL, which is not set under stop_machine"},
+  {"i": 18, "label": "c", "issue": "hibernate_drain_rt", "reason": "spinlock_t in swsusp_save with irqs off is in the common hibernation path of every architecture, not RISC-V specific"},
+  {"i": 19, "label": "b", "issue": "hibernate_flush", "reason": "flush_tlb_all takes the local path when fewer than two CPUs are online, as during create_image"},
+  {"i": 20, "label": "c", "issue": "hibernate_flush", "reason": "flush_icache_all path with one CPU online not checked"},
+  {"i": 21, "label": "c", "issue": "noinstr_inline", "reason": "static inline called from noinstr irqentry_exit while x86 uses __always_inline; RISC-V changed it to __always_inline later in a cleanup (d7e0cce10366) without a Fixes tag"},
+  {"i": 22, "label": "c", "issue": "noinstr_inline", "reason": "on_thread_stack static inline called from noinstr stackleak_erase; x86 uses __always_inline; unchanged at the end version"},
+  {"i": 23, "label": "c", "issue": "noinstr_callee", "reason": "noinstr arch_stack_walk calls instrumentable walk_stackframe; RISC-V has no objtool check, impact not established"},
+  {"i": 24, "label": "c", "issue": "noinstr_callee", "reason": "noinstr do_page_fault calls handle_page_fault outside instrumentation_begin/end; same open question as in mech_scan_riscv_20261102"},
+  {"i": 25, "label": "c", "issue": "noinstr_callee", "reason": "noinstr handle_riscv_irq calls irq_enter_rcu outside instrumentation_begin/end, which x86 wraps; impact not established"},
+  {"i": 26, "label": "c", "issue": "noinstr_callee", "reason": "same as 25 for irq_exit_rcu"}
+ ]
+}

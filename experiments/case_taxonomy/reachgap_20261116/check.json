@@ -1,0 +1,18 @@
+{
+ "criteria": "三.2：新滤掉的每一条读源码核对（HEAD df2908090cda）",
+ "newly_filtered": [
+  {"loc": "mm/huge_memory.c:1934", "func": "copy_huge_pmd", "A": "pmd_write", "by": "G1 (F1)", "old_rank": 44,
+   "present": true, "why": "在 `if (unlikely(pmd_present(pmd) && pmd_special(pmd) && ...))` 分支里，pmd 已查 present。restblind 两人都判“不可能”。"},
+  {"loc": "mm/huge_memory.c:3284", "func": "__split_huge_pmd_locked", "A": "pmd_dirty", "by": "G2 (F1s)", "old_rank": 46,
+   "present": true, "why": "匿名分支 `if (pmd_is_migration_entry(*pmd)) … else if (pmd_is_device_private_entry(*pmd)) … else` 的最后一个 else；函数开头 VM_WARN_ON_ONCE 断言 *pmd 是 softleaf 或 trans_huge，大零页已在前面 return。old_pmd = pmdp_invalidate(...) 是 present 大页。restblind 两人判“不可能”。"},
+  {"loc": "mm/huge_memory.c:3288", "func": "__split_huge_pmd_locked", "A": "pmd_write", "by": "G2 (F1s)", "old_rank": 47, "present": true, "why": "同 3284。"},
+  {"loc": "mm/huge_memory.c:3289", "func": "__split_huge_pmd_locked", "A": "pmd_young", "by": "G2 (F1s)", "old_rank": 9, "present": true, "why": "同 3284；以前（P1/契约前 30）审过，判“不可能”。"},
+  {"loc": "mm/huge_memory.c:3290", "func": "__split_huge_pmd_locked", "A": "pmd_soft_dirty", "by": "G2 (F1s)", "old_rank": 10, "present": true, "why": "同 3284；以前审过，判“不可能”。"},
+  {"loc": "mm/huge_memory.c:3291", "func": "__split_huge_pmd_locked", "A": "pmd_uffd", "by": "G2 (F1s)", "old_rank": 55, "present": true, "why": "同 3284。"}
+ ],
+ "new_summary": {"func": "__pte_offset_map", "file": "mm/pgtable-generic.c", "arg": 0, "pointer": true, "sentinel": "NULL",
+   "correct": true, "why": "`if (unlikely(pmd_none(pmdval) || !pmd_present(pmdval))) goto nomap;` 之后才 return __pte_map(...)，nomap 返回 NULL。G1 剥掉 unlikely 后才提出这条事实。这条摘要没有改变任何一条结果。"},
+ "not_filtered_expected": {"mm/huge_memory.c:3183": "非匿名分支只排除了迁移项（device-private 只出现在匿名映射上，属语义知识），按 G2 不滤，符合判据。",
+   "mm/huge_memory.c:2723": "守卫是 `thp_migration_supported() && pmd_is_valid_softleaf(*pmd)` 的否定，不是合取形式，不在本轮范围。"},
+ "verdict": "6 条全部确实 present；没有新滤掉的条目需要报告为误滤。"
+}

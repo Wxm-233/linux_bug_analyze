@@ -1,0 +1,75 @@
+########## 第31条  编号 A065  提交 443574b03387  日期 2024-03-24
+
+【提交说明】
+riscv, bpf: Fix kfunc parameters incompatibility between bpf and riscv abi
+
+We encountered a failing case when running selftest in no_alu32 mode:
+
+The failure case is `kfunc_call/kfunc_call_test4` and its source code is
+like bellow:
+```
+long bpf_kfunc_call_test4(signed char a, short b, int c, long d) __ksym;
+int kfunc_call_test4(struct __sk_buff *skb)
+{
+	...
+	tmp = bpf_kfunc_call_test4(-3, -30, -200, -1000);
+	...
+}
+```
+
+And its corresponding asm code is:
+```
+0: r1 = -3
+1: r2 = -30
+2: r3 = 0xffffff38 # opcode: 18 03 00 00 38 ff ff ff 00 00 00 00 00 00 00 00
+4: r4 = -1000
+5: call bpf_kfunc_call_test4
+```
+
+insn 2 is parsed to ld_imm64 insn to emit 0x00000000ffffff38 imm, and
+converted to int type and then send to bpf_kfunc_call_test4. But since
+it is zero-extended in the bpf calling convention, riscv jit will
+directly treat it as an unsigned 32-bit int value, and then fails with
+the message "actual 4294966063 != expected -1234".
+
+The reason is the incompatibility between bpf and riscv abi, that is,
+bpf will do zero-extension on uint, but riscv64 requires sign-extension
+on int or uint. We can solve this problem by sign extending the 32-bit
+parameters in kfunc.
+
+The issue is related to [0], and thanks to Yonghong and Alexei.
+
+Fixes: d40c3847b485 ("riscv, bpf: Add kfunc support for RV64")
+
+【改动统计】
+ arch/riscv/net/bpf_jit_comp64.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+【改动内容】
+diff --git a/arch/riscv/net/bpf_jit_comp64.c b/arch/riscv/net/bpf_jit_comp64.c
+index aac190085472..1adf2f39ce59 100644
+--- a/arch/riscv/net/bpf_jit_comp64.c
++++ b/arch/riscv/net/bpf_jit_comp64.c
+@@ -1463,6 +1463,22 @@ int bpf_jit_emit_insn(const struct bpf_insn *insn, struct rv_jit_context *ctx,
+ 		if (ret < 0)
+ 			return ret;
+ 
++		if (insn->src_reg == BPF_PSEUDO_KFUNC_CALL) {
++			const struct btf_func_model *fm;
++			int idx;
++
++			fm = bpf_jit_find_kfunc_model(ctx->prog, insn);
++			if (!fm)
++				return -EINVAL;
++
++			for (idx = 0; idx < fm->nr_args; idx++) {
++				u8 reg = bpf_to_rv_reg(BPF_REG_1 + idx, ctx);
++
++				if (fm->arg_size[idx] == sizeof(int))
++					emit_sextw(reg, reg, ctx);
++			}
++		}
++
+ 		ret = emit_call(addr, fixed_addr, ctx);
+ 		if (ret)
+ 			return ret;

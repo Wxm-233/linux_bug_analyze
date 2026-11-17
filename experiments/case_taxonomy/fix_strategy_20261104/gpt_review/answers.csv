@@ -1,0 +1,31 @@
+item,id,action,follow,layer,cites,reason
+1,A003,A4,F1,A,Y,覆盖 uprobe 的公共弱实现，按陷阱识别约定同时识别 RISC-V 的 ebreak 与 c.ebreak。
+2,A029,A4,F1,A,N,将非叶页表交给 TLB 批处理延迟释放，确保像 arm64 一样先完成相关 TLB 失效再回收页表。
+3,A032,A4;A5,F4,A,N,在各架构的逐 VMA 锁重试路径中同时补上 VM_FAULT_MAJOR 分支，以 FAULT_FLAG_TRIED 保留公共缺页统计所需的状态。
+4,A043,A8,F1,A,N,按 x86 的做法在批量刷新 TLB 后清空 CPU 掩码，避免后续批次向遗留 CPU 发送 IPI。
+5,A058,A7,F1,A,N,与 arm64 一样从 vmemmap 基址扣除 DRAM 起始页帧号，避免 PFN 转换越出映射区。
+6,A069,A3,F3,A,N,在临时 fixmap 的映射与解除之间禁止抢占以避免迁移，而 arm64 用保存中断状态的自旋锁覆盖该区间。
+7,A081,A11,F1,A,N,为全序的 8 位和 16 位 LR/SC 交换使用 release store-conditional 并在成功后执行全屏障，满足与 arm64 对应路径相同的顺序要求。
+8,A094,A4,F1,A,N,在两个 nosync 文本修改接口成功后恢复全局指令缓存刷新，补齐 arm64 对应接口同样执行的指令缓存维护步骤。
+9,A113,A6,F1,A,N,与 arm64 一样给 vDSO 加上 -fno-builtin，避免编译器插入 memset 调用并产生动态重定位。
+10,A115,A10;A5,F4,AC,N,扩展早期 FDT 接口以保存启动时已知的物理地址，供公共 kexec 代码使用，修复原先对 arm64 fixmap 地址调用 __pa() 的错误。
+11,A143,A10;A1,F2,A,Y,照 arm64 改用 sz 计算连续项数并限制 A/D 位合并，但仍凭 pte_napot 选择单项快路径，因而漏掉首项不带 NAPOT 位的连续映射。
+12,A175,A3,F1,A,N,像 x86 的用户异常路径一样在处理期间开启中断，并在返回入口代码前关闭，让信号处理可在 PREEMPT_RT 上取得睡眠锁。
+13,A213,A6,F1,A,N,与 arm64 一样始终从 vmlinux 生成 Image，使可重定位内核的启动镜像排除额外的 .modinfo。
+14,A238,A5,F1,A,N,像 arm64 的间接调用汇编入口一样使用 SYM_TYPED_FUNC_START 为非对齐复制函数提供 CFI 类型标注。
+15,A255,A6,F1,A,N,像 arm64 一样从 vDSO 对象的编译选项中移除 LTO，避免用户态入口被优化掉。
+16,A277,A7,F1,A,N,像 LoongArch 一样在生成 kfunc 调用时按 ABI 和参数元数据做符号扩展，并把处理覆盖到有符号的 1 字节与 2 字节参数。
+17,A288,A5,F1,A,N,像 x86 一样在模块分配时传入 VM_FLUSH_RESET_PERMS，使卸载恢复线性映射权限。
+18,A313,A4,F1,A,N,为用户态 VM_FAULT_SIGSEGV 增加发出 SIGSEGV 的路径，并在分派错误前统一处理内核态故障。
+19,A344,A3,F1,A,N,像 arm64 的用户异常路径一样在非对齐访问仿真期间开启中断，使访问用户内存时可以处理缺页。
+20,A387,A4,F3,A,N,RISC-V 在 ioctl 中补调配置钩子切换 hedeleg 的断点委派位，arm64 则在该接口保存调试状态供运行路径配置。
+21,A393,A1,F1,A,N,按公共 kexec 路径允许出现空缓冲区的约定跳过 NULL 段，避免读取 IMA 预留段时解引用空指针。
+22,B432,A6,F4,C,N,在公共 Kconfig 中令 RUST 依赖 !CFI_CLANG，统一排除当时无法安全加载 Rust 模块的配置。
+23,B444,A9,F1,A,Y,移除 arm64、s390 和 x86 的局部熵掩码，让公共 KSTACK_OFFSET_MAX 与原已采用该默认值的 RISC-V 一致地限制实际偏移。
+24,B455,A7,F4,C,N,将无数据段偏移配置下的共享库指针初始化循环上界设为零，避免覆盖未预留的区域。
+25,B492,A7,F3,C,N,在 UBI 调用 access_ok 时显式将数组转成用户指针，以适配 RISC-V 的类型保留宏，而 arm64 由函数形参完成转换。
+26,B519,A6,F4,C,N,只在旧版系统调用号有定义时编译对应 case，使公共睡眠监控器能在仅有 time64 的系统上构建。
+27,B524,A7,F4,C,N,将公共 copy_sighand 的 clone_flags 参数改为 u64，避免 32 位架构截断 CLONE_CLEAR_SIGHAND。
+28,B527,A6,F4,C,N,用空汇编模板替换公共 Kconfig 探测中的 x86 跳转助记符，使局部标签测试不再依赖目标指令集。
+29,B577,A4,F1,C,Y,按公共事件写入路径的布局，在强制 8 字节对齐时也扣除小事件中单独存放长度的字段。
+30,B584,A11,F4,C,N,以 release 写入和 acquire 读取配对发布 stats_nch，保证读者看到新计数后能访问已经发布的通道统计指针。

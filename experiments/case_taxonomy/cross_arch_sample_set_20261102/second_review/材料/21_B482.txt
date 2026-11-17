@@ -1,0 +1,40 @@
+########## 第21条  编号 B482  提交 537a2525eaf7  日期 2024-11-27
+
+【提交说明】
+tools: Override makefile ARCH variable if defined, but empty
+
+There are a number of tools (bpftool, selftests), that require a
+"bootstrap" build. Here, a bootstrap build is a build host variant of
+a target. E.g., assume that you're performing a bpftool cross-build on
+x86 to riscv, a bootstrap build would then be an x86 variant of
+bpftool. The typical way to perform the host build variant, is to pass
+"ARCH=" in a sub-make. However, if a variable has been set with a
+command argument, then ordinary assignments in the makefile are
+ignored.
+
+This side-effect results in that ARCH, and variables depending on ARCH
+are not set. Workaround by overriding ARCH to the host arch, if ARCH
+is empty.
+
+Fixes: 8859b0da5aac ("tools/bpftool: Fix cross-build")
+
+【改动统计】
+ tools/scripts/Makefile.arch | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+【改动内容】
+diff --git a/tools/scripts/Makefile.arch b/tools/scripts/Makefile.arch
+index f6a50f06dfc4..eabfe9f411d9 100644
+--- a/tools/scripts/Makefile.arch
++++ b/tools/scripts/Makefile.arch
+@@ -7,8 +7,8 @@ HOSTARCH := $(shell uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ \
+                                   -e s/sh[234].*/sh/ -e s/aarch64.*/arm64/ \
+                                   -e s/riscv.*/riscv/ -e s/loongarch.*/loongarch/)
+ 
+-ifndef ARCH
+-ARCH := $(HOSTARCH)
++ifeq ($(strip $(ARCH)),)
++override ARCH := $(HOSTARCH)
+ endif
+ 
+ SRCARCH := $(ARCH)

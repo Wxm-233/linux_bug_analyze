@@ -1,0 +1,23 @@
+item,label,reason
+E00,a2,普通 kexec 在启用 CPU 热插拔时先关闭本地中断，而 smp_shutdown_nonboot_cpus 随即通过 cpu_maps_update_begin 获取可阻塞的互斥锁。
+E01,b,bust_spinlocks(1) 只增加 oops_in_progress，随后 bust_spinlocks(0) 在递减前调用 console_unblank，使其只会尝试非阻塞获取控制台锁。
+E02,b,mmu_split_huge_pages 在 cond_resched 和补充分配缓存之前已释放 mmu_lock，并在继续拆分或返回前重新持锁。
+E03,c,常规缺页在处理前会恢复中断，但 faulthandler_disabled 不单独检查关中断状态，尚无法确认只有本地中断关闭的受支持调用能否到达 hugetlb_fault。
+E04,a2,内核软件检查异常在关中断状态调用 die，当 PREEMPT_RT 启用且 pause_on_oops 非零时会进入可能阻塞的 pause_on_oops_lock 获取路径。
+E05,a2,启用休眠和 PREEMPT_RT 时，镜像保存路径在关中断状态下由 mark_free_pages 获取具有阻塞语义的 zone->lock。
+E06,b,休眠恢复到此处时仍只有一个在线 CPU，因此 flush_tlb_all 只执行本地 TLB 刷新。
+E07,b,休眠恢复到此处时仍只有一个在线 CPU，因此 flush_icache_all 完成本地刷新后直接返回。
+E08,b,do_irq 在 irqentry_enter 后使用这个通常直接内联的栈地址比较，内联后的代码受调用者 noinstr 约束。
+E09,b,cpu_idle_poll 在已有的插桩标记区间调用 cpu_relax，而该内联助手只执行汇编和编译器屏障。
+E10,a2,启用 KASAN 等编译期插桩时，仅有 notrace 的 walk_stackframe 仍可被插桩并由 noinstr 的 arch_stack_walk 直接调用。
+E11,b,handle_page_fault 在 irqentry_enter 建立 RCU 和入口跟踪状态后、irqentry_exit 之前运行，此时缺页处理允许插桩。
+E12,b,do_irq 先用 irqentry_enter 建立 RCU 和入口跟踪状态，再调用含 irq_enter_rcu 的处理函数，符合通用中断入口的顺序。
+E13,b,irq_exit_rcu 在 do_irq 调用 irqentry_exit 撤销入口状态之前执行，仍处于允许插桩的中断处理区间。
+E14,a2,RV32 上客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，随后高半部读取只用可被错误推测的分支检查该下标。
+E15,a,客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，随后固件计数读取时下标只有分支检查而无推测执行屏蔽。
+E16,b,该函数的宿主调用点按处理的事件传入固定 SBI_PMU_FW_* 枚举值，客体无法提供越界 fid。
+E17,a,客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，启动计数器时可以在错误推测下用该码访问 fw_event。
+E18,a,客体可用 SKIP_MATCH 把越界 RAW 事件码写进已配置的固件计数器，停止计数器时可以在错误推测下用该码访问 fw_event。
+E19,a,客体 SBI 调用直接控制 eidx 和 AUTO_START 标志，越界事件码可在错误推测下绕过分支检查并用于写入 fw_event。
+E20,b,RISC-V 委托 init_of_cache_level 处理设备树，该公共函数会调用 get_cpu_cacheinfo 并填写缓存层数及叶节点数。
+E21,b,RISC-V 使用公共的大页映射实现 vmemmap_populate_hugepages，该实现会在需要且允许回退时调用 vmemmap_populate_basepages。

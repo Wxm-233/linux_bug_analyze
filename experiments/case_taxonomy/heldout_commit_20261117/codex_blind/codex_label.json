@@ -1,0 +1,602 @@
+[
+  {
+    "k": 1,
+    "commit": "0f90b88dbcd1",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P5",
+    "missing": "按先取当前时间、调用暂停检查钩子、再取报告时间戳的顺序取得可比较的时间戳。",
+    "archs": "x86（CONFIG_KVM_GUEST；对照 asm-generic、PowerPC 的空实现）",
+    "why": "公共 watchdog 提前保存 period_ts，隐含它在架构暂停检查后仍能与当前时间比较。修复时源码显示 x86 的 kvm_check_and_clear_guest_paused() 会调用 pvclock_touch_watchdogs() 改变状态，而通用及 PowerPC 实现只返回 false，因此补上的读取顺序涉及真实的架构钩子效果差异；补丁也同时收紧了通用 NMI 竞态。"
+  },
+  {
+    "k": 2,
+    "commit": "3c474b3239f1",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "问题是尚未上线的 CPU 的 rq->core 没有初始化，公共调度器在遍历 possible CPU 时访问了无效状态。补丁统一初始自指关系并维护上下线时的核心 leader，属于调度器内部的初始化与生命周期错误，没有架构接口差异证据。"
+  },
+  {
+    "k": 3,
+    "commit": "d9807d60c145",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P2",
+    "missing": "在 sparse_init() 填充 VMEMMAP 后、zone_sizes_init() 使用 struct page 前执行覆盖该区域的本地 sfence.vma。",
+    "archs": "RISC-V rv64（CONFIG_SPARSEMEM_VMEMMAP）",
+    "why": "RISC-V 启动代码依赖通用 sparse_init() 建立随后可访问的 vmemmap，但该架构写页表后还需要 sfence.vma 才保证地址翻译相关数据可见。补丁在公共 sparsemem 初始化返回与后续使用之间补上本地 TLB 刷新，弥补这一架构特定的完成效果。"
+  },
+  {
+    "k": 4,
+    "commit": "d94c12bd97d5",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "OTHER",
+    "missing": "字扫描字符串时处理跨 MTE 标签粒度边界的访问，改用架构提供的 load_unaligned_zeropad()。",
+    "archs": "arm64（MTE，尤其 CONFIG_KASAN_HW_TAGS）",
+    "why": "通用 sized_strscpy() 把不跨页的整字读取当作安全操作，但 arm64 MTE 仍可能因越过 16 字节标签粒度边界而报错。补丁改用架构读取接口；修复时 arm64 实现确实包含标签检查覆盖处理，说明安全读取效果在不同架构上不等价。"
+  },
+  {
+    "k": 5,
+    "commit": "59f876fb9d68",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "OTHER",
+    "missing": "调用 __ffs() 前排除零 PFN，并将零地址对应的对齐阶数直接设为 MAX_ORDER。",
+    "archs": "ARM（提交报告的启动失败）；其他 __ffs(0) 结果不同的架构也受该前提影响",
+    "why": "公共内存初始化代码把 __ffs(0) 的结果当作可用于阶数计算的值，而该输入的行为没有保证。提交明确报告 ARM 返回值经 int 转换成为 -1 后导致启动失败，修复补上零输入分支；根因是位操作输入前提，不是页缓存阶数上限。"
+  },
+  {
+    "k": 6,
+    "commit": "4deb96e35c5c",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "补丁统一 GICv3 驱动的 DT 与 ACPI 两条探测路径对 iomem 资源申请失败的处理，使两者都报告但不致命。差异发生在同一驱动的固件枚举路径，未显示公共层与架构层之间的接口约定失配。"
+  },
+  {
+    "k": 7,
+    "commit": "e68b823ab0ba",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "这是两个改动交互后仍调用已删除 get_clear_flush() 所造成的 arm64 编译错误。显式 flush_tlb_range() 是改用新内部 helper 时保留原语义的配套工作，提交没有给出独立的跨层运行时缺陷，按本轮排除构建错误的判据判否。"
+  },
+  {
+    "k": 8,
+    "commit": "8891b176d350",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "OTHER",
+    "missing": "arch_dup_task_struct() 必须识别静态 init_task 没有动态 FP 尾部，只复制其实际大小并清零目标扩展区。",
+    "archs": "UML（arch/um，带动态用户 FP 状态的 task_struct 布局）",
+    "why": "公共 fork 路径向 arch_dup_task_struct() 传入的源对象可以是静态 init_task，UML 实现却假设源对象都具有 arch_task_struct_size 大小的动态扩展。其他普通任务的分配方式掩盖了该假设，补丁针对公共静态任务对象补齐了大小与初始化处理。"
+  },
+  {
+    "k": 9,
+    "commit": "22883973244b",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "OTHER",
+    "missing": "在 VMA 查找及栈扩展判断之前，按目标 mm 的规则去除用户地址标签。",
+    "archs": "x86_64（LAM）、arm64（支持 tagged user address 的配置）",
+    "why": "公共 __access_remote_vm() 新增的 VMA 查找直接使用带标签地址，假设用户指针数值就是 VMA 的规范地址。修复使用 untagged_addr_remote(mm, addr)，其中 x86 的实现按目标 mm 掩码处理，而不支持标签的架构采用恒等操作，属于明确的地址语义差异。"
+  },
+  {
+    "k": 10,
+    "commit": "56ae10cf628b",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P4",
+    "missing": "通过 ptep_get() 获取架构定义的逻辑 PTE，不能把裸解引用当成等价读取。",
+    "archs": "PowerPC 8xx（CONFIG_PPC_16K_PAGES 的 ptep_get() 覆盖实现）",
+    "why": "完整补丁修正 UFFDIO_MOVE 的七处裸 PTE 读取。修复时源码中 PowerPC 8xx 的 16K 页实现会读取一个子项并构造四项逻辑 PTE，通用默认实现则是 READ_ONCE，因而公共层绕过 accessor 确实跳过了架构定义的读取效果。"
+  },
+  {
+    "k": 11,
+    "commit": "c7bde43f6daf",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "hugetlb vmemmap 回滚把含 head 元数据的页面误当作 tail 模板来恢复，导致通用元数据损坏。补丁改成复制实际映射页并限定共享 tail 页的恢复范围，未涉及架构间的映射或接口语义差异。"
+  },
+  {
+    "k": 12,
+    "commit": "6510c78490c4",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "RISC-V 的 copy_thread() 未初始化自身 thread_struct.s 保存寄存器数组，可能将残留内核数据带到用户态。修复的是该架构内部上下文初始化细节，提交和补丁没有显示公共层与架构层之间的某项不同约定。"
+  },
+  {
+    "k": 13,
+    "commit": "546e42c8c6d9",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P4",
+    "missing": "为 RISC-V SMP 提供原子读取并清除 PUD 的实现，返回真正被清除的旧条目。",
+    "archs": "RISC-V（CONFIG_SMP、PUD THP）",
+    "why": "修复时通用 pudp_huge_get_and_clear() 默认实现先读再清，并不提供原子交换。RISC-V 沿用该默认效果会漏掉两步之间其他核心的更新，补丁用 __HAVE_ARCH_PUDP_HUGE_GET_AND_CLEAR 和 xchg() 补齐公共大页接口所需的取旧值并清除效果。"
+  },
+  {
+    "k": 14,
+    "commit": "edf2d546bfd6",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "RISC-V 热补丁实现把本地 I-cache 刷新延迟到内部调用链过晚的位置，此时尚未退出补丁操作就可能调用刚被改写的函数。完整补丁把刷新下移到实际写指令之后，修复的是架构内部热补丁算法的自修改代码顺序，没有呈现公共调用者与架构接口之间的失配。"
+  },
+  {
+    "k": 15,
+    "commit": "7e3811521dc3",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P2",
+    "missing": "实现 flush_cache_vmap()，在建立 vmalloc 映射后执行 RISC-V 所需的 sfence.vma。",
+    "archs": "RISC-V 64 位",
+    "why": "公共 vmalloc 在建图后依赖架构 flush_cache_vmap() 完成必要维护，RISC-V 原来依靠稍后的 vmalloc fault 顺便执行 sfence.vma。64 位内核移除该 fault 路径后，空钩子不再满足映射可用的效果，补丁因此补齐架构实现。"
+  },
+  {
+    "k": 16,
+    "commit": "44f86392bdd1",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "hugetlb_change_protection() 只在部分 migration entry 类型下更新 uffd-wp，并可能在重建条目时丢掉该位。补丁修正公共 MM 的分支与状态保留逻辑，没有给出架构差异或架构接口前提的证据。"
+  },
+  {
+    "k": 17,
+    "commit": "af0c3f058662",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P6",
+    "missing": "区分 PFN 存在 struct page 与 PFN 实际属于可用 RAM，不能仅用 pfn_valid() 拒绝 MMIO DMA 映射。",
+    "archs": "arm64（SPARSEMEM，提交中的 Raspberry Pi 4）",
+    "why": "公共 dma_map_resource() 把 pfn_valid() 当作 RAM 判定，但 arm64 的稀疏内存 section 可同时覆盖 RAM 和 MMIO。提交给出 SPI FIFO 与 RAM 同处 section 的实际反例，补丁去掉致命拒绝，并在调试检查中结合 PageReserved() 区分区域性质。"
+  },
+  {
+    "k": 18,
+    "commit": "f5407e9b697c",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P3",
+    "missing": "对 hugetlb folio 的页表指针调用 huge_ptep_get()，再解释 present、PFN 等字段。",
+    "archs": "s390 等覆盖 huge_ptep_get() 的架构；系列说明也涉及 arm64 的大页读取约束",
+    "why": "公共反向映射代码假设 page_vma_mapped_walk() 返回的 pte_t 指针总能用普通 ptep_get() 解码。提交明确说明 s390 等架构的大页条目需要专门转换，否则 pte_present()、pte_pfn() 会失真，修复按 folio 类型选择架构大页接口。"
+  },
+  {
+    "k": 19,
+    "commit": "2163aff6bebb",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "补丁为 Cirrus DSP 固件 V2 算法头的变长字符串和字段增加缓冲区边界检查。缺陷属于固件格式解析时的普通越界，既不是 CPU 架构差异，也未涉及公共层与架构实现的隐藏约定。"
+  },
+  {
+    "k": 20,
+    "commit": "b3431a8bb336",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P5",
+    "missing": "kfence_protect_page() 在关中断上下文中不能发同步跨核 IPI，应改用本地 TLB 刷新并容许其他核心惰性处理。",
+    "archs": "RISC-V rv64（SMP、KFENCE）",
+    "why": "公共 KFENCE 可在中断关闭的释放路径调用架构保护钩子，RISC-V 实现却使用可能发 IPI 的 flush_tlb_kernel_range()。提交给出从公共 kfree/KFENCE 路径进入 smp_call_function 的警告栈，补丁使架构实现满足该调用上下文约定。"
+  },
+  {
+    "k": 21,
+    "commit": "d5dc200c3a3f",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P5",
+    "missing": "在 __get_user() 读取用户符号指针数组前，对整个数组执行 access_ok()。",
+    "archs": "x86（__get_user 不做范围检查）；对照 arm64 的带 access_ok 实现",
+    "why": "公共 BPF tracing 路径使用 __get_user() 却没有满足先验证用户地址范围的前提。修复时源码显示 x86 将其接到 get_user_nocheck，而 arm64 的同名实现内部执行 access_ok()，因此遗漏检查确实会因架构实现不同而暴露或被掩盖。"
+  },
+  {
+    "k": 22,
+    "commit": "79e10dad1ce3",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "CONFIG_DEBUG_RSEQ 下，写用户区中途失败后，内核保存的只读字段副本没有与已经成功写入的字段同步。补丁改为每个字段成功写入后立即更新副本，属于公共 rseq 的错误路径一致性问题，没有架构差异证据。"
+  },
+  {
+    "k": 23,
+    "commit": "0b5be138ce00",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "补丁用 pte_batch_hint() 提前跳过无收益的 folio 查询，恢复 mremap 性能；提交也明确说明 arm64 与其他架构的 hint 不同。这里没有错误解释返回值或遗漏接口必需效果，额外 folio 查询仍然正确，属于公共路径的开销优化而非跨层语义约定缺陷。"
+  },
+  {
+    "k": 24,
+    "commit": "b3f78e749865",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P4",
+    "missing": "vmap_pfn_apply() 必须经 set_pte_at() 安装 PTE，让架构完成校验、硬件表项写入等效果。",
+    "archs": "ARM 32 位非 LPAE 的软/硬件 PTE 布局；x86 也有专门的 PTE 写入及校验路径",
+    "why": "公共 vmalloc 代码把对 pte_t 的赋值当作完整安装映射，绕过架构 setter。修复时 ARM 两级页表源码说明 Linux PTE 与硬件 PTE 分区保存，set_pte_at() 经 set_pte_ext() 安装条目；x86 setter 也额外调用页表检查，因此并非各架构都等价于裸写。"
+  },
+  {
+    "k": 25,
+    "commit": "f442fa614137",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "GUP 慢路径误用为快路径设计的 try_grab_folio()，导致 CMA 页面在尚未迁移前就因长期 pin 检查失败。虽然报告由 SEV 虚拟机触发，完整补丁修复的仍是公共 GUP 内部快慢路径与引用计数 helper 的混用，没有架构接口语义差异。"
+  },
+  {
+    "k": 26,
+    "commit": "8fa507083388",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "OTHER",
+    "missing": "查询异常修复表时使用真正的异常指令地址 exception_ip()，不能假设 instruction_pointer() 就是故障指令。",
+    "archs": "MIPS 等具有分支延迟槽的架构",
+    "why": "公共 MM 的谨慎加锁路径把保存的 instruction_pointer() 当作异常发生位置。提交明确指出延迟槽架构两者可以不同，因此改用 exception_ip() 才能正确查异常表，属于公共层对架构寄存器语义的错误假设。"
+  },
+  {
+    "k": 27,
+    "commit": "63b85ac56a64",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "Generic KASAN 在对象未进入 quarantine 或 mempool 对象覆盖 free trace 时漏掉 stack depot 引用释放。补丁统一元数据有效性标记与释放时机，属于公共内存调试代码的资源泄漏和生命周期问题，没有架构边界失配。"
+  },
+  {
+    "k": 28,
+    "commit": "afd2627f727b",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P4",
+    "missing": "字符串验证不能依赖 vsnprintf() 消费参数后推进调用者的 va_list，应按事件字段定位待检查的字符串。",
+    "archs": "x86_32 等 va_list 按值传递的架构；与按引用传递 va_list 的 ABI 对照",
+    "why": "公共 tracing 假设调用打印函数后，原 va_list 会停在下一待查参数上，但这个未保证的副作用依赖架构 ABI。提交及删除代码明确点名 x86_32 按值传递时该假设不成立，旧实现只能禁用验证，修复改为不依赖该效果的字段检查。"
+  },
+  {
+    "k": 29,
+    "commit": "87a7ae75d738",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P6",
+    "missing": "只有明确支持普通页表式 vmemmap 优化的架构才能进入 compound devmap 的去重映射路径。",
+    "archs": "PowerPC 64 位 Hash MMU（报告为 ppc64、64K 页）",
+    "why": "公共 vmemmap 优化假设 vmemmap 位于 init_mm 页表并可按普通映射方式重建。提交明确指出 PowerPC Hash MMU 使用硬件哈希表中的 bolted 条目，给出了 devdax 崩溃，补丁通过架构选择条件限制优化并同步初始化范围。"
+  },
+  {
+    "k": 30,
+    "commit": "ce9e40a9a5e5",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "ITS 驱动分配设备事件表时没有按硬件声明的 EventID 位数限制 MSI 数量。修复读取 GITS_TYPER 的能力并钳制分配规模，属于控制器驱动内部的硬件容量处理，未涉及公共层与 CPU 架构层的约定差异。"
+  },
+  {
+    "k": 31,
+    "commit": "1458eb2c9d88",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P2",
+    "missing": "替换 present NAPOT 大页翻译前，清除整组 PTE 并执行覆盖所有子页的 sfence.vma，再写新翻译。",
+    "archs": "RISC-V（Svnapot hugetlb；补丁以 arm64 Break-Before-Make 作类比）",
+    "why": "公共 hugetlb 通过 set_huge_pte_at() 请求完成大页映射更新，RISC-V NAPOT 实现原先只逐项覆写。该架构形式要求先断开映射并刷新 TLB 才能建立新翻译，补丁在架构接口内补齐这项通用调用者无法代做的效果。"
+  },
+  {
+    "k": 32,
+    "commit": "a419beac4a07",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "zstd 解压工作区可能过大，使用 kmalloc() 申请连续物理内存会触发阶数警告或分配失败。改用 vmalloc() 是公共模块解压路径的分配策略修复，提交没有证明架构差异，也不是页缓存阶数上限问题。"
+  },
+  {
+    "k": 33,
+    "commit": "fd35ca3d12cc",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "设备迁移快路径清除 PTE 后没有把脏位传给 folio，可能把尚未写回 swap 的页面误判为干净。补丁补齐与普通迁移路径相同的脏状态传播，属于公共 MM 的数据状态丢失，没有架构接口效果差异。"
+  },
+  {
+    "k": 34,
+    "commit": "24bf08c4376b",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "THP migration entry 的构造与保护修改没有独立维护 uffd-wp 位，导致公共软件状态丢失。补丁修复通用 THP 与 userfaultfd 的分支和位复制逻辑，没有表明某架构对相关接口有不同语义。"
+  },
+  {
+    "k": 35,
+    "commit": "65ac1a60a57e",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P3",
+    "missing": "在调用 pfn_pmd()、pfn_pud() 等 THP helper 前检查 has_transparent_hugepage() 的运行时结果。",
+    "archs": "PowerPC（4K 页、Hash MMU 配置）；其他 THP 能力需运行时确认的平台",
+    "why": "公共页表自测假设 CONFIG_TRANSPARENT_HUGEPAGE=y 就能使用大页构造接口。提交明确给出 PowerPC 4K Hash 配置中 helper 不可用的反例，补丁把运行时能力检查移到所有相关调用之前，避免架构大页支持形式差异。"
+  },
+  {
+    "k": 36,
+    "commit": "055f23b74b20",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P4",
+    "missing": "模块布局时单独合并 exit-section 判定，不能假设架构覆盖的 module_init_section() 也包含 !MODULE_UNLOAD 下的 exit 段。",
+    "archs": "ARM（覆盖 module_init_section()、module_exit_section()）",
+    "why": "公共模块加载器把 exit 段应临时保留的工作塞进弱 module_init_section()，隐含所有架构覆盖实现都会继承该判定范围。ARM 自有实现没有这一效果，补丁在公共 layout_sections() 中统一组合两类段判断，保证动态代码补丁期间 exit 段仍存在。"
+  },
+  {
+    "k": 37,
+    "commit": "3542dcb15cef",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "Intel IOMMU 转用公共 DMA ops 后漏接了原有 forcedac 启动参数，补丁恢复参数并推广到公共 IOVA 分配器。这里是驱动选项兼容性与配置传递的回归，没有公共层依赖架构接口隐含语义的证据。"
+  },
+  {
+    "k": 38,
+    "commit": "9be12ffa78cd",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P3",
+    "missing": "迁移 hugetlb folio 时通过 huge_ptep_get() 读取大页条目，再执行 PFN 与 present 解释。",
+    "archs": "s390 等实现专用 huge_ptep_get() 的架构",
+    "why": "公共 try_to_migrate_one() 把 hugetlb 页表指针当作普通 PTE 指针读取，假设两者编码和访问方式相同。提交说明专用大页 accessor 的架构会因此错误解释 pte_pfn()、pte_present()，与本组 try_to_unmap_one() 的同类缺陷一致。"
+  },
+  {
+    "k": 39,
+    "commit": "713274f1f2c8",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "BPF verifier 在窄位宽 spill 后仍保留原 64 位标量 ID，错误认定两个不同值等价。这里的 32/64 位是固定 BPF 指令和抽象寄存器语义，不是 CPU 架构位宽截断或架构接口差异，因此判为公共验证器逻辑错误。"
+  },
+  {
+    "k": 40,
+    "commit": "9cee7e8ef3e3",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "补丁缓存 memcg 每 CPU 统计结构的父指针和聚合指针，减少层级遍历的内存读取与缓存未命中。它修复公共统计快路径的性能回归，未补充架构接口必需的检查、效果或调用约定。"
+  },
+  {
+    "k": 41,
+    "commit": "4bd1d80efb5a",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P2",
+    "missing": "update_mmu_cache() 更新后覆盖同一 mm 的其他 hart，并为之后迁移到的 hart 安排按 ASID 的延迟 TLB 刷新。",
+    "archs": "RISC-V（SMP、ASID 分配器启用）",
+    "why": "公共 MM 调用 update_mmu_cache() 后依赖架构维护该映射相关的地址翻译状态。RISC-V 实现只刷本地且不考虑 ASID，而启用 ASID 后上下文切换也不必刷 TLB，补丁因此补齐远端和后续运行该 mm 的 hart 的维护范围。"
+  },
+  {
+    "k": 42,
+    "commit": "e4a70f5fbd43",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "timer migration 已经按 CPU 容量建立多套层级，但热插拔时错误地从全局 CPU 集合选择接任者。补丁修复公共计时器自身的层级成员约束；异构容量只是触发条件，没有架构接口返回值或效果被错误假定。"
+  },
+  {
+    "k": 43,
+    "commit": "dc2eae1620bd",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "GICv5 IRS 探测失败后只 iounmap，没有释放先前申请的 iomem 资源。补丁保存资源描述并补 release_mem_region()，是控制器驱动错误路径的普通资源泄漏。"
+  },
+  {
+    "k": 44,
+    "commit": "7c29ada5e700",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "Intel IOMMU 驱动只遍历完整附属设备，遗漏 auxiliary subdevice 的 devTLB 失效与能力标记。补丁扩展同一驱动内部的设备列表处理范围，没有涉及公共层与 CPU 架构接口之间的不同约定。"
+  },
+  {
+    "k": 45,
+    "commit": "de8798965fd0",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "memfd 的 hugetlb 分配路径绕过正常 fault 路径后，遗漏清零、uptodate 标记和页缓存插入锁。三项修复都是公共 MM 分配路径之间应有的状态和并发处理，没有架构差异证据。"
+  },
+  {
+    "k": 46,
+    "commit": "8b356e536e69",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "OTHER",
+    "missing": "在 _OSC 未确认 CPPC 时，还要允许架构依据 CPU 的专用 CPPC 能力判断是否支持。",
+    "archs": "x86 的 AMD、Hygon CPPC 平台",
+    "why": "公共 ACPI CPPC 探测假设未获得 _OSC 确认就等于 CPU 不支持 CPPC，但提交说明部分 AMD 平台通过专用能力指示支持而不置该固件位。补丁新增架构能力钩子，并由 x86 检查 X86_FEATURE_CPPC，补齐公共探测对架构支持方式的遗漏。"
+  },
+  {
+    "k": 47,
+    "commit": "d6e152d905bd",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "公共 clockevents 反复把已到期事件重设为相对的最小延迟，可能不断推迟中断，补丁记录已有强制事件以避免饥饿。提交虽以 Zen5 和 Intel TSC deadline 说明可观察性差异，但原因仍是通用重设逻辑与速度关系，没有表明某架构接口违反另一种隐含语义。"
+  },
+  {
+    "k": 48,
+    "commit": "d8a719059b9d",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P3",
+    "missing": "不能用页表层级折叠推断大页建图接口无效，须保留架构在折叠后实际顶层建立 block 映射的能力。",
+    "archs": "arm64（PUD 或 PMD 折叠配置）；补丁另给 PowerPC 8xx 配套构建桩",
+    "why": "公共 pgtable 根据层级折叠把 pmd/pud 大页操作替换成返回失败的桩，错误假设该逻辑层级不存在就不能建立 block 映射。提交明确报告 arm64 丢失 huge-vmap 并因线性映射无法建立而启动崩溃，因此这部分是运行时跨层缺陷，不因同时修复 8xx 链接问题而归为纯构建错误。"
+  },
+  {
+    "k": 49,
+    "commit": "409f45387c93",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "问题是 AMD SNP 主机启用、IOMMU 检查与内建 KVM/SVM 之间的特定初始化顺序，在相关 CPU 勘误下引发 MSR 异常。完整补丁重新串联 AMD IOMMU 与 x86 SEV 的初始化，属于该架构内部功能之间的依赖，未显示公共内核层与架构层约定不同。"
+  },
+  {
+    "k": 50,
+    "commit": "eec76ea5a721",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P5",
+    "missing": "arm64 的 Poly1305 架构入口必须先检查 may_use_simd()，在当前上下文不能使用 SIMD 时退回标量实现。",
+    "archs": "arm64（NEON/ASIMD 优化路径）",
+    "why": "公共 lib/crypto/poly1305.c 按架构配置直接分派到 poly1305_blocks_arch()，而 arm64 原先只检查机器有 NEON，隐含当前调用上下文也能使用 SIMD。修复恢复上下文检查以避免寄存器损坏；即使提交提醒调用者应避免这种上下文，公共分派本身并没有替架构保证这一性质。"
+  },
+  {
+    "k": 51,
+    "commit": "2858b4027f49",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "queue_folios_pmd() 把 device-private 软件叶条目误当作可取硬件 PFN 的映射，确实呈现缺 present 检查的形状。但修复时 pmd_is_huge() 在公共 huge_mm.h 中统一接纳非空软件叶，提交没有证明这一失误来自架构实现差异，故判为公共 MM 对新增软件状态处理不全。"
+  },
+  {
+    "k": 52,
+    "commit": "3b89863c3fa4",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "公共 pagewalk 在 PUD split 后未重新验证条目，可能与并发 refault 重建叶映射竞争并错误下钻。补丁增加稳定快照和重试，属于通用页表遍历竞态；x86 故障栈只是实例，未提供架构之间的接口语义差异。"
+  },
+  {
+    "k": 53,
+    "commit": "75cb1cca2c88",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "UFFDIO_MOVE 错把硬件 dirty 位与用于用户态变化跟踪的 soft-dirty 位混为一谈，并遗漏 swap 条目的 soft-dirty 更新。补丁按公共 mremap/CRIU 语义修正状态，未表明问题由架构接口差异造成。"
+  },
+  {
+    "k": 54,
+    "commit": "2d331a6ac481",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "OTHER",
+    "missing": "应用 x86 IO-APIC 的 ACPI IRQ override 前排除不适用的 Zen 平台，并保留机型级例外。",
+    "archs": "x86 AMD Zen，尤其提交提到的 Ryzen 6000 及更新平台和列出的笔记本机型",
+    "why": "公共 ACPI resource 代码默认用 acpi_get_override_irq() 的架构结果替换固件资源属性，但该效果在部分 Zen 平台上会错误改写低有效 IRQ。修复恢复 CONFIG_X86/X86_FEATURE_ZEN 条件及 DMI 例外；源码中的调用确实跨到 x86 IO-APIC 实现，属于条件适用范围的失配。"
+  },
+  {
+    "k": 55,
+    "commit": "afe8605ca454",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "zsmalloc 销毁等待与孤立页计数递减之间缺少顺序保证，可能错过唤醒。补丁补上配对内存屏障，修复公共代码自己的并发协议；提交没有给出特定架构或跨层接口效果差异，不能仅因出现屏障就判为跨架构。"
+  },
+  {
+    "k": 56,
+    "commit": "bbcbf045d6c7",
+    "verdict": "是",
+    "direction": "a2c",
+    "category": "P1",
+    "missing": "PowerPC 的大页清除接口必须接纳公共 MM 传来的非 present migration/device-private PMD，跳过仅适用于有效硬件映射的更新与刷新。",
+    "archs": "PowerPC 64s / Book3S64（Hash 与 Radix 路径）",
+    "why": "公共 zap_huge_pmd() 和设备迁移可以合法地把非 present 软件 PMD 交给架构清除接口，PowerPC 实现却断言它一定 present，并进入要求有效映射的内部操作。补丁显式区分软件条目并直接清除，修复了架构实现对公共调用范围的错误假设。"
+  },
+  {
+    "k": 57,
+    "commit": "e5dec38ac5d0",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "Loongson PCH PIC 驱动没有按边沿/电平模式切换 IRQ flow handler，也遗漏本控制器的边沿确认寄存器写入。完整补丁修复的是该控制器自身的模式与 ack 实现；驱动仅用于 Loongson 并不足以证明公共层与 arch 层接口有架构差异约定。"
+  },
+  {
+    "k": 58,
+    "commit": "c50f8e6053b0",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "公共 userfaultfd 移动 swap PTE 时错误假设关联 folio 已离开 swapcache，因而漏更新 folio 的 index 与 mapping。补丁处理交换缓存中间状态及其并发窗口；KSM 配置影响症状，arm64 栈是复现实例，根因不涉及架构边界语义。"
+  },
+  {
+    "k": 59,
+    "commit": "3d0b95cd87b2",
+    "verdict": "是",
+    "direction": "c2a",
+    "category": "P2",
+    "missing": "hugetlb 页表移动涉及共享 PMD 时，按可能解绑的整个共享区间执行 cache/TLB 刷新。",
+    "archs": "x86、arm64（相应页大小配置）、RISC-V 64 位的 hugetlb PMD 共享路径；cache 影响取决于架构",
+    "why": "公共 mremap 只刷新请求移动的地址段，隐含页表操作的影响范围不超过该段，但 huge_pmd_unshare() 可能解绑更大的共享 PMD 范围。提交明确指出部分架构可能出现 cache 问题，补丁用共享范围调整刷新；修复时 Kconfig 也显示 PMD 共享是架构选择能力。"
+  },
+  {
+    "k": 60,
+    "commit": "1690eeb0cb2b",
+    "verdict": "不是",
+    "direction": null,
+    "category": null,
+    "missing": null,
+    "archs": null,
+    "why": "ITS 驱动把 __le64 硬件表项直接交给 FIELD_GET()，遗漏了协议表项到 CPU 字节序的转换。该错误可能在大端 CPU 上暴露，但补丁仍是控制器内部硬件格式解析修复，未呈现公共层与架构实现之间的隐藏接口约定。"
+  }
+]

@@ -1,0 +1,39 @@
+########## 第36条  编号 B518  提交 cb9f6a40382c  日期 2025-08-02
+
+【提交说明】
+irqchip/riscv-imsic: Don't dereference before NULL pointer check
+
+smatch warns about a dereference before check:
+drivers/irqchip/irq-riscv-imsic-platform.c:317 imsic_irqdomain_init() warn: variable dereferenced before check 'imsic' (see line 311)    
+
+Cure it by moving the firmware not assignement after the checks.
+
+Fixes: 59422904dd98 ("irqchip/riscv-imsic: Convert to msi_create_parent_irq_domain() helper")
+ drivers/irqchip/irq-riscv-imsic-platform.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动统计】
+ drivers/irqchip/irq-riscv-imsic-platform.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+【改动内容】
+diff --git a/drivers/irqchip/irq-riscv-imsic-platform.c b/drivers/irqchip/irq-riscv-imsic-platform.c
+index 74a2a28f9403..643c8e459611 100644
+--- a/drivers/irqchip/irq-riscv-imsic-platform.c
++++ b/drivers/irqchip/irq-riscv-imsic-platform.c
+@@ -308,7 +308,6 @@ static const struct msi_parent_ops imsic_msi_parent_ops = {
+ int imsic_irqdomain_init(void)
+ {
+ 	struct irq_domain_info info = {
+-		.fwnode		= imsic->fwnode,
+ 		.ops		= &imsic_base_domain_ops,
+ 		.host_data	= imsic,
+ 	};
+@@ -325,6 +324,7 @@ int imsic_irqdomain_init(void)
+ 	}
+ 
+ 	/* Create Base IRQ domain */
++	info.fwnode = imsic->fwnode,
+ 	imsic->base_domain = msi_create_parent_irq_domain(&info, &imsic_msi_parent_ops);
+ 	if (!imsic->base_domain) {
+ 		pr_err("%pfwP: failed to create IMSIC base domain\n", imsic->fwnode);

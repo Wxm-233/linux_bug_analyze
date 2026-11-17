@@ -1,0 +1,387 @@
+
+##### L150
+=== fd4021529faa L 2026-08-10 +0/-1
+LoongArch: KVM: Fix PC double advance in kernel MMIO read fast path
+
+In the in-kernel MMIO read fast path of kvm_emu_mmio_read(),
+kvm_complete_mmio_read() already advances the guest PC via update_pc().
+The explicit update_pc() call right after it advances the PC a second
+time, so PC moves forward by 8 bytes instead of 4, and the instruction
+following the MMIO read is silently skipped.
+
+The user space MMIO read completion path in kvm_arch_vcpu_ioctl_run()
+calls kvm_complete_mmio_read() only once, and the MMIO write fast path
+advances the PC exactly once as well.
+
+Here remove the redundant update_pc() so the kernel MMIO read fast path
+advances the PC by a single instruction.
+
+Fixes: 80edf90831a2 ("LoongArch: KVM: Add sign extension with kernel MMIO read emulation")
+functions: arch/loongarch/kvm/exit.c:kvm_emu_mmio_read
+fixes: 80edf90831a2
+diff --git a/arch/loongarch/kvm/exit.c b/arch/loongarch/kvm/exit.c
+index 8572b63478bb..482ba17bcd3d 100644
+--- a/arch/loongarch/kvm/exit.c
++++ b/arch/loongarch/kvm/exit.c
+@@ -482,5 +482,4 @@ int kvm_emu_mmio_read(struct kvm_vcpu *vcpu, larch_inst inst)
+ 		if (!ret) {
+ 			kvm_complete_mmio_read(vcpu, run);
+-			update_pc(&vcpu->arch);
+ 			vcpu->mmio_needed = 0;
+ 			return EMULATE_DONE;
+
+##### L151
+=== fe41c0759b11 L 2026-08-10 +12/-0
+LoongArch: KVM: Reload one-shot TVAL on migration destination
+
+kvm_restore_timer() rebuilds the remaining timer countdown value from
+vcpu->arch.expire, which is host-internal and is not part of the
+migrated vCPU state. On the migration destination it is still 0, so for
+a one-shot timer that has not expired yet the computed delta is 0 and
+write_gcsr_timertick(0) injects the timer interrupt immediately instead
+of after the remaining time.
+
+The expired one-shot case (TVAL = -1) is already handled earlier. When
+expire has not been set (i.e. on the migration destination), reload the
+remaining countdown value from the migrated TVAL. This covers both one-
+shot and periodic timers. The regular preempt/resume path on the source,
+where expire is valid, is unchanged.
+
+Fixes: a5857b9ff6e0 ("LoongArch: KVM: Implement vcpu timer operations")
+functions: arch/loongarch/kvm/timer.c:kvm_restore_timer
+fixes: a5857b9ff6e0
+diff --git a/arch/loongarch/kvm/timer.c b/arch/loongarch/kvm/timer.c
+index 3829f35a4070..96f33e34855a 100644
+--- a/arch/loongarch/kvm/timer.c
++++ b/arch/loongarch/kvm/timer.c
+@@ -120,4 +120,16 @@ void kvm_restore_timer(struct kvm_vcpu *vcpu)
+ 	now = ktime_get();
+ 	expire = vcpu->arch.expire;
++	if (!expire) {
++		/*
++		 * vcpu->arch.expire is host-internal and is not migrated,
++		 * so it is 0 after migration. Reload the remaining countdown
++		 * from the migrated TVAL. This covers both one-shot and
++		 * periodic timers.
++		 */
++		if (ticks < cfg)
++			delta = tick_to_ns(vcpu, ticks);
++		expire = ktime_add_ns(now, delta);
++	}
++
+ 	if (ktime_before(now, expire))
+ 		delta = ktime_to_tick(vcpu, ktime_sub(expire, now));
+
+##### L152
+=== 2a2367d46d7a L 2026-08-17 +2/-1
+LoongArch: Fix acpi_package_ids[] array overflow
+
+With LoongArch virt machine, a typical setting is one core per socket,
+there will max 256 sockets (packages) on one VM. With PPTT acpi table,
+array acpi_package_ids[] will be overflowed.
+
+Here change the array size of acpi_package_ids[] with the max value of
+MAX_PACKAGES and KVM_MAX_VCPUS.
+
+Fixes: 4e8f58620f67 ("LoongArch: Retrieve CPU package ID from PPTT when available")
+functions: 
+fixes: 4e8f58620f67
+diff --git a/arch/loongarch/kernel/acpi.c b/arch/loongarch/kernel/acpi.c
+index 873e90990771..cb454ee92b20 100644
+--- a/arch/loongarch/kernel/acpi.c
++++ b/arch/loongarch/kernel/acpi.c
+@@ -14,4 +14,5 @@
+ #include <linux/irq.h>
+ #include <linux/irqdomain.h>
++#include <linux/kvm_host.h>
+ #include <linux/memblock.h>
+ #include <linux/of_fdt.h>
+@@ -203,5 +204,5 @@ static void __init acpi_process_madt(void)
+ int pptt_enabled;
+ static int acpi_nr_packages;
+-static int acpi_package_ids[MAX_PACKAGES];
++static int acpi_package_ids[MAX(MAX_PACKAGES, KVM_MAX_VCPUS)];
+ 
+ int __init parse_acpi_topology(void)
+
+##### L153
+=== 30419a0aa128 L 2026-09-04 +1/-1
+LoongArch: BPF: Fix off-by-one error for insn_is_cast_user()
+
+In the LoongArch BPF JIT code, the branch offset represents the number
+of instructions. An offset of 1 means the target of the "beq" is the
+current PC plus 1 instruction (PC + 4 bytes). This matches the exact
+same path as the sequential non-branch execution, the "or" instruction
+is always executed for the cast_user JIT arm in build_insn().
+
+If the pointer is not NULL, there is no side effect. But if the pointer
+is NULL, it is incorrectly combined with the base address and turns into
+a non-zero address, meaning a zero arena offset no longer casts to NULL.
+
+Fix this by changing the branch offset from 1 to 2, which properly skips
+the "or" instruction and jumps directly to the "move_reg" instruction if
+the pointer is NULL, ensuring the destination register is safely cleared
+to 0.
+
+Fixes: 4fdb5dd8aeba ("LoongArch: BPF: Implement bpf_addr_space_cast instruction")
+functions: arch/loongarch/net/bpf_jit.c:build_insn
+fixes: 4fdb5dd8aeba
+diff --git a/arch/loongarch/net/bpf_jit.c b/arch/loongarch/net/bpf_jit.c
+index 1eb588e443c9..4da278900938 100644
+--- a/arch/loongarch/net/bpf_jit.c
++++ b/arch/loongarch/net/bpf_jit.c
+@@ -718,5 +718,5 @@ static int build_insn(const struct bpf_insn *insn, struct jit_ctx *ctx, bool ext
+ 			emit_zext_32(ctx, t1, true);
+ 			move_imm(ctx, dst, (ctx->user_vm_start >> 32) << 32, false);
+-			emit_insn(ctx, beq, t1, LOONGARCH_GPR_ZERO, 1);
++			emit_insn(ctx, beq, t1, LOONGARCH_GPR_ZERO, 2);
+ 			emit_insn(ctx, or, t1, dst, t1);
+ 			move_reg(ctx, dst, t1);
+
+##### L154
+=== 501514d6ebd2 L 2026-09-04 +3/-0
+LoongArch: KVM: Validate MSI data before routing it to EIOINTC
+
+pch_msi_set_irq() passes e->msi.data straight into eiointc_set_irq() as
+the irq number. The MSI data comes from userspace, that either via a
+KVM_IRQ_ROUTING_MSI entry set with KVM_SET_GSI_ROUTING (used by irqfd
+and KVM_IRQ_LINE) or directly via KVM_SIGNAL_MSI, and is never checked
+against EIOINTC_IRQS.
+
+eiointc_set_irq() uses the value with __set_bit()/__clear_bit() on the
+256-bit isr bitmap, eiointc_update_irq() then indexes sw_coremap[] and
+the per-cpu coreisr/sw_coreisr bitmaps with it. Therefore a data value
+>= 256 reads and writes memory past the end of those arrays, i.e. any
+process holding a VM fd can corrupt kernel memory beyond the allocation
+of loongarch_eiointc.
+
+Reject MSI data that doesn't fit in the EIOINTC irq space. The DMSINTC
+path is unaffected as it decodes the vector from the address and masks
+it.
+
+Fixes: 1928254c5ccb ("LoongArch: KVM: Add irqfd support")
+functions: arch/loongarch/kvm/intc/pch_pic.c:pch_msi_set_irq
+fixes: 1928254c5ccb
+diff --git a/arch/loongarch/kvm/intc/pch_pic.c b/arch/loongarch/kvm/intc/pch_pic.c
+index 83fa2386cf81..2b63b0c2c7ce 100644
+--- a/arch/loongarch/kvm/intc/pch_pic.c
++++ b/arch/loongarch/kvm/intc/pch_pic.c
+@@ -79,4 +79,7 @@ int pch_msi_set_irq(struct kvm *kvm, struct kvm_kernel_irq_routing_entry *e, int
+ 	}
+ 
++	if (e->msi.data >= EIOINTC_IRQS)
++		return -EINVAL;
++
+ 	eiointc_set_irq(kvm->arch.eiointc, e->msi.data, level);
+ 
+
+##### L155
+=== 63b6a48c951d L 2026-09-04 +1/-1
+LoongArch: Do not select HAVE_RUST when KASAN is enabled
+
+After commit 2625480a1bf7 ("hardening: Default randstruct off with rust
+for better allmodconfig support"), which allows Rust to be enabled for
+allmodconfig, ARCH=loongarch allmodconfig starts failing with:
+
+  error: kernel-address sanitizer is not supported for this target
+
+  error: aborting due to 1 previous error
+
+  make[4]: *** [rust/Makefile:741: rust/core.o] Error 1
+
+For the same reason as the commit 84a0f7caafc679f7 ("ARM: Do not select
+HAVE_RUST when KASAN is enabled"), do not select HAVE_RUST when KASAN
+is enabled until the loongarch64-unknown-none-softfloat target in rustc
+supports KASAN.
+
+Fixes: 90868ff9cade ("LoongArch: Enable initial Rust support")
+functions: 
+fixes: 90868ff9cade
+diff --git a/arch/loongarch/Kconfig b/arch/loongarch/Kconfig
+index a21f51e5815e..2067d1f2ad7a 100644
+--- a/arch/loongarch/Kconfig
++++ b/arch/loongarch/Kconfig
+@@ -176,5 +176,5 @@ config LOONGARCH
+ 	select HAVE_RETHOOK
+ 	select HAVE_RSEQ
+-	select HAVE_RUST
++	select HAVE_RUST if !KASAN
+ 	select HAVE_SAMPLE_FTRACE_DIRECT
+ 	select HAVE_SAMPLE_FTRACE_DIRECT_MULTI
+
+##### L156
+=== 72ce4b24676e L 2026-09-04 +3/-0
+LoongArch: Avoid preempt count underflow without probe
+
+LoongArch uses break 11 for the breakpoint placed after an instruction
+that Kprobes executes out of line. Since userspace can issue the same
+break instruction, do_bp() can reach kprobe_singlestep_handler() when
+there is no current probe.
+
+The handler actually returns false in this case, but it first calls
+preempt_enable_no_resched(). The corresponding preempt_disable() is done
+by kprobe_breakpoint_handler() on a real Kprobe hit, so it has not run
+here. As a result, an ordinary userspace breakpoint (code 11) underflows
+the current task's preempt count.
+
+This also makes in_interrupt() return true until the task schedules. One
+visible consequence is the socket cgroup attribution: cgroup_sk_alloc()
+treats the allocation as interrupt context and assigns the socket to the
+root cgroup. A socket opened from the SIGTRAP handler can then avoid a
+BPF_CGROUP_INET_SOCK_CREATE policy attached to the task's own cgroup.
+
+Return as soon as kprobe_running() reports no active probe.
+
+The same check has appeared in [PATCH v10 2/4] of the original LoongArch
+Kprobes series, but was dropped before the feature reached mainline.
+
+Fixes: 6d4cc40fb5f5 ("LoongArch: Add kprobes support")
+Assisted-by: Codex:gpt-5
+functions: arch/loongarch/kernel/kprobes.c:kprobe_singlestep_handler
+fixes: 6d4cc40fb5f5
+diff --git a/arch/loongarch/kernel/kprobes.c b/arch/loongarch/kernel/kprobes.c
+index 1985ed30dd16..ddfefea17472 100644
+--- a/arch/loongarch/kernel/kprobes.c
++++ b/arch/loongarch/kernel/kprobes.c
+@@ -276,4 +276,7 @@ bool kprobe_singlestep_handler(struct pt_regs *regs)
+ 	unsigned long addr = instruction_pointer(regs);
+ 
++	if (!cur)
++		return false;
++
+ 	if (cur && (kcb->kprobe_status & (KPROBE_HIT_SS | KPROBE_REENTER)) &&
+ 	    ((unsigned long)&cur->ainsn.insn[1] == addr)) {
+
+##### L157
+=== 910132bc7d72 L 2026-09-04 +29/-4
+LoongArch: KVM: Fix resource leak in kvm_loongarch_env_init() error path
+
+kvm_loongarch_env_init() allocates the per-CPU kvm_context (vmcs) and
+kvm_loongarch_ops, registers the perf callbacks, and then registers
+the IPI/EIOINTC/PCH-PIC/DMSINTC KVM devices. If any of those device
+registrations fails, the function returned the error directly, leaving
+everything acquired so far in place: vmcs and kvm_loongarch_ops are
+never freed, the perf callbacks stay registered, and all previously
+registered KVM device operations remain registered. kvm_loongarch_init()
+propagates the errors without calling kvm_loongarch_env_exit(), so
+nothing else cleans up either.
+
+Unwind the error path in reverse order of registration, so that each
+failure only undoes what had actually been set up. Use the same helpers
+in kvm_loongarch_env_exit() to remove the device registrations during
+normal teardown as well.
+
+Fixes: c532de5a67a7 ("LoongArch: KVM: Add IPI device support")
+functions: arch/loongarch/kvm/main.c:kvm_loongarch_env_init, arch/loongarch/kvm/main.c:kvm_loongarch_env_exit
+fixes: c532de5a67a7
+diff --git a/arch/loongarch/kvm/main.c b/arch/loongarch/kvm/main.c
+index b6ddf5827c03..236523d2449d 100644
+--- a/arch/loongarch/kvm/main.c
++++ b/arch/loongarch/kvm/main.c
+@@ -386,19 +386,37 @@ static int kvm_loongarch_env_init(void)
+ 	ret = kvm_loongarch_register_ipi_device();
+ 	if (ret)
+-		return ret;
++		goto err_env;
+ 
+ 	/* Register LoongArch EIOINTC interrupt controller interface. */
+ 	ret = kvm_loongarch_register_eiointc_device();
+ 	if (ret)
+-		return ret;
++		goto err_ipi;
+ 
+ 	/* Register LoongArch PCH-PIC interrupt controller interface. */
+ 	ret = kvm_loongarch_register_pch_pic_device();
+ 	if (ret)
+-		return ret;
++		goto err_eiointc;
+ 
+ 	/* Register LoongArch DMSINTC interrupt contrroller interface */
+-	if (cpu_has_msgint)
++	if (cpu_has_msgint) {
+ 		ret = kvm_loongarch_register_dmsintc_device();
++		if (ret)
++			goto err_pch_pic;
++	}
++
++	return 0;
++
++err_pch_pic:
++	kvm_loongarch_unregister_pch_pic_device();
++err_eiointc:
++	kvm_loongarch_unregister_eiointc_device();
++err_ipi:
++	kvm_loongarch_unregister_ipi_device();
++err_env:
++	kvm_unregister_perf_callbacks();
++	kfree(kvm_loongarch_ops);
++	kvm_loongarch_ops = NULL;
++	free_percpu(vmcs);
++	vmcs = NULL;
+ 
+ 	return ret;
+@@ -407,4 +425,11 @@ static int kvm_loongarch_env_init(void)
+ static void kvm_loongarch_env_exit(void)
+ {
++	if (cpu_has_msgint)
++		kvm_loongarch_unregister_dmsintc_device();
++
++	kvm_loongarch_unregister_pch_pic_device();
++	kvm_loongarch_unregister_eiointc_device();
++	kvm_loongarch_unregister_ipi_device();
++
+ 	if (vmcs)
+ 		free_percpu(vmcs);
+
+##### L158
+=== c3f2feace5e4 L 2026-09-04 +0/-2
+LoongArch: Do not save/restore percpu base register in rethook trampoline
+
+The rethook trampoline saves $r21 ($u0), the percpu base, into its frame
+at entry and restores it at exit. Inbetween rethook_trampoline_handler()
+may schedule via preempt_enable_notrace().
+
+If the task migrates to another CPU, the frame's $r21 holds the old
+CPU's percpu base, and restoring it poisons $r21 on the new CPU. Until
+the next user->kernel transition heals $r21, all this_cpu_*() accesses
+(runqueues, RCU per-CPU data, timer tick programming, FPU ownership)
+hit the wrong CPU's percpu area.
+
+Under kretprobe-heavy preemptible load this can corrupt scheduler and
+timer state: scheduling-while-atomic splats, wrong-CPU RCU warnings,
+WARN_ON_ONCE(rq != this_rq()) in nohz_balance_exit_idle(), and CPUs
+parking in the idle loop with the constant timer never re-armed (hard
+lockup). Reproduces on a Loongson-3A6000 with kretprobes on VFS paths
+plus heavy file churn (OS install / unsquashfs).
+
+By convention $r21 always holds the current CPU's percpu base in kernel
+mode: SAVE_SOME() at exception entry reloads it only when coming from
+user mode, and RESTORE_SOME() restores it only when returning to user
+mode; the context-switch path never writes it. Therefore the live $r21
+at trampoline exit is already correct, and nothing inbetween can change
+it legitimately (kernel C code cannot write a global register variable).
+The same flaw existed even in the pre-rethook kretprobe trampoline since
+v6.3; it was carried over when rethook replaced it. Drop both the save
+and the restore here. Drop the restore is enough to solve the issue, and
+drop the save is to keep the code tidy and no need to clear it.
+
+Fixes: 3f5536860086d ("LoongArch: Add kretprobes support")
+Assisted-by: Kimi:Kimi-K3 # debug and root-cause analysis
+functions: 
+fixes: 3f5536860086
+diff --git a/arch/loongarch/kernel/rethook_trampoline.S b/arch/loongarch/kernel/rethook_trampoline.S
+index 2e009fbea53f..160189444684 100644
+--- a/arch/loongarch/kernel/rethook_trampoline.S
++++ b/arch/loongarch/kernel/rethook_trampoline.S
+@@ -25,5 +25,4 @@
+ 	cfi_st	t7, PT_R19
+ 	cfi_st	t8, PT_R20
+-	cfi_st	u0, PT_R21
+ 	cfi_st	fp, PT_R22
+ 	cfi_st	s0, PT_R23
+@@ -60,5 +59,4 @@
+ 	cfi_ld	t7, PT_R19
+ 	cfi_ld	t8, PT_R20
+-	cfi_ld	u0, PT_R21
+ 	cfi_ld	fp, PT_R22
+ 	cfi_ld	s0, PT_R23

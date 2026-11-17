@@ -1,0 +1,219 @@
+commit f64c723741c911544cca4c838d7a291b06b3ad1d
+Author:     Tejun Heo <tj@kernel.org>
+AuthorDate: Mon Jun 1 08:37:28 2026 -1000
+Commit:     Alexei Starovoitov <ast@kernel.org>
+CommitDate: Fri Jun 5 08:22:36 2026 -0700
+
+    bpf: Replace scratch PTE atomically when allocating arena pages
+    
+    apply_range_set_cb() maps the pages for a new arena allocation and returned
+    -EBUSY when the target PTE was already populated. Kernel-fault recovery
+    leaves the per-arena scratch page in unallocated arena PTEs, so a later
+    bpf_arena_alloc_pages() over such a page hits that -EBUSY, and every
+    subsequent allocation of it fails the same way. Allocation must install the
+    real page over scratch instead.
+    
+    Overwriting the scratch PTE in place is a valid->valid change, which arm64
+    forbids without break-before-make. Route through an invalid entry instead:
+    ptep_try_set() fills only a none slot, so the PTE goes scratch->none->page.
+    On finding scratch, clear it and flush_tlb_before_set() before retrying. The
+    new flush_tlb_before_set() is a no-op except on arches like arm64 that need
+    the break-before-make TLB invalidate. The loop also copes with a concurrent
+    fault re-scratching the slot.
+    
+    Arches without ptep_try_set() never install the scratch page, so keep the
+    must-be-empty check and set_pte_at() for them.
+    
+    Fixes: dc11a4dba246 ("bpf: Recover arena kernel faults with scratch page")
+    Signed-off-by: Tejun Heo <tj@kernel.org>
+    Cc: Alexei Starovoitov <ast@kernel.org>
+    Cc: David Hildenbrand <david@kernel.org>
+    Acked-by: Kumar Kartikeya Dwivedi <memxor@gmail.com>
+    Link: https://lore.kernel.org/r/20260601183728.1800490-1-tj@kernel.org
+    Signed-off-by: Alexei Starovoitov <ast@kernel.org>
+
+diff --git a/arch/arm64/include/asm/pgtable.h b/arch/arm64/include/asm/pgtable.h
+index 984f0502c9d0..3ce0f2a6cab6 100644
+--- a/arch/arm64/include/asm/pgtable.h
++++ b/arch/arm64/include/asm/pgtable.h
+@@ -1837,16 +1837,27 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+ static inline bool ptep_try_set(pte_t *ptep, pte_t new_pte)
+ {
+ 	pteval_t old = 0;
+ 
+ 	return try_cmpxchg(&pte_val(*ptep), &old, pte_val(new_pte));
+ }
+ #define ptep_try_set ptep_try_set
+ 
++/*
++ * arm64 mandates break-before-make: a cleared kernel PTE must have its TLB
++ * invalidated before a different page is installed in its place. The broadcast
++ * TLBI is an instruction, not an IPI, so this is safe with interrupts disabled.
++ */
++static inline void flush_tlb_before_set(unsigned long addr)
++{
++	flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
++}
++#define flush_tlb_before_set flush_tlb_before_set
++
+ #define test_and_clear_young_ptes test_and_clear_young_ptes
+ static inline bool test_and_clear_young_ptes(struct vm_area_struct *vma,
+ 		unsigned long addr, pte_t *ptep, unsigned int nr)
+ {
+ 	if (likely(nr == 1 && !pte_cont(__ptep_get(ptep))))
+ 		return __ptep_test_and_clear_young(vma, addr, ptep);
+ 
+ 	return contpte_test_and_clear_young_ptes(vma, addr, ptep, nr);
+diff --git a/include/linux/pgtable.h b/include/linux/pgtable.h
+index b5739bb99fc1..4c6c4081ef71 100644
+--- a/include/linux/pgtable.h
++++ b/include/linux/pgtable.h
+@@ -1056,16 +1056,34 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long addres
+  * correct for callers that fall through to oops on failure.
+  */
+ static inline bool ptep_try_set(pte_t *ptep, pte_t new_pte)
+ {
+ 	return false;
+ }
+ #endif
+ 
++#ifndef flush_tlb_before_set
++/**
++ * flush_tlb_before_set - invalidate a kernel PTE's TLB before re-setting it
++ * @addr: kernel virtual address whose PTE was just cleared
++ *
++ * Some architectures (e.g. arm64) do not allow a live page-table entry to be
++ * repointed at a different page in one step. The old entry must first be made
++ * invalid and its translation flushed from every TLB, and only then may the new
++ * entry be written.
++ *
++ * This is only for the lockless atomic kernel-PTE installers (ptep_try_set()).
++ * It must be callable with interrupts disabled.
++ */
++static inline void flush_tlb_before_set(unsigned long addr)
++{
++}
++#endif
++
+ #ifndef wrprotect_ptes
+ /**
+  * wrprotect_ptes - Write-protect PTEs that map consecutive pages of the same
+  *		    folio.
+  * @mm: Address space the pages are mapped into.
+  * @addr: Address the first page is mapped at.
+  * @ptep: Page table pointer for the first entry.
+  * @nr: Number of entries to write-protect.
+diff --git a/kernel/bpf/arena.c b/kernel/bpf/arena.c
+index 9b2dea229b38..af49c154473d 100644
+--- a/kernel/bpf/arena.c
++++ b/kernel/bpf/arena.c
+@@ -139,41 +139,67 @@ static int arena_map_get_next_key(struct bpf_map *map, void *key, void *next_key
+ 
+ static long compute_pgoff(struct bpf_arena *arena, long uaddr)
+ {
+ 	return (u32)(uaddr - (u32)arena->user_vm_start) >> PAGE_SHIFT;
+ }
+ 
+ struct apply_range_data {
+ 	struct page **pages;
++	struct page *scratch_page;
+ 	int i;
+ };
+ 
+ struct clear_range_data {
+ 	struct llist_head *free_pages;
+ 	struct page *scratch_page;
+ };
+ 
+ static int apply_range_set_cb(pte_t *pte, unsigned long addr, void *data)
+ {
+ 	struct apply_range_data *d = data;
+ 	struct page *page;
++	pte_t pteval;
+ 
+ 	if (!data)
+ 		return 0;
+-	/* sanity check */
+-	if (unlikely(!pte_none(ptep_get(pte))))
+-		return -EBUSY;
+ 
+ 	page = d->pages[d->i];
+ 	/* paranoia, similar to vmap_pages_pte_range() */
+ 	if (WARN_ON_ONCE(!pfn_valid(page_to_pfn(page))))
+ 		return -EINVAL;
+ 
+-	set_pte_at(&init_mm, addr, pte, mk_pte(page, PAGE_KERNEL));
++	pteval = mk_pte(page, PAGE_KERNEL);
++#ifdef ptep_try_set
++	/*
++	 * Kernel-fault recovery may have installed the scratch page here, and
++	 * some architectures (arm64) prohibit valid->valid PTE transitions.
++	 * Install atomically into a none slot. If scratch is present, clear it
++	 * and flush_tlb_before_set() (break-before-make) before retrying.
++	 */
++	while (!ptep_try_set(pte, pteval)) {
++		pte_t old = ptep_get(pte);
++
++		if (pte_none(old))
++			continue;
++		if (WARN_ON_ONCE(pte_page(old) != d->scratch_page))
++			return -EBUSY;
++		ptep_get_and_clear(&init_mm, addr, pte);
++		flush_tlb_before_set(addr);
++	}
++#else
++	/*
++	 * Without ptep_try_set() there is no atomic installer, but such arches
++	 * also do not wire up bpf_arena_handle_page_fault(), so no scratch page
++	 * is ever installed and the slot is always none here.
++	 */
++	if (unlikely(!pte_none(ptep_get(pte))))
++		return -EBUSY;
++	set_pte_at(&init_mm, addr, pte, pteval);
++#endif
+ 	d->i++;
+ 	return 0;
+ }
+ 
+ static void flush_vmap_cache(unsigned long start, unsigned long size)
+ {
+ 	flush_cache_vmap(start, start + size);
+ }
+@@ -475,17 +501,18 @@ static vm_fault_t arena_vm_fault(struct vm_fault *vmf)
+ 	if (arena->map.map_flags & BPF_F_SEGV_ON_FAULT)
+ 		/* User space requested to segfault when page is not allocated by bpf prog */
+ 		goto out_sigsegv_memcg;
+ 
+ 	ret = range_tree_clear(&arena->rt, vmf->pgoff, 1);
+ 	if (ret)
+ 		goto out_sigsegv_memcg;
+ 
+-	struct apply_range_data data = { .pages = &page, .i = 0 };
++	struct apply_range_data data = { .pages = &page, .i = 0,
++					 .scratch_page = arena->scratch_page };
+ 	/* Account into memcg of the process that created bpf_arena */
+ 	ret = bpf_map_alloc_pages(map, NUMA_NO_NODE, 1, &page);
+ 	if (ret) {
+ 		range_tree_set(&arena->rt, vmf->pgoff, 1);
+ 		goto out_sigsegv_memcg;
+ 	}
+ 
+ 	ret = apply_to_page_range(&init_mm, kaddr, PAGE_SIZE, apply_range_set_cb, &data);
+@@ -665,16 +692,17 @@ static long arena_alloc_pages(struct bpf_arena *arena, long uaddr, long page_cnt
+ 	/* Cap allocation size to KMALLOC_MAX_CACHE_SIZE so kmalloc_nolock() can succeed. */
+ 	alloc_pages = min(page_cnt, KMALLOC_MAX_CACHE_SIZE / sizeof(struct page *));
+ 	pages = kmalloc_nolock(alloc_pages * sizeof(struct page *), __GFP_ACCOUNT, NUMA_NO_NODE);
+ 	if (!pages) {
+ 		bpf_map_memcg_exit(old_memcg, new_memcg);
+ 		return 0;
+ 	}
+ 	data.pages = pages;
++	data.scratch_page = arena->scratch_page;
+ 
+ 	if (raw_res_spin_lock_irqsave(&arena->spinlock, flags))
+ 		goto out_free_pages;
+ 
+ 	if (uaddr) {
+ 		ret = is_range_tree_set(&arena->rt, pgoff, page_cnt);
+ 		if (ret)
+ 			goto out_unlock_free_pages;
