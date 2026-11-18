@@ -1,0 +1,4 @@
+[
+ {"k": 1, "verdict": "不可能", "why": "replace_page 在 1421 行遇到 pmd_trans_huge 就 goto out，能走到 1464 行的一定是 PTE 映射的普通页；flush_cache_page 第 3 个参数是这个 PTE 的页框号，用法正确。被报出是因为调用在函数顶层，“同一分支”退化成整个函数，把开头的大页早退检查算进来了。"},
+ {"k": 2, "verdict": "可能", "why": "riscv 的 flush_cache_vmap 只在 is_vmalloc_or_module_addr 或 VMEMMAP 区时调 mark_new_valid_map，KASAN 影子区不在其中，于是 __kasan_populate_vmalloc 新建的影子映射在 riscv 上既没有 sfence 也没有标记；会缓存无效项的硬件上，访问新影子（kasan_unpoison 的 memset）缺页，entry.S 不补 sfence，do_page_fault 也不当 vmalloc 地址处理，Oops。（非盲：第一版里 Codex 已指出，且 Ali Tariq 已在 Orange Pi RV2 实机上复现 2/30 启动崩溃。）"}
+]

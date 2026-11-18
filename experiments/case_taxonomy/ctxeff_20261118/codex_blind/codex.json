@@ -1,0 +1,23 @@
+[
+  {"k":1,"verdict":"不可能","why":"arm64 的 force_pte_mapping() 在 debug_pagealloc_enabled() 时返回 true，linear_map_requires_bbml3 因而为 false；split_kernel_leaf_mapping() 在 mmu.c:808 提前返回，不会拿 mutex。另示例中的 page_alloc.c:7567 已 spin_unlock_irqrestore，不能把前面的关中断状态传播到 7568。"},
+  {"k":2,"verdict":"不可能","why":"就给出的连续页分配链而言，page_alloc.c:7567 在调用 alloc_contig_frozen_range_noprof 前已释放 zone 锁并恢复中断；7400 的 split_free_frozen_pages 也不是该锁的持锁区间。RISC-V 的刷新确实可以跨核，但此示例没有成立的 irq-off 来源，不能据此判为违规调用。"},
+  {"k":3,"verdict":"不可能","why":"ptrace.c:1333 的 mmput 位于独立的 PTRACE_GETFDPIC 分支，没有持有其他 case 中的 sighand 锁。前面 PTRACE_LISTEN 等分支均解锁并 break，不能把它们的关中断状态带入 GETFDPIC→exit_mmap。"},
+  {"k":4,"verdict":"可能","why":"SH 的 aio_complete 在 fs/aio.c:1187 spin_lock_irqsave 后，于 1200、1216 调用 flush_dcache_folio，直到 1225 才恢复中断。配置 CONFIG_AIO、CONFIG_CPU_SHX3、CONFIG_SMP 且至少两个 CPU 在线时，arch/sh/mm/cache.c:225→39 无条件进入同步 smp_call_function，可能触发中断状态断言或跨核互等死锁。"},
+  {"k":5,"verdict":"不可能","why":"示例的 irq-off→memcpy_to_page 调用仅位于 swiotlb_bounce 的 PageHighMem 分支（1055—1079）。该版本 SH 没有 HIGHMEM 配置支持，无法产生这个高端页分支；不能把其他架构的 SWIOTLB 高端页路径与 SH 的刷新实现拼接成真实路径。"},
+  {"k":6,"verdict":"不可能","why":"futex_lock_pi 的 -EFAULT 分支从 pi.c:1030 直接跳到 uaddr_faulted，1170 释放哈希桶锁后才在 1173 调用 fault_in_user_writeable。1094 的 raw_spin_lock_irq 属于另一条控制流且在 1102 配对释放，因此不会把关中断状态带入 hugetlb_fault 的 huge_ptep_set_access_flags。"},
+  {"k":7,"verdict":"不可能","why":"arm64 的 split_kernel_leaf_mapping 在 mmu.c:808 对 is_kfence_address(start) 直接返回，不会到达 844 的 mutex_lock。KFENCE 池在早期映射或 arch_kfence_init_pool 中预先拆成 PTE，保护页路径的原子上下文是被明确支持的。"},
+  {"k":8,"verdict":"不可能","why":"RISC-V 的 pte_clear 在 pgtable.h:657 传入 __pte(0)，而 __set_pte_at 只有在 pte_present 且 pte_exec 同时成立时才调用 flush_icache_pte。零 PTE 不满足条件，所以即使调度时关中断，也不会沿该效果链发出 IPI。"},
+  {"k":9,"verdict":"不可能","why":"示例的 futex 缺页分支在 pi.c:1170 已释放锁，且并不经过 1094 的关中断加锁路径。hugetlb_fault:6113 使用普通 huge_pte_lock，6130 的 set_huge_pte_at 没有从这条示例链继承 irq-off；不能将持普通自旋锁等同于关中断。"},
+  {"k":10,"verdict":"不可能","why":"resume_target_kernel 在 hibernate.c:504 成功停用其他 CPU 后，才于 508 关中断并沿失败清理路径调用 swsusp_free。RISC-V flush_tlb_all 在 tlbflush.c:73 检查在线 CPU 少于两个即仅做本地刷新，因此这里即使开启镜像保护并走到 set_memory_rw，也不会跨核等待。"},
+  {"k":11,"verdict":"不可能","why":"futex_lock_pi→fault_in_user_writeable 的示例链并不处于关中断区间：-EFAULT 跳转绕过 raw_spin_lock_irq，调用前还释放了桶锁。hugetlb_fault:6132 的普通页表自旋锁不关闭中断，因此 ARC 即使进入指令缓存 IPI 刷新，也不能由此证明 irq-off 违规。"},
+  {"k":12,"verdict":"可能","why":"ARC 配置 CONFIG_KGDB、CONFIG_SMP、CONFIG_ARC_HAS_ICACHE 且至少两个 CPU 在线时，kgdb_cpu_enter:599 关中断后在 727 撤销软件断点；ARC 的 CACHE_FLUSH_IS_SAFE=1。断点范围小于一页，会经 flush_icache_range→__sync_icache_dcache→__ic_line_inv_vaddr 到 cache.c:534 的 on_each_cpu(wait=1)，已停在调试器中的其他 CPU 无法处理普通 IPI，可造成死锁。"},
+  {"k":13,"verdict":"可能","why":"RISC-V 配置 CONFIG_KGDB、CONFIG_SMP 且多个 CPU 在线，KGDB 在关中断并停止其他 CPU 后撤销软件断点，而 CACHE_FLUSH_IS_SAFE=1，flush_icache_range 会调用 flush_icache_all。至少在 riscv_use_sbi_for_rfence() 为 false、采用普通内核 IPI 的平台上，cacheflush.c:43 的 on_each_cpu(wait=1) 会等待已停住的 CPU；此判断不把所有 SBI 固件刷新都认定为同样不安全。"},
+  {"k":14,"verdict":"不可能","why":"SH 在 CONFIG_SMP 下将 CACHE_FLUSH_IS_SAFE 定义为 0（asm/kgdb.h:30—33），kgdb_flush_swbreak_addr 在 debug_core.c:282 直接返回。非 SMP 时虽然允许刷新，却没有远端 CPU 同步等待，示例无法同时满足刷新可达与跨核 IPI 条件。"},
+  {"k":15,"verdict":"不可能","why":"dissolve_free_hugetlb_folio 在 hugetlb.c:1997 spin_unlock_irq 后才于 2012 调用 vmemmap 恢复，示例的关中断传播不成立。另 ARC 不选择 ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP，不能启用 fs/Kconfig:277 所约束的 HVO 实现。"},
+  {"k":16,"verdict":"不可能","why":"RISC-V 可以编译 HVO，但 dissolve_free_hugetlb_folio 在 hugetlb.c:1997 已释放 hugetlb_lock 并开中断，2012 才进入恢复路径。vmemmap_remap_range 中的 mmap_read_lock 也不关闭中断，因此示例的远程 TLB 刷新不处于所声称的 irq-off 区间。"},
+  {"k":17,"verdict":"不可能","why":"x86 示例在 hugetlb.c:1997 spin_unlock_irq 后才调用 hugetlb_vmemmap_restore_folio（2012），不在 hugetlb_lock 的关中断区间。后续 vmemmap_remap_range 的同步 TLB 刷新没有这条链声称的违规上下文。"},
+  {"k":18,"verdict":"不可能","why":"set_max_huge_pages 在 hugetlb.c:3929 明确 spin_unlock_irq，3930 才调用 update_and_free_pages_bulk，故批量恢复后的 flush_tlb_all 不继承 irq-off。ARC 也未选择 ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP，该 HVO 调用点不能在其正常配置中编译启用。"},
+  {"k":19,"verdict":"不可能","why":"set_max_huge_pages:3929 已解锁并开中断，随后才进入批量 vmemmap 恢复，不存在示例声称的关中断刷新。parisc 也没有选择 ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP，不能启用该 HVO 实现。"},
+  {"k":20,"verdict":"不可能","why":"RISC-V 的 set_max_huge_pages 在 hugetlb.c:3929 spin_unlock_irq 后，才于 3930 调用 update_and_free_pages_bulk。其 1634 进入恢复函数前没有重新关中断，因此恢复成功后的 flush_tlb_all 即使执行跨核刷新，也不是该示例所称的违规路径。"},
+  {"k":21,"verdict":"不可能","why":"x86 的该示例同样在 hugetlb.c:3929 解锁并开中断后才进入批量释放，3932 的重新加锁发生在整个 update_and_free_pages_bulk 返回之后。不能把函数内前后两个关中断区间连成一个区间，故 474 的 flush_tlb_all 不在其内。"}
+]

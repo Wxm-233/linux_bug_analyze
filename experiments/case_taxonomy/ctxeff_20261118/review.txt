@@ -1,0 +1,1108 @@
+====================================================================================================
+[1] X1：公共代码在原子上下文（持自旋锁、关抢占、RCU 读侧、关中断等）里调到这个钩子，而这个架构的实现会睡眠
+    钩子 __kernel_map_pages；架构 arm64；效果 sleep（实现该钩子的 5 个架构里有 1 个有此效果）
+    架构实现的效果路径：__kernel_map_pages -> set_memory_valid -> __change_memory_common -> update_range_prot -> split_kernel_leaf_mapping -> mutex_lock
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      mm/page_alloc.c:7568 alloc_contig_frozen_pages_noprof [irq-off]
+      mm/page_alloc.c:7400 alloc_contig_frozen_range_noprof
+      mm/page_alloc.c:7206 split_free_frozen_pages
+      mm/page_alloc.c:1832 post_alloc_hook
+      include/linux/mm.h:4991 debug_pagealloc_map_pages -> __kernel_map_pages
+    架构实现的定义位置：
+      arch/arm64/mm/pageattr.c:375:void __kernel_map_pages(struct page *page, int numpages, int enable)
+      >>  375 void __kernel_map_pages(struct page *page, int numpages, int enable)
+          376 {
+          377 	if (!can_set_direct_map())
+          378 		return;
+          379 
+          380 	set_memory_valid((unsigned long)page_address(page), numpages, enable);
+          381 }
+          382 #endif /* CONFIG_DEBUG_PAGEALLOC */
+          383 
+          384 /*
+          385  * This function is used to determine if a linear map page has been marked as
+          386  * not-valid. Walk the page table and check the PTE_VALID bit.
+          387  *
+          388  * Because this is only called on the kernel linear map,  p?d_sect() implies
+          389  * p?d_present(). When debug_pagealloc is enabled, sections mappings are
+          390  * disabled.
+          391  */
+          392 bool kernel_page_present(struct page *page)
+          393 {
+          394 	pgd_t *pgdp;
+          395 	p4d_t *p4dp;
+          396 	pud_t *pudp, pud;
+          397 	pmd_t *pmdp, pmd;
+    公共代码调用点 include/linux/mm.h:4991 debug_pagealloc_map_pages：
+         4979 
+         4980 /*
+         4981  * To support DEBUG_PAGEALLOC architecture must ensure that
+         4982  * __kernel_map_pages() never fails
+         4983  */
+         4984 extern void __kernel_map_pages(struct page *page, int numpages, int enable);
+         4985 #ifdef CONFIG_DEBUG_PAGEALLOC
+         4986 static inline void debug_pagealloc_map_pages(struct page *page, int numpages)
+         4987 {
+         4988 	iommu_debug_check_unmapped(page, numpages);
+         4989 
+         4990 	if (debug_pagealloc_enabled_static())
+      >> 4991 		__kernel_map_pages(page, numpages, 1);
+         4992 }
+         4993 
+         4994 static inline void debug_pagealloc_unmap_pages(struct page *page, int numpages)
+         4995 {
+         4996 	iommu_debug_check_unmapped(page, numpages);
+         4997 
+====================================================================================================
+[2] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 __kernel_map_pages；架构 riscv；效果 ipi（实现该钩子的 5 个架构里有 1 个有此效果）
+    架构实现的效果路径：__kernel_map_pages -> flush_tlb_kernel_range -> __flush_tlb_range -> sbi_remote_sfence_vma_asid
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      mm/page_alloc.c:7568 alloc_contig_frozen_pages_noprof [irq-off]
+      mm/page_alloc.c:7400 alloc_contig_frozen_range_noprof
+      mm/page_alloc.c:7206 split_free_frozen_pages
+      mm/page_alloc.c:1832 post_alloc_hook
+      include/linux/mm.h:4991 debug_pagealloc_map_pages -> __kernel_map_pages
+    架构实现的定义位置：
+      arch/riscv/mm/pageattr.c:421:void __kernel_map_pages(struct page *page, int numpages, int enable)
+      >>  421 void __kernel_map_pages(struct page *page, int numpages, int enable)
+          422 {
+          423 	if (!debug_pagealloc_enabled())
+          424 		return;
+          425 
+          426 	unsigned long start = (unsigned long)page_address(page);
+          427 	unsigned long size = PAGE_SIZE * numpages;
+          428 
+          429 	apply_to_existing_page_range(&init_mm, start, size, debug_pagealloc_set_page, &enable);
+          430 
+          431 	flush_tlb_kernel_range(start, start + size);
+          432 }
+          433 #endif
+          434 
+          435 bool kernel_page_present(struct page *page)
+          436 {
+          437 	unsigned long addr = (unsigned long)page_address(page);
+          438 	pgd_t *pgd;
+          439 	pud_t *pud;
+          440 	p4d_t *p4d;
+          441 	pmd_t *pmd;
+          442 	pte_t *pte;
+          443 
+    公共代码调用点 include/linux/mm.h:4991 debug_pagealloc_map_pages：
+         4979 
+         4980 /*
+         4981  * To support DEBUG_PAGEALLOC architecture must ensure that
+         4982  * __kernel_map_pages() never fails
+         4983  */
+         4984 extern void __kernel_map_pages(struct page *page, int numpages, int enable);
+         4985 #ifdef CONFIG_DEBUG_PAGEALLOC
+         4986 static inline void debug_pagealloc_map_pages(struct page *page, int numpages)
+         4987 {
+         4988 	iommu_debug_check_unmapped(page, numpages);
+         4989 
+         4990 	if (debug_pagealloc_enabled_static())
+      >> 4991 		__kernel_map_pages(page, numpages, 1);
+         4992 }
+         4993 
+         4994 static inline void debug_pagealloc_unmap_pages(struct page *page, int numpages)
+         4995 {
+         4996 	iommu_debug_check_unmapped(page, numpages);
+         4997 
+====================================================================================================
+[3] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_cache_mm；架构 sh；效果 ipi（实现该钩子的 8 个架构里有 1 个有此效果）
+    架构实现的效果路径：flush_cache_mm -> cacheop_on_each_cpu -> smp_call_function
+    调用上下文示例链（从上下文来源到钩子调用点，共 1 个这样的调用点）：
+      kernel/ptrace.c:1333 ptrace_request [irq-off]
+      kernel/fork.c:1216 mmput
+      kernel/fork.c:1193 __mmput
+      mm/mmap.c:1311 exit_mmap -> flush_cache_mm
+    架构实现的定义位置：
+      arch/sh/include/asm/cacheflush.h:38:extern void flush_cache_mm(struct mm_struct *mm);
+      >>   38 extern void flush_cache_mm(struct mm_struct *mm);
+           39 extern void flush_cache_dup_mm(struct mm_struct *mm);
+           40 extern void flush_cache_page(struct vm_area_struct *vma,
+           41 				unsigned long addr, unsigned long pfn);
+           42 extern void flush_cache_range(struct vm_area_struct *vma,
+           43 				 unsigned long start, unsigned long end);
+           44 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
+           45 void flush_dcache_folio(struct folio *folio);
+           46 #define flush_dcache_folio flush_dcache_folio
+           47 static inline void flush_dcache_page(struct page *page)
+           48 {
+           49 	flush_dcache_folio(page_folio(page));
+           50 }
+           51 
+           52 extern void flush_icache_range(unsigned long start, unsigned long end);
+           53 #define flush_icache_user_range flush_icache_range
+           54 void flush_icache_pages(struct vm_area_struct *vma, struct page *page,
+           55 		unsigned int nr);
+           56 #define flush_icache_pages flush_icache_pages
+           57 extern void flush_cache_sigtramp(unsigned long address);
+           58 
+           59 struct flusher_data {
+           60 	struct vm_area_struct *vma;
+    公共代码调用点 mm/mmap.c:1311 exit_mmap：
+         1299 	mmap_read_lock(mm);
+         1300 	arch_exit_mmap(mm);
+         1301 
+         1302 	vma = vma_next(&vmi);
+         1303 	if (!vma) {
+         1304 		/* Can happen if dup_mmap() received an OOM */
+         1305 		mmap_read_unlock(mm);
+         1306 		mmap_write_lock(mm);
+         1307 		goto destroy;
+         1308 	}
+         1309 
+         1310 	unmap_all_init(&unmap, &vmi, vma);
+      >> 1311 	flush_cache_mm(mm);
+         1312 	tlb_gather_mmu_fullmm(&tlb, mm);
+         1313 	/* update_hiwater_rss(mm) here? but nobody should be looking */
+         1314 	/* Use ULONG_MAX here to ensure all VMAs in the mm are unmapped */
+         1315 	unmap_vmas(&tlb, &unmap);
+         1316 	mmap_read_unlock(mm);
+         1317 
+====================================================================================================
+[4] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_dcache_folio；架构 sh；效果 ipi（实现该钩子的 13 个架构里有 1 个有此效果）
+    架构实现的效果路径：flush_dcache_folio -> cacheop_on_each_cpu -> smp_call_function
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      fs/aio.c:1200 aio_complete -> flush_dcache_folio
+    架构实现的定义位置：
+      arch/sh/include/asm/cacheflush.h:45:void flush_dcache_folio(struct folio *folio);
+      >>   45 void flush_dcache_folio(struct folio *folio);
+           46 #define flush_dcache_folio flush_dcache_folio
+           47 static inline void flush_dcache_page(struct page *page)
+           48 {
+           49 	flush_dcache_folio(page_folio(page));
+           50 }
+           51 
+           52 extern void flush_icache_range(unsigned long start, unsigned long end);
+           53 #define flush_icache_user_range flush_icache_range
+           54 void flush_icache_pages(struct vm_area_struct *vma, struct page *page,
+           55 		unsigned int nr);
+           56 #define flush_icache_pages flush_icache_pages
+           57 extern void flush_cache_sigtramp(unsigned long address);
+           58 
+           59 struct flusher_data {
+           60 	struct vm_area_struct *vma;
+           61 	unsigned long addr1, addr2;
+           62 };
+           63 
+           64 #define ARCH_HAS_FLUSH_ANON_PAGE
+           65 extern void __flush_anon_page(struct page *page, unsigned long);
+           66 
+           67 static inline void flush_anon_page(struct vm_area_struct *vma,
+    公共代码调用点 fs/aio.c:1200 aio_complete：
+         1188 
+         1189 	tail = ctx->tail;
+         1190 	pos = tail + AIO_EVENTS_OFFSET;
+         1191 
+         1192 	if (++tail >= ctx->nr_events)
+         1193 		tail = 0;
+         1194 
+         1195 	ev_page = folio_address(ctx->ring_folios[pos / AIO_EVENTS_PER_PAGE]);
+         1196 	event = ev_page + pos % AIO_EVENTS_PER_PAGE;
+         1197 
+         1198 	*event = iocb->ki_res;
+         1199 
+      >> 1200 	flush_dcache_folio(ctx->ring_folios[pos / AIO_EVENTS_PER_PAGE]);
+         1201 
+         1202 	pr_debug("%p[%u]: %p: %p %Lx %Lx %Lx\n", ctx, tail, iocb,
+         1203 		 (void __user *)(unsigned long)iocb->ki_res.obj,
+         1204 		 iocb->ki_res.data, iocb->ki_res.res, iocb->ki_res.res2);
+         1205 
+         1206 	/* after flagging the request as done, we
+====================================================================================================
+[5] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_dcache_page；架构 sh；效果 ipi（实现该钩子的 14 个架构里有 1 个有此效果）
+    架构实现的效果路径：flush_dcache_page -> flush_dcache_folio -> cacheop_on_each_cpu -> smp_call_function
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      kernel/dma/swiotlb.c:1077 swiotlb_bounce [irq-off]
+      include/linux/highmem.h:554 memcpy_to_page -> flush_dcache_page
+    架构实现的定义位置：
+      arch/sh/include/asm/cacheflush.h:47:static inline void flush_dcache_page(struct page *page)
+      >>   47 static inline void flush_dcache_page(struct page *page)
+           48 {
+           49 	flush_dcache_folio(page_folio(page));
+           50 }
+           51 
+           52 extern void flush_icache_range(unsigned long start, unsigned long end);
+           53 #define flush_icache_user_range flush_icache_range
+           54 void flush_icache_pages(struct vm_area_struct *vma, struct page *page,
+           55 		unsigned int nr);
+           56 #define flush_icache_pages flush_icache_pages
+           57 extern void flush_cache_sigtramp(unsigned long address);
+           58 
+           59 struct flusher_data {
+           60 	struct vm_area_struct *vma;
+           61 	unsigned long addr1, addr2;
+           62 };
+           63 
+           64 #define ARCH_HAS_FLUSH_ANON_PAGE
+           65 extern void __flush_anon_page(struct page *page, unsigned long);
+           66 
+           67 static inline void flush_anon_page(struct vm_area_struct *vma,
+           68 				   struct page *page, unsigned long vmaddr)
+           69 {
+    公共代码调用点 include/linux/highmem.h:554 memcpy_to_page：
+          542 	VM_BUG_ON(offset + len > PAGE_SIZE);
+          543 	memcpy(to, from + offset, len);
+          544 	kunmap_local(from);
+          545 }
+          546 
+          547 static inline void memcpy_to_page(struct page *page, size_t offset,
+          548 				  const char *from, size_t len)
+          549 {
+          550 	char *to = kmap_local_page(page);
+          551 
+          552 	VM_BUG_ON(offset + len > PAGE_SIZE);
+          553 	memcpy(to + offset, from, len);
+      >>  554 	flush_dcache_page(page);
+          555 	kunmap_local(to);
+          556 }
+          557 
+          558 static inline void memzero_page(struct page *page, size_t offset, size_t len)
+          559 {
+          560 	char *addr = kmap_local_page(page);
+====================================================================================================
+[6] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 huge_ptep_set_access_flags；架构 riscv；效果 ipi（实现该钩子的 8 个架构里有 1 个有此效果）
+    架构实现的效果路径：huge_ptep_set_access_flags -> ptep_set_access_flags -> __set_pte_at -> flush_icache_pte -> flush_icache_mm -> sbi_remote_fence_i
+    调用上下文示例链（从上下文来源到钩子调用点，共 1 个这样的调用点）：
+      kernel/futex/pi.c:1173 futex_lock_pi [irq-off]
+      kernel/futex/core.c:748 fault_in_user_writeable
+      mm/gup.c:1588 fixup_user_fault
+      mm/memory.c:6874 handle_mm_fault
+      mm/hugetlb.c:6200 hugetlb_fault -> huge_ptep_set_access_flags
+    架构实现的定义位置：
+      arch/riscv/include/asm/hugetlb.h:43:int huge_ptep_set_access_flags(struct vm_area_struct *vma,
+      >>   43 int huge_ptep_set_access_flags(struct vm_area_struct *vma,
+           44 			       unsigned long addr, pte_t *ptep,
+           45 			       pte_t pte, int dirty);
+           46 
+           47 #define __HAVE_ARCH_HUGE_PTEP_GET
+           48 pte_t huge_ptep_get(struct mm_struct *mm, unsigned long addr, pte_t *ptep);
+           49 
+           50 pte_t arch_make_huge_pte(pte_t entry, unsigned int shift, vm_flags_t flags);
+           51 #define arch_make_huge_pte arch_make_huge_pte
+           52 
+           53 #endif /*CONFIG_RISCV_ISA_SVNAPOT*/
+           54 
+           55 #include <asm-generic/hugetlb.h>
+           56 
+           57 #endif /* _ASM_RISCV_HUGETLB_H */
+           58 
+    公共代码调用点 mm/hugetlb.c:6200 hugetlb_fault：
+         6188 			}
+         6189 			folio_get(folio);
+         6190 			ret = hugetlb_wp(&vmf);
+         6191 			if (folio_test_anon(folio))
+         6192 				folio_unlock(folio);
+         6193 			folio_put(folio);
+         6194 			goto out_ptl;
+         6195 		} else if (likely(flags & FAULT_FLAG_WRITE)) {
+         6196 			vmf.orig_pte = huge_pte_mkdirty(vmf.orig_pte);
+         6197 		}
+         6198 	}
+         6199 	vmf.orig_pte = pte_mkyoung(vmf.orig_pte);
+      >> 6200 	if (huge_ptep_set_access_flags(vma, vmf.address, vmf.pte, vmf.orig_pte,
+         6201 						flags & FAULT_FLAG_WRITE))
+         6202 		update_mmu_cache(vma, vmf.address, vmf.pte);
+         6203 out_ptl:
+         6204 	spin_unlock(vmf.ptl);
+         6205 out_mutex:
+         6206 	hugetlb_vma_unlock_read(vma);
+====================================================================================================
+[7] X1：公共代码在原子上下文（持自旋锁、关抢占、RCU 读侧、关中断等）里调到这个钩子，而这个架构的实现会睡眠
+    钩子 kfence_protect_page；架构 arm64；效果 sleep（实现该钩子的 8 个架构里有 1 个有此效果）
+    架构实现的效果路径：kfence_protect_page -> set_memory_valid -> __change_memory_common -> update_range_prot -> split_kernel_leaf_mapping -> mutex_lock
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      mm/kfence/core.c:517 kfence_guarded_alloc [irq-off]
+      mm/kfence/core.c:254 kfence_protect -> kfence_protect_page
+    架构实现的定义位置：
+      arch/arm64/include/asm/kfence.h:13:static inline bool kfence_protect_page(unsigned long addr, bool protect)
+      >>   13 static inline bool kfence_protect_page(unsigned long addr, bool protect)
+           14 {
+           15 	set_memory_valid(addr, 1, !protect);
+           16 
+           17 	return true;
+           18 }
+           19 
+           20 #ifdef CONFIG_KFENCE
+           21 extern bool kfence_early_init;
+           22 static inline bool arm64_kfence_can_set_direct_map(void)
+           23 {
+           24 	return !kfence_early_init;
+           25 }
+           26 bool arch_kfence_init_pool(void);
+           27 #else /* CONFIG_KFENCE */
+           28 static inline bool arm64_kfence_can_set_direct_map(void) { return false; }
+           29 #endif /* CONFIG_KFENCE */
+           30 
+           31 #endif /* __ASM_KFENCE_H */
+           32 
+    公共代码调用点 mm/kfence/core.c:254 kfence_protect：
+          242 
+          243 	for (i = 0; i < ALLOC_COVERED_HNUM; i++) {
+          244 		if (!atomic_read(&alloc_covered[alloc_stack_hash & ALLOC_COVERED_MASK]))
+          245 			return false;
+          246 		alloc_stack_hash = ALLOC_COVERED_HNEXT(alloc_stack_hash);
+          247 	}
+          248 
+          249 	return true;
+          250 }
+          251 
+          252 static bool kfence_protect(unsigned long addr)
+          253 {
+      >>  254 	return !KFENCE_WARN_ON(!kfence_protect_page(ALIGN_DOWN(addr, PAGE_SIZE), true));
+          255 }
+          256 
+          257 static bool kfence_unprotect(unsigned long addr)
+          258 {
+          259 	return !KFENCE_WARN_ON(!kfence_protect_page(ALIGN_DOWN(addr, PAGE_SIZE), false));
+          260 }
+====================================================================================================
+[8] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 pte_clear；架构 riscv；效果 ipi（实现该钩子的 20 个架构里有 1 个有此效果）
+    架构实现的效果路径：pte_clear -> __set_pte_at -> flush_icache_pte -> flush_icache_mm -> flush_icache_all -> sbi_remote_fence_i
+    调用上下文示例链（从上下文来源到钩子调用点，共 1 个这样的调用点）：
+      kernel/sched/core.c:7276 __schedule [irq-off]
+      kernel/sched/core.c:5471 context_switch
+      kernel/sched/core.c:5310 prepare_task_switch
+      kernel/sched/core.c:5276 kmap_local_sched_out
+      mm/highmem.c:678 __kmap_local_sched_out -> pte_clear
+    架构实现的定义位置：
+      arch/riscv/include/asm/pgtable.h:654:static inline void pte_clear(struct mm_struct *mm,
+      >>  654 static inline void pte_clear(struct mm_struct *mm,
+          655 	unsigned long addr, pte_t *ptep)
+          656 {
+          657 	__set_pte_at(mm, ptep, __pte(0));
+          658 }
+          659 
+          660 #define __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS	/* defined in mm/pgtable.c */
+          661 extern int ptep_set_access_flags(struct vm_area_struct *vma, unsigned long address,
+          662 				 pte_t *ptep, pte_t entry, int dirty);
+          663 #define __HAVE_ARCH_PTEP_TEST_AND_CLEAR_YOUNG	/* defined in mm/pgtable.c */
+          664 bool ptep_test_and_clear_young(struct vm_area_struct *vma,
+          665 		unsigned long address, pte_t *ptep);
+          666 
+          667 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR
+          668 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
+          669 				       unsigned long address, pte_t *ptep)
+          670 {
+          671 #ifdef CONFIG_SMP
+          672 	pte_t pte = __pte(xchg(&ptep->pte, 0));
+          673 #else
+          674 	pte_t pte = *ptep;
+          675 
+          676 	set_pte(ptep, __pte(0));
+    公共代码调用点 mm/highmem.c:678 __kmap_local_sched_out：
+          666 		/*
+          667 		 * This is a horrible hack for XTENSA to calculate the
+          668 		 * coloured PTE index. Uses the PFN encoded into the pteval
+          669 		 * and the map index calculation because the actual mapped
+          670 		 * virtual address is not stored in task::kmap_ctrl.
+          671 		 * For any sane architecture this is optimized out.
+          672 		 */
+          673 		idx = arch_kmap_local_map_idx(i, pte_pfn(pteval));
+          674 
+          675 		addr = __fix_to_virt(FIX_KMAP_BEGIN + idx);
+          676 		kmap_pte = kmap_get_pte(addr, idx);
+          677 		arch_kmap_local_pre_unmap(addr);
+      >>  678 		pte_clear(&init_mm, addr, kmap_pte);
+          679 		arch_kmap_local_post_unmap(addr);
+          680 	}
+          681 }
+          682 
+          683 void __kmap_local_sched_in(void)
+          684 {
+====================================================================================================
+[9] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 set_huge_pte_at；架构 riscv；效果 ipi（实现该钩子的 6 个架构里有 1 个有此效果）
+    架构实现的效果路径：set_huge_pte_at -> set_ptes -> __set_pte_at -> flush_icache_pte -> flush_icache_mm -> sbi_remote_fence_i
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      kernel/futex/pi.c:1173 futex_lock_pi [irq-off]
+      kernel/futex/core.c:748 fault_in_user_writeable
+      mm/gup.c:1588 fixup_user_fault
+      mm/memory.c:6874 handle_mm_fault
+      mm/hugetlb.c:6130 hugetlb_fault -> set_huge_pte_at
+    架构实现的定义位置：
+      arch/riscv/include/asm/hugetlb.h:25:void set_huge_pte_at(struct mm_struct *mm,
+      >>   25 void set_huge_pte_at(struct mm_struct *mm,
+           26 		     unsigned long addr, pte_t *ptep, pte_t pte,
+           27 		     unsigned long sz);
+           28 
+           29 #define __HAVE_ARCH_HUGE_PTEP_GET_AND_CLEAR
+           30 pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+           31 			      unsigned long addr, pte_t *ptep,
+           32 			      unsigned long sz);
+           33 
+           34 #define __HAVE_ARCH_HUGE_PTEP_CLEAR_FLUSH
+           35 pte_t huge_ptep_clear_flush(struct vm_area_struct *vma,
+           36 			    unsigned long addr, pte_t *ptep);
+           37 
+           38 #define __HAVE_ARCH_HUGE_PTEP_SET_WRPROTECT
+           39 void huge_ptep_set_wrprotect(struct mm_struct *mm,
+           40 			     unsigned long addr, pte_t *ptep);
+           41 
+           42 #define __HAVE_ARCH_HUGE_PTEP_SET_ACCESS_FLAGS
+           43 int huge_ptep_set_access_flags(struct vm_area_struct *vma,
+           44 			       unsigned long addr, pte_t *ptep,
+           45 			       pte_t pte, int dirty);
+           46 
+           47 #define __HAVE_ARCH_HUGE_PTEP_GET
+    公共代码调用点 mm/hugetlb.c:6130 hugetlb_fault：
+         6118 			pte = huge_pte_modify(pte, vma->vm_page_prot);
+         6119 			pte = arch_make_huge_pte(pte, shift, vma->vm_flags);
+         6120 			/* huge_pte_modify() preserves _PAGE_UFFD; drop it on resolution */
+         6121 			pte = huge_pte_clear_uffd(pte);
+         6122 			pte = pte_mkyoung(pte);
+         6123 			/*
+         6124 			 * Unlike do_uffd_rwp(), do not upgrade to writable
+         6125 			 * here. Hugetlb lacks a can_change_huge_pte_writable()
+         6126 			 * equivalent, so a write access will take a separate
+         6127 			 * COW fault — acceptable for the rare private hugetlb
+         6128 			 * case.
+         6129 			 */
+      >> 6130 			set_huge_pte_at(mm, vmf.address, vmf.pte, pte,
+         6131 					huge_page_size(h));
+         6132 			update_mmu_cache(vma, vmf.address, vmf.pte);
+         6133 		}
+         6134 		spin_unlock(ptl);
+         6135 		ret = 0;
+         6136 		goto out_mutex;
+====================================================================================================
+[10] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 set_memory_rw；架构 riscv；效果 ipi（实现该钩子的 5 个架构里有 1 个有此效果）
+    架构实现的效果路径：set_memory_rw -> __set_memory -> flush_tlb_all -> sbi_remote_sfence_vma_asid
+    调用上下文示例链（从上下文来源到钩子调用点，共 1 个这样的调用点）：
+      kernel/power/hibernate.c:536 resume_target_kernel [irq-off]
+      kernel/power/snapshot.c:1620 swsusp_free
+      kernel/power/snapshot.c:71 hibernate_restore_unprotect_page -> set_memory_rw
+    架构实现的定义位置：
+      arch/riscv/include/asm/set_memory.h:15:int set_memory_rw(unsigned long addr, int numpages);
+      >>   15 int set_memory_rw(unsigned long addr, int numpages);
+           16 int set_memory_x(unsigned long addr, int numpages);
+           17 int set_memory_nx(unsigned long addr, int numpages);
+           18 int set_memory_rw_nx(unsigned long addr, int numpages);
+           19 static __always_inline int set_kernel_memory(char *startp, char *endp,
+           20 					     int (*set_memory)(unsigned long start,
+           21 							       int num_pages))
+           22 {
+           23 	unsigned long start = (unsigned long)startp;
+           24 	unsigned long end = (unsigned long)endp;
+           25 	int num_pages = PAGE_ALIGN(end - start) >> PAGE_SHIFT;
+           26 
+           27 	return set_memory(start, num_pages);
+           28 }
+           29 #else
+           30 static inline int set_memory_ro(unsigned long addr, int numpages) { return 0; }
+           31 static inline int set_memory_rw(unsigned long addr, int numpages) { return 0; }
+           32 static inline int set_memory_x(unsigned long addr, int numpages) { return 0; }
+           33 static inline int set_memory_nx(unsigned long addr, int numpages) { return 0; }
+           34 static inline int set_memory_rw_nx(unsigned long addr, int numpages) { return 0; }
+           35 static inline int set_kernel_memory(char *startp, char *endp,
+           36 				    int (*set_memory)(unsigned long start,
+           37 						      int num_pages))
+    公共代码调用点 kernel/power/snapshot.c:71 hibernate_restore_unprotect_page：
+           59 }
+           60 
+           61 static inline int __must_check hibernate_restore_protect_page(void *page_address)
+           62 {
+           63 	if (hibernate_restore_protection_active)
+           64 		return set_memory_ro((unsigned long)page_address, 1);
+           65 	return 0;
+           66 }
+           67 
+           68 static inline int hibernate_restore_unprotect_page(void *page_address)
+           69 {
+           70 	if (hibernate_restore_protection_active)
+      >>   71 		return set_memory_rw((unsigned long)page_address, 1);
+           72 	return 0;
+           73 }
+           74 #else
+           75 static inline void hibernate_restore_protection_begin(void) {}
+           76 static inline void hibernate_restore_protection_end(void) {}
+           77 static inline int __must_check hibernate_restore_protect_page(void *page_address) {return 0; }
+====================================================================================================
+[11] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 update_mmu_cache；架构 arc；效果 ipi（实现该钩子的 21 个架构里有 1 个有此效果）
+    架构实现的效果路径：update_mmu_cache -> update_mmu_cache_range -> __inv_icache_pages -> __ic_line_inv_vaddr -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      kernel/futex/pi.c:1173 futex_lock_pi [irq-off]
+      kernel/futex/core.c:748 fault_in_user_writeable
+      mm/gup.c:1588 fixup_user_fault
+      mm/memory.c:6874 handle_mm_fault
+      mm/hugetlb.c:6132 hugetlb_fault -> update_mmu_cache
+    架构实现的定义位置：
+      arch/arc/include/asm/pgtable-bits-arcv2.h:107:#define update_mmu_cache(vma, addr, ptep) \
+      >>  107 #define update_mmu_cache(vma, addr, ptep) \
+          108 	update_mmu_cache_range(NULL, vma, addr, ptep, 1)
+          109 
+          110 /*
+          111  * Encode/decode swap entries and swap PTEs. Swap PTEs are all PTEs that
+          112  * are !pte_none() && !pte_present().
+          113  *
+          114  * Format of swap PTEs:
+          115  *
+          116  *   3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1
+          117  *   1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
+          118  *   <-------------- offset -------------> <--- zero --> E < type ->
+          119  *
+          120  *   E is the exclusive marker that is not stored in swap entries.
+          121  *   The zero'ed bits include _PAGE_PRESENT.
+          122  */
+          123 #define __swp_entry(type, off)		((swp_entry_t) \
+          124 					{ ((type) & 0x1f) | ((off) << 13) })
+          125 
+          126 /* Decode a PTE containing swap "identifier "into constituents */
+          127 #define __swp_type(pte_lookalike)	(((pte_lookalike).val) & 0x1f)
+          128 #define __swp_offset(pte_lookalike)	((pte_lookalike).val >> 13)
+          129 
+    公共代码调用点 mm/hugetlb.c:6132 hugetlb_fault：
+         6120 			/* huge_pte_modify() preserves _PAGE_UFFD; drop it on resolution */
+         6121 			pte = huge_pte_clear_uffd(pte);
+         6122 			pte = pte_mkyoung(pte);
+         6123 			/*
+         6124 			 * Unlike do_uffd_rwp(), do not upgrade to writable
+         6125 			 * here. Hugetlb lacks a can_change_huge_pte_writable()
+         6126 			 * equivalent, so a write access will take a separate
+         6127 			 * COW fault — acceptable for the rare private hugetlb
+         6128 			 * case.
+         6129 			 */
+         6130 			set_huge_pte_at(mm, vmf.address, vmf.pte, pte,
+         6131 					huge_page_size(h));
+      >> 6132 			update_mmu_cache(vma, vmf.address, vmf.pte);
+         6133 		}
+         6134 		spin_unlock(ptl);
+         6135 		ret = 0;
+         6136 		goto out_mutex;
+         6137 	}
+         6138 
+====================================================================================================
+[12] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_icache_range；架构 arc；效果 ipi（实现该钩子的 13 个架构里有 3 个有此效果）
+    架构实现的效果路径：flush_icache_range -> __sync_icache_dcache -> __ic_line_inv_vaddr -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      kernel/debug/debug_core.c:727 kgdb_cpu_enter [irq-off]
+      kernel/debug/debug_core.c:375 dbg_deactivate_sw_breakpoints
+      kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr -> flush_icache_range
+    架构实现的定义位置：
+      arch/arc/include/asm/cacheflush.h:23:void flush_icache_range(unsigned long kstart, unsigned long kend);
+      >>   23 void flush_icache_range(unsigned long kstart, unsigned long kend);
+           24 void __sync_icache_dcache(phys_addr_t paddr, unsigned long vaddr, int len);
+           25 void __inv_icache_pages(phys_addr_t paddr, unsigned long vaddr, unsigned nr);
+           26 void __flush_dcache_pages(phys_addr_t paddr, unsigned long vaddr, unsigned nr);
+           27 
+           28 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
+           29 
+           30 void flush_dcache_page(struct page *page);
+           31 void flush_dcache_folio(struct folio *folio);
+           32 #define flush_dcache_folio flush_dcache_folio
+           33 
+           34 void dma_cache_wback_inv(phys_addr_t start, unsigned long sz);
+           35 void dma_cache_inv(phys_addr_t start, unsigned long sz);
+           36 void dma_cache_wback(phys_addr_t start, unsigned long sz);
+           37 
+           38 #define flush_dcache_mmap_lock(mapping)		do { } while (0)
+           39 #define flush_dcache_mmap_unlock(mapping)	do { } while (0)
+           40 
+           41 /* TBD: optimize this */
+           42 #define flush_cache_vmap(start, end)		flush_cache_all()
+           43 #define flush_cache_vmap_early(start, end)	do { } while (0)
+           44 #define flush_cache_vunmap(start, end)		flush_cache_all()
+           45 
+    公共代码调用点 kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr：
+          274 #endif
+          275 
+          276 /*
+          277  * Some architectures need cache flushes when we set/clear a
+          278  * breakpoint:
+          279  */
+          280 static void kgdb_flush_swbreak_addr(unsigned long addr)
+          281 {
+          282 	if (!CACHE_FLUSH_IS_SAFE)
+          283 		return;
+          284 
+          285 	/* Force flush instruction cache if it was outside the mm */
+      >>  286 	flush_icache_range(addr, addr + BREAK_INSTR_SIZE);
+          287 }
+          288 NOKPROBE_SYMBOL(kgdb_flush_swbreak_addr);
+          289 
+          290 /*
+          291  * SW breakpoint management:
+          292  */
+====================================================================================================
+[13] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_icache_range；架构 riscv；效果 ipi（实现该钩子的 13 个架构里有 3 个有此效果）
+    架构实现的效果路径：flush_icache_range -> flush_icache_all -> sbi_remote_fence_i
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      kernel/debug/debug_core.c:727 kgdb_cpu_enter [irq-off]
+      kernel/debug/debug_core.c:375 dbg_deactivate_sw_breakpoints
+      kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr -> flush_icache_range
+    架构实现的定义位置：
+      arch/riscv/include/asm/cacheflush.h:83:static inline void flush_icache_range(unsigned long start, unsigned long end)
+      >>   83 static inline void flush_icache_range(unsigned long start, unsigned long end)
+           84 {
+           85 	flush_icache_all();
+           86 }
+           87 
+           88 extern unsigned int riscv_cbom_block_size;
+           89 extern unsigned int riscv_cboz_block_size;
+           90 extern unsigned int riscv_cbop_block_size;
+           91 void riscv_init_cbo_blocksizes(void);
+           92 
+           93 #ifdef CONFIG_RISCV_DMA_NONCOHERENT
+           94 void riscv_noncoherent_supported(void);
+           95 void __init riscv_set_dma_cache_alignment(void);
+           96 #else
+           97 static inline void riscv_noncoherent_supported(void) {}
+           98 static inline void riscv_set_dma_cache_alignment(void) {}
+           99 #endif
+          100 
+          101 /*
+          102  * Bits in sys_riscv_flush_icache()'s flags argument.
+          103  */
+          104 #define SYS_RISCV_FLUSH_ICACHE_LOCAL 1UL
+          105 #define SYS_RISCV_FLUSH_ICACHE_ALL   (SYS_RISCV_FLUSH_ICACHE_LOCAL)
+    公共代码调用点 kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr：
+          274 #endif
+          275 
+          276 /*
+          277  * Some architectures need cache flushes when we set/clear a
+          278  * breakpoint:
+          279  */
+          280 static void kgdb_flush_swbreak_addr(unsigned long addr)
+          281 {
+          282 	if (!CACHE_FLUSH_IS_SAFE)
+          283 		return;
+          284 
+          285 	/* Force flush instruction cache if it was outside the mm */
+      >>  286 	flush_icache_range(addr, addr + BREAK_INSTR_SIZE);
+          287 }
+          288 NOKPROBE_SYMBOL(kgdb_flush_swbreak_addr);
+          289 
+          290 /*
+          291  * SW breakpoint management:
+          292  */
+====================================================================================================
+[14] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_icache_range；架构 sh；效果 ipi（实现该钩子的 13 个架构里有 3 个有此效果）
+    架构实现的效果路径：flush_icache_range -> cacheop_on_each_cpu -> smp_call_function
+    调用上下文示例链（从上下文来源到钩子调用点，共 2 个这样的调用点）：
+      kernel/debug/debug_core.c:727 kgdb_cpu_enter [irq-off]
+      kernel/debug/debug_core.c:375 dbg_deactivate_sw_breakpoints
+      kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr -> flush_icache_range
+    架构实现的定义位置：
+      arch/sh/include/asm/cacheflush.h:52:extern void flush_icache_range(unsigned long start, unsigned long end);
+      >>   52 extern void flush_icache_range(unsigned long start, unsigned long end);
+           53 #define flush_icache_user_range flush_icache_range
+           54 void flush_icache_pages(struct vm_area_struct *vma, struct page *page,
+           55 		unsigned int nr);
+           56 #define flush_icache_pages flush_icache_pages
+           57 extern void flush_cache_sigtramp(unsigned long address);
+           58 
+           59 struct flusher_data {
+           60 	struct vm_area_struct *vma;
+           61 	unsigned long addr1, addr2;
+           62 };
+           63 
+           64 #define ARCH_HAS_FLUSH_ANON_PAGE
+           65 extern void __flush_anon_page(struct page *page, unsigned long);
+           66 
+           67 static inline void flush_anon_page(struct vm_area_struct *vma,
+           68 				   struct page *page, unsigned long vmaddr)
+           69 {
+           70 	if (boot_cpu_data.dcache.n_aliases && PageAnon(page))
+           71 		__flush_anon_page(page, vmaddr);
+           72 }
+           73 
+           74 #define ARCH_IMPLEMENTS_FLUSH_KERNEL_VMAP_RANGE 1
+    公共代码调用点 kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr：
+          274 #endif
+          275 
+          276 /*
+          277  * Some architectures need cache flushes when we set/clear a
+          278  * breakpoint:
+          279  */
+          280 static void kgdb_flush_swbreak_addr(unsigned long addr)
+          281 {
+          282 	if (!CACHE_FLUSH_IS_SAFE)
+          283 		return;
+          284 
+          285 	/* Force flush instruction cache if it was outside the mm */
+      >>  286 	flush_icache_range(addr, addr + BREAK_INSTR_SIZE);
+          287 }
+          288 NOKPROBE_SYMBOL(kgdb_flush_swbreak_addr);
+          289 
+          290 /*
+          291  * SW breakpoint management:
+          292  */
+====================================================================================================
+[15] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_kernel_range；架构 arc；效果 ipi（实现该钩子的 20 个架构里有 3 个有此效果）
+    架构实现的效果路径：flush_tlb_kernel_range -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 5 个这样的调用点）：
+      mm/hugetlb.c:2012 dissolve_free_hugetlb_folio [irq-off]
+      mm/hugetlb_vmemmap.c:436 hugetlb_vmemmap_restore_folio
+      mm/hugetlb_vmemmap.c:417 __hugetlb_vmemmap_restore_folio
+      mm/hugetlb_vmemmap.c:384 vmemmap_remap_alloc
+      mm/hugetlb_vmemmap.c:170 vmemmap_remap_range -> flush_tlb_kernel_range
+    架构实现的定义位置：
+      arch/arc/include/asm/tlbflush.h:25:#define flush_tlb_kernel_range(s, e)	local_flush_tlb_kernel_range(s, e)
+      >>   25 #define flush_tlb_kernel_range(s, e)	local_flush_tlb_kernel_range(s, e)
+           26 #define flush_tlb_all()			local_flush_tlb_all()
+           27 #define flush_tlb_mm(mm)		local_flush_tlb_mm(mm)
+           28 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+           29 #define flush_pmd_tlb_range(vma, s, e)	local_flush_pmd_tlb_range(vma, s, e)
+           30 #endif
+           31 #else
+           32 extern void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           33 							 unsigned long end);
+           34 extern void flush_tlb_page(struct vm_area_struct *vma, unsigned long page);
+           35 extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+           36 extern void flush_tlb_all(void);
+           37 extern void flush_tlb_mm(struct mm_struct *mm);
+           38 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+           39 extern void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned long end);
+           40 #endif
+           41 #endif /* CONFIG_SMP */
+           42 #endif
+           43 
+    公共代码调用点 mm/hugetlb_vmemmap.c:170 vmemmap_remap_range：
+          158 	int ret;
+          159 
+          160 	VM_BUG_ON(!PAGE_ALIGNED(start | end));
+          161 
+          162 	mmap_read_lock(&init_mm);
+          163 	ret = walk_kernel_page_table_range(start, end, &vmemmap_remap_ops,
+          164 				    NULL, walk);
+          165 	mmap_read_unlock(&init_mm);
+          166 	if (ret)
+          167 		return ret;
+          168 
+          169 	if (walk->remap_pte && !(walk->flags & VMEMMAP_REMAP_NO_TLB_FLUSH))
+      >>  170 		flush_tlb_kernel_range(start, end);
+          171 
+          172 	return 0;
+          173 }
+          174 
+          175 /*
+          176  * Free a vmemmap page. A vmemmap page can be allocated from the memblock
+====================================================================================================
+[16] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_kernel_range；架构 riscv；效果 ipi（实现该钩子的 20 个架构里有 3 个有此效果）
+    架构实现的效果路径：flush_tlb_kernel_range -> __flush_tlb_range -> sbi_remote_sfence_vma_asid
+    调用上下文示例链（从上下文来源到钩子调用点，共 5 个这样的调用点）：
+      mm/hugetlb.c:2012 dissolve_free_hugetlb_folio [irq-off]
+      mm/hugetlb_vmemmap.c:436 hugetlb_vmemmap_restore_folio
+      mm/hugetlb_vmemmap.c:417 __hugetlb_vmemmap_restore_folio
+      mm/hugetlb_vmemmap.c:384 vmemmap_remap_alloc
+      mm/hugetlb_vmemmap.c:170 vmemmap_remap_range -> flush_tlb_kernel_range
+    架构实现的定义位置：
+      arch/riscv/include/asm/tlbflush.h:76:void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+      >>   76 void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+           77 void local_flush_tlb_kernel_range(unsigned long start, unsigned long end);
+           78 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+           79 #define __HAVE_ARCH_FLUSH_PMD_TLB_RANGE
+           80 void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           81 			unsigned long end);
+           82 void flush_pud_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           83 			 unsigned long end);
+           84 #endif
+           85 
+           86 bool arch_tlbbatch_should_defer(struct mm_struct *mm);
+           87 void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
+           88 		struct mm_struct *mm, unsigned long start, unsigned long end);
+           89 void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch);
+           90 
+           91 extern unsigned long tlb_flush_all_threshold;
+           92 #else /* CONFIG_MMU */
+           93 #define local_flush_tlb_all()			do { } while (0)
+           94 #endif /* CONFIG_MMU */
+           95 
+           96 #endif /* _ASM_RISCV_TLBFLUSH_H */
+           97 
+    公共代码调用点 mm/hugetlb_vmemmap.c:170 vmemmap_remap_range：
+          158 	int ret;
+          159 
+          160 	VM_BUG_ON(!PAGE_ALIGNED(start | end));
+          161 
+          162 	mmap_read_lock(&init_mm);
+          163 	ret = walk_kernel_page_table_range(start, end, &vmemmap_remap_ops,
+          164 				    NULL, walk);
+          165 	mmap_read_unlock(&init_mm);
+          166 	if (ret)
+          167 		return ret;
+          168 
+          169 	if (walk->remap_pte && !(walk->flags & VMEMMAP_REMAP_NO_TLB_FLUSH))
+      >>  170 		flush_tlb_kernel_range(start, end);
+          171 
+          172 	return 0;
+          173 }
+          174 
+          175 /*
+          176  * Free a vmemmap page. A vmemmap page can be allocated from the memblock
+====================================================================================================
+[17] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_kernel_range；架构 x86；效果 ipi（实现该钩子的 20 个架构里有 3 个有此效果）
+    架构实现的效果路径：flush_tlb_kernel_range -> kernel_tlb_flush_all -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 5 个这样的调用点）：
+      mm/hugetlb.c:2012 dissolve_free_hugetlb_folio [irq-off]
+      mm/hugetlb_vmemmap.c:436 hugetlb_vmemmap_restore_folio
+      mm/hugetlb_vmemmap.c:417 __hugetlb_vmemmap_restore_folio
+      mm/hugetlb_vmemmap.c:384 vmemmap_remap_alloc
+      mm/hugetlb_vmemmap.c:170 vmemmap_remap_range -> flush_tlb_kernel_range
+    架构实现的定义位置：
+      arch/x86/include/asm/tlbflush.h:348:extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+      >>  348 extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+          349 
+          350 static inline void flush_tlb_page(struct vm_area_struct *vma, unsigned long a)
+          351 {
+          352 	flush_tlb_mm_range(vma->vm_mm, a, a + PAGE_SIZE, PAGE_SHIFT, false);
+          353 }
+          354 
+          355 static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)
+          356 {
+          357 	bool should_defer = false;
+          358 
+          359 	/* If remote CPUs need to be flushed then defer batch the flush */
+          360 	if (cpumask_any_but(mm_cpumask(mm), get_cpu()) < nr_cpu_ids)
+          361 		should_defer = true;
+          362 	put_cpu();
+          363 
+          364 	return should_defer;
+          365 }
+          366 
+          367 static inline u64 inc_mm_tlb_gen(struct mm_struct *mm)
+          368 {
+          369 	/*
+          370 	 * Bump the generation count.  This also serves as a full barrier
+    公共代码调用点 mm/hugetlb_vmemmap.c:170 vmemmap_remap_range：
+          158 	int ret;
+          159 
+          160 	VM_BUG_ON(!PAGE_ALIGNED(start | end));
+          161 
+          162 	mmap_read_lock(&init_mm);
+          163 	ret = walk_kernel_page_table_range(start, end, &vmemmap_remap_ops,
+          164 				    NULL, walk);
+          165 	mmap_read_unlock(&init_mm);
+          166 	if (ret)
+          167 		return ret;
+          168 
+          169 	if (walk->remap_pte && !(walk->flags & VMEMMAP_REMAP_NO_TLB_FLUSH))
+      >>  170 		flush_tlb_kernel_range(start, end);
+          171 
+          172 	return 0;
+          173 }
+          174 
+          175 /*
+          176  * Free a vmemmap page. A vmemmap page can be allocated from the memblock
+====================================================================================================
+[18] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_all；架构 arc；效果 ipi（实现该钩子的 15 个架构里有 4 个有此效果）
+    架构实现的效果路径：flush_tlb_all -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 4 个这样的调用点）：
+      mm/hugetlb.c:3930 set_max_huge_pages [irq-off]
+      mm/hugetlb.c:1634 update_and_free_pages_bulk
+      mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all
+    架构实现的定义位置：
+      arch/arc/include/asm/tlbflush.h:26:#define flush_tlb_all()			local_flush_tlb_all()
+      >>   26 #define flush_tlb_all()			local_flush_tlb_all()
+           27 #define flush_tlb_mm(mm)		local_flush_tlb_mm(mm)
+           28 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+           29 #define flush_pmd_tlb_range(vma, s, e)	local_flush_pmd_tlb_range(vma, s, e)
+           30 #endif
+           31 #else
+           32 extern void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           33 							 unsigned long end);
+           34 extern void flush_tlb_page(struct vm_area_struct *vma, unsigned long page);
+           35 extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+           36 extern void flush_tlb_all(void);
+           37 extern void flush_tlb_mm(struct mm_struct *mm);
+           38 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+           39 extern void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start, unsigned long end);
+           40 #endif
+           41 #endif /* CONFIG_SMP */
+           42 #endif
+           43 
+    公共代码调用点 mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios：
+          462 		if (folio_test_hugetlb_vmemmap_optimized(folio)) {
+          463 			ret = __hugetlb_vmemmap_restore_folio(h, folio, flags);
+          464 			if (ret)
+          465 				break;
+          466 			restored++;
+          467 		}
+          468 
+          469 		/* Add non-optimized folios to output list */
+          470 		list_move(&folio->lru, non_hvo_folios);
+          471 	}
+          472 
+          473 	if (restored)
+      >>  474 		flush_tlb_all();
+          475 	if (!ret)
+          476 		ret = restored;
+          477 	return ret;
+          478 }
+          479 
+          480 /* Return true iff a HugeTLB whose vmemmap should and can be optimized. */
+====================================================================================================
+[19] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_all；架构 parisc；效果 ipi（实现该钩子的 15 个架构里有 4 个有此效果）
+    架构实现的效果路径：flush_tlb_all -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 4 个这样的调用点）：
+      mm/hugetlb.c:3930 set_max_huge_pages [irq-off]
+      mm/hugetlb.c:1634 update_and_free_pages_bulk
+      mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all
+    架构实现的定义位置：
+      arch/parisc/include/asm/tlbflush.h:11:extern void flush_tlb_all(void);
+      >>   11 extern void flush_tlb_all(void);
+           12 extern void flush_tlb_all_local(void *);
+           13 
+           14 #define smp_flush_tlb_all()	flush_tlb_all()
+           15 
+           16 int __flush_tlb_range(unsigned long sid,
+           17 	unsigned long start, unsigned long end);
+           18 
+           19 #define flush_tlb_range(vma, start, end) \
+           20 	__flush_tlb_range((vma)->vm_mm->context.space_id, start, end)
+           21 
+           22 #define flush_tlb_kernel_range(start, end) \
+           23 	__flush_tlb_range(0, start, end)
+           24 
+           25 /*
+           26  * flush_tlb_mm()
+           27  *
+           28  * The code to switch to a new context is NOT valid for processes
+           29  * which play with the space id's.  Thus, we have to preserve the
+           30  * space and just flush the entire tlb.  However, the compilers,
+           31  * dynamic linker, etc, do not manipulate space id's, so there
+           32  * could be a significant performance benefit in switching contexts
+           33  * and not flushing the whole tlb.
+    公共代码调用点 mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios：
+          462 		if (folio_test_hugetlb_vmemmap_optimized(folio)) {
+          463 			ret = __hugetlb_vmemmap_restore_folio(h, folio, flags);
+          464 			if (ret)
+          465 				break;
+          466 			restored++;
+          467 		}
+          468 
+          469 		/* Add non-optimized folios to output list */
+          470 		list_move(&folio->lru, non_hvo_folios);
+          471 	}
+          472 
+          473 	if (restored)
+      >>  474 		flush_tlb_all();
+          475 	if (!ret)
+          476 		ret = restored;
+          477 	return ret;
+          478 }
+          479 
+          480 /* Return true iff a HugeTLB whose vmemmap should and can be optimized. */
+====================================================================================================
+[20] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_all；架构 riscv；效果 ipi（实现该钩子的 15 个架构里有 4 个有此效果）
+    架构实现的效果路径：flush_tlb_all -> sbi_remote_sfence_vma_asid
+    调用上下文示例链（从上下文来源到钩子调用点，共 4 个这样的调用点）：
+      mm/hugetlb.c:3930 set_max_huge_pages [irq-off]
+      mm/hugetlb.c:1634 update_and_free_pages_bulk
+      mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all
+    架构实现的定义位置：
+      arch/riscv/include/asm/tlbflush.h:69:void flush_tlb_all(void);
+      >>   69 void flush_tlb_all(void);
+           70 void flush_tlb_mm(struct mm_struct *mm);
+           71 void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
+           72 			unsigned long end, unsigned int page_size);
+           73 void flush_tlb_page(struct vm_area_struct *vma, unsigned long addr);
+           74 void flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           75 		     unsigned long end);
+           76 void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+           77 void local_flush_tlb_kernel_range(unsigned long start, unsigned long end);
+           78 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+           79 #define __HAVE_ARCH_FLUSH_PMD_TLB_RANGE
+           80 void flush_pmd_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           81 			unsigned long end);
+           82 void flush_pud_tlb_range(struct vm_area_struct *vma, unsigned long start,
+           83 			 unsigned long end);
+           84 #endif
+           85 
+           86 bool arch_tlbbatch_should_defer(struct mm_struct *mm);
+           87 void arch_tlbbatch_add_pending(struct arch_tlbflush_unmap_batch *batch,
+           88 		struct mm_struct *mm, unsigned long start, unsigned long end);
+           89 void arch_tlbbatch_flush(struct arch_tlbflush_unmap_batch *batch);
+           90 
+           91 extern unsigned long tlb_flush_all_threshold;
+    公共代码调用点 mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios：
+          462 		if (folio_test_hugetlb_vmemmap_optimized(folio)) {
+          463 			ret = __hugetlb_vmemmap_restore_folio(h, folio, flags);
+          464 			if (ret)
+          465 				break;
+          466 			restored++;
+          467 		}
+          468 
+          469 		/* Add non-optimized folios to output list */
+          470 		list_move(&folio->lru, non_hvo_folios);
+          471 	}
+          472 
+          473 	if (restored)
+      >>  474 		flush_tlb_all();
+          475 	if (!ret)
+          476 		ret = restored;
+          477 	return ret;
+          478 }
+          479 
+          480 /* Return true iff a HugeTLB whose vmemmap should and can be optimized. */
+====================================================================================================
+[21] X2：公共代码在关中断上下文里调到这个钩子，而这个架构的实现会发 IPI 并等待（smp_call_function / on_each_cpu / riscv SBI 远程刷新）
+    钩子 flush_tlb_all；架构 x86；效果 ipi（实现该钩子的 15 个架构里有 4 个有此效果）
+    架构实现的效果路径：flush_tlb_all -> on_each_cpu
+    调用上下文示例链（从上下文来源到钩子调用点，共 4 个这样的调用点）：
+      mm/hugetlb.c:3930 set_max_huge_pages [irq-off]
+      mm/hugetlb.c:1634 update_and_free_pages_bulk
+      mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all
+    架构实现的定义位置：
+      arch/x86/include/asm/tlbflush.h:344:extern void flush_tlb_all(void);
+      >>  344 extern void flush_tlb_all(void);
+          345 extern void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
+          346 				unsigned long end, unsigned int stride_shift,
+          347 				bool freed_tables);
+          348 extern void flush_tlb_kernel_range(unsigned long start, unsigned long end);
+          349 
+          350 static inline void flush_tlb_page(struct vm_area_struct *vma, unsigned long a)
+          351 {
+          352 	flush_tlb_mm_range(vma->vm_mm, a, a + PAGE_SIZE, PAGE_SHIFT, false);
+          353 }
+          354 
+          355 static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)
+          356 {
+          357 	bool should_defer = false;
+          358 
+          359 	/* If remote CPUs need to be flushed then defer batch the flush */
+          360 	if (cpumask_any_but(mm_cpumask(mm), get_cpu()) < nr_cpu_ids)
+          361 		should_defer = true;
+          362 	put_cpu();
+          363 
+          364 	return should_defer;
+          365 }
+          366 
+    公共代码调用点 mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios：
+          462 		if (folio_test_hugetlb_vmemmap_optimized(folio)) {
+          463 			ret = __hugetlb_vmemmap_restore_folio(h, folio, flags);
+          464 			if (ret)
+          465 				break;
+          466 			restored++;
+          467 		}
+          468 
+          469 		/* Add non-optimized folios to output list */
+          470 		list_move(&folio->lru, non_hvo_folios);
+          471 	}
+          472 
+          473 	if (restored)
+      >>  474 		flush_tlb_all();
+          475 	if (!ret)
+          476 		ret = restored;
+          477 	return ret;
+          478 }
+          479 
+          480 /* Return true iff a HugeTLB whose vmemmap should and can be optimized. */

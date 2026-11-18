@@ -1,0 +1,107 @@
+[
+ {
+  "k": 1,
+  "verdict": "不可能",
+  "why": "arm64 的 split_kernel_leaf_mapping 在 ce2b3a50ad92 之后对 debug_pagealloc/kfence 路径提前返回，不会走到 mutex_lock；词法分析看不到这个提前返回。示例链（alloc_contig 持 zone 锁）也不成立。"
+ },
+ {
+  "k": 2,
+  "verdict": "可能",
+  "why": "riscv __kernel_map_pages 末尾调用 flush_tlb_kernel_range；多核且 IPI 不走 SBI（IMSIC/ACLINT）时走 on_each_cpu_mask(...,1)，关中断调用会触发 kernel/smp.c:716 的 WARN 并可能死锁。真实的关中断路径很常见：spin_lock_irqsave 里 GFP_ATOMIC 分配→post_alloc_hook→debug_pagealloc_map_pages，或关中断时释放页。x86 的同名函数注释明确说这里发 IPI 会死锁、只刷本 CPU。条件：CONFIG_DEBUG_PAGEALLOC + debug_pagealloc=on + SMP。示例链本身不对。"
+ },
+ {
+  "k": 3,
+  "verdict": "不可能",
+  "why": "mmput/__mmput/exit_mmap 都可能睡眠（mmap_read_lock 等），不会在关中断上下文里运行；示例链是 ptrace_request 里解锁后的调用被误归入区间。"
+ },
+ {
+  "k": 4,
+  "verdict": "可能",
+  "why": "aio_complete 在 spin_lock_irqsave(&ctx->completion_lock) 里调用 flush_dcache_folio；sh 在 CONFIG_CPU_SHX3 且多核时 cacheop_on_each_cpu 会 smp_call_function(...,1)，关中断时 WARN 并可能死锁。只影响 SH-X3 多核，影响面很小。"
+ },
+ {
+  "k": 5,
+  "verdict": "不可能",
+  "why": "swiotlb_bounce 里 local_irq_save + memcpy_to_page 只在高端内存页分支；sh 不支持 HIGHMEM，走不到。"
+ },
+ {
+  "k": 6,
+  "verdict": "不可能",
+  "why": "缺页处理不在关中断上下文；futex_lock_pi 先解锁再 fault_in_user_writeable。"
+ },
+ {
+  "k": 7,
+  "verdict": "不可能",
+  "why": "同 1：arm64 kfence 路径在 ce2b3a50ad92 后提前返回，不拿 mutex。"
+ },
+ {
+  "k": 8,
+  "verdict": "不可能",
+  "why": "pte_clear 写入的是非 present 项，riscv __set_pte_at 只对 present 且可执行的项刷 icache；riscv 也没有 HIGHMEM，kmap_local 切换走不到这里。"
+ },
+ {
+  "k": 9,
+  "verdict": "不可能",
+  "why": "同 6，缺页路径不在关中断上下文。"
+ },
+ {
+  "k": 10,
+  "verdict": "不可能",
+  "why": "resume_target_kernel 关中断时非引导 CPU 都已下线，riscv flush_tlb_all 在只有一个 CPU 在线时只做本地刷新，不发 IPI。"
+ },
+ {
+  "k": 11,
+  "verdict": "不可能",
+  "why": "同 6，缺页路径不在关中断上下文。"
+ },
+ {
+  "k": 12,
+  "verdict": "可能",
+  "why": "kgdb_cpu_enter 关中断且其他 CPU 被围在 kgdb 里空转时，dbg_deactivate_sw_breakpoints→kgdb_flush_swbreak_addr→flush_icache_range；arc 的 CACHE_FLUSH_IS_SAFE 为 1，SMP 下 __ic_line_inv_vaddr 走 on_each_cpu(...,1)，会 WARN 并死锁。只在 arc 多核 + kgdb 用软件断点时。"
+ },
+ {
+  "k": 13,
+  "verdict": "可能",
+  "why": "同 12 的路径；riscv CACHE_FLUSH_IS_SAFE 为 1，flush_icache_all 在多核且 IPI 不走 SBI 时 on_each_cpu(ipi_remote_fence_i, NULL, 1)，其他 CPU 在 kgdb 里关中断空转，会死锁。只在 kgdb 调试时。"
+ },
+ {
+  "k": 14,
+  "verdict": "不可能",
+  "why": "sh 在 CONFIG_SMP 下 CACHE_FLUSH_IS_SAFE 为 0，kgdb_flush_swbreak_addr 直接返回；单核时 cacheop_on_each_cpu 不发 IPI。"
+ },
+ {
+  "k": 15,
+  "verdict": "不可能",
+  "why": "dissolve_free_hugetlb_folio 先 spin_unlock_irq(&hugetlb_lock) 再调 hugetlb_vmemmap_restore_folio（本身会 GFP_KERNEL 分配）；是修订 1 把后面带 goto 的块当成提前退出造成的误报。"
+ },
+ {
+  "k": 16,
+  "verdict": "不可能",
+  "why": "同 15。"
+ },
+ {
+  "k": 17,
+  "verdict": "不可能",
+  "why": "同 15。"
+ },
+ {
+  "k": 18,
+  "verdict": "不可能",
+  "why": "set_max_huge_pages 先 spin_unlock_irq 再 update_and_free_pages_bulk，示例链不成立。"
+ },
+ {
+  "k": 19,
+  "verdict": "不可能",
+  "why": "同 18。"
+ },
+ {
+  "k": 20,
+  "verdict": "不可能",
+  "why": "同 18。"
+ },
+ {
+  "k": 21,
+  "verdict": "不可能",
+  "why": "同 18。"
+ }
+]

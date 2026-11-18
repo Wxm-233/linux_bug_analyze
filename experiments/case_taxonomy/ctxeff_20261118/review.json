@@ -1,0 +1,495 @@
+[
+ {
+  "rule": "X1",
+  "hook": "__kernel_map_pages",
+  "arch": "arm64",
+  "effect": "sleep",
+  "minority": true,
+  "n_impl": 5,
+  "n_effect": 1,
+  "witness": [
+   "__kernel_map_pages",
+   "set_memory_valid",
+   "__change_memory_common",
+   "update_range_prot",
+   "split_kernel_leaf_mapping",
+   "mutex_lock"
+  ],
+  "site": "include/linux/mm.h:4991 debug_pagealloc_map_pages",
+  "chain": [
+   "mm/page_alloc.c:7568 alloc_contig_frozen_pages_noprof [irq-off]",
+   "mm/page_alloc.c:7400 alloc_contig_frozen_range_noprof",
+   "mm/page_alloc.c:7206 split_free_frozen_pages",
+   "mm/page_alloc.c:1832 post_alloc_hook",
+   "include/linux/mm.h:4991 debug_pagealloc_map_pages -> __kernel_map_pages"
+  ],
+  "n_sites": 2,
+  "k": 1
+ },
+ {
+  "rule": "X2",
+  "hook": "__kernel_map_pages",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 5,
+  "n_effect": 1,
+  "witness": [
+   "__kernel_map_pages",
+   "flush_tlb_kernel_range",
+   "__flush_tlb_range",
+   "sbi_remote_sfence_vma_asid"
+  ],
+  "site": "include/linux/mm.h:4991 debug_pagealloc_map_pages",
+  "chain": [
+   "mm/page_alloc.c:7568 alloc_contig_frozen_pages_noprof [irq-off]",
+   "mm/page_alloc.c:7400 alloc_contig_frozen_range_noprof",
+   "mm/page_alloc.c:7206 split_free_frozen_pages",
+   "mm/page_alloc.c:1832 post_alloc_hook",
+   "include/linux/mm.h:4991 debug_pagealloc_map_pages -> __kernel_map_pages"
+  ],
+  "n_sites": 2,
+  "k": 2
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_cache_mm",
+  "arch": "sh",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 8,
+  "n_effect": 1,
+  "witness": [
+   "flush_cache_mm",
+   "cacheop_on_each_cpu",
+   "smp_call_function"
+  ],
+  "site": "mm/mmap.c:1311 exit_mmap",
+  "chain": [
+   "kernel/ptrace.c:1333 ptrace_request [irq-off]",
+   "kernel/fork.c:1216 mmput",
+   "kernel/fork.c:1193 __mmput",
+   "mm/mmap.c:1311 exit_mmap -> flush_cache_mm"
+  ],
+  "n_sites": 1,
+  "k": 3
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_dcache_folio",
+  "arch": "sh",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 13,
+  "n_effect": 1,
+  "witness": [
+   "flush_dcache_folio",
+   "cacheop_on_each_cpu",
+   "smp_call_function"
+  ],
+  "site": "fs/aio.c:1200 aio_complete",
+  "chain": [
+   "fs/aio.c:1200 aio_complete -> flush_dcache_folio"
+  ],
+  "n_sites": 2,
+  "k": 4
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_dcache_page",
+  "arch": "sh",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 14,
+  "n_effect": 1,
+  "witness": [
+   "flush_dcache_page",
+   "flush_dcache_folio",
+   "cacheop_on_each_cpu",
+   "smp_call_function"
+  ],
+  "site": "include/linux/highmem.h:554 memcpy_to_page",
+  "chain": [
+   "kernel/dma/swiotlb.c:1077 swiotlb_bounce [irq-off]",
+   "include/linux/highmem.h:554 memcpy_to_page -> flush_dcache_page"
+  ],
+  "n_sites": 2,
+  "k": 5
+ },
+ {
+  "rule": "X2",
+  "hook": "huge_ptep_set_access_flags",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 8,
+  "n_effect": 1,
+  "witness": [
+   "huge_ptep_set_access_flags",
+   "ptep_set_access_flags",
+   "__set_pte_at",
+   "flush_icache_pte",
+   "flush_icache_mm",
+   "sbi_remote_fence_i"
+  ],
+  "site": "mm/hugetlb.c:6200 hugetlb_fault",
+  "chain": [
+   "kernel/futex/pi.c:1173 futex_lock_pi [irq-off]",
+   "kernel/futex/core.c:748 fault_in_user_writeable",
+   "mm/gup.c:1588 fixup_user_fault",
+   "mm/memory.c:6874 handle_mm_fault",
+   "mm/hugetlb.c:6200 hugetlb_fault -> huge_ptep_set_access_flags"
+  ],
+  "n_sites": 1,
+  "k": 6
+ },
+ {
+  "rule": "X1",
+  "hook": "kfence_protect_page",
+  "arch": "arm64",
+  "effect": "sleep",
+  "minority": true,
+  "n_impl": 8,
+  "n_effect": 1,
+  "witness": [
+   "kfence_protect_page",
+   "set_memory_valid",
+   "__change_memory_common",
+   "update_range_prot",
+   "split_kernel_leaf_mapping",
+   "mutex_lock"
+  ],
+  "site": "mm/kfence/core.c:254 kfence_protect",
+  "chain": [
+   "mm/kfence/core.c:517 kfence_guarded_alloc [irq-off]",
+   "mm/kfence/core.c:254 kfence_protect -> kfence_protect_page"
+  ],
+  "n_sites": 2,
+  "k": 7
+ },
+ {
+  "rule": "X2",
+  "hook": "pte_clear",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 20,
+  "n_effect": 1,
+  "witness": [
+   "pte_clear",
+   "__set_pte_at",
+   "flush_icache_pte",
+   "flush_icache_mm",
+   "flush_icache_all",
+   "sbi_remote_fence_i"
+  ],
+  "site": "mm/highmem.c:678 __kmap_local_sched_out",
+  "chain": [
+   "kernel/sched/core.c:7276 __schedule [irq-off]",
+   "kernel/sched/core.c:5471 context_switch",
+   "kernel/sched/core.c:5310 prepare_task_switch",
+   "kernel/sched/core.c:5276 kmap_local_sched_out",
+   "mm/highmem.c:678 __kmap_local_sched_out -> pte_clear"
+  ],
+  "n_sites": 1,
+  "k": 8
+ },
+ {
+  "rule": "X2",
+  "hook": "set_huge_pte_at",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 6,
+  "n_effect": 1,
+  "witness": [
+   "set_huge_pte_at",
+   "set_ptes",
+   "__set_pte_at",
+   "flush_icache_pte",
+   "flush_icache_mm",
+   "sbi_remote_fence_i"
+  ],
+  "site": "mm/hugetlb.c:6130 hugetlb_fault",
+  "chain": [
+   "kernel/futex/pi.c:1173 futex_lock_pi [irq-off]",
+   "kernel/futex/core.c:748 fault_in_user_writeable",
+   "mm/gup.c:1588 fixup_user_fault",
+   "mm/memory.c:6874 handle_mm_fault",
+   "mm/hugetlb.c:6130 hugetlb_fault -> set_huge_pte_at"
+  ],
+  "n_sites": 2,
+  "k": 9
+ },
+ {
+  "rule": "X2",
+  "hook": "set_memory_rw",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 5,
+  "n_effect": 1,
+  "witness": [
+   "set_memory_rw",
+   "__set_memory",
+   "flush_tlb_all",
+   "sbi_remote_sfence_vma_asid"
+  ],
+  "site": "kernel/power/snapshot.c:71 hibernate_restore_unprotect_page",
+  "chain": [
+   "kernel/power/hibernate.c:536 resume_target_kernel [irq-off]",
+   "kernel/power/snapshot.c:1620 swsusp_free",
+   "kernel/power/snapshot.c:71 hibernate_restore_unprotect_page -> set_memory_rw"
+  ],
+  "n_sites": 1,
+  "k": 10
+ },
+ {
+  "rule": "X2",
+  "hook": "update_mmu_cache",
+  "arch": "arc",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 21,
+  "n_effect": 1,
+  "witness": [
+   "update_mmu_cache",
+   "update_mmu_cache_range",
+   "__inv_icache_pages",
+   "__ic_line_inv_vaddr",
+   "on_each_cpu"
+  ],
+  "site": "mm/hugetlb.c:6132 hugetlb_fault",
+  "chain": [
+   "kernel/futex/pi.c:1173 futex_lock_pi [irq-off]",
+   "kernel/futex/core.c:748 fault_in_user_writeable",
+   "mm/gup.c:1588 fixup_user_fault",
+   "mm/memory.c:6874 handle_mm_fault",
+   "mm/hugetlb.c:6132 hugetlb_fault -> update_mmu_cache"
+  ],
+  "n_sites": 2,
+  "k": 11
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_icache_range",
+  "arch": "arc",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 13,
+  "n_effect": 3,
+  "witness": [
+   "flush_icache_range",
+   "__sync_icache_dcache",
+   "__ic_line_inv_vaddr",
+   "on_each_cpu"
+  ],
+  "site": "kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr",
+  "chain": [
+   "kernel/debug/debug_core.c:727 kgdb_cpu_enter [irq-off]",
+   "kernel/debug/debug_core.c:375 dbg_deactivate_sw_breakpoints",
+   "kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr -> flush_icache_range"
+  ],
+  "n_sites": 2,
+  "k": 12
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_icache_range",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 13,
+  "n_effect": 3,
+  "witness": [
+   "flush_icache_range",
+   "flush_icache_all",
+   "sbi_remote_fence_i"
+  ],
+  "site": "kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr",
+  "chain": [
+   "kernel/debug/debug_core.c:727 kgdb_cpu_enter [irq-off]",
+   "kernel/debug/debug_core.c:375 dbg_deactivate_sw_breakpoints",
+   "kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr -> flush_icache_range"
+  ],
+  "n_sites": 2,
+  "k": 13
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_icache_range",
+  "arch": "sh",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 13,
+  "n_effect": 3,
+  "witness": [
+   "flush_icache_range",
+   "cacheop_on_each_cpu",
+   "smp_call_function"
+  ],
+  "site": "kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr",
+  "chain": [
+   "kernel/debug/debug_core.c:727 kgdb_cpu_enter [irq-off]",
+   "kernel/debug/debug_core.c:375 dbg_deactivate_sw_breakpoints",
+   "kernel/debug/debug_core.c:286 kgdb_flush_swbreak_addr -> flush_icache_range"
+  ],
+  "n_sites": 2,
+  "k": 14
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_kernel_range",
+  "arch": "arc",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 20,
+  "n_effect": 3,
+  "witness": [
+   "flush_tlb_kernel_range",
+   "on_each_cpu"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:170 vmemmap_remap_range",
+  "chain": [
+   "mm/hugetlb.c:2012 dissolve_free_hugetlb_folio [irq-off]",
+   "mm/hugetlb_vmemmap.c:436 hugetlb_vmemmap_restore_folio",
+   "mm/hugetlb_vmemmap.c:417 __hugetlb_vmemmap_restore_folio",
+   "mm/hugetlb_vmemmap.c:384 vmemmap_remap_alloc",
+   "mm/hugetlb_vmemmap.c:170 vmemmap_remap_range -> flush_tlb_kernel_range"
+  ],
+  "n_sites": 5,
+  "k": 15
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_kernel_range",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 20,
+  "n_effect": 3,
+  "witness": [
+   "flush_tlb_kernel_range",
+   "__flush_tlb_range",
+   "sbi_remote_sfence_vma_asid"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:170 vmemmap_remap_range",
+  "chain": [
+   "mm/hugetlb.c:2012 dissolve_free_hugetlb_folio [irq-off]",
+   "mm/hugetlb_vmemmap.c:436 hugetlb_vmemmap_restore_folio",
+   "mm/hugetlb_vmemmap.c:417 __hugetlb_vmemmap_restore_folio",
+   "mm/hugetlb_vmemmap.c:384 vmemmap_remap_alloc",
+   "mm/hugetlb_vmemmap.c:170 vmemmap_remap_range -> flush_tlb_kernel_range"
+  ],
+  "n_sites": 5,
+  "k": 16
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_kernel_range",
+  "arch": "x86",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 20,
+  "n_effect": 3,
+  "witness": [
+   "flush_tlb_kernel_range",
+   "kernel_tlb_flush_all",
+   "on_each_cpu"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:170 vmemmap_remap_range",
+  "chain": [
+   "mm/hugetlb.c:2012 dissolve_free_hugetlb_folio [irq-off]",
+   "mm/hugetlb_vmemmap.c:436 hugetlb_vmemmap_restore_folio",
+   "mm/hugetlb_vmemmap.c:417 __hugetlb_vmemmap_restore_folio",
+   "mm/hugetlb_vmemmap.c:384 vmemmap_remap_alloc",
+   "mm/hugetlb_vmemmap.c:170 vmemmap_remap_range -> flush_tlb_kernel_range"
+  ],
+  "n_sites": 5,
+  "k": 17
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_all",
+  "arch": "arc",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 15,
+  "n_effect": 4,
+  "witness": [
+   "flush_tlb_all",
+   "on_each_cpu"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios",
+  "chain": [
+   "mm/hugetlb.c:3930 set_max_huge_pages [irq-off]",
+   "mm/hugetlb.c:1634 update_and_free_pages_bulk",
+   "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all"
+  ],
+  "n_sites": 4,
+  "k": 18
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_all",
+  "arch": "parisc",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 15,
+  "n_effect": 4,
+  "witness": [
+   "flush_tlb_all",
+   "on_each_cpu"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios",
+  "chain": [
+   "mm/hugetlb.c:3930 set_max_huge_pages [irq-off]",
+   "mm/hugetlb.c:1634 update_and_free_pages_bulk",
+   "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all"
+  ],
+  "n_sites": 4,
+  "k": 19
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_all",
+  "arch": "riscv",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 15,
+  "n_effect": 4,
+  "witness": [
+   "flush_tlb_all",
+   "sbi_remote_sfence_vma_asid"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios",
+  "chain": [
+   "mm/hugetlb.c:3930 set_max_huge_pages [irq-off]",
+   "mm/hugetlb.c:1634 update_and_free_pages_bulk",
+   "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all"
+  ],
+  "n_sites": 4,
+  "k": 20
+ },
+ {
+  "rule": "X2",
+  "hook": "flush_tlb_all",
+  "arch": "x86",
+  "effect": "ipi",
+  "minority": true,
+  "n_impl": 15,
+  "n_effect": 4,
+  "witness": [
+   "flush_tlb_all",
+   "on_each_cpu"
+  ],
+  "site": "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios",
+  "chain": [
+   "mm/hugetlb.c:3930 set_max_huge_pages [irq-off]",
+   "mm/hugetlb.c:1634 update_and_free_pages_bulk",
+   "mm/hugetlb_vmemmap.c:474 hugetlb_vmemmap_restore_folios -> flush_tlb_all"
+  ],
+  "n_sites": 4,
+  "k": 21
+ }
+]

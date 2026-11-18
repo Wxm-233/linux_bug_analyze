@@ -1,0 +1,155 @@
+====================================================================================================
+[1] 公共侧：flush_cache_page 所在的同一分支（最内层花括号块及其条件头）里出现 PMD 大页写法，可能在大页上用了按页刷
+    mm/ksm.c:1464  函数 replace_page  写法 flush_cache_page(vma, addr, pte_pfn(ptep_get(ptep)))
+   1414 		goto out;
+   1415 	/*
+   1416 	 * Some THP functions use the sequence pmdp_huge_clear_flush(), set_pmd_at()
+   1417 	 * without holding anon_vma lock for write.  So when looking for a
+   1418 	 * genuine pmde (in which to find pte), test present and !THP together.
+   1419 	 */
+   1420 	pmde = pmdp_get_lockless(pmd);
+   1421 	if (!pmd_present(pmde) || pmd_trans_huge(pmde))
+   1422 		goto out;
+   1423 
+   1424 	mmu_notifier_range_init(&range, MMU_NOTIFY_CLEAR, 0, mm, addr,
+   1425 				addr + PAGE_SIZE);
+   1426 	mmu_notifier_invalidate_range_start(&range);
+   1427 
+   1428 	ptep = pte_offset_map_lock(mm, pmd, addr, &ptl);
+   1429 	if (!ptep)
+   1430 		goto out_mn;
+   1431 	if (!pte_same(ptep_get(ptep), orig_pte)) {
+   1432 		pte_unmap_unlock(ptep, ptl);
+   1433 		goto out_mn;
+   1434 	}
+   1435 	VM_BUG_ON_PAGE(PageAnonExclusive(page), page);
+   1436 	VM_BUG_ON_FOLIO(folio_test_anon(kfolio) && PageAnonExclusive(kpage),
+   1437 			kfolio);
+   1438 
+   1439 	/*
+   1440 	 * No need to check ksm_use_zero_pages here: we can only have a
+   1441 	 * zero_page here if ksm_use_zero_pages was enabled already.
+   1442 	 */
+   1443 	if (!is_zero_pfn(page_to_pfn(kpage))) {
+   1444 		folio_get(kfolio);
+   1445 		folio_add_anon_rmap_pte(kfolio, kpage, vma, addr, RMAP_NONE);
+   1446 		newpte = mk_pte(kpage, vma->vm_page_prot);
+   1447 	} else {
+   1448 		/*
+   1449 		 * Use pte_mkdirty to mark the zero page mapped by KSM, and then
+   1450 		 * we can easily track all KSM-placed zero pages by checking if
+   1451 		 * the dirty bit in zero page's PTE is set.
+   1452 		 */
+   1453 		newpte = pte_mkdirty(pte_mkspecial(pfn_pte(page_to_pfn(kpage), vma->vm_page_prot)));
+   1454 		ksm_map_zero_page(mm);
+   1455 		/*
+   1456 		 * We're replacing an anonymous page with a zero page, which is
+   1457 		 * not anonymous. We need to do proper accounting otherwise we
+   1458 		 * will get wrong values in /proc, and a BUG message in dmesg
+   1459 		 * when tearing down the mm.
+   1460 		 */
+   1461 		dec_mm_counter(mm, MM_ANONPAGES);
+   1462 	}
+   1463 
+>> 1464 	flush_cache_page(vma, addr, pte_pfn(ptep_get(ptep)));
+   1465 	/*
+   1466 	 * No need to notify as we are replacing a read only page with another
+   1467 	 * read only page with the same content.
+   1468 	 *
+   1469 	 * See Documentation/mm/mmu_notifier.rst
+   1470 	 */
+   1471 	ptep_clear_flush(vma, addr, ptep);
+   1472 	set_pte_at(mm, addr, ptep, newpte);
+   1473 
+   1474 	folio_remove_rmap_pte(folio, page, vma);
+   1475 	if (!folio_mapped(folio))
+   1476 		folio_free_swap(folio);
+====================================================================================================
+[2] 公共侧：调用了 flush_cache_vmap(start, end)，但某个架构的 flush_cache_vmap 只对部分地址区域生效，这次映射的区域不在其中
+    mm/kasan/shadow.c:428  函数 __kasan_populate_vmalloc  写法 flush_cache_vmap(shadow_start shadow_end)
+    架构 riscv：flush_cache_vmap 只对 module, vmalloc, vmemmap 区域生效；这次映射判断为 kasan 区域
+    | #if defined(CONFIG_64BIT) && defined(CONFIG_MMU)
+    | /* This is accessed in assembly code. cpumask_var_t would be too complex. */
+    | extern DECLARE_BITMAP(new_valid_map_cpus, NR_CPUS);
+    | extern char _end[];
+    | static inline void mark_new_valid_map(void)
+    | {
+    | 	/*
+    | 	 * We don't care if concurrently a cpu resets this value since
+    | 	 * the only place this can happen is in handle_exception() where
+    | 	 * an sfence.vma is emitted.
+    | 	 */
+    | 	bitmap_fill(new_valid_map_cpus, NR_CPUS);
+    | }
+    | #define flush_cache_vmap flush_cache_vmap
+    | static inline void flush_cache_vmap(unsigned long start, unsigned long end)
+    | {
+    | 	if (is_vmalloc_or_module_addr((void *)start) ||
+    | 	    (start >= VMEMMAP_START && end <= VMEMMAP_END))
+    | 		mark_new_valid_map();
+    | }
+    | #define flush_cache_vmap_early(start, end)	local_flush_tlb_kernel_range(start, end)
+    | #endif
+    378 		 * by the scope API
+    379 		 */
+    380 		flags = memalloc_apply_gfp_scope(gfp_mask);
+    381 		ret = apply_to_page_range(&init_mm, start, nr_pages * PAGE_SIZE,
+    382 					  kasan_populate_vmalloc_pte, &data);
+    383 		memalloc_restore_scope(flags);
+    384 
+    385 		___free_pages_bulk(data.pages, nr_pages);
+    386 		if (ret)
+    387 			break;
+    388 
+    389 		start += nr_pages * PAGE_SIZE;
+    390 		nr_total -= nr_pages;
+    391 	}
+    392 
+    393 	free_page((unsigned long)data.pages);
+    394 
+    395 	return ret;
+    396 }
+    397 
+    398 int __kasan_populate_vmalloc(unsigned long addr, unsigned long size, gfp_t gfp_mask)
+    399 {
+    400 	unsigned long shadow_start, shadow_end;
+    401 	int ret;
+    402 
+    403 	if (!is_vmalloc_or_module_addr((void *)addr))
+    404 		return 0;
+    405 
+    406 	shadow_start = (unsigned long)kasan_mem_to_shadow((void *)addr);
+    407 	shadow_end = (unsigned long)kasan_mem_to_shadow((void *)addr + size);
+    408 
+    409 	/*
+    410 	 * User Mode Linux maps enough shadow memory for all of virtual memory
+    411 	 * at boot, so doesn't need to allocate more on vmalloc, just clear it.
+    412 	 *
+    413 	 * The remaining CONFIG_UML checks in this file exist for the same
+    414 	 * reason.
+    415 	 */
+    416 	if (IS_ENABLED(CONFIG_UML)) {
+    417 		__memset((void *)shadow_start, KASAN_VMALLOC_INVALID, shadow_end - shadow_start);
+    418 		return 0;
+    419 	}
+    420 
+    421 	shadow_start = PAGE_ALIGN_DOWN(shadow_start);
+    422 	shadow_end = PAGE_ALIGN(shadow_end);
+    423 
+    424 	ret = __kasan_populate_vmalloc_do(shadow_start, shadow_end, gfp_mask);
+    425 	if (ret)
+    426 		return ret;
+    427 
+>>  428 	flush_cache_vmap(shadow_start, shadow_end);
+    429 
+    430 	/*
+    431 	 * We need to be careful about inter-cpu effects here. Consider:
+    432 	 *
+    433 	 *   CPU#0				  CPU#1
+    434 	 * WRITE_ONCE(p, vmalloc(100));		while (x = READ_ONCE(p)) ;
+    435 	 *					p[99] = 1;
+    436 	 *
+    437 	 * With compiler instrumentation, that ends up looking like this:
+    438 	 *
+    439 	 *   CPU#0				  CPU#1
+    440 	 * // vmalloc() allocates memory

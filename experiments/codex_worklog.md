@@ -222,3 +222,17 @@ wsl -u root -- bash /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze
 
 未验证：实际硬件或模拟器上的无效项缓存行为、编号 14 的动态复现、编号 13 的完整运行时访问时序；动态实验数与复现次数为 null。全程未构建、未联网、未安装软件、未调用其他模型、未 commit/push/切分支。
 
+
+## 2026-11-17：TLB / 缓存钩子第二标注人盲判
+按本次任务特例，仅读取 review.txt、codex_blind/read_source.sh 及其指定提交 df2908090cda 的内核源码；未读取交接文档、进度日志、其他轮次或第一标注人的判据与结果。通过 read_source.sh show/grep64 核查 KSM replace_page、KASAN 影子页安装、per-CPU 虚拟区域分配、RISC-V cacheflush/pgtable/kasan 布局、初始化与异常处理路径。
+输出 experiments/case_taxonomy/tlbhook2_20261117/codex_blind/codex.json：候选 1 不可能（注释命中且实际排除 PMD 大页），候选 2 可能（影子地址未设置延迟刷新标志，per-CPU 路径可能先访问影子）；JSON 解析验证通过，共 2 项。仅静态判断，未构建、未运行复现，动态结果为 null；未联网、未调用其他模型、未修改内核。盲判已完成，后续由任务发起方对照两位标注结果。
+
+## 2026-11-18 Codex：调用上下文 21 条候选第二标注人盲判
+
+- 按本次用户指令限定读取范围，仅读取 ctxeff_20261118/review.txt、codex_blind/read_source.sh，以及该脚本通过 git show/grep 读取的 df2908090cda 内核源码；未读取第一标注人结果、其他轮次、交接文档或进度日志。本条仅追加，不读取既有工作日志。
+- 新建 experiments/case_taxonomy/ctxeff_20261118/codex_blind/codex.json（21 项，逐项两三句理由）和 notes.md（范围及限制）。判断为可能 3 项：4、12、13；不可能 18 项；说不清 0 项。
+- 命令：wsl -u root -- bash /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze/experiments/case_taxonomy/ctxeff_20261118/codex_blind/read_source.sh show <文件> <范围>，以及 grep64 <正则Base64> <源码路径>。核对了页分配、futex、ptrace、AIO、SWIOTLB、休眠、KGDB、大页恢复及 arm64/riscv/sh/arc 架构条件分支和 Kconfig。
+- 关键依据：解锁后调用不能继承关中断；arm64 DEBUG_PAGEALLOC/KFENCE 拆分早退；零 PTE 不触发指令缓存刷新；SH 无 HIGHMEM；SH SMP KGDB 禁用通用缓存刷新；休眠失败清理时仅剩单个在线 CPU。可能项目为 SHX3 SMP AIO 同步刷新，以及 ARC/RISC-V SMP KGDB 普通 IPI 等待。
+- 验证：PowerShell ConvertFrom-Json 成功，确认 21 项编号连续、判断枚举有效且理由非空；未构建、未运行复现、未联网、未调用其他模型。未展开的其他示例调用点未穷举，特别是第 2 项只排除所给连续页分配链，不宣称钩子的所有其他调用安全。
+- 工具问题：首次读取中文编码异常后改 UTF-8；搜索参数生成的 btoa 不可用后改用 PowerShell Base64，均已更正重跑。
+- 停止位置：盲判结果已写完；下一步由用户解除盲判后再进行双人结果比对，本轮不读取或比对其他标注。按本次明确要求追加此日志，未修改交接文档和进度日志。

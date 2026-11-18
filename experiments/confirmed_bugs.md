@@ -60,6 +60,17 @@
 - **上游状态（2026-11-16 联网只读核对）**：**未修**。主线 v7.4-rc3（2026-11-15）、linux-next、akpm/mm 的 `mm-unstable` 和 `mm-new` 里，相关函数都和 v7.3-rc2 一样，没有排队的修复补丁。lore.kernel.org 有人机验证，邮件列表上有没有人报告过、或交过还没进任何树的补丁，没有查到。 另外，主线新加的 `vma_is_mm_backed()` 不拦 DAX 映射，`vma_can_userfault()` 在 WP_ASYNC 下仍放行，触发路径还在（只做了静态核对，没在主线上运行）。
 - **邮件列表核对（2026-11-17，lore.kernel.org）**：没有找到 DAX + uffd-wp 标记的报告或补丁。相关的只有 David Hildenbrand 2025-06-17 的 RFC《mm: compare pfns only if the entry is present when inserting pfns/pages》（https://lore.kernel.org/all/20250617154345.2494405-4-david@redhat.com/ ），它在 `insert_page_into_pte_locked()` 里加了 `|| !pte_present(pteval)` 返回 -EBUSY，当时说法是“预计实践中没造成实际危害，更像清理”，这个改动没有进主线（v7.3-rc2 仍触发 WARN）。即使合入，写缺页也会从 SIGBUS 变成和读缺页一样的无限重试，并不能解决问题。
 - **已报告（2026-11-17 20:17，作者本人发出）**：缺陷报告《[BUG] mm: uffd-wp marker on a DAX file mapping: SIGBUS on write, endless refaults on read》，lore 链接 https://lore.kernel.org/linux-mm/?q=s:%22uffd-wp+marker+on+a+DAX%22（Message-ID 记在外层进度日志）。To：Andrew Morton、David Hildenbrand、Mike Rapoport、Peter Xu；Cc：Dan Williams、Matthew Wilcox、Jan Kara、Alistair Popple、linux-mm、nvdimm、linux-fsdevel、linux-kernel。没有附补丁，等待维护者回复。
+- **维护者已发修复（2026-11-17 23:58）**：userfaultfd 维护者 Mike Rapoport 回复了一个 3 个补丁的系列，收件人是 Andrew Morton、David Hildenbrand，抄送原报告的全部收件人：
+  - 1/3《mm/memory: install new PTEs first in insert_page_into_pte_locked()》：调整代码结构，不改变行为；
+  - **2/3《mm/memory: replace uffd-wp markers in insert_page_into_pte_locked()》**：用新 PTE 替换 uffd-wp 标记，并用 `pte_mkuffd_wp` 保留写保护，正是我们报告里建议的第一种修法。`Fixes: d61ea1cb0095 ("userfaultfd: UFFD_FEATURE_WP_ASYNC")`，**`Reported-by:` 作者本人**，`Closes:` 指向我们的报告；
+  - 3/3《mm/memory: don't upgrade non-present PTEs in insert_page_into_pte_locked()》：同一处 `!pte_none` 写法的另一个变体，guard 标记竞争，`Fixes: f807123d578d`，由维护者自己发现。
+  
+  - 封面信 0/3《mm/memory: fix handling of PTE markers in insert_page_into_pte_locked()》开头写明是我们报告的问题，引用了报告链接；两个问题都在 ext4 dax=always 的模拟 pmem 上复现，并验证了修复。
+  - **2026-11-18 00:22，David Hildenbrand（mm 核心维护者）回复封面信**：他手上有一个补丁，要在 DAX 上**完全禁用 userfaultfd**（原话：“It's completely broken”），本来准备和别的补丁一起发，可以单独发出。这对应我们报告里的第二种修法（在 `vma_can_userfault()` 里拒绝 DAX）。最终合入的可能是 Mike 的修复，也可能是 David 的禁用补丁，或者两者都有。
+  - 2026-11-18 03:31 Mike 回复 David：不需要另发补丁，但 3/3（DAX 上的 MADV_GUARD_INSTALL）与 uffd 无关；04:19 David 回复：明天看 3/3，**1、2 应该改为直接拒绝在 DAX 上注册 uffd**（即我们报告里的第二种修法）。
+  - **2026-11-18 18:03 David Hildenbrand 发出最终修法《[PATCH] mm/userfaultfd: reject DAX mappings》**：在 `vma_can_userfault()` 里对 `vma_is_dax()` 返回 false，让 UFFDIO_REGISTER 失败（EINVAL）；`Fixes: d61ea1cb0095`；**`Reported-by:` 作者本人**（另一位 Reported-by 是 Chris Mason）；`Closes:` 指向我们的报告。说明里还补充了 PAGEMAP_SCAN 的 DAX PMD 写保护、device DAX 的问题。
+  - 同日 18:05 David 对 Mike 的 3/3（DAX 上 guard 标记，由本报告引出）给了 Reviewed-by，并说会收下。
+  状态：修复补丁已发出，带 Reported-by，等待进入 mm 树。合入后补记提交号。
 
 ## B-2026-11-16-2：MGLRU 回收时清 device-exclusive 页表项的访问位，arm64 上把它改成坏交换项（S4，B-2026-11-15-2 的 MGLRU 变体）
 
@@ -104,3 +115,8 @@
 - **上游状态（2026-11-17 联网只读核对）**：**未修**。kernel.googlesource 镜像上的主线 v7.4-rc3、linux-next，以及 akpm/mm 的 `mm-unstable`、`mm-new`、`mm-stable`、`mm-hotfixes-unstable`、`mm-hotfixes-stable`、`mm-everything`：`shmem_allowable_huge_orders()` 的 force 分支仍是 `return READ_ONCE(huge_shmem_orders_inherit);`，没有和 `THP_ORDERS_ALL_FILE_DEFAULT` 求交；`huge_shmem_orders_inherit` 默认仍是 `BIT(HPAGE_PMD_ORDER)`；`MAX_PAGECACHE_ORDER` 的定义和 `lib/xarray.c` 都没变（`xas_split_alloc` 的 WARN 仍在第 1051 行），触发链完整。该函数相对 v7.3-rc2 只多了一处改动：开头的早返回加了 `|| shmem_huge_force`（强制合并忽略 sysfs 配置），不影响缺页路径。邮件列表有没有人报告过、或交过还没进任何树的补丁查不了：lore.kernel.org 是人机验证页（未绕过），WebSearch 工具不可用。
 - **邮件列表核对（2026-11-17，lore.kernel.org，用户在浏览器面板里通过了人机验证）**：没有人报告过这个问题，也没有修它的补丁。注意两处相关的进行中工作：① Luiz Capitulino 的系列《mm: thp: always enable mTHP support》v8 14/14（https://lore.kernel.org/all/752f528f0fed5cdc9de12b54260b0495d4e5a6cb.1789695931.git.luizcap@redhat.com/ ，2026-09-18，还在审）改的就是 force 分支这一行（改成 `& ~disabled_orders`），也没加 `THP_ORDERS_ALL_FILE_DEFAULT`，我们的补丁会和它有上下文冲突；② Baolin Wang 的 `ignore sysfs configs for shmem forced collapse` 已合入，就是上面说的 `|| shmem_huge_force`，与本问题无关。
 - **已报告（2026-11-17 20:16，作者本人用 git send-email 发出）**：补丁《[PATCH] mm: shmem: limit forced anonymous shmem huge orders to MAX_PAGECACHE_ORDER》，lore 链接 https://lore.kernel.org/linux-mm/?q=s:%22limit+forced+anonymous+shmem%22（Message-ID 记在外层进度日志），基于主线 666539eecdf4。To：Hugh Dickins、David Hildenbrand、Andrew Morton；Cc：Baolin Wang、Luiz Capitulino、stable、linux-mm、linux-kernel。等待维护者回复；进入 mm 树或主线后记提交号。
+- **审阅（2026-11-18 10:31）**：shmem 审阅人 Baolin Wang 回复 **“LGTM. Reviewed-by: Baolin Wang”**，同时对 `Assisted-by: LLM` 这一行说 “Please drop this tag.”。这一点与 `Documentation/process/coding-assistants.rst`（要求加 Assisted-by）有冲突，由作者本人决定怎么回复。
+- **v2 已发出（2026-11-18 10:45，作者本人）**：《[PATCH v2] mm: shmem: limit forced anonymous shmem huge orders to MAX_PAGECACHE_ORDER》，删掉 Assisted-by，带 Reviewed-by: Baolin Wang；Luiz Capitulino 回复说他的 mTHP 系列会晚于本补丁合入。Message-ID 记在外层进度日志。等待 Andrew 收进 mm 树。
+- **v2 审阅（2026-11-18 17:31）**：David Hildenbrand 建议改写法：force 分支里改为 `mask = READ_ONCE(huge_shmem_orders_inherit);` 并 goto 到函数末尾的 `return THP_ORDERS_ALL_FILE_DEFAULT & mask;`（“Avoiding the goto means more churn I guess”）。需要发 v3。
+- **v3 已发出（2026-11-18 18:22，作者本人）**：按 David 的建议改用 goto 写法（Baolin 回复赞同），保留 Baolin 的 Reviewed-by；发送前用 `s6v3_20261118` 重测：原内核 3/3 复现，v3 内核 0/3。Message-ID 记在外层进度日志。等待 Andrew 收进 mm 树。
+- **v3 审阅（2026-11-18 18:26）**：David Hildenbrand（shmem 维护者之一）给出 Reviewed-by，并说 “I'll queue this later.”。补丁已有两个 Reviewed-by，维护者表示会收下。

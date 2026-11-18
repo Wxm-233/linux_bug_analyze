@@ -1,0 +1,4 @@
+[
+  {"k":1,"verdict":"不可能","why":"mm/ksm.c:1416 的 pmdp_huge_clear_flush()/set_pmd_at() 只是注释，replace_page 实际在 1421 行排除 PMD 透明大页，并通过 pte_offset_map_lock 取得单页 PTE。1464—1472 行针对旧 PTE 的页框先 flush_cache_page，再 ptep_clear_flush、set_pte_at，操作粒度一致，因此这条候选是词法误报。"},
+  {"k":2,"verdict":"可能","why":"64 位 RISC-V 开启 KASAN_VMALLOC 时，影子区不在 flush_cache_vmap 接受的 vmalloc/module/vmemmap 区间，shadow.c:317 安装 PTE 后的 428 行因而不会设置 new_valid_map_cpus，set_pte_at 本身也不刷新 TLB。具体可由 pcpu_get_vm_areas（mm/vmalloc.c:5124—5145）建立影子页后直接 kasan_unpoison_vmap_areas 访问影子内存触发，此时实际 per-CPU 映射尚未建立，没有必经的普通 vmalloc 映射刷新兜底。若处理器缓存了无效项且当前 CPU 的 new_valid_map_cpus 位已清零，entry.S:70—82 不会执行 sfence.vma，64 位 fault.c:311 又不走 vmalloc_fault 补刷，合法的影子访问可能被当作无法处理的内核缺页而 Oops。"}
+]

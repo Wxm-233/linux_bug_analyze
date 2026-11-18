@@ -1,0 +1,26 @@
+{
+ "_note": "s6v3_20261118: F6v3 = shmem patch v3 as sent upstream (mask + goto out); precheck regex over the whole shmem.i (region_start would hit the header prototype first)",
+ "F6v3": {
+  "arm64": {
+   "edits": [
+    {
+     "file": "mm/shmem.c",
+     "anchor": "\tif (shmem_huge == SHMEM_HUGE_FORCE)\n\t\treturn READ_ONCE(huge_shmem_orders_inherit);\n",
+     "new": "\tif (shmem_huge == SHMEM_HUGE_FORCE) {\n\t\tmask = READ_ONCE(huge_shmem_orders_inherit);\n\t\tgoto out;\n\t}\n",
+     "region_start": "unsigned long shmem_allowable_huge_orders("
+    },
+    {
+     "file": "mm/shmem.c",
+     "anchor": "\tif (global_orders > 0)\n\t\tmask |= READ_ONCE(huge_shmem_orders_inherit);\n\n\treturn THP_ORDERS_ALL_FILE_DEFAULT & mask;\n}\n",
+     "new": "\tif (global_orders > 0)\n\t\tmask |= READ_ONCE(huge_shmem_orders_inherit);\n\nout:\n\treturn THP_ORDERS_ALL_FILE_DEFAULT & mask;\n}\n",
+     "region_start": "unsigned long shmem_allowable_huge_orders("
+    }
+   ],
+   "precheck": {
+    "obj": "mm/shmem.o",
+    "regex": "huge_shmem_orders_inherit[\\s\\S]{0,2000}?\\bout:\\s*return\\b",
+    "absent": false
+   }
+  }
+ }
+}
