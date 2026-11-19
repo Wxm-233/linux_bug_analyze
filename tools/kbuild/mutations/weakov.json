@@ -1,0 +1,20 @@
+{
+ "_note": "weakov_20261118: W1 = arch_unregister_cpu as before 18a4e5cf633f (three early returns that skip unregister_cpu), applied on df2908090cda",
+ "W1": {
+  "arm64": {
+   "edits": [
+    {
+     "file": "arch/arm64/kernel/smp.c",
+     "anchor": "\tunsigned long long sta;\n\tacpi_status status;\n\n\tstatus = acpi_evaluate_integer(acpi_handle, \"_STA\", NULL, &sta);\n\tif (!ACPI_FAILURE(status) &&\n\t    cpu_present(cpu) && !(sta & ACPI_STA_DEVICE_PRESENT))\n\t\tpr_err_once(\"Changing CPU present bit is not supported\\n\");\n\n\tunregister_cpu(c);\n",
+     "new": "\tacpi_status status;\n\tunsigned long long sta;\n\n\tif (!acpi_handle) {\n\t\tpr_err_once(\"Removing a CPU without associated ACPI handle\\n\");\n\t\treturn;\n\t}\n\n\tstatus = acpi_evaluate_integer(acpi_handle, \"_STA\", NULL, &sta);\n\tif (ACPI_FAILURE(status))\n\t\treturn;\n\n\t/* For now do not allow anything that looks like physical CPU HP */\n\tif (cpu_present(cpu) && !(sta & ACPI_STA_DEVICE_PRESENT)) {\n\t\tpr_err_once(\"Changing CPU present bit is not supported\\n\");\n\t\treturn;\n\t}\n\n\tunregister_cpu(c);\n",
+     "region_start": "void arch_unregister_cpu(int cpu)\n{"
+    }
+   ],
+   "precheck": {
+    "obj": "arch/arm64/kernel/smp.o",
+    "regex": "Removing a CPU without associated ACPI handle",
+    "absent": false
+   }
+  }
+ }
+}

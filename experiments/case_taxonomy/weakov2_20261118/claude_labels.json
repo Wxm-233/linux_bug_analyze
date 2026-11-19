@@ -1,0 +1,10 @@
+[
+ {"n": 1, "label": "yes", "effect": "注销 CPU 设备（unregister_cpu）", "reason": "arm64 覆盖实现在没有 ACPI handle、_STA 求值失败、固件报告已移除三种情况下提前返回，不注销设备；公共层 acpi_processor_post_eject 不看结果继续清理。修复后总是调用 unregister_cpu。（这是开发样本，不计入召回）"},
+ {"n": 2, "label": "no", "effect": "从 execmem 分配一页指令内存", "reason": "缺的是 arm64 自己需要的 set_memory_rox（给线性映射别名设权限），通用实现本身也不做这一步；覆盖实现并没有跳过通用实现的工作。"},
+ {"n": 3, "label": "no", "effect": "按大页大小返回可跳过的地址掩码", "reason": "riscv 覆盖实现漏了 NAPOT 这种大页尺寸的分支，是架构特有的情况没处理；通用实现的“效果”只是取 huge_page_size，修复也不是补上通用实现做的事。"},
+ {"n": 4, "label": "no", "effect": "在 sysfs 报告“Not affected”", "reason": "修的是 x86 漏洞状态的报告内容（增加 unknown），与通用实现所做的事无关。"},
+ {"n": 5, "label": "no", "effect": "释放 JIT 映像并释放 bpf_prog", "reason": "修复前 x86 用的就是通用实现，问题出在通用实现对未 finalize 的 prog_pack 处理不对；修复是新加一个覆盖实现，不是覆盖实现跳过了通用实现的工作。"},
+ {"n": 6, "label": "no", "effect": "用 vmalloc 分配模块内存", "reason": "只是给第一次尝试加 __GFP_NOWARN，去掉多余告警，没有路径少做分配。"},
+ {"n": 7, "label": "no", "effect": "调用 kexec_image_post_load_cleanup_default 做默认清理", "reason": "修复前 s390 没有覆盖实现，用的是通用实现；漏的是 s390 自己的 ipl 缓冲区释放。修复新增覆盖实现，先释放架构缓冲区再调默认清理。"},
+ {"n": 8, "label": "no", "effect": "分配可执行内存给 BPF JIT", "reason": "改的是分配范围（去掉 128MB 区域限制），两种写法都完成了分配，不是路径少做事。"}
+]

@@ -236,3 +236,11 @@ wsl -u root -- bash /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze
 - 验证：PowerShell ConvertFrom-Json 成功，确认 21 项编号连续、判断枚举有效且理由非空；未构建、未运行复现、未联网、未调用其他模型。未展开的其他示例调用点未穷举，特别是第 2 项只排除所给连续页分配链，不宣称钩子的所有其他调用安全。
 - 工具问题：首次读取中文编码异常后改 UTF-8；搜索参数生成的 btoa 不可用后改用 PowerShell Base64，均已更正重跑。
 - 停止位置：盲判结果已写完；下一步由用户解除盲判后再进行双人结果比对，本轮不读取或比对其他标注。按本次明确要求追加此日志，未修改交接文档和进度日志。
+## 2026-11-19 weakov2 历史修复提交盲判（Codex，第二标注人）
+
+- 按本次任务定义，逐个阅读 `experiments/case_taxonomy/weakov2_20261118/packets/001.md` 至 `008.md`，判断修复前的架构覆盖实现是否遗漏公共调用方依赖的通用效果，并由此次修复补齐或报告失败。
+- 共标注 8 个样本：yes 1 个（001），no 7 个（002～008），unsure 0 个。每项写明通用效果及一两句判定理由。
+- 结果写入 `experiments/case_taxonomy/weakov2_20261118/codex_labels.json`。已解析 JSON，检查编号与 packets 完整且唯一对应、字段及标签合法、effect/reason 非空，全部通过。
+- 首次校验脚本用 @() 包裹 ConvertFrom-Json，在本机 PowerShell 中把整个 JSON 数组作为一个元素，错误地报告样本数量不符；已修正校验脚本并重跑通过，未改动标注内容。
+- 判定依据为 packets 材料；未读取本轮分析器结果文件及另一位标注人的标签，未运行 weakov2.py，未查询完整 git 提交、未联网、未运行内核实验。未计算双人一致率或分析器召回率。
+- 仅新建 codex_labels.json 并追加本记录；依本次明确要求，不修改 packets、外层交接文档、外层进度日志或其他文件。

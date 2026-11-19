@@ -70,7 +70,17 @@
   - 2026-11-18 03:31 Mike 回复 David：不需要另发补丁，但 3/3（DAX 上的 MADV_GUARD_INSTALL）与 uffd 无关；04:19 David 回复：明天看 3/3，**1、2 应该改为直接拒绝在 DAX 上注册 uffd**（即我们报告里的第二种修法）。
   - **2026-11-18 18:03 David Hildenbrand 发出最终修法《[PATCH] mm/userfaultfd: reject DAX mappings》**：在 `vma_can_userfault()` 里对 `vma_is_dax()` 返回 false，让 UFFDIO_REGISTER 失败（EINVAL）；`Fixes: d61ea1cb0095`；**`Reported-by:` 作者本人**（另一位 Reported-by 是 Chris Mason）；`Closes:` 指向我们的报告。说明里还补充了 PAGEMAP_SCAN 的 DAX PMD 写保护、device DAX 的问题。
   - 同日 18:05 David 对 Mike 的 3/3（DAX 上 guard 标记，由本报告引出）给了 Reviewed-by，并说会收下。
-  状态：修复补丁已发出，带 Reported-by，等待进入 mm 树。合入后补记提交号。
+  - **2026-11-18 晚的进展**：
+    - David 的《mm/userfaultfd: reject DAX mappings》又收到两个 Reviewed-by：Gregory Price（22:12）、Mike Rapoport（22:58）。
+    - Mike 的 3/3《mm/memory: don't upgrade non-present PTEs in insert_page_into_pte_locked()》：
+      - 22:27 Lorenzo Stoakes 给了 Reviewed-by；
+      - 22:47 David 发现它依赖 Andrew 树里一些不该有的改动；
+      - **22:56 David 只把 3/3 收进 mm/core.git 的 `core-7.5.misc` 分支（提交 3fa9917a，可能因变基而变），1/3、2/3 没收**，uffd 这一侧由“拒绝 DAX”补丁处理。
+    - 23:59 Sashiko AI 审阅机器人对 2/3、3/3 各提了一个中等问题：
+      - 读缺页先把 uffd-wp 标记换成带写保护位的只读 present 项，并发的写缺页随后看到 present 项，`maybe_mkwrite()` 置了可写位，却没检查 uffd-wp；
+      - 结果是页表项同时可写又带写保护位，触发 page_table_check 的 WARN，WP_ASYNC 写跟踪失效。
+      - 这个场景要求 DAX 上能注册 uffd，David 的拒绝补丁合入后不会出现；2/3 本来也没被收。（同一个审阅机器人也是 18a4e5cf 那个 arm64 缺陷的发现者。）
+  状态：两个修复都有 Reviewed-by。guard 标记那半已进 mm/core 分支；“拒绝 DAX”补丁等待收进树。合入主线后补记提交号。
 
 ## B-2026-11-16-2：MGLRU 回收时清 device-exclusive 页表项的访问位，arm64 上把它改成坏交换项（S4，B-2026-11-15-2 的 MGLRU 变体）
 
