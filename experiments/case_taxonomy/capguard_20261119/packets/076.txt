@@ -1,0 +1,55 @@
+commit 0ed1325967ab
+2020-02-04|mm/mmu_gather: invalidate TLB correctly on batch allocation failure and flush
+
+mm/mmu_gather: invalidate TLB correctly on batch allocation failure and flush
+
+Architectures for which we have hardware walkers of Linux page table
+should flush TLB on mmu gather batch allocation failures and batch flush.
+Some architectures like POWER supports multiple translation modes (hash
+and radix) and in the case of POWER only radix translation mode needs the
+above TLBI.  This is because for hash translation mode kernel wants to
+avoid this extra flush since there are no hardware walkers of linux page
+table.  With radix translation, the hardware also walks linux page table
+and with that, kernel needs to make sure to TLB invalidate page walk cache
+before page table pages are freed.
+
+More details in commit d86564a2f085 ("mm/tlb, x86/mm: Support invalidating
+TLB caches for RCU_TABLE_FREE")
+
+The changes to sparc are to make sure we keep the old behavior since we
+are now removing HAVE_RCU_TABLE_NO_INVALIDATE.  The default value for
+tlb_needs_table_invalidate is to always force an invalidate and sparc can
+avoid the table invalidate.  Hence we define tlb_needs_table_invalidate to
+false for sparc architecture.
+
+Fixes: a46cc7a90fd8 ("powerpc/mm/radix: Improve TLB/PWC flushes")
+
+---- diff (matched files only)
+diff --git a/mm/mmu_gather.c b/mm/mmu_gather.c
+index 7d70e5c78f97..7c1b8f67af7b 100644
+--- a/mm/mmu_gather.c
++++ b/mm/mmu_gather.c
+@@ -102,14 +102,14 @@ bool __tlb_remove_page_size(struct mmu_gather *tlb, struct page *page, int page_
+  */
+ static inline void tlb_table_invalidate(struct mmu_gather *tlb)
+ {
+-#ifndef CONFIG_HAVE_RCU_TABLE_NO_INVALIDATE
+-	/*
+-	 * Invalidate page-table caches used by hardware walkers. Then we still
+-	 * need to RCU-sched wait while freeing the pages because software
+-	 * walkers can still be in-flight.
+-	 */
+-	tlb_flush_mmu_tlbonly(tlb);
+-#endif
++	if (tlb_needs_table_invalidate()) {
++		/*
++		 * Invalidate page-table caches used by hardware walkers. Then
++		 * we still need to RCU-sched wait while freeing the pages
++		 * because software walkers can still be in-flight.
++		 */
++		tlb_flush_mmu_tlbonly(tlb);
++	}
+ }
+ 
+ static void tlb_remove_table_smp_sync(void *arg)
+

@@ -1,0 +1,77 @@
+commit b8b4ead11e9d
+2016-03-25|drivers/input: eliminate INPUT_COMPAT_TEST macro
+
+drivers/input: eliminate INPUT_COMPAT_TEST macro
+
+INPUT_COMPAT_TEST became much simpler after commit f4056b52845283
+("input: redefine INPUT_COMPAT_TEST as in_compat_syscall()") so we can
+cleanly eliminate it altogether.
+
+---- diff (matched files only)
+diff --git a/drivers/input/input-compat.c b/drivers/input/input-compat.c
+index 64ca7113ff28..d84d20b9cec0 100644
+--- a/drivers/input/input-compat.c
++++ b/drivers/input/input-compat.c
+@@ -17,7 +17,7 @@
+ int input_event_from_user(const char __user *buffer,
+ 			  struct input_event *event)
+ {
+-	if (INPUT_COMPAT_TEST && !COMPAT_USE_64BIT_TIME) {
++	if (in_compat_syscall() && !COMPAT_USE_64BIT_TIME) {
+ 		struct input_event_compat compat_event;
+ 
+ 		if (copy_from_user(&compat_event, buffer,
+@@ -41,7 +41,7 @@ int input_event_from_user(const char __user *buffer,
+ int input_event_to_user(char __user *buffer,
+ 			const struct input_event *event)
+ {
+-	if (INPUT_COMPAT_TEST && !COMPAT_USE_64BIT_TIME) {
++	if (in_compat_syscall() && !COMPAT_USE_64BIT_TIME) {
+ 		struct input_event_compat compat_event;
+ 
+ 		compat_event.time.tv_sec = event->time.tv_sec;
+@@ -65,7 +65,7 @@ int input_event_to_user(char __user *buffer,
+ int input_ff_effect_from_user(const char __user *buffer, size_t size,
+ 			      struct ff_effect *effect)
+ {
+-	if (INPUT_COMPAT_TEST) {
++	if (in_compat_syscall()) {
+ 		struct ff_effect_compat *compat_effect;
+ 
+ 		if (size != sizeof(struct ff_effect_compat))
+diff --git a/drivers/input/input.c b/drivers/input/input.c
+index 880605959aa6..b87ffbd4547d 100644
+--- a/drivers/input/input.c
++++ b/drivers/input/input.c
+@@ -1015,7 +1015,7 @@ static int input_bits_to_string(char *buf, int buf_size,
+ {
+ 	int len = 0;
+ 
+-	if (INPUT_COMPAT_TEST) {
++	if (in_compat_syscall()) {
+ 		u32 dword = bits >> 32;
+ 		if (dword || !skip_empty)
+ 			len += snprintf(buf, buf_size, "%x ", dword);
+diff --git a/drivers/input/misc/uinput.c b/drivers/input/misc/uinput.c
+index 4eb9e4d94f46..abe1a927b332 100644
+--- a/drivers/input/misc/uinput.c
++++ b/drivers/input/misc/uinput.c
+@@ -664,7 +664,7 @@ struct uinput_ff_upload_compat {
+ static int uinput_ff_upload_to_user(char __user *buffer,
+ 				    const struct uinput_ff_upload *ff_up)
+ {
+-	if (INPUT_COMPAT_TEST) {
++	if (in_compat_syscall()) {
+ 		struct uinput_ff_upload_compat ff_up_compat;
+ 
+ 		ff_up_compat.request_id = ff_up->request_id;
+@@ -695,7 +695,7 @@ static int uinput_ff_upload_to_user(char __user *buffer,
+ static int uinput_ff_upload_from_user(const char __user *buffer,
+ 				      struct uinput_ff_upload *ff_up)
+ {
+-	if (INPUT_COMPAT_TEST) {
++	if (in_compat_syscall()) {
+ 		struct uinput_ff_upload_compat ff_up_compat;
+ 
+ 		if (copy_from_user(&ff_up_compat, buffer,
+

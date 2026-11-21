@@ -1,0 +1,266 @@
+commit 4049866f0913
+2017-10-07|drm/i915/selftests: huge page tests
+
+drm/i915/selftests: huge page tests
+
+v2: mock test page support configurations and add MI_STORE_DWORD test
+
+v3: run all mockable huge page tests on all platforms via the mock_device
+
+v4: add pin_update regression test
+    various improvements suggested by Chris
+
+v5: fix issues reported by kbuild
+    test single sg spanning multiple page sizes
+    don't explode when running the live-tests through the appgtt
+
+v6: lots of improvements from Chris
+
+v7: run on each engine for igt_write_huge
+    add simple tmpfs fallback test
+
+v8: size_t is bad
+    don't break the i386 build
+
+---- diff (matched files only)
+diff --git a/drivers/gpu/drm/i915/selftests/huge_pages.c b/drivers/gpu/drm/i915/selftests/huge_pages.c
+new file mode 100644
+index 000000000000..b8495882e5b0
+--- /dev/null
++++ b/drivers/gpu/drm/i915/selftests/huge_pages.c
+@@ -0,0 +1,1715 @@
++/*
++ * Copyright © 2017 Intel Corporation
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice (including the next
++ * paragraph) shall be included in all copies or substantial portions of the
++ * Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ *
++ */
++
++#include "../i915_selftest.h"
++
++#include <linux/prime_numbers.h>
++
++#include "mock_drm.h"
++
++static const unsigned int page_sizes[] = {
++	I915_GTT_PAGE_SIZE_2M,
++	I915_GTT_PAGE_SIZE_64K,
++	I915_GTT_PAGE_SIZE_4K,
++};
++
++static unsigned int get_largest_page_size(struct drm_i915_private *i915,
++					  u64 rem)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(page_sizes); ++i) {
++		unsigned int page_size = page_sizes[i];
++
++		if (HAS_PAGE_SIZES(i915, page_size) && rem >= page_size)
++			return page_size;
++	}
++
++	return 0;
++}
++
++static void huge_pages_free_pages(struct sg_table *st)
++{
++	struct scatterlist *sg;
++
++	for (sg = st->sgl; sg; sg = __sg_next(sg)) {
++		if (sg_page(sg))
++			__free_pages(sg_page(sg), get_order(sg->length));
++	}
++
++	sg_free_table(st);
++	kfree(st);
++}
++
++static int get_huge_pages(struct drm_i915_gem_object *obj)
++{
++#define GFP (GFP_KERNEL | __GFP_NOWARN | __GFP_NORETRY)
++	unsigned int page_mask = obj->mm.page_mask;
++	struct sg_table *st;
++	struct scatterlist *sg;
++	unsigned int sg_mask;
++	u64 rem;
++
++	st = kmalloc(sizeof(*st), GFP);
++	if (!st)
++		return -ENOMEM;
++
++	if (sg_alloc_table(st, obj->base.size >> PAGE_SHIFT, GFP)) {
++		kfree(st);
++		return -ENOMEM;
++	}
++
++	rem = obj->base.size;
++	sg = st->sgl;
++	st->nents = 0;
++	sg_mask = 0;
++
++	/*
++	 * Our goal here is simple, we want to greedily fill the object from
++	 * largest to smallest page-size, while ensuring that we use *every*
++	 * page-size as per the given page-mask.
++	 */
++	do {
++		unsigned int bit = ilog2(page_mask);
++		unsigned int page_size = BIT(bit);
++		int order = get_order(page_size);
++
++		do {
++			struct page *page;
++
++			GEM_BUG_ON(order >= MAX_ORDER);
++			page = alloc_pages(GFP | __GFP_ZERO, order);
++			if (!page)
++				goto err;
++
++			sg_set_page(sg, page, page_size, 0);
++			sg_mask |= page_size;
++			st->nents++;
++
++			rem -= page_size;
++			if (!rem) {
++				sg_mark_end(sg);
++				break;
++			}
++
++			sg = __sg_next(sg);
++		} while ((rem - ((page_size-1) & page_mask)) >= page_size);
++
++		page_mask &= (page_size-1);
++	} while (page_mask);
++
++	if (i915_gem_gtt_prepare_pages(obj, st))
++		goto err;
++
++	obj->mm.madv = I915_MADV_DONTNEED;
++
++	GEM_BUG_ON(sg_mask != obj->mm.page_mask);
++	__i915_gem_object_set_pages(obj, st, sg_mask);
++
++	return 0;
++
++err:
++	sg_set_page(sg, NULL, 0, 0);
++	sg_mark_end(sg);
++	huge_pages_free_pages(st);
++
++	return -ENOMEM;
++}
++
++static void put_huge_pages(struct drm_i915_gem_object *obj,
++			   struct sg_table *pages)
++{
++	i915_gem_gtt_finish_pages(obj, pages);
++	huge_pages_free_pages(pages);
++
++	obj->mm.dirty = false;
++	obj->mm.madv = I915_MADV_WILLNEED;
++}
++
++static const struct drm_i915_gem_object_ops huge_page_ops = {
++	.flags = I915_GEM_OBJECT_HAS_STRUCT_PAGE |
++		 I915_GEM_OBJECT_IS_SHRINKABLE,
++	.get_pages = get_huge_pages,
++	.put_pages = put_huge_pages,
++};
++
++static struct drm_i915_gem_object *
++huge_pages_object(struct drm_i915_private *i915,
++		  u64 size,
++		  unsigned int page_mask)
++{
++	struct drm_i915_gem_object *obj;
++
++	GEM_BUG_ON(!size);
++	GEM_BUG_ON(!IS_ALIGNED(size, BIT(__ffs(page_mask))));
++
++	if (size >> PAGE_SHIFT > INT_MAX)
++		return ERR_PTR(-E2BIG);
++
++	if (overflows_type(size, obj->base.size))
++		return ERR_PTR(-E2BIG);
++
++	obj = i915_gem_object_alloc(i915);
++	if (!obj)
++		return ERR_PTR(-ENOMEM);
++
++	drm_gem_private_object_init(&i915->drm, &obj->base, size);
++	i915_gem_object_init(obj, &huge_page_ops);
++
++	obj->base.write_domain = I915_GEM_DOMAIN_CPU;
++	obj->base.read_domains = I915_GEM_DOMAIN_CPU;
++	obj->cache_level = I915_CACHE_NONE;
++
++	obj->mm.page_mask = page_mask;
++
++	return obj;
++}
++
++static int fake_get_huge_pages(struct drm_i915_gem_object *obj)
++{
++	struct drm_i915_private *i915 = to_i915(obj->base.dev);
++	const u64 max_len = rounddown_pow_of_two(UINT_MAX);
++	struct sg_table *st;
++	struct scatterlist *sg;
++	unsigned int sg_mask;
++	u64 rem;
++
++	st = kmalloc(sizeof(*st), GFP);
++	if (!st)
++		return -ENOMEM;
++
++	if (sg_alloc_table(st, obj->base.size >> PAGE_SHIFT, GFP)) {
++		kfree(st);
++		return -ENOMEM;
++	}
++
++	/* Use optimal page sized chunks to fill in the sg table */
++	rem = obj->base.size;
++	sg = st->sgl;
++	st->nents = 0;
++	sg_mask = 0;
++	do {
++		unsigned int page_size = get_largest_page_size(i915, rem);
++		unsigned int len = min(page_size * div_u64(rem, page_size),
++				       max_len);
++
++		GEM_BUG_ON(!page_size);
++
++		sg->offset = 0;
++		sg->length = len;
++		sg_dma_len(sg) = len;
++		sg_dma_address(sg) = page_size;
++
++		sg_mask |= len;
++
++		st->nents++;
++
++		rem -= len;
++		if (!rem) {
++			sg_mark_end(sg);
++			break;
++		}
++
++		sg = sg_next(sg);
++	} while (1

@@ -1,0 +1,52 @@
+commit 787d563b8642
+2020-06-10|mm/debug_vm_pgtable: fix kernel crash by checking for THP support
+
+mm/debug_vm_pgtable: fix kernel crash by checking for THP support
+
+Architectures can have CONFIG_TRANSPARENT_HUGEPAGE enabled but no THP
+support enabled based on platforms.  For ex: with 4K PAGE_SIZE ppc64
+supports THP only with radix translation.
+
+This results in below crash when running with hash translation and 4K
+PAGE_SIZE.
+
+    kernel BUG at arch/powerpc/include/asm/book3s/64/hash-4k.h:140!
+    cpu 0x61: Vector: 700 (Program Check) at [c000000ff948f860]
+        pc: debug_vm_pgtable+0x480/0x8b0
+        lr: debug_vm_pgtable+0x474/0x8b0
+    ...
+        debug_vm_pgtable+0x374/0x8b0 (unreliable)
+        do_one_initcall+0x98/0x4f0
+        kernel_init_freeable+0x330/0x3fc
+        kernel_init+0x24/0x148
+
+Check for THP support correctly
+
+Fixes: 399145f9eb6c ("mm/debug: add tests validating architecture page table helpers")
+
+---- diff (matched files only)
+diff --git a/mm/debug_vm_pgtable.c b/mm/debug_vm_pgtable.c
+index 9ec59c38d6a2..e45623016aea 100644
+--- a/mm/debug_vm_pgtable.c
++++ b/mm/debug_vm_pgtable.c
+@@ -60,6 +60,9 @@ static void __init pmd_basic_tests(unsigned long pfn, pgprot_t prot)
+ {
+ 	pmd_t pmd = pfn_pmd(pfn, prot);
+ 
++	if (!has_transparent_hugepage())
++		return;
++
+ 	WARN_ON(!pmd_same(pmd, pmd));
+ 	WARN_ON(!pmd_young(pmd_mkyoung(pmd_mkold(pmd))));
+ 	WARN_ON(!pmd_dirty(pmd_mkdirty(pmd_mkclean(pmd))));
+@@ -79,6 +82,9 @@ static void __init pud_basic_tests(unsigned long pfn, pgprot_t prot)
+ {
+ 	pud_t pud = pfn_pud(pfn, prot);
+ 
++	if (!has_transparent_hugepage())
++		return;
++
+ 	WARN_ON(!pud_same(pud, pud));
+ 	WARN_ON(!pud_young(pud_mkyoung(pud_mkold(pud))));
+ 	WARN_ON(!pud_write(pud_mkwrite(pud_wrprotect(pud))));
+

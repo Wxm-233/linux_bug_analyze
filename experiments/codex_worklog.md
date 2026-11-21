@@ -244,3 +244,73 @@ wsl -u root -- bash /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze
 - 首次校验脚本用 @() 包裹 ConvertFrom-Json，在本机 PowerShell 中把整个 JSON 数组作为一个元素，错误地报告样本数量不符；已修正校验脚本并重跑通过，未改动标注内容。
 - 判定依据为 packets 材料；未读取本轮分析器结果文件及另一位标注人的标签，未运行 weakov2.py，未查询完整 git 提交、未联网、未运行内核实验。未计算双人一致率或分析器召回率。
 - 仅新建 codex_labels.json 并追加本记录；依本次明确要求，不修改 packets、外层交接文档、外层进度日志或其他文件。
+
+### 2026-11-19 Codex：110个内核修复提交第二标注人盲判
+
+独立阅读分析集44个、封存集66个修复提交的完整补丁，并按需只读同版本内核源码，完成中文标签；核对两份JSON的结构、全部编号与12位提交号，覆盖数分别为44和66。输出位于 `experiments/case_taxonomy/heldout2_20261119/codex_blind/codex_label_analysis.json`、`codex_label_sealed.json`；同目录 `notes.md` 记录判据SHA256及分析集疑难判断，`validation.json` 保存校验结果。
+
+
+## 2026-11-19 Codex：线性映射接口历史提交分类盲判（第二标注人）
+
+- 按用户给定定义，逐份阅读 experiments/case_taxonomy/linmap_20261119/packets/001.txt 至 080.txt，完成全部 80 个历史提交的独立分类，逐项填写 n、label、addr 和一两句中文理由。
+- 分类数量：yes 25、no 53、unsure 2（027、041）。027 无法确认原有驱动是否确实把 vmalloc/SG 缓冲区送入默认页回调；041 主要修复调试条目泄漏，材料未明确其余待检查地址的非线性来源。新增 vmalloc/kmap 支持、原本已正确分流的重构、改名和格式调整均按本次定义区分。
+- 补充材料仅用本地只读 git show：007、027、031、032（地址转换相关上下文）、041、061，以及 031 提交说明所引用的 515ce6061312。未读取 linmap_20261119 下的 claude_labels.json、mined.json、head*、dev* 或 *.log，未运行 linmap.py，未查看或比较分析器结果和另一位标注人的结论。
+- 写入文件：D:\homework\software\linux_bug_analyze\linux_bug_analyze\experiments\case_taxonomy\linmap_20261119\codex_labels.json；本记录仅追加于 D:\homework\software\linux_bug_analyze\linux_bug_analyze\experiments\codex_worklog.md。遵循本次用户要求，不修改外层交接文档、进度日志、判据或其他文件。
+- 核对：JSON 可解析，内容与独立标注逐项一致；编号为整数且 1～80 各出现一次，标签及地址类别合法，80 项理由齐全。已比对全部 80 个 packet 的 SHA256，材料未改变；工作记录按追加方式写入。未构建或运行内核，未运行仓库测试，也未做标注一致性统计。
+- 操作说明：最初读取中文文档时默认解码不正确，已显式按 UTF-8 重读；少数只读 WSL 命令被启动警告影响 PowerShell 返回状态，后续显式传回原生 LASTEXITCODE，确认正常读取。
+- 停点：80 项标注全部完成。后续由主标注人或用户进行双人一致性计算和争议裁定；本轮保持盲判，不开展结果比对。
+
+## 2026-11-19 20:46 Codex：capguard 两部分独立标注（第二标注人）
+
+- 本次按用户直接给出的判定口径工作：历史提交只有修复既有的“架构能力缺失仍执行依赖操作／误认静默成功”，并补上相应判断才标 yes。新增功能、自测新增、搬迁重命名、compat ABI 转换、按架构需求补资源或维护操作等不据此标 yes。当前候选同时检查可达性、上游门控、查询／清理语义。
+- 写入且仅写入以下三个文件：
+  - experiments/case_taxonomy/capguard_20261119/codex_labels.json（新建）
+  - experiments/case_taxonomy/capguard_20261119/codex_review.json（新建）
+  - experiments/codex_worklog.md（本条追加）
+  本次用户明确指定以上输出并禁止修改其他文件，因此没有更新外层进度日志、交接文档，也没有新建 criteria、脚本或内核文件。
+- 读取边界的偏差如实说明：开头按通用 AGENTS.md 的启动要求读取了根 AGENTS.md、外层 ../交接文档.md 和 ../进度日志.md 最后 180 行，输出编码异常且被截断；这超出了本次“只看 packets/ 和 review/ 材料”的范围。后续判断以这 117 个 packet、11 个 review 和授权的 Git 源码为依据。没有读取 capguard_20261119 下的 claude_*.json、mined.json、head*、dev*、*.log、adjudication.json，没有运行 capguard.py，没有对照或裁决其他标注人的结果。
+- 过程：通过 PowerShell Get-Content -Encoding UTF8 分批查看 packets/001.txt 至 117.txt 和 review/R01.txt 至 R11.txt；材料中若节选未显示判断函数，使用 wsl.exe -u root -- git -C /root/repos/linux show 补查相应提交。没有联网、下载、安装、调用模型接口、构建或运行内核，没有 commit/push/切分支。
+- 历史补查：0105b0562a5e:io_uring/wait.c；474fe91f213a:mm/hugetlb_cma.c；c43203154d8a:io_uring/register.c；f2542a3be327:drivers/scsi/scsi_ioctl.c；f05916281fd7:drivers/staging/vc04_services/interface/vchiq_arm/vchiq_dev.c；05289402d717:mm/debug_vm_pgtable.c；4049866f0913:drivers/gpu/drm/i915/selftests/huge_pages.c；02b15e343aee:drivers/mtd/chips/cfi_cmdset_0002.c；另查看 d5aad4c2ca05、348ad1606f4c 的完整补丁，以及 1da177e4c3f4:drivers/mtd/chips/cfi_cmdset_0001.c 中的中断查询。补查主要用于区分准备性抽象和实际修复、补齐 pred 名称。
+- 当前源码核对均固定在 df2908090cda，使用 git show <版本>:<路径>：arch/x86/events/core.c；kernel/power/snapshot.c；mm/execmem.c；arch/arm64/mm/pageattr.c；arch/arm64/Kconfig；arch/arm64/kernel/module.c；mm/hugetlb.c；mm/secretmem.c；mm/hugetlb_sysfs.c；mm/Kconfig；arch/Kconfig；include/linux/hugetlb.h；arch/powerpc/mm/hugetlbpage.c；arch/s390/mm/hugetlbpage.c；arch/x86/mm/hugetlbpage.c；mm/hugetlb_cma.c。
+- 历史结果：117/117，yes=10、no=107、unsure=0。yes 编号：023、049、072、073、086、098、109、110、112、114。每条均包含 n、label、pred、reason，没有留空 pred。
+- 当前结果：11/11，likely=0、unlikely=11、unsure=0。关键依据：
+  - R01：x86 perf_callchain_user 内部已有 nmi_uaccess_okay 门控，返回的是实际取得的部分调用链。
+  - R02/R03：safe_copy_page 只在 kernel_page_present 为假时临时映射并配对撤销；arm64 的能力缺失并不产生相应的解除映射。
+  - R04/R05：代码受 CONFIG_ARCH_HAS_EXECMEM_ROX 保护，当前 arm64 未选择该隐藏配置；R05 还只是错误回滚分支。
+  - R06：MDWE 状态查询，不启用保护。
+  - R07：hugetlb_parse_params 调用的三类参数处理器已有 hugepages_supported 检查；分配器对零 max_huge_pages 返回。
+  - R08/R09：已有大页资源的释放／降级路径，入口和状态由成功初始化建立。
+  - R10：size_to_hstate 是元数据查重；参数调用者检查能力和具体大小，架构路径检查大小支持。
+  - R11：释放已有 secretmem 私有状态，创建和初始化入口已经门控。
+- 文件校验：从落盘 JSON 重新解析，检查连续完整编号（1..117、R01..R11）、允许标签、精确字段集合、非空理由和 pred，128/128 条通过。第一次校验命令对 ConvertFrom-Json 外套 @() 在本机形成嵌套数组，误报 Wrong count；改成直接赋值后重跑通过，输出文件没有因此改判。一次源码切片管道因 Select-Object -First 提前关闭管道返回非零，后改为先完整捕获再筛选，读取成功。
+- codex_labels.json SHA256：50df712bb51c5f90706cbd432279cbe9a5e6fd157a07f060788cc3b7d2038769
+- codex_review.json SHA256：b53c347529fe41203be8171b4e35ff9a1c47773aa9f62e95ff64eafa0ac83860
+- 停点：两份标注完成，等待用户后续比对。下一步可由用户安排与其他标注对照；本轮没有读取其他答案，也没有编译、启动、动态复现或证明这些候选在所有配置下绝对无问题。
+
+
+- 2026-11-20 完成晚期样本独立盲判与根因归并。逐条记录、根因清单和数字汇总存于 experiments/case_taxonomy/effsupply_20261120/sealed_late/。
+
+## 2026-11-20　E-ZERO 第二审查人盲判
+
+读取本轮判据、两份修订和 packets.md，用 WSL git show、git grep 核对 df2908090cda 的函数及辅助实现，读取 6829e274a623、e89f5b370153 等历史提交说明。已写入 effzero_20261120/review/codex_labels.json 和 codex_notes.md，复读 JSON 得 13 项，确认 0、可能 1、排除 9、证据不足 3。第 1、3、4、5 项未完成端到端可达性及影响验证。未构建、未联网、未读另一审查人的判断或封存集，未计算一致率。
+
+- 2026-11-20 完成晚期回放盲判及汇总校验，输出位于 experiments/case_taxonomy/effreplay_20261120/sealed_replay/ 下的 scorer_replay.json 和 summary.json。
+
+## 2026-11-20｜outparam 第二审查人盲判
+
+依据冻结判据、修订和去来源审查材料，核对 9 个代表调用点。通过 WSL 的 git show 检查 df2908090cda 的调用方、辅助函数与宏，并读取三个 defconfig 的相关配置。结果为排除 9 条，其中调用方不依赖 5 条、合法的实现差异 2 条、性质表示不了 2 条。已写入 outparam_20261120/review/codex_labels.json 和 codex_notes.md，回读 JSON 核对了编号和判定数。未构建、未做动态验证、未比对第一审查人的标签。后续由汇总人按 id 对齐两份判定并计算一致率。
+
+## 2026-11-20　firstbreak_20261121 第二标注人盲判
+
+按本次任务覆盖交接流程。读取 criteria.md、collected.json，以 WSL git show 核对 20 个修复及父树行号，并查 arm64 defconfig 编译数据库的 mmu.c 条目。输出本轮 codex_registry.json、codex_notes.md。PowerShell 回读 JSON 校验 21 个样本键、证据字段、首断点及自动化类别。S2/S3/S4/S5/S6 分别 8/2/3/6/2；具备 8、只能人工核验 7、其他 6。历史构建未验证，Poly1305 覆盖未知。未读第一标注结果，未计算一致率。未构建、未联网、未调用其他模型。
+
+## evcard_20261121 第二审查（盲判）
+读取 criteria.md、review/packets.md，以 git show、git grep 核对 df2908090cda 的类型、配置依赖和调用点。新增 review/codex_review.json 与 review/codex_notes.md；用 ConvertFrom-Json 校验序号 1–24。完整线索 1，未决 2，排除 21，未知 0。JSON SHA256 为 4F3B1AB4698C6C0082D6E755761B70C9238951844D9BE35210910A35AAA21B90。构建 0，其他模型调用 0。未做运行验证或双审裁决。
+
+## 2026-11-20 incscan 第二审查人盲审
+
+判据 criteria.md 的 SHA256 为 8B542480FF1D2050ED39E04F132B6EC89189469E759D208E124C79C51481D670。读取本轮 packets.md，用 git show、git grep 核对 aebb7274476403040d582c61478df8f4a7bf9cd3 的源码，写入 review/codex_review.json 和 review/codex_notes.md。JSON 回读核对 1–16 号，完整线索 1 条（第 1 条），排除 15 条，未决与未知均为 0。未构建、未运行测试、未查看第一审查人结论；两人一致率待盲审结束后另算。
+
+2026-11-21　完成晚期候选盲判、根因归并和汇总核对。输出位于 experiments/case_taxonomy/abisupply_20261121/sealed_late/ 下的 scorer_judgement.json、rootcauses.json 和 summary.json。
+
+2026-11-21　完成晚期候选盲判、父版本核对及根因去重。逐条记录、根因表和汇总均存于 experiments/case_taxonomy/capsupply_20261121/sealed_late/。

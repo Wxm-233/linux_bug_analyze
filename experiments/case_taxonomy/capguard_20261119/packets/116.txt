@@ -1,0 +1,181 @@
+commit 02b15e343aee
+2005-06-29|[MTD] XIP for AMD CFI flash.
+
+[MTD] XIP for AMD CFI flash.
+
+Author: Vitaly Wool <vwool@ru.mvista.com>
+
+---- diff (matched files only)
+diff --git a/drivers/mtd/chips/cfi_cmdset_0002.c b/drivers/mtd/chips/cfi_cmdset_0002.c
+index 49cd81207137..e42eefbda0e1 100644
+--- a/drivers/mtd/chips/cfi_cmdset_0002.c
++++ b/drivers/mtd/chips/cfi_cmdset_0002.c
+@@ -4,16 +4,20 @@
+  *
+  * Copyright (C) 2000 Crossnet Co. <info@crossnet.co.jp>
+  * Copyright (C) 2004 Arcom Control Systems Ltd <linux@arcom.com>
++ * Copyright (C) 2005 MontaVista Software Inc. <source@mvista.com>
+  *
+  * 2_by_8 routines added by Simon Munton
+  *
+  * 4_by_16 work by Carolyn J. Smith
+  *
++ * XIP support hooks by Vitaly Wool (based on code for Intel flash 
++ * by Nicolas Pitre)
++ * 
+  * Occasionally maintained by Thayne Harbaugh tharbaugh at lnxi dot com
+  *
+  * This code is GPL
+  *
+- * $Id: cfi_cmdset_0002.c,v 1.116 2005/05/24 13:29:42 gleixner Exp $
++ * $Id: cfi_cmdset_0002.c,v 1.117 2005/06/06 23:04:35 tpoynor Exp $
+  *
+  */
+ 
+@@ -34,6 +38,7 @@
+ #include <linux/mtd/map.h>
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/cfi.h>
++#include <linux/mtd/xip.h>
+ 
+ #define AMD_BOOTLOC_BUG
+ #define FORCE_WORD_WRITE 0
+@@ -393,7 +398,7 @@ static struct mtd_info *cfi_amdstd_setup(struct mtd_info *mtd)
+  * correctly and is therefore not done	(particulary with interleaved chips
+  * as each chip must be checked independantly of the others).
+  */
+-static int chip_ready(struct map_info *map, unsigned long addr)
++static int __xipram chip_ready(struct map_info *map, unsigned long addr)
+ {
+ 	map_word d, t;
+ 
+@@ -418,7 +423,7 @@ static int chip_ready(struct map_info *map, unsigned long addr)
+  * as each chip must be checked independantly of the others).
+  *
+  */
+-static int chip_good(struct map_info *map, unsigned long addr, map_word expected)
++static int __xipram chip_good(struct map_info *map, unsigned long addr, map_word expected)
+ {
+ 	map_word oldd, curd;
+ 
+@@ -448,12 +453,12 @@ static int get_chip(struct map_info *map, struct flchip *chip, unsigned long adr
+ 
+ 			if (time_after(jiffies, timeo)) {
+ 				printk(KERN_ERR "Waiting for chip to be ready timed out.\n");
+-				cfi_spin_unlock(chip->mutex);
++				spin_unlock(chip->mutex);
+ 				return -EIO;
+ 			}
+-			cfi_spin_unlock(chip->mutex);
++			spin_unlock(chip->mutex);
+ 			cfi_udelay(1);
+-			cfi_spin_lock(chip->mutex);
++			spin_lock(chip->mutex);
+ 			/* Someone else might have been playing with it. */
+ 			goto retry;
+ 		}
+@@ -501,15 +506,23 @@ static int get_chip(struct map_info *map, struct flchip *chip, unsigned long adr
+ 				return -EIO;
+ 			}
+ 			
+-			cfi_spin_unlock(chip->mutex);
++			spin_unlock(chip->mutex);
+ 			cfi_udelay(1);
+-			cfi_spin_lock(chip->mutex);
++			spin_lock(chip->mutex);
+ 			/* Nobody will touch it while it's in state FL_ERASE_SUSPENDING.
+ 			   So we can just loop here. */
+ 		}
+ 		chip->state = FL_READY;
+ 		return 0;
+ 
++	case FL_XIP_WHILE_ERASING:
++		if (mode != FL_READY && mode != FL_POINT &&
++		    (!cfip || !(cfip->EraseSuspend&2)))
++			goto sleep;
++		chip->oldstate = chip->state;
++		chip->state = FL_READY;
++		return 0;
++
+ 	case FL_POINT:
+ 		/* Only if there's no operation suspended... */
+ 		if (mode == FL_READY && chip->oldstate == FL_READY)
+@@ -519,10 +532,10 @@ static int get_chip(struct map_info *map, struct flchip *chip, unsigned long adr
+ 	sleep:
+ 		set_current_state(TASK_UNINTERRUPTIBLE);
+ 		add_wait_queue(&chip->wq, &wait);
+-		cfi_spin_unlock(chip->mutex);
++		spin_unlock(chip->mutex);
+ 		schedule();
+ 		remove_wait_queue(&chip->wq, &wait);
+-		cfi_spin_lock(chip->mutex);
++		spin_lock(chip->mutex);
+ 		goto resettime;
+ 	}
+ }
+@@ -540,6 +553,11 @@ static void put_chip(struct map_info *map, struct flchip *chip, unsigned long ad
+ 		chip->state = FL_ERASING;
+ 		break;
+ 
++	case FL_XIP_WHILE_ERASING:
++		chip->state = chip->oldstate;
++		chip->oldstate = FL_READY;
++		break;
++
+ 	case FL_READY:
+ 	case FL_STATUS:
+ 		/* We should really make set_vpp() count, rather than doing this */
+@@ -551,6 +569,198 @@ static void put_chip(struct map_info *map, struct flchip *chip, unsigned long ad
+ 	wake_up(&chip->wq);
+ }
+ 
++#ifdef CONFIG_MTD_XIP
++
++/*
++ * No interrupt what so ever can be serviced while the flash isn't in array
++ * mode.  This is ensured by the xip_disable() and xip_enable() functions
++ * enclosing any code path where the flash is known not to be in array mode.
++ * And within a XIP disabled code path, only functions marked with __xipram
++ * may be called and nothing else (it's a good thing to inspect generated
++ * assembly to make sure inline functions were actually inlined and that gcc
++ * didn't emit calls to its own support functions). Also configuring MTD CFI
++ * support to a single buswidth and a single interleave is also recommended.
++ */
++#include <asm/hardware.h>
++static void xip_disable(struct map_info *map, struct flchip *chip,
++			unsigned long adr)
++{
++	/* TODO: chips with no XIP use should ignore and return */
++	(void) map_read(map, adr); /* ensure mmu mapping is up to date */
++	local_irq_disable();
++}
++
++static void __xipram xip_enable(struct map_info *map, struct flchip *chip,
++				unsigned long adr)
++{
++	struct cfi_private *cfi = map->fldrv_priv;
++
++	if (chip->state != FL_POINT && chip->state != FL_READY) {
++		map_write(map, CMD(0xf0), adr);
++		chip->state = FL_READY;
++	}
++	(void) map_read(map, adr);
++	asm volatile (".rep 8; nop; .endr"); /* fill instruction prefetch */
++	local_irq_enable();
++}
++
++/*
++ * When a delay is required for the flash operation to complete, the
++ * xip_udelay() function is polling for both the given timeout and pending
++ * (but still masked) hardware interrupts.  Whenever there is an interrupt
++ * pending then the flash erase operation is suspended, array mode restored 
++ * and interrupts unmasked.  Task scheduling might also happen at that
++ * point.  The CPU eventually returns from the interrupt or the call to
++ * schedule() and the suspended flash operation is resumed for the remaining
++ * of the delay period.
++ *
++ * Warning: this function _will_ fool interrupt latency tracing tools.
++ */
++
++static void __xipram xip_udelay(struct map_info *map, struct flchip *chip,
++			

@@ -1,0 +1,215 @@
+commit 6de9a91f873c
+2026-08-07|btrfs: use kvmalloc() for stripe buffer of scrub_stripe
+
+btrfs: use kvmalloc() for stripe buffer of scrub_stripe
+
+Currently we're using scrub_stripe::folios[] to store all contents of a
+stripe.
+
+This means we need all the extra work to handle things like sub-page
+cases, and also require larger folios to handle bs > ps cases.
+
+On the other hand, it's not hard to allocate a 64K large folio to cover
+the full stripe, getting rid of the cross-page handling.
+
+Furthermore, even if that large folio allocation failed, we can still
+use vmalloc() to allocate a virtually contiguous space and still get rid
+of cross-page handling.
+
+This patch will go with kvmalloc() to allocate 64K of memory for
+the stripe buffer, thus getting rid of all the complex cross-page
+handling.
+
+The following aspects can be greatly simplified:
+
+- Checksum verification for both data and metadata
+  No more per-page iteration, all in one go.
+
+- RAID56 data caching
+  Just copy the buffer into the RAID56 pages.
+
+- No more kaddr/paddr grabbing
+  For most cases the virtual address is enough for csum calculation and
+  io submission.
+
+- Bio assembly
+  There is already the helper bio_add_vmalloc() to queue vmallocated
+  memory into a bio.
+
+Although it means we have something else to be concerned about:
+
+- Bio assembly
+  If the memory is vmallocated, we need to use bio_add_vmalloc()
+  Otherwise use the existing bio_add_page().
+
+- Read endio
+  For vmallocated memory, we need to call
+  invalidate_kernel_vmap_range().
+
+- Scrub bbio bvec size
+  Since scrub_stripe::buffer is kvmallocated, we also need to enlarge
+  the scrub bbio, to be able to handle the worst case, where all 64KiB is
+  allocated by discontiguous 4K physical pages.
+
+---- diff (matched files only)
+diff --git a/fs/btrfs/scrub.c b/fs/btrfs/scrub.c
+index 67076d654973..f209e75f0ff5 100644
+--- a/fs/btrfs/scrub.c
++++ b/fs/btrfs/scrub.c
+@@ -123,19 +123,17 @@ enum {
+ 	scrub_bitmap_nr_last,
+ };
+ 
+-#define SCRUB_STRIPE_MAX_FOLIOS		(BTRFS_STRIPE_LEN / PAGE_SIZE)
+-
+ /*
+  * Represent one contiguous range with a length of BTRFS_STRIPE_LEN.
+  */
+ struct scrub_stripe {
+ 	struct scrub_ctx *sctx;
+ 	struct btrfs_block_group *bg;
+-
+-	struct folio *folios[SCRUB_STRIPE_MAX_FOLIOS];
+ 	struct scrub_sector_verification *sectors;
+-
+ 	struct btrfs_device *dev;
++
++	void *buffer;
++
+ 	u64 logical;
+ 	u64 physical;
+ 
+@@ -221,6 +219,9 @@ struct scrub_ctx {
+ 	refcount_t              refs;
+ };
+ 
++static_assert(BTRFS_STRIPE_LEN >= PAGE_SIZE);
++static_assert(IS_ALIGNED(BTRFS_STRIPE_LEN, PAGE_SIZE));
++
+ #define scrub_calc_start_bit(stripe, name, block_nr)			\
+ ({									\
+ 	unsigned int __start_bit;					\
+@@ -332,13 +333,10 @@ static void release_scrub_stripe(struct scrub_stripe *stripe)
+ 	if (!stripe)
+ 		return;
+ 
+-	for (int i = 0; i < SCRUB_STRIPE_MAX_FOLIOS; i++) {
+-		if (stripe->folios[i])
+-			folio_put(stripe->folios[i]);
+-		stripe->folios[i] = NULL;
+-	}
++	kvfree(stripe->buffer);
+ 	kfree(stripe->sectors);
+ 	kfree(stripe->csums);
++	stripe->buffer = NULL;
+ 	stripe->sectors = NULL;
+ 	stripe->csums = NULL;
+ 	stripe->sctx = NULL;
+@@ -348,9 +346,6 @@ static void release_scrub_stripe(struct scrub_stripe *stripe)
+ static int init_scrub_stripe(struct btrfs_fs_info *fs_info,
+ 			     struct scrub_stripe *stripe)
+ {
+-	const u32 min_folio_shift = PAGE_SHIFT + fs_info->block_min_order;
+-	int ret;
+-
+ 	memset(stripe, 0, sizeof(*stripe));
+ 
+ 	stripe->nr_sectors = BTRFS_STRIPE_LEN >> fs_info->sectorsize_bits;
+@@ -361,11 +356,8 @@ static int init_scrub_stripe(struct btrfs_fs_info *fs_info,
+ 	atomic_set(&stripe->pending_io, 0);
+ 	spin_lock_init(&stripe->write_error_lock);
+ 
+-	ASSERT(BTRFS_STRIPE_LEN >> min_folio_shift <= SCRUB_STRIPE_MAX_FOLIOS);
+-	ret = btrfs_alloc_folio_array(BTRFS_STRIPE_LEN >> min_folio_shift,
+-				      fs_info->block_min_order, stripe->folios,
+-				      GFP_NOFS);
+-	if (ret < 0)
++	stripe->buffer = kvmalloc(BTRFS_STRIPE_LEN, GFP_NOFS);
++	if (!stripe->buffer)
+ 		goto error;
+ 
+ 	stripe->sectors = kzalloc_objs(struct scrub_sector_verification,
+@@ -676,32 +668,18 @@ static int fill_writer_pointer_gap(struct scrub_ctx *sctx, u64 physical)
+ 	return ret;
+ }
+ 
+-static void *scrub_stripe_get_kaddr(struct scrub_stripe *stripe, int sector_nr)
+-{
+-	struct btrfs_fs_info *fs_info = stripe->bg->fs_info;
+-	const u32 min_folio_shift = PAGE_SHIFT + fs_info->block_min_order;
+-	u32 offset = (sector_nr << fs_info->sectorsize_bits);
+-	const struct folio *folio = stripe->folios[offset >> min_folio_shift];
+-
+-	/* stripe->folios[] is allocated by us and no highmem is allowed. */
+-	ASSERT(folio);
+-	ASSERT(!folio_test_highmem(folio));
+-	return folio_address(folio) + offset_in_folio(folio, offset);
+-}
+-
+-static phys_addr_t scrub_stripe_get_paddr(struct scrub_stripe *stripe, int sector_nr)
++/*
++ * Unlike the existing csum which is based on paddr, this version is fully on
++ * vaddr, so no extra per-page iteration needed.
++ */
++static void scrub_calc_vaddr_csum(struct btrfs_fs_info *fs_info,
++				  void *vaddr, unsigned int len, u8 *dest)
+ {
+-	struct btrfs_fs_info *fs_info = stripe->bg->fs_info;
+-	const u32 min_folio_shift = PAGE_SHIFT + fs_info->block_min_order;
+-	u32 offset = (sector_nr << fs_info->sectorsize_bits);
+-	const struct folio *folio = stripe->folios[offset >> min_folio_shift];
++	struct btrfs_csum_ctx csum;
+ 
+-	/* stripe->folios[] is allocated by us and no highmem is allowed. */
+-	ASSERT(folio);
+-	ASSERT(!folio_test_highmem(folio));
+-	/* And the range must be contained inside the folio. */
+-	ASSERT(offset_in_folio(folio, offset) + fs_info->sectorsize <= folio_size(folio));
+-	return page_to_phys(folio_page(folio, 0)) + offset_in_folio(folio, offset);
++	btrfs_csum_init(&csum, fs_info->csum_type);
++	btrfs_csum_update(&csum, vaddr, len);
++	btrfs_csum_final(&csum, dest);
+ }
+ 
+ static void scrub_verify_one_metadata(struct scrub_stripe *stripe, int sector_nr)
+@@ -709,19 +687,10 @@ static void scrub_verify_one_metadata(struct scrub_stripe *stripe, int sector_nr
+ 	struct btrfs_fs_info *fs_info = stripe->bg->fs_info;
+ 	const u32 sectors_per_tree = fs_info->nodesize >> fs_info->sectorsize_bits;
+ 	const u64 logical = stripe->logical + (sector_nr << fs_info->sectorsize_bits);
+-	void *first_kaddr = scrub_stripe_get_kaddr(stripe, sector_nr);
+-	struct btrfs_header *header = first_kaddr;
+-	struct btrfs_csum_ctx csum;
+-	u8 on_disk_csum[BTRFS_CSUM_SIZE];
++	void *first_vaddr = stripe->buffer + (sector_nr << fs_info->sectorsize_bits);
++	struct btrfs_header *header = first_vaddr;
+ 	u8 calculated_csum[BTRFS_CSUM_SIZE];
+ 
+-	/*
+-	 * Here we don't have a good way to attach the pages (and subpages)
+-	 * to a dummy extent buffer, thus we have to directly grab the members
+-	 * from pages.
+-	 */
+-	memcpy(on_disk_csum, header->csum, fs_info->csum_size);
+-
+ 	if (logical != btrfs_stack_header_bytenr(header)) {
+ 		scrub_bitmap_set_meta_error(stripe, sector_nr, sectors_per_tree);
+ 		scrub_bitmap_set_error(stripe, sector_nr, sectors_per_tree);
+@@ -753,23 +722,15 @@ static void scrub_verify_one_metadata(struct scrub_stripe *stripe, int sector_nr
+ 	}
+ 
+ 	/* Now check tree block csum. */
+-	btrfs_csum_init(&csum, fs_info->csum_type);
+-	btrfs_csum_update(&csum, first_kaddr + BTRFS_CSUM_SIZE,
+-			  fs_info->sectorsize - BTRFS_CSUM_SIZE);
+-
+-	for (int i = sector_nr + 1; i < sector_nr + sectors_per_tree; i++) {
+-		btrfs_csum_update(&csum, scrub_stripe_get_kaddr(stripe, i),
+-				  fs_info->sectorsize);
+-	}
+-
+-	btrfs_csum_final(&csum, calculated_csum);
+-	if (memcmp(calculated_csum, on_disk_csum, fs_info->csum_size) != 0) {
++	scrub_calc_vaddr_csum(fs_info, first_vaddr + BTRFS_CSUM_SIZE,
++			      fs_info->nodesize - BTRFS_CSUM_SIZE, calculated_csum);
++	if (memcmp(calculated_csum, header->csum, fs_info->csum_size) != 0) {
+ 		scrub_bitmap_set_meta_error(stripe, sector_nr, se

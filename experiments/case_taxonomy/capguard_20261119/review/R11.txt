@@ -1,0 +1,68 @@
+候选 R11  规则 B2  版本 df2908090cda
+位置 mm/secretmem.c:197  所在函数 secretmem_release  调用 secretmem_destroy_inode_priv  能力判断 can_set_direct_map  相关架构 arm64
+
+==== 所在函数 secretmem_release（mm/secretmem.c）
+
+static int secretmem_release(struct inode *inode, struct file *file)
+{
+	atomic_dec(&secretmem_users);
+	secretmem_destroy_inode_priv(inode);
+
+	return 0;
+}
+
+==== 被 can_set_direct_map 保护的调用处所在函数 secretmem_file_create
+
+static struct file *secretmem_file_create(unsigned long flags)
+{
+	struct file *file;
+	struct inode *inode;
+	const char *anon_name = "[secretmem]";
+	int err;
+
+	inode = anon_inode_make_secure_inode(secretmem_mnt->mnt_sb, anon_name, NULL);
+	if (IS_ERR(inode))
+		return ERR_CAST(inode);
+
+	err = secretmem_init_inode_priv(inode);
+	if (err)
+		goto err_free_inode;
+
+	file = alloc_file_pseudo(inode, secretmem_mnt, "secretmem",
+				 O_RDWR | O_LARGEFILE, &secretmem_fops);
+	if (IS_ERR(file)) {
+		err = PTR_ERR(file);
+		goto err_free_priv;
+	}
+
+	mapping_set_gfp_mask(inode->i_mapping, GFP_USER);
+	mapping_set_unevictable(inode->i_mapping);
+
+	inode->i_op = &secretmem_iops;
+	inode->i_mapping->a_ops = &secretmem_aops;
+
+	/* pretend we are a normal file with zero size */
+	inode->i_mode |= S_IFREG;
+	inode->i_size = 0;
+
+	atomic_inc(&secretmem_users);
+
+	return file;
+err_free_priv:
+	secretmem_destroy_inode_priv(inode);
+err_free_inode:
+	iput(inode);
+	return ERR_PTR(err);
+}
+
+==== 被调用的本文件函数 secretmem_destroy_inode_priv
+
+static void secretmem_destroy_inode_priv(struct inode *inode)
+{
+	struct secretmem_inode_state *state = inode->i_private;
+
+	secretmem_unaccount_all_folios(state);
+	free_uid(state->user);
+	kfree(state);
+	inode->i_private = NULL;
+}

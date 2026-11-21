@@ -1,0 +1,2275 @@
+﻿====================================================================================================
+b75f4c9afac2 2015-03-06 KVM: s390: Zero out current VMDB of STSI before including level3 data.
+  fixes=[] used=False analysis=False tokens=['memset(&mem->vm[0], 0,']
+  s390 documentation requires words 0 and 10-15 to be reserved and stored as
+  zeros. As we fill out all other fields, we can memset the full structure.
+  --- arch/s390/kvm/priv.c
+  @@ -466,8 +466,9 @@ static void handle_stsi_3_2_2(struct kvm_vcpu *vcpu, struct sysinfo_3_2_2 *mem)
+   		mem->count++;
+   	for (n = mem->count - 1; n > 0 ; n--)
+   		memcpy(&mem->vm[n], &mem->vm[n - 1], sizeof(mem->vm[0]));
+   
+  +	memset(&mem->vm[0], 0, sizeof(mem->vm[0]));
+   	mem->vm[0].cpus_total = cpus;
+   	mem->vm[0].cpus_configured = cpus;
+   	mem->vm[0].cpus_standby = 0;
+   	mem->vm[0].cpus_reserved = 0;
+  
+====================================================================================================
+6829e274a623 2015-04-27 arm64: dma-mapping: always clear allocated buffers
+  fixes=[] used=False analysis=False tokens=['__GFP_ZERO', 'memset(addr, 0,', 'memset(ptr, 0,']
+  Buffers allocated by dma_alloc_coherent() are always zeroed on Alpha,
+  ARM (32bit), MIPS, PowerPC, x86/x86_64 and probably other architectures.
+  It turned out that some drivers rely on this 'feature'. Allocated buffer
+  might be also exposed to userspace with dma_mmap() call, so clearing it
+  is desired from security point of view to avoid exposing random memory
+  to userspace. This patch unifies dma_alloc_coherent() behavior on ARM64
+  architecture with other implementations by unconditionally zeroing
+  allocated buffer.
+  --- arch/arm64/mm/dma-mapping.c
+  @@ -66,10 +66,9 @@ static void *__alloc_from_pool(size_t size, struct page **ret_page, gfp_t flags)
+   		phys_addr_t phys = gen_pool_virt_to_phys(atomic_pool, val);
+   
+   		*ret_page = phys_to_page(phys);
+   		ptr = (void *)val;
+  -		if (flags & __GFP_ZERO)
+  -			memset(ptr, 0, size);
+  +		memset(ptr, 0, size);
+   	}
+   
+   	return ptr;
+   }
+  --- arch/arm64/mm/dma-mapping.c
+  @@ -112,10 +111,9 @@ static void *__dma_alloc_coherent(struct device *dev, size_t size,
+   			return NULL;
+   
+   		*dma_handle = phys_to_dma(dev, page_to_phys(page));
+   		addr = page_address(page);
+  -		if (flags & __GFP_ZERO)
+  -			memset(addr, 0, size);
+  +		memset(addr, 0, size);
+   		return addr;
+   	} else {
+   		return swiotlb_alloc_coherent(dev, size, dma_handle, flags);
+   	}
+  
+====================================================================================================
+f2ae45edbca7 2015-06-23 KVM: s390: clear floating interrupt bitmap and parameters
+  fixes=[] used=False analysis=False tokens=['memset(&fi->mchk, 0,', 'memset(&fi->srv_signal, 0,']
+  commit 6d3da24141 ("KVM: s390: deliver floating interrupts in order
+  of priority") introduced a regression for the reset handling.
+  
+  We don't clear the bitmap of pending floating interrupts
+  and interrupt parameters. This could result in stale interrupts
+  even after a reset. Let's fix this by clearing the pending bitmap
+  and the parameters for service and machine check interrupts.
+  --- arch/s390/kvm/interrupt.c
+  @@ -1620,8 +1620,11 @@ void kvm_s390_clear_float_irqs(struct kvm *kvm)
+   	struct kvm_s390_float_interrupt *fi = &kvm->arch.float_int;
+   	int i;
+   
+   	spin_lock(&fi->lock);
+  +	fi->pending_irqs = 0;
+  +	memset(&fi->srv_signal, 0, sizeof(fi->srv_signal));
+  +	memset(&fi->mchk, 0, sizeof(fi->mchk));
+   	for (i = 0; i < FIRQ_LIST_COUNT; i++)
+   		clear_irq_list(&fi->lists[i]);
+   	for (i = 0; i < FIRQ_MAX_COUNT; i++)
+   		fi->counters[i] = 0;
+  
+====================================================================================================
+dfbca61af0b6 2016-08-12 arm64: hibernate: handle allocation failures
+  fixes=['82869ac57b5d'] used=False analysis=False tokens=['zero_page']
+  In create_safe_exec_page(), we create a copy of the hibernate exit text,
+  along with some page tables to map this via TTBR0. We then install the
+  new tables in TTBR0.
+  
+  In swsusp_arch_resume() we call create_safe_exec_page() before trying a
+  number of operations which may fail (e.g. copying the linear map page
+  tables). If these fail, we bail out of swsusp_arch_resume() and return
+  an error code, but leave TTBR0 as-is. Subsequently, the core hibernate
+  code will call free_basic_memory_bitmaps(), which will free all of the
+  memory allocations we made, including the page tables installed in
+  TTBR0.
+  
+  Thus, we may have TTBR0 pointing at dangling freed memory for some
+  period of time. If the hibernate attempt was triggered by a user
+  requesting a hibernate test via the reboot syscall, we may return to
+  userspace with the clobbered TTBR0 value.
+  
+  Avoid these issues by reorganising swsusp_arch_resume() such that we
+  have no failure paths after create_safe_exec_page(). We also add a check
+  that the zero page allocation succeeded, matching what we have for other
+  allocations.
+  --- arch/arm64/kernel/hibernate.c
+  @@ -403,8 +403,40 @@ int swsusp_arch_resume(void)
+   	phys_addr_t phys_hibernate_exit;
+   	void __noreturn (*hibernate_exit)(phys_addr_t, phys_addr_t, void *,
+   					  void *, phys_addr_t, phys_addr_t);
+   
+  +	/*
+  +	 * Restoring the memory image will overwrite the ttbr1 page tables.
+  +	 * Create a second copy of just the linear map, and use this when
+  +	 * restoring.
+  +	 */
+  +	tmp_pg_dir = (pgd_t *)get_safe_page(GFP_ATOMIC);
+  +	if (!tmp_pg_dir) {
+  +		pr_err("Failed to allocate memory for temporary page tables.");
+  +		rc = -ENOMEM;
+  +		goto out;
+  +	}
+  +	rc = copy_page_tables(tmp_pg_dir, PAGE_OFFSET, 0);
+  +	if (rc)
+  +		goto out;
+  +
+  +	/*
+  +	 * Since we only copied the linear map, we need to find restore_pblist's
+  +	 * linear map address.
+  +	 */
+  +	lm_restore_pblist = LMADDR(restore_pblist);
+  +
+  +	/*
+  +	 * We need a zero page that is zero before & after resume in order to
+  +	 * to break before make on the ttbr1 page tables.
+  +	 */
+  --- arch/arm64/kernel/hibernate.c
+  @@ -463,14 +474,8 @@ int swsusp_arch_resume(void)
+   
+   		__hyp_set_vectors(el2_vectors);
+   	}
+   
+  -	/*
+  -	 * We need a zero page that is zero before & after resume in order to
+  -	 * to break before make on the ttbr1 page tables.
+  -	 */
+  -	zero_page = (void *)get_safe_page(GFP_ATOMIC);
+  -
+   	hibernate_exit(virt_to_phys(tmp_pg_dir), resume_hdr.ttbr1_el1,
+   		       resume_hdr.reenter_kernel, lm_restore_pblist,
+   		       resume_hdr.__hyp_stub_vectors, virt_to_phys(zero_page));
+   
+  
+====================================================================================================
+2545e5da080b 2016-09-09 asm-generic: make copy_from_user() zero the destination properly
+  fixes=[] used=False analysis=False tokens=['memset(to + (n - res), 0,']
+  ... in all cases, including the failing access_ok()
+  
+  Note that some architectures using asm-generic/uaccess.h have
+  __copy_from_user() not zeroing the tail on failure halfway
+  through.  This variant works either way.
+  --- include/asm-generic/uaccess.h
+  @@ -256,13 +256,15 @@ extern int __get_user_bad(void) __attribute__((noreturn));
+   
+   static inline long copy_from_user(void *to,
+   		const void __user * from, unsigned long n)
+   {
+  +	unsigned long res = n;
+   	might_fault();
+  -	if (access_ok(VERIFY_READ, from, n))
+  -		return __copy_from_user(to, from, n);
+  -	else
+  -		return n;
+  +	if (likely(access_ok(VERIFY_READ, from, n)))
+  +		res = __copy_from_user(to, from, n);
+  +	if (unlikely(res))
+  +		memset(to + (n - res), 0, res);
+  +	return res;
+   }
+   
+   static inline long copy_to_user(void __user *to,
+   		const void *from, unsigned long n)
+  
+====================================================================================================
+8630c32275ba 2016-09-13 avr32: fix copy_from_user()
+  fixes=[] used=False analysis=False tokens=['memset(to + (n - res), 0,']
+  really ugly, but apparently avr32 compilers turns access_ok() into
+  something so bad that they want it in assembler.  Left that way,
+  zeroing added in inline wrapper.
+  --- arch/avr32/include/asm/uaccess.h
+  @@ -87,8 +87,17 @@ static inline __kernel_size_t __copy_from_user(void *to,
+   					       __kernel_size_t n)
+   {
+   	return __copy_user(to, (const void __force *)from, n);
+   }
+  +static inline __kernel_size_t copy_from_user(void *to,
+  +					       const void __user *from,
+  +					       __kernel_size_t n)
+  +{
+  +	size_t res = ___copy_from_user(to, from, n);
+  +	if (unlikely(res))
+  +		memset(to + (n - res), 0, res);
+  +	return res;
+  +}
+   
+   #define __copy_to_user_inatomic __copy_to_user
+   #define __copy_from_user_inatomic __copy_from_user
+   
+====================================================================================================
+e33d1f6f72cc 2016-09-13 nios2: copy_from_user() should zero the tail of destination
+  fixes=[] used=False analysis=False tokens=['memset(to + (n - res), 0,']
+  
+  --- arch/nios2/include/asm/uaccess.h
+  @@ -101,11 +101,14 @@ extern long __copy_to_user(void __user *to, const void *from, unsigned long n);
+   
+   static inline long copy_from_user(void *to, const void __user *from,
+   				unsigned long n)
+   {
+  -	if (!access_ok(VERIFY_READ, from, n))
+  -		return n;
+  -	return __copy_from_user(to, from, n);
+  +	unsigned long res = n;
+  +	if (access_ok(VERIFY_READ, from, n))
+  +		res = __copy_from_user(to, from, n);
+  +	if (unlikely(res))
+  +		memset(to + (n - res), 0, res);
+  +	return res;
+   }
+   
+   static inline long copy_to_user(void __user *to, const void *from,
+   				unsigned long n)
+  
+====================================================================================================
+ae7cc577ec2a 2016-09-13 mn10300: copy_from_user() should zero on access_ok() failure...
+  fixes=[] used=False analysis=False tokens=['memset(to, 0,']
+  
+  --- arch/mn10300/lib/usercopy.c
+  @@ -23,8 +23,10 @@ unsigned long
+   __generic_copy_from_user(void *to, const void *from, unsigned long n)
+   {
+   	if (access_ok(VERIFY_READ, from, n))
+   		__copy_user_zeroing(to, from, n);
+  +	else
+  +		memset(to, 0, n);
+   	return n;
+   }
+   
+   /*
+  
+====================================================================================================
+8ae95ed4ae5f 2016-09-13 metag: copy_from_user() should zero the destination on access_ok() failure
+  fixes=[] used=False analysis=False tokens=['memset(to, 0,']
+  
+  --- arch/metag/include/asm/uaccess.h
+  @@ -203,10 +203,11 @@ extern unsigned long __must_check __copy_user_zeroing(void *to,
+   
+   static inline unsigned long
+   copy_from_user(void *to, const void __user *from, unsigned long n)
+   {
+  -	if (access_ok(VERIFY_READ, from, n))
+  +	if (likely(access_ok(VERIFY_READ, from, n)))
+   		return __copy_user_zeroing(to, from, n);
+  +	memset(to, 0, n);
+   	return n;
+   }
+   
+   #define __copy_from_user(to, from, n) __copy_user_zeroing(to, from, n)
+  
+====================================================================================================
+a5e541f796f1 2016-09-13 ia64: copy_from_user() should zero the destination on access_ok() failure
+  fixes=[] used=False analysis=False tokens=['memset(to, 0,']
+  
+  --- arch/ia64/include/asm/uaccess.h
+  @@ -271,22 +271,19 @@ __copy_from_user (void *to, const void __user *from, unsigned long count)
+   	}										\
+   	__cu_len;									\
+   })
+   
+  -#define copy_from_user(to, from, n)							\
+  -({											\
+  -	void *__cu_to = (to);								\
+  -	const void __user *__cu_from = (from);						\
+  -	long __cu_len = (n);								\
+  -											\
+  -	__chk_user_ptr(__cu_from);							\
+  -	if (__access_ok(__cu_from, __cu_len, get_fs())) {				\
+  -		if (!__builtin_constant_p(n))						\
+  -			check_object_size(__cu_to, __cu_len, false);			\
+  -		__cu_len = __copy_user((__force void __user *) __cu_to, __cu_from, __cu_len);	\
+  -	}										\
+  -	__cu_len;									\
+  -})
+  +static inline unsigned long
+  +copy_from_user(void *to, const void __user *from, unsigned long n)
+  +{
+  +	if (!__builtin_constant_p(n))
+  +		check_object_size(to, n, false);
+  +	if (likely(__access_ok(from, n, get_fs())))
+  +		n = __copy_user((__force void __user *) to, from, n);
+  +	else
+  +		memset(to, 0, n);
+  +	return n;
+  +}
+====================================================================================================
+eb47e0293baa 2016-09-13 cris: buggered copy_from_user/copy_to_user/clear_user
+  fixes=[] used=False analysis=False tokens=['memset(to, 0,']
+  * copy_from_user() on access_ok() failure ought to zero the destination
+  * none of those primitives should skip the access_ok() check in case of
+  small constant size.
+  --- arch/cris/include/asm/uaccess.h
+  @@ -365,28 +341,45 @@ __constant_clear_user(void __user *to, unsigned long n)
+   		__asm_clear_20(to, ret);
+   	else if (n == 24)
+   		__asm_clear_24(to, ret);
+   	else
+  -		ret = __generic_clear_user(to, n);
+  +		ret = __do_clear_user(to, n);
+   
+   	return ret;
+   }
+   
+   
+  -#define clear_user(to, n)				\
+  -	(__builtin_constant_p(n) ?			\
+  -	 __constant_clear_user(to, n) :			\
+  -	 __generic_clear_user(to, n))
+  +static inline size_t clear_user(void __user *to, size_t n)
+  +{
+  +	if (unlikely(!access_ok(VERIFY_WRITE, to, n)))
+  +		return n;
+  +	if (__builtin_constant_p(n))
+  +		return __constant_clear_user(to, n);
+  +	else
+  +		return __do_clear_user(to, n);
+  +}
+   
+  -#define copy_from_user(to, from, n)			\
+  -	(__builtin_constant_p(n) ?			\
+  -	 __constant_copy_from_user(to, from, n) :	\
+  -	 __generic_copy_from_user(to, from, n))
+====================================================================================================
+e3b6a02816eb 2016-10-11 parisc: Zero-initialize newly alloced memblock
+  fixes=['4fe9e1d957e4'] used=False analysis=False tokens=['memset(__va(phys), 0,']
+  Commit 4fe9e1d957e4 ("parisc: Drop bootmem and switch to memblock")
+  switched to the memblock allocator, but missed to zero-initialize the
+  newly allocated memblocks. This lead to crashes on some machines like
+  the rp3410.
+  --- arch/parisc/mm/init.c
+  @@ -104,8 +104,10 @@ static void * __init get_memblock(unsigned long size)
+   		memblock_reserve(phys, size);
+   	else
+   		panic("get_memblock() failed.\n");
+   
+  +	memset(__va(phys), 0, size);
+  +
+   	return __va(phys);
+   }
+   
+   #ifdef CONFIG_64BIT
+  
+====================================================================================================
+cbfc6c9184ce 2017-05-19 KVM: X86: Fix read out-of-bounds vulnerability in kvm pio emulation
+  fixes=[] used=False analysis=False tokens=['memset(vcpu->arch.pio_data, 0,']
+  Huawei folks reported a read out-of-bounds vulnerability in kvm pio emulation.
+  
+  - "inb" instruction to access PIT Mod/Command register (ioport 0x43, write only,
+    a read should be ignored) in guest can get a random number.
+  - "rep insb" instruction to access PIT register port 0x43 can control memcpy()
+    in emulator_pio_in_emulated() to copy max 0x400 bytes but only read 1 bytes,
+    which will disclose the unimportant kernel memory in host but no crash.
+  
+  The similar test program below can reproduce the read out-of-bounds vulnerability:
+  
+  void hexdump(void *mem, unsigned int len)
+  {
+          unsigned int i, j;
+  
+          for(i = 0; i < len + ((len % HEXDUMP_COLS) ? (HEXDUMP_COLS - len % HEXDUMP_COLS) : 0); i++)
+          {
+                  /* print offset */
+                  if(i % HEXDUMP_COLS == 0)
+                  {
+                          printf("0x%06x: ", i);
+                  }
+  
+                  /* print hex data */
+                  if(i < len)
+                  {
+                          printf("%02x ", 0xFF & ((char*)mem)[i]);
+                  }
+                  else /* end of block, just aligning for ASCII dump */
+                  {
+                          printf("   ");
+                  }
+  
+                  /* print ASCII dump */
+                  if(i % HEXDUMP_COLS == (HEXDUMP_COLS - 1))
+                  {
+                          for(j = i - (HEXDUMP_COLS - 1); j <= i; j++)
+                          {
+                      
+  --- arch/x86/kvm/x86.c
+  @@ -4877,8 +4881,10 @@ static int emulator_pio_in_emulated(struct x86_emulate_ctxt *ctxt,
+   
+   	if (vcpu->arch.pio.count)
+   		goto data_avail;
+   
+  +	memset(vcpu->arch.pio_data, 0, size * count);
+  +
+   	ret = emulator_pio_in_out(vcpu, size, port, val, count, true);
+   	if (ret) {
+   data_avail:
+   		memcpy(val, vcpu->arch.pio_data, size * count);
+  
+====================================================================================================
+5c7a3a3d20a4 2017-06-12 posix-timers: Zero out oldval itimerspec
+  fixes=['eabdec043853'] used=False analysis=False tokens=['memset(rtn, 0,']
+  The recent posix timer rework moved the clearing of the itimerspec to the
+  real syscall implementation, but forgot that the kclock->timer_get() is
+  used by timer_settime() as well. That results in an uninitialized variable
+  and bogus values returned to user space.
+  
+  Add the missing memset to timer_settime().
+  --- kernel/time/posix-timers.c
+  @@ -827,8 +827,10 @@ SYSCALL_DEFINE4(timer_settime, timer_t, timer_id, int, flags,
+   
+   	if (!timespec64_valid(&new_spec64.it_interval) ||
+   	    !timespec64_valid(&new_spec64.it_value))
+   		return -EINVAL;
+  +	if (rtn)
+  +		memset(rtn, 0, sizeof(*rtn));
+   retry:
+   	timr = lock_timer(timer_id, &flag);
+   	if (!timr)
+   		return -EINVAL;
+  
+====================================================================================================
+34f19ff1b5a0 2017-06-23 powerpc/64: Initialise thread_info for emergency stacks
+  fixes=[] used=False analysis=False tokens=['memset(ti, 0,']
+  Emergency stacks have their thread_info mostly uninitialised, which in
+  particular means garbage preempt_count values.
+  
+  Emergency stack code runs with interrupts disabled entirely, and is
+  used very rarely, so this has been unnoticed so far. It was found by a
+  proposed new powerpc watchdog that takes a soft-NMI directly from the
+  masked_interrupt handler and using the emergency stack. That crashed
+  at BUG_ON(in_nmi()) in nmi_enter(). preempt_count()s were found to be
+  garbage.
+  
+  To fix this, zero the entire THREAD_SIZE allocation, and initialize
+  the thread_info.
+  
+  [mpe: Move it all into setup_64.c, use a function not a macro. Fix
+        crashes on Cell by setting preempt_count to 0 not HARDIRQ_OFFSET]
+  --- arch/powerpc/kernel/setup_64.c
+  @@ -632,26 +650,33 @@ void __init emergency_stack_init(void)
+   	 *
+   	 * Since we use these as temporary stacks during secondary CPU
+   	 * bringup, we need to get at them in real mode. This means they
+   	 * must also be within the RMO region.
+  +	 *
+  +	 * The IRQ stacks allocated elsewhere in this file are zeroed and
+  +	 * initialized in kernel/irq.c. These are initialized here in order
+  +	 * to have emergency stacks available as early as possible.
+   	 */
+   	limit = min(safe_stack_limit(), ppc64_rma_size);
+   
+   	for_each_possible_cpu(i) {
+   		struct thread_info *ti;
+   		ti = __va(memblock_alloc_base(THREAD_SIZE, THREAD_SIZE, limit));
+  -		klp_init_thread_info(ti);
+  +		memset(ti, 0, THREAD_SIZE);
+  +		emerg_stack_init_thread_info(ti, i);
+   		paca[i].emergency_sp = (void *)ti + THREAD_SIZE;
+   
+   #ifdef CONFIG_PPC_BOOK3S_64
+   		/* emergency stack for NMI exception handling. */
+   		ti = __va(memblock_alloc_base(THREAD_SIZE, THREAD_SIZE, limit));
+  -		klp_init_thread_info(ti);
+  +		memset(ti, 0, THREAD_SIZE);
+  +		emerg_stack_init_thread_info(ti, i);
+   		paca[i].nmi_emergency_sp = (void *)ti + THREAD_SIZE;
+   
+   		/* emergency stack for machine check exception handling. */
+   		ti = __va(memblock_alloc_base(THREAD_SIZE, THREAD_SIZE, limit));
+====================================================================================================
+af54aed94bf3 2017-08-10 mm/balloon_compaction.c: don't zero ballooned pages
+  fixes=['bb01b64cfab7'] used=False analysis=False tokens=['__GFP_ZERO']
+  Revert commit bb01b64cfab7 ("mm/balloon_compaction.c: enqueue zero page
+  to balloon device")'
+  
+  Zeroing ballon pages is rather time consuming, especially when a lot of
+  pages are in flight. E.g. 7GB worth of ballooned memory takes 2.8s with
+  __GFP_ZERO while it takes ~491ms without it.
+  
+  The original commit argued that zeroing will help ksmd to merge these
+  pages on the host but this argument is assuming that the host actually
+  marks balloon pages for ksm which is not universally true.  So we pay
+  performance penalty for something that even might not be used in the end
+  which is wrong.  The host can zero out pages on its own when there is a
+  need.
+  
+  [mhocko@kernel.org: new changelog text]
+  --- mm/balloon_compaction.c
+  @@ -23,9 +23,9 @@
+   struct page *balloon_page_enqueue(struct balloon_dev_info *b_dev_info)
+   {
+   	unsigned long flags;
+   	struct page *page = alloc_page(balloon_mapping_gfp_mask() |
+  -				__GFP_NOMEMALLOC | __GFP_NORETRY | __GFP_ZERO);
+  +				       __GFP_NOMEMALLOC | __GFP_NORETRY);
+   	if (!page)
+   		return NULL;
+   
+   	/*
+  
+====================================================================================================
+e10237cc76ef 2017-11-10 kthread: zero the kthread data structure
+  fixes=['05e3db95ebfc'] used=False analysis=False tokens=['kzalloc']
+  kthread() could bail out early before we initialize blkcg_css (if the
+  kthread is killed very early. Please see xchg() statement in kthread()),
+  which confuses free_kthread_struct. Instead of moving the blkcg_css
+  initialization early, we simply zero the whole 'self' data structure,
+  which doesn't sound much overhead.
+  --- kernel/kthread.c
+  @@ -203,9 +203,9 @@ static int kthread(void *_create)
+   	struct completion *done;
+   	struct kthread *self;
+   	int ret;
+   
+  -	self = kmalloc(sizeof(*self), GFP_KERNEL);
+  +	self = kzalloc(sizeof(*self), GFP_KERNEL);
+   	set_kthread_struct(self);
+   
+   	/* If user was SIGKILLed, I release the structure. */
+   	done = xchg(&create->done, NULL);
+====================================================================================================
+6b7e633fe9c2 2017-12-27 tracing: Remove extra zeroing out of the ring buffer page
+  fixes=['2711ca237a08'] used=False analysis=False tokens=['memset(ref->page + size, 0,']
+  The ring_buffer_read_page() takes care of zeroing out any extra data in the
+  page that it returns. There's no need to zero it out again from the
+  consumer. It was removed from one consumer of this function, but
+  read_buffers_splice_read() did not remove it, and worse, it contained a
+  nasty bug because of it.
+  --- kernel/trace/trace.c
+  @@ -6822,16 +6822,8 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
+   			kfree(ref);
+   			break;
+   		}
+   
+  -		/*
+  -		 * zero out any left over data, this is going to
+  -		 * user land.
+  -		 */
+  -		size = ring_buffer_page_len(ref->page);
+  -		if (size < PAGE_SIZE)
+  -			memset(ref->page + size, 0, PAGE_SIZE - size);
+  -
+   		page = virt_to_page(ref->page);
+   
+   		spd.pages[i] = page;
+   		spd.partial[i].len = PAGE_SIZE;
+  
+====================================================================================================
+636e645f1f2a 2018-01-21 ARM: 8740/1: NOMMU: Make sure we do not hold stale data in mem[] array
+  fixes=['5c9d9a1b3a54'] used=False analysis=False tokens=['memset(mem, 0,']
+  adjust_lowmem_bounds() called twice which can lead to stalled data
+  (i.e. subreg) value in mem[] array after the first call.
+  
+  Zero out mem[] array before we allocate MPU regions for memory.
+  --- arch/arm/mm/pmsa-v7.c
+  @@ -295,8 +296,9 @@ void __init adjust_lowmem_bounds_mpu(void)
+   			break;
+   		}
+   	}
+   
+  +	memset(mem, 0, sizeof(mem));
+   	num = allocate_region(mem_start, specified_mem_size, mem_max_regions, mem);
+   
+   	for (i = 0; i < num; i++) {
+   		unsigned long  subreg = mem[i].size / MPU_NR_SUBREGS;
+  
+====================================================================================================
+e89f5b370153 2018-03-28 dma-mapping: Don't clear GFP_ZERO in dma_alloc_attrs
+  fixes=['57bf5a8963f8'] used=False analysis=False tokens=['__GFP_ZERO']
+  Revert the clearing of __GFP_ZERO in dma_alloc_attrs and move it to
+  dma_direct_alloc for now.  While most common architectures always zero dma
+  cohereny allocations (and x86 did so since day one) this is not documented
+  and at least arc and s390 do not zero without the explicit __GFP_ZERO
+  argument.
+  --- include/linux/dma-mapping.h
+  @@ -517,14 +517,10 @@ static inline void *dma_alloc_attrs(struct device *dev, size_t size,
+   
+   	if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr))
+   		return cpu_addr;
+   
+  -	/*
+  -	 * Let the implementation decide on the zone to allocate from, and
+  -	 * decide on the way of zeroing the memory given that the memory
+  -	 * returned should always be zeroed.
+  -	 */
+  -	flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM | __GFP_ZERO);
+  +	/* let the implementation decide on the zone to allocate from: */
+  +	flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);
+   
+   	if (!arch_dma_alloc_attrs(&dev, &flag))
+   		return NULL;
+   	if (!ops->alloc)
+  --- lib/dma-direct.c
+  @@ -58,8 +58,11 @@ void *dma_direct_alloc(struct device *dev, size_t size, dma_addr_t *dma_handle,
+   	int page_order = get_order(size);
+   	struct page *page = NULL;
+   	void *ret;
+   
+  +	/* we always manually zero the memory once we are done: */
+  +	gfp &= ~__GFP_ZERO;
+  +
+   	/* GFP_DMA32 and GFP_DMA are no ops without the corresponding zones: */
+   	if (dev->coherent_dma_mask <= DMA_BIT_MASK(ARCH_ZONE_DMA_BITS))
+   		gfp |= GFP_DMA;
+   	if (dev->coherent_dma_mask <= DMA_BIT_MASK(32) && !(gfp & GFP_DMA))
+  
+====================================================================================================
+09e35a4a1ca8 2018-04-13 mm/gup_benchmark: handle gup failures
+  fixes=[] used=False analysis=False tokens=['kvzalloc']
+  Patch series "mm/get_user_pages_fast fixes, cleanups", v2.
+  
+  Turns out get_user_pages_fast and __get_user_pages_fast return different
+  values on error when given a single page: __get_user_pages_fast returns
+  0.  get_user_pages_fast returns either 0 or an error.
+  
+  Callers of get_user_pages_fast expect an error so fix it up to return an
+  error consistently.
+  
+  Stress the difference between get_user_pages_fast and
+  __get_user_pages_fast to make sure callers aren't confused.
+  
+  This patch (of 3):
+  
+  __gup_benchmark_ioctl does not handle the case where get_user_pages_fast
+  fails:
+  
+   - a negative return code will cause a buffer overrun
+  
+   - returning with partial success will cause use of uninitialized
+     memory.
+  
+  [akpm@linux-foundation.org: simplification]
+  --- mm/gup_benchmark.c
+  @@ -22,9 +22,9 @@ static int __gup_benchmark_ioctl(unsigned int cmd,
+   	unsigned long i, nr, nr_pages, addr, next;
+   	struct page **pages;
+   
+   	nr_pages = gup->size / PAGE_SIZE;
+  -	pages = kvmalloc(sizeof(void *) * nr_pages, GFP_KERNEL);
+  +	pages = kvzalloc(sizeof(void *) * nr_pages, GFP_KERNEL);
+   	if (!pages)
+   		return -ENOMEM;
+   
+   	i = 0;
+====================================================================================================
+0a0b98734479 2018-05-10 compat: fix 4-byte infoleak via uninitialized struct field
+  fixes=['3a4d44b61625'] used=False analysis=False tokens=['memset(txc, 0,']
+  Commit 3a4d44b61625 ("ntp: Move adjtimex related compat syscalls to
+  native counterparts") removed the memset() in compat_get_timex().  Since
+  then, the compat adjtimex syscall can invoke do_adjtimex() with an
+  uninitialized ->tai.
+  
+  If do_adjtimex() doesn't write to ->tai (e.g.  because the arguments are
+  invalid), compat_put_timex() then copies the uninitialized ->tai field
+  to userspace.
+  
+  Fix it by adding the memset() back.
+  --- kernel/compat.c
+  @@ -33,8 +33,9 @@
+   int compat_get_timex(struct timex *txc, const struct compat_timex __user *utp)
+   {
+   	struct compat_timex tx32;
+   
+  +	memset(txc, 0, sizeof(struct timex));
+   	if (copy_from_user(&tx32, utp, sizeof(struct compat_timex)))
+   		return -EFAULT;
+   
+   	txc->modes = tx32.modes;
+  
+====================================================================================================
+128227e7fe40 2018-06-07 slab: __GFP_ZERO is incompatible with a constructor
+  fixes=['d07dbea46405'] used=False analysis=False tokens=['__GFP_ZERO']
+  __GFP_ZERO requests that the object be initialised to all-zeroes, while
+  the purpose of a constructor is to initialise an object to a particular
+  pattern.  We cannot do both.  Add a warning to catch any users who
+  mistakenly pass a __GFP_ZERO flag when allocating a slab with a
+  constructor.
+  --- mm/slab.c
+  @@ -2664,8 +2664,9 @@ static struct page *cache_grow_begin(struct kmem_cache *cachep,
+   		pr_warn("Unexpected gfp: %#x (%pGg). Fixing up to gfp: %#x (%pGg). Fix your code!\n",
+   				invalid_mask, &invalid_mask, flags, &flags);
+   		dump_stack();
+   	}
+  +	WARN_ON_ONCE(cachep->ctor && (flags & __GFP_ZERO));
+   	local_flags = flags & (GFP_CONSTRAINT_MASK|GFP_RECLAIM_MASK);
+   
+   	check_irq_off();
+   	if (gfpflags_allow_blocking(local_flags))
+  --- mm/slab.c
+  @@ -3070,8 +3071,9 @@ static inline void cache_alloc_debugcheck_before(struct kmem_cache *cachep,
+   #if DEBUG
+   static void *cache_alloc_debugcheck_after(struct kmem_cache *cachep,
+   				gfp_t flags, void *objp, unsigned long caller)
+   {
+  +	WARN_ON_ONCE(cachep->ctor && (flags & __GFP_ZERO));
+   	if (!objp)
+   		return objp;
+   	if (cachep->flags & SLAB_POISON) {
+   		check_poison_obj(cachep, objp);
+  --- mm/slob.c
+  @@ -554,10 +554,12 @@ static void *slob_alloc_node(struct kmem_cache *c, gfp_t flags, int node)
+   					    PAGE_SIZE << get_order(c->size),
+   					    flags, node);
+   	}
+   
+  -	if (b && c->ctor)
+  +	if (b && c->ctor) {
+  +		WARN_ON_ONCE(flags & __GFP_ZERO);
+   		c->ctor(b);
+  +	}
+   
+   	kmemleak_alloc_recursive(b, c->size, 1, c->flags, flags);
+   	return b;
+   }
+====================================================================================================
+dd65a941f6ba 2018-06-19 arm64: dma-mapping: clear buffers allocated with FORCE_CONTIGUOUS flag
+  fixes=['44176bb38fa4'] used=False analysis=False tokens=['memset(addr, 0,']
+  dma_alloc_*() buffers might be exposed to userspace via mmap() call, so
+  they should be cleared on allocation. In case of IOMMU-based dma-mapping
+  implementation such buffer clearing was missing in the code path for
+  DMA_ATTR_FORCE_CONTIGUOUS flag handling, because dma_alloc_from_contiguous()
+  doesn't honor __GFP_ZERO flag. This patch fixes this issue. For more
+  information on clearing buffers allocated by dma_alloc_* functions,
+  see commit 6829e274a623 ("arm64: dma-mapping: always clear allocated
+  buffers").
+  --- arch/arm64/mm/dma-mapping.c
+  @@ -582,15 +582,16 @@ static void *__iommu_alloc_attrs(struct device *dev, size_t size,
+   			dma_release_from_contiguous(dev, page,
+   						    size >> PAGE_SHIFT);
+   			return NULL;
+   		}
+  -		if (!coherent)
+  -			__dma_flush_area(page_to_virt(page), iosize);
+  -
+   		addr = dma_common_contiguous_remap(page, size, VM_USERMAP,
+   						   prot,
+   						   __builtin_return_address(0));
+  -		if (!addr) {
+  +		if (addr) {
+  +			memset(addr, 0, size);
+  +			if (!coherent)
+  +				__dma_flush_area(page_to_virt(page), iosize);
+  +		} else {
+   			iommu_dma_unmap_page(dev, *handle, iosize, 0, attrs);
+   			dma_release_from_contiguous(dev, page,
+   						    size >> PAGE_SHIFT);
+   		}
+  
+====================================================================================================
+d3f66e4116af 2018-10-25 bpf: fix leaking uninitialized memory on pop/peek helpers
+  fixes=['f1a2e44a3aec'] used=False analysis=False tokens=['memset(value, 0,']
+  Commit f1a2e44a3aec ("bpf: add queue and stack maps") added helpers
+  with ARG_PTR_TO_UNINIT_MAP_VALUE. Meaning, the helper is supposed to
+  fill the map value buffer with data instead of reading from it like
+  in other helpers such as map update. However, given the buffer is
+  allowed to be uninitialized (since we fill it in the helper anyway),
+  it also means that the helper is obliged to wipe the memory in case
+  of an error in order to not allow for leaking uninitialized memory.
+  Given pop/peek is both handled inside __{stack,queue}_map_get(),
+  lets wipe it there on error case, that is, empty stack/queue.
+  --- kernel/bpf/queue_stack_maps.c
+  @@ -121,8 +121,9 @@ static int __queue_map_get(struct bpf_map *map, void *value, bool delete)
+   
+   	raw_spin_lock_irqsave(&qs->lock, flags);
+   
+   	if (queue_stack_map_is_empty(qs)) {
+  +		memset(value, 0, qs->map.value_size);
+   		err = -ENOENT;
+   		goto out;
+   	}
+   
+  --- kernel/bpf/queue_stack_maps.c
+  @@ -150,8 +151,9 @@ static int __stack_map_get(struct bpf_map *map, void *value, bool delete)
+   
+   	raw_spin_lock_irqsave(&qs->lock, flags);
+   
+   	if (queue_stack_map_is_empty(qs)) {
+  +		memset(value, 0, qs->map.value_size);
+   		err = -ENOENT;
+   		goto out;
+   	}
+   
+  
+====================================================================================================
+2af8ff291848 2018-11-30 mm/khugepaged: collapse_shmem() remember to clear holes
+  fixes=['f3f0e1d2150b'] used=False analysis=False tokens=['clear_highpage']
+  Huge tmpfs testing reminds us that there is no __GFP_ZERO in the gfp
+  flags khugepaged uses to allocate a huge page - in all common cases it
+  would just be a waste of effort - so collapse_shmem() must remember to
+  clear out any holes that it instantiates.
+  
+  The obvious place to do so, where they are put into the page cache tree,
+  is not a good choice: because interrupts are disabled there.  Leave it
+  until further down, once success is assured, where the other pages are
+  copied (before setting PageUptodate).
+  --- mm/khugepaged.c
+  @@ -1466,9 +1466,14 @@ static void collapse_shmem(struct mm_struct *mm,
+   		/*
+   		 * Replacing old pages with new one has succeeded, now we
+   		 * need to copy the content and free the old pages.
+   		 */
+  +		index = start;
+   		list_for_each_entry_safe(page, tmp, &pagelist, lru) {
+  +			while (index < page->index) {
+  +				clear_highpage(new_page + (index % HPAGE_PMD_NR));
+  +				index++;
+  +			}
+   			copy_highpage(new_page + (page->index % HPAGE_PMD_NR),
+   					page);
+   			list_del(&page->lru);
+   			unlock_page(page);
+  --- mm/khugepaged.c
+  @@ -1476,8 +1481,13 @@ static void collapse_shmem(struct mm_struct *mm,
+   			page->mapping = NULL;
+   			ClearPageActive(page);
+   			ClearPageUnevictable(page);
+   			put_page(page);
+  +			index++;
+  +		}
+  +		while (index < end) {
+  +			clear_highpage(new_page + (index % HPAGE_PMD_NR));
+  +			index++;
+   		}
+   
+   		local_irq_disable();
+   		__inc_node_page_state(new_page, NR_SHMEM_THPS);
+  
+====================================================================================================
+a1da439cc0d9 2018-12-05 dma-mapping: fix lack of DMA address assignment in generic remap allocator
+  fixes=['bfd56cd60521'] used=False analysis=False tokens=['memset(ret, 0,']
+  Commit bfd56cd60521 ("dma-mapping: support highmem in the generic remap
+  allocator") replaced dma_direct_alloc_pages() with __dma_direct_alloc_pages(),
+  which doesn't set dma_handle and zero allocated memory. Fix it by doing this
+  directly in the caller function.
+  --- kernel/dma/remap.c
+  @@ -222,10 +222,16 @@ void *arch_dma_alloc(struct device *dev, size_t size, dma_addr_t *dma_handle,
+   	/* create a coherent mapping */
+   	ret = dma_common_contiguous_remap(page, size, VM_USERMAP,
+   			arch_dma_mmap_pgprot(dev, PAGE_KERNEL, attrs),
+   			__builtin_return_address(0));
+  -	if (!ret)
+  +	if (!ret) {
+   		__dma_direct_free_pages(dev, size, page);
+  +		return ret;
+  +	}
+  +
+  +	*dma_handle = phys_to_dma(dev, page_to_phys(page));
+  +	memset(ret, 0, size);
+  +
+   	return ret;
+   }
+   
+   void arch_dma_free(struct device *dev, size_t size, void *vaddr,
+  
+====================================================================================================
+32043fa065b5 2018-12-19 x86/mtrr: Don't copy uninitialized gentry fields back to userspace
+  fixes=['b263b31e8ad6'] used=False analysis=False tokens=['memset(&gentry, 0,']
+  Currently the copy_to_user of data in the gentry struct is copying
+  uninitiaized data in field _pad from the stack to userspace.
+  
+  Fix this by explicitly memset'ing gentry to zero, this also will zero any
+  compiler added padding fields that may be in struct (currently there are
+  none).
+  
+  Detected by CoverityScan, CID#200783 ("Uninitialized scalar variable")
+  --- arch/x86/kernel/cpu/mtrr/if.c
+  @@ -164,8 +164,10 @@ mtrr_ioctl(struct file *file, unsigned int cmd, unsigned long __arg)
+   	struct mtrr_sentry sentry;
+   	struct mtrr_gentry gentry;
+   	void __user *arg = (void __user *) __arg;
+   
+  +	memset(&gentry, 0, sizeof(gentry));
+  +
+   	switch (cmd) {
+   	case MTRRIOC_ADD_ENTRY:
+   	case MTRRIOC_SET_ENTRY:
+   	case MTRRIOC_DEL_ENTRY:
+  
+====================================================================================================
+4af396ae4836 2019-01-17 bpf: zero out build_id for BPF_STACK_BUILD_ID_IP
+  fixes=['615755a77b24'] used=False analysis=False tokens=['memset(id_offs[i].build_id, 0,']
+  When returning BPF_STACK_BUILD_ID_IP from stack_map_get_build_id_offset,
+  make sure that build_id field is empty. Since we are using percpu
+  free list, there is a possibility that we might reuse some previous
+  bpf_stack_build_id with non-zero build_id.
+  --- kernel/bpf/stackmap.c
+  @@ -313,8 +313,9 @@ static void stack_map_get_build_id_offset(struct bpf_stack_build_id *id_offs,
+   		/* cannot access current->mm, fall back to ips */
+   		for (i = 0; i < trace_nr; i++) {
+   			id_offs[i].status = BPF_STACK_BUILD_ID_IP;
+   			id_offs[i].ip = ips[i];
+  +			memset(id_offs[i].build_id, 0, BPF_BUILD_ID_SIZE);
+   		}
+   		return;
+   	}
+   
+  --- kernel/bpf/stackmap.c
+  @@ -323,8 +324,9 @@ static void stack_map_get_build_id_offset(struct bpf_stack_build_id *id_offs,
+   		if (!vma || stack_map_get_build_id(vma, id_offs[i].build_id)) {
+   			/* per entry fall back to ips */
+   			id_offs[i].status = BPF_STACK_BUILD_ID_IP;
+   			id_offs[i].ip = ips[i];
+  +			memset(id_offs[i].build_id, 0, BPF_BUILD_ID_SIZE);
+   			continue;
+   		}
+   		id_offs[i].offset = (vma->vm_pgoff << PAGE_SHIFT) + ips[i]
+   			- vma->vm_start;
+  
+====================================================================================================
+3a33d030daaa 2019-01-25 kvm: x86/vmx: Use kzalloc for cached_vmcs12
+  fixes=['8fcc4b5923af'] used=False analysis=False tokens=['kzalloc']
+  This changes the allocation of cached_vmcs12 to use kzalloc instead of
+  kmalloc. This removes the information leak found by Syzkaller (see
+  Reported-by) in this case and prevents similar leaks from happening
+  based on cached_vmcs12.
+  
+  It also changes vmx_get_nested_state to copy out the full 4k VMCS12_SIZE
+  in copy_to_user rather than only the size of the struct.
+  
+  Tested: rebuilt against head, booted, and ran the syszkaller repro
+    https://syzkaller.appspot.com/text?tag=ReproC&x=174efca3400000 without
+    observing any problems.
+  --- arch/x86/kvm/vmx/nested.c
+  @@ -4139,13 +4139,13 @@ static int enter_vmx_operation(struct kvm_vcpu *vcpu)
+   	r = alloc_loaded_vmcs(&vmx->nested.vmcs02);
+   	if (r < 0)
+   		goto out_vmcs02;
+   
+  -	vmx->nested.cached_vmcs12 = kmalloc(VMCS12_SIZE, GFP_KERNEL);
+  +	vmx->nested.cached_vmcs12 = kzalloc(VMCS12_SIZE, GFP_KERNEL);
+   	if (!vmx->nested.cached_vmcs12)
+   		goto out_cached_vmcs12;
+   
+  -	vmx->nested.cached_shadow_vmcs12 = kmalloc(VMCS12_SIZE, GFP_KERNEL);
+  +	vmx->nested.cached_shadow_vmcs12 = kzalloc(VMCS12_SIZE, GFP_KERNEL);
+   	if (!vmx->nested.cached_shadow_vmcs12)
+   		goto out_cached_shadow_vmcs12;
+   
+   	if (enable_shadow_vmcs && !alloc_shadow_vmcs(vcpu))
+====================================================================================================
+98d90582be2e 2019-02-20 svm: Fix AVIC DFR and LDR handling
+  fixes=['18f40c53e10f'] used=False analysis=False tokens=['clear_page']
+  Current SVM AVIC driver makes two incorrect assumptions:
+    1. APIC LDR register cannot be zero
+    2. APIC DFR for all vCPUs must be the same
+  
+  LDR=0 means the local APIC does not support logical destination mode.
+  Therefore, the driver should mark any previously assigned logical APIC ID
+  table entry as invalid, and return success.  Also, DFR is specific to
+  a particular local APIC, and can be different among all vCPUs
+  (as observed on Windows 10).
+  
+  These incorrect assumptions cause Windows 10 and FreeBSD VMs to fail
+  to boot with AVIC enabled. So, instead of flush the whole logical APIC ID
+  table, handle DFR and LDR for each vCPU independently.
+  --- arch/x86/kvm/svm.c
+  @@ -4636,29 +4644,18 @@ static int avic_handle_apic_id_update(struct kvm_vcpu *vcpu)
+   
+   	return 0;
+   }
+   
+  -static int avic_handle_dfr_update(struct kvm_vcpu *vcpu)
+  +static void avic_handle_dfr_update(struct kvm_vcpu *vcpu)
+   {
+   	struct vcpu_svm *svm = to_svm(vcpu);
+  -	struct kvm_svm *kvm_svm = to_kvm_svm(vcpu->kvm);
+   	u32 dfr = kvm_lapic_get_reg(vcpu->arch.apic, APIC_DFR);
+  -	u32 mod = (dfr >> 28) & 0xf;
+  -
+  -	/*
+  -	 * We assume that all local APICs are using the same type.
+  -	 * If this changes, we need to flush the AVIC logical
+  -	 * APID id table.
+  -	 */
+  -	if (kvm_svm->ldr_mode == mod)
+  -		return 0;
+   
+  -	clear_page(page_address(kvm_svm->avic_logical_id_table_page));
+  -	kvm_svm->ldr_mode = mod;
+  +	if (svm->dfr_reg == dfr)
+  +		return;
+   
+  -	if (svm->ldr_reg)
+  -		avic_handle_ldr_update(vcpu);
+  -	return 0;
+  +	avic_invalidate_logical_id_entry(vcpu);
+====================================================================================================
+a90118c445cc 2019-08-16 x86/boot: Save fields explicitly, zero out everything else
+  fixes=[] used=False analysis=False tokens=['memset(&boot_params->_pad7[0], 0,', 'memset(&boot_params->_pad8[0], 0,', 'memset(&boot_params->_pad9[0], 0,', 'memset(&boot_params->ext_ramdisk_image, 0,', 'memset(&boot_params->kbd_status, 0,', 'memset(&scratch, 0,']
+  Recent gcc compilers (gcc 9.1) generate warnings about an out of bounds
+  memset, if the memset goes accross several fields of a struct. This
+  generated a couple of warnings on x86_64 builds in sanitize_boot_params().
+  
+  Fix this by explicitly saving the fields in struct boot_params
+  that are intended to be preserved, and zeroing all the rest.
+  
+  [ tglx: Tagged for stable as it breaks the warning free build there as well ]
+  --- arch/x86/include/asm/bootparam_utils.h
+  @@ -34,23 +48,42 @@ static void sanitize_boot_params(struct boot_params *boot_params)
+   	 * (or any other) individual field, or you will soon have
+   	 * problems again.
+   	 */
+   	if (boot_params->sentinel) {
+  -		/* fields in boot_params are left uninitialized, clear them */
+  -		boot_params->acpi_rsdp_addr = 0;
+  -		memset(&boot_params->ext_ramdisk_image, 0,
+  -		       (char *)&boot_params->efi_info -
+  -			(char *)&boot_params->ext_ramdisk_image);
+  -		memset(&boot_params->kbd_status, 0,
+  -		       (char *)&boot_params->hdr -
+  -		       (char *)&boot_params->kbd_status);
+  -		memset(&boot_params->_pad7[0], 0,
+  -		       (char *)&boot_params->edd_mbr_sig_buffer[0] -
+  -			(char *)&boot_params->_pad7[0]);
+  -		memset(&boot_params->_pad8[0], 0,
+  -		       (char *)&boot_params->eddbuf[0] -
+  -			(char *)&boot_params->_pad8[0]);
+  -		memset(&boot_params->_pad9[0], 0, sizeof(boot_params->_pad9));
+  +		static struct boot_params scratch;
+  +		char *bp_base = (char *)boot_params;
+  +		char *save_base = (char *)&scratch;
+  +		int i;
+  +
+  +		const struct boot_params_to_save to_save[] = {
+  +			BOOT_PARAM_PRESERVE(screen_info),
+  +			BOOT_PARAM_PRESERVE(apm_bios_info),
+  +			BOOT_PARAM_PRESERVE(tboot_addr),
+  +			BOOT_PARAM_PRESERVE(ist_info),
+====================================================================================================
+0f181f9fbea8 2019-10-14 mm/slub.c: init_on_free=1 should wipe freelist ptr for bulk allocations
+  fixes=['6471384af2a6'] used=False analysis=False tokens=['memset((void *)((char *)obj + s->offset), 0,', 'memset(object + s->offset, 0,', 'want_init_on_free']
+  slab_alloc_node() already zeroed out the freelist pointer if
+  init_on_free was on.  Thibaut Sautereau noticed that the same needs to
+  be done for kmem_cache_alloc_bulk(), which performs the allocations
+  separately.
+  
+  kmem_cache_alloc_bulk() is currently used in two places in the kernel,
+  so this change is unlikely to have a major performance impact.
+  
+  SLAB doesn't require a similar change, as auto-initialization makes the
+  allocator store the freelist pointers off-slab.
+  --- mm/slub.c
+  @@ -2670,8 +2670,19 @@ static void *__slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
+   	local_irq_restore(flags);
+   	return p;
+   }
+   
+  +/*
+  + * If the object has been wiped upon free, make sure it's fully initialized by
+  + * zeroing out freelist pointer.
+  + */
+  +static __always_inline void maybe_wipe_obj_freeptr(struct kmem_cache *s,
+  +						   void *obj)
+  +{
+  +	if (unlikely(slab_want_init_on_free(s)) && obj)
+  +		memset((void *)((char *)obj + s->offset), 0, sizeof(void *));
+  +}
+  +
+   /*
+    * Inlined fastpath so that allocation functions (kmalloc, kmem_cache_alloc)
+    * have the fastpath folded into their functions. So no function call
+    * overhead for requests that can be satisfied on the fastpath.
+  --- mm/slub.c
+  @@ -2758,14 +2769,10 @@ static __always_inline void *slab_alloc_node(struct kmem_cache *s,
+   		}
+   		prefetch_freepointer(s, next_object);
+   		stat(s, ALLOC_FASTPATH);
+   	}
+  -	/*
+  -	 * If the object has been wiped upon free, make sure it's fully
+  -	 * initialized by zeroing out freelist pointer.
+  -	 */
+  -	if (unlikely(slab_want_init_on_free(s)) && object)
+  -		memset(object + s->offset, 0, sizeof(void *));
+  +
+  +	maybe_wipe_obj_freeptr(s, object);
+   
+   	if (unlikely(slab_want_init_on_alloc(gfpflags, s)) && object)
+   		memset(object, 0, s->object_size);
+   
+====================================================================================================
+8a9093c79863 2020-02-17 net: sched: correct flower port blocking
+  fixes=['62230715fd24'] used=False analysis=False tokens=['memset(key_basic, 0,', 'memset(key_control, 0,']
+  tc flower rules that are based on src or dst port blocking are sometimes
+  ineffective due to uninitialized stack data. __skb_flow_dissect() extracts
+  ports from the skb for tc flower to match against. However, the port
+  dissection is not done when when the FLOW_DIS_IS_FRAGMENT bit is set in
+  key_control->flags. All callers of __skb_flow_dissect(), zero-out the
+  key_control field except for fl_classify() as used by the flower
+  classifier. Thus, the FLOW_DIS_IS_FRAGMENT may be set on entry to
+  __skb_flow_dissect(), since key_control is allocated on the stack
+  and may not be initialized.
+  
+  Since key_basic and key_control are present for all flow keys, let's
+  make sure they are initialized.
+  --- include/net/flow_dissector.h
+  @@ -347,5 +348,13 @@ struct bpf_flow_dissector {
+   	void			*data;
+   	void			*data_end;
+   };
+   
+  +static inline void
+  +flow_dissector_init_keys(struct flow_dissector_key_control *key_control,
+  +			 struct flow_dissector_key_basic *key_basic)
+  +{
+  +	memset(key_control, 0, sizeof(*key_control));
+  +	memset(key_basic, 0, sizeof(*key_basic));
+  +}
+  +
+   #endif
+  
+====================================================================================================
+edd4fa37baa6 2020-03-16 KVM: x86: Allocate new rmap and large page tracking when moving memslot
+  fixes=['05da45583de9'] used=True analysis=False tokens=['memset(&slot->arch, 0,']
+  Reallocate a rmap array and recalcuate large page compatibility when
+  moving an existing memslot to correctly handle the alignment properties
+  of the new memslot.  The number of rmap entries required at each level
+  is dependent on the alignment of the memslot's base gfn with respect to
+  that level, e.g. moving a large-page aligned memslot so that it becomes
+  unaligned will increase the number of rmap entries needed at the now
+  unaligned level.
+  
+  Not updating the rmap array is the most obvious bug, as KVM accesses
+  garbage data beyond the end of the rmap.  KVM interprets the bad data as
+  pointers, leading to non-canonical #GPs, unexpected #PFs, etc...
+  
+    general protection fault: 0000 [#1] SMP
+    CPU: 0 PID: 1909 Comm: move_memory_reg Not tainted 5.4.0-rc7+ #139
+    Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 0.0.0 02/06/2015
+    RIP: 0010:rmap_get_first+0x37/0x50 [kvm]
+    Code: <48> 8b 3b 48 85 ff 74 ec e8 6c f4 ff ff 85 c0 74 e3 48 89 d8 5b c3
+    RSP: 0018:ffffc9000021bbc8 EFLAGS: 00010246
+    RAX: ffff00617461642e RBX: ffff00617461642e RCX: 0000000000000012
+    RDX: ffff88827400f568 RSI: ffffc9000021bbe0 RDI: ffff88827400f570
+    RBP: 0010000000000000 R08: ffffc9000021bd00 R09: ffffc9000021bda8
+    R10: ffffc9000021bc48 R11: 0000000000000000 R12: 0030000000000000
+    R13: 0000000000000000 R14: ffff88827427d700 R15: ffffc9000021bce8
+    FS:  00007f7eda014700(0000) GS:ffff888277a00000(0000) knlGS:0000000000000000
+    CS:  0010 DS: 0000 ES: 0000 
+  --- arch/x86/kvm/x86.c
+  @@ -9877,8 +9877,15 @@ int kvm_arch_create_memslot(struct kvm *kvm, struct kvm_memory_slot *slot,
+   			    unsigned long npages)
+   {
+   	int i;
+   
+  +	/*
+  +	 * Clear out the previous array pointers for the KVM_MR_MOVE case.  The
+  +	 * old arrays will be freed by __kvm_set_memory_region() if installing
+  +	 * the new memslot is successful.
+  +	 */
+  +	memset(&slot->arch, 0, sizeof(slot->arch));
+  +
+   	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
+   		struct kvm_lpage_info *linfo;
+   		unsigned long ugfn;
+   		int lpages;
+====================================================================================================
+56df70a63ed5 2020-04-21 mm/ksm: fix NULL pointer dereference when KSM zero page is enabled
+  fixes=['e86c59b1b12d'] used=False analysis=False tokens=['ZERO_PAGE']
+  find_mergeable_vma() can return NULL.  In this case, it leads to a crash
+  when we access vm_mm(its offset is 0x40) later in write_protect_page.
+  And this case did happen on our server.  The following call trace is
+  captured in kernel 4.19 with the following patch applied and KSM zero
+  page enabled on our server.
+  
+    commit e86c59b1b12d ("mm/ksm: improve deduplication of zero pages with colouring")
+  
+  So add a vma check to fix it.
+  
+    BUG: unable to handle kernel NULL pointer dereference at 0000000000000040
+    Oops: 0000 [#1] SMP NOPTI
+    CPU: 9 PID: 510 Comm: ksmd Kdump: loaded Tainted: G OE 4.19.36.bsk.9-amd64 #4.19.36.bsk.9
+    RIP: try_to_merge_one_page+0xc7/0x760
+    Code: 24 58 65 48 33 34 25 28 00 00 00 89 e8 0f 85 a3 06 00 00 48 83 c4
+          60 5b 5d 41 5c 41 5d 41 5e 41 5f c3 48 8b 46 08 a8 01 75 b8 <49>
+          8b 44 24 40 4c 8d 7c 24 20 b9 07 00 00 00 4c 89 e6 4c 89 ff 48
+    RSP: 0018:ffffadbdd9fffdb0 EFLAGS: 00010246
+    RAX: ffffda83ffd4be08 RBX: ffffda83ffd4be40 RCX: 0000002c6e800000
+    RDX: 0000000000000000 RSI: ffffda83ffd4be40 RDI: 0000000000000000
+    RBP: ffffa11939f02ec0 R08: 0000000094e1a447 R09: 00000000abe76577
+    R10: 0000000000000962 R11: 0000000000004e6a R12: 0000000000000000
+    R13: ffffda83b1e06380 R14: ffffa18f31f072c0 R15: ffffda83ffd4be40
+    FS: 0000000000000000(0000) GS:ffffa0da43b80000(0000) knlGS:0000000000000000
+    CS: 0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+    CR2: 0000000000000040 CR3: 0000002c77c0a003 CR4: 00
+  --- mm/ksm.c
+  @@ -2111,10 +2111,18 @@ static void cmp_and_merge_page(struct page *page, struct rmap_item *rmap_item)
+   		struct vm_area_struct *vma;
+   
+   		down_read(&mm->mmap_sem);
+   		vma = find_mergeable_vma(mm, rmap_item->address);
+  -		err = try_to_merge_one_page(vma, page,
+  -					    ZERO_PAGE(rmap_item->address));
+  +		if (vma) {
+  +			err = try_to_merge_one_page(vma, page,
+  +					ZERO_PAGE(rmap_item->address));
+  +		} else {
+  +			/*
+  +			 * If the vma is out of date, we do not need to
+  +			 * continue.
+  +			 */
+  +			err = 0;
+  +		}
+   		up_read(&mm->mmap_sem);
+   		/*
+   		 * In case of failure, the page was not really empty, so we
+   		 * need to continue. Otherwise we're done.
+  
+====================================================================================================
+8982ae527fbe 2020-06-26 mm/slab: use memzero_explicit() in kzfree()
+  fixes=['3ef0e5ba4673'] used=False analysis=False tokens=['memset(mem, 0,', 'memzero_explicit']
+  The kzfree() function is normally used to clear some sensitive
+  information, like encryption keys, in the buffer before freeing it back to
+  the pool.  Memset() is currently used for buffer clearing.  However
+  unlikely, there is still a non-zero probability that the compiler may
+  choose to optimize away the memory clearing especially if LTO is being
+  used in the future.
+  
+  To make sure that this optimization will never happen,
+  memzero_explicit(), which is introduced in v3.18, is now used in
+  kzfree() to future-proof it.
+  --- mm/slab_common.c
+  @@ -1725,9 +1725,9 @@ void kzfree(const void *p)
+   
+   	if (unlikely(ZERO_OR_NULL_PTR(mem)))
+   		return;
+   	ks = ksize(mem);
+  -	memset(mem, 0, ks);
+  +	memzero_explicit(mem, ks);
+   	kfree(mem);
+   }
+   EXPORT_SYMBOL(kzfree);
+   
+  
+====================================================================================================
+d81ae8aac85c 2020-07-08 sched/uclamp: Fix initialization of struct uclamp_rq
+  fixes=['69842cba9ace'] used=False analysis=False tokens=['memset(&cpu_rq(cpu)->uclamp, 0,']
+  struct uclamp_rq was zeroed out entirely in assumption that in the first
+  call to uclamp_rq_inc() they'd be initialized correctly in accordance to
+  default settings.
+  
+  But when next patch introduces a static key to skip
+  uclamp_rq_{inc,dec}() until userspace opts in to use uclamp, schedutil
+  will fail to perform any frequency changes because the
+  rq->uclamp[UCLAMP_MAX].value is zeroed at init and stays as such. Which
+  means all rqs are capped to 0 by default.
+  
+  Fix it by making sure we do proper initialization at init without
+  relying on uclamp_rq_inc() doing it later.
+  --- kernel/sched/core.c
+  @@ -1238,21 +1238,32 @@ static void uclamp_fork(struct task_struct *p)
+   			      uclamp_none(clamp_id), false);
+   	}
+   }
+   
+  +static void __init init_uclamp_rq(struct rq *rq)
+  +{
+  +	enum uclamp_id clamp_id;
+  +	struct uclamp_rq *uc_rq = rq->uclamp;
+  +
+  +	for_each_clamp_id(clamp_id) {
+  +		uc_rq[clamp_id] = (struct uclamp_rq) {
+  +			.value = uclamp_none(clamp_id)
+  +		};
+  +	}
+  +
+  +	rq->uclamp_flags = 0;
+  +}
+  +
+   static void __init init_uclamp(void)
+   {
+   	struct uclamp_se uc_max = {};
+   	enum uclamp_id clamp_id;
+   	int cpu;
+   
+   	mutex_init(&uclamp_mutex);
+   
+  -	for_each_possible_cpu(cpu) {
+  -		memset(&cpu_rq(cpu)->uclamp, 0,
+  -				sizeof(struct uclamp_rq)*UCLAMP_CNT);
+====================================================================================================
+ce5716c61852 2021-01-24 kasan, mm: fix conflicts with init_on_alloc/free
+  fixes=['aa1ef4d7b3f6'] used=False analysis=False tokens=['memset((void *)((char *)obj + s->offset), 0,', 'memset(kasan_reset_tag(p[j]), 0,', 'memset(p[j], 0,']
+  A few places where SLUB accesses object's data or metadata were missed
+  in a previous patch.  This leads to false positives with hardware
+  tag-based KASAN when bulk allocations are used with init_on_alloc/free.
+  
+  Fix the false-positives by resetting pointer tags during these accesses.
+  
+  (The kasan_reset_tag call is removed from slab_alloc_node, as it's added
+   into maybe_wipe_obj_freeptr.)
+  --- mm/slub.c
+  @@ -2790,9 +2790,10 @@ static void *__slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
+   static __always_inline void maybe_wipe_obj_freeptr(struct kmem_cache *s,
+   						   void *obj)
+   {
+   	if (unlikely(slab_want_init_on_free(s)) && obj)
+  -		memset((void *)((char *)obj + s->offset), 0, sizeof(void *));
+  +		memset((void *)((char *)kasan_reset_tag(obj) + s->offset),
+  +			0, sizeof(void *));
+   }
+   
+   /*
+    * Inlined fastpath so that allocation functions (kmalloc, kmem_cache_alloc)
+  --- mm/slub.c
+  @@ -3328,9 +3329,9 @@ int kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t size,
+   	if (unlikely(slab_want_init_on_alloc(flags, s))) {
+   		int j;
+   
+   		for (j = 0; j < i; j++)
+  -			memset(p[j], 0, s->object_size);
+  +			memset(kasan_reset_tag(p[j]), 0, s->object_size);
+   	}
+   
+   	/* memcg and kmem_cache debug support */
+   	slab_post_alloc_hook(s, objcg, flags, size, p);
+  
+====================================================================================================
+17d8beda277a 2021-02-12 bpf: Fix an unitialized value in bpf_iter
+  fixes=['15d83c4d7cef'] used=False analysis=False tokens=['kzalloc']
+  Commit 15d83c4d7cef ("bpf: Allow loading of a bpf_iter program")
+  cached btf_id in struct bpf_iter_target_info so later on
+  if it can be checked cheaply compared to checking registered names.
+  
+  syzbot found a bug that uninitialized value may occur to
+  bpf_iter_target_info->btf_id. This is because we allocated
+  bpf_iter_target_info structure with kmalloc and never initialized
+  field btf_id afterwards. This uninitialized btf_id is typically
+  compared to a u32 bpf program func proto btf_id, and the chance
+  of being equal is extremely slim.
+  
+  This patch fixed the issue by using kzalloc which will also
+  prevent future likely instances due to adding new fields.
+  --- kernel/bpf/bpf_iter.c
+  @@ -286,9 +286,9 @@ const struct file_operations bpf_iter_fops = {
+   int bpf_iter_reg_target(const struct bpf_iter_reg *reg_info)
+   {
+   	struct bpf_iter_target_info *tinfo;
+   
+  -	tinfo = kmalloc(sizeof(*tinfo), GFP_KERNEL);
+  +	tinfo = kzalloc(sizeof(*tinfo), GFP_KERNEL);
+   	if (!tinfo)
+   		return -ENOMEM;
+   
+   	tinfo->reg_info = reg_info;
+  
+====================================================================================================
+68d54ceeec0e 2021-02-12 arm64: mte: Allow PTRACE_PEEKMTETAGS access to the zero page
+  fixes=['34bfeea4a9e9'] used=True analysis=False tokens=['ZERO_PAGE']
+  The ptrace(PTRACE_PEEKMTETAGS) implementation checks whether the user
+  page has valid tags (mapped with PROT_MTE) by testing the PG_mte_tagged
+  page flag. If this bit is cleared, ptrace(PTRACE_PEEKMTETAGS) returns
+  -EIO.
+  
+  A newly created (PROT_MTE) mapping points to the zero page which had its
+  tags zeroed during cpu_enable_mte(). If there were no prior writes to
+  this mapping, ptrace(PTRACE_PEEKMTETAGS) fails with -EIO since the zero
+  page does not have the PG_mte_tagged flag set.
+  
+  Set PG_mte_tagged on the zero page when its tags are cleared during
+  boot. In addition, to avoid ptrace(PTRACE_PEEKMTETAGS) succeeding on
+  !PROT_MTE mappings pointing to the zero page, change the
+  __access_remote_tags() check to (vm_flags & VM_MTE) instead of
+  PG_mte_tagged.
+  --- arch/arm64/kernel/cpufeature.c
+  @@ -1700,18 +1700,14 @@ static void bti_enable(const struct arm64_cpu_capabilities *__unused)
+   
+   #ifdef CONFIG_ARM64_MTE
+   static void cpu_enable_mte(struct arm64_cpu_capabilities const *cap)
+   {
+  -	static bool cleared_zero_page = false;
+  -
+   	/*
+   	 * Clear the tags in the zero page. This needs to be done via the
+   	 * linear map which has the Tagged attribute.
+   	 */
+  -	if (!cleared_zero_page) {
+  -		cleared_zero_page = true;
+  +	if (!test_and_set_bit(PG_mte_tagged, &ZERO_PAGE(0)->flags))
+   		mte_clear_page_tags(lm_alias(empty_zero_page));
+  -	}
+   
+   	kasan_init_hw_tags_cpu();
+   }
+   #endif /* CONFIG_ARM64_MTE */
+====================================================================================================
+85d703746154 2021-04-09 KVM: arm64: Fully zero the vcpu state on reset
+  fixes=['e47c2055c68e'] used=True analysis=False tokens=['memset(&vcpu->arch.ctxt.fp_regs, 0,']
+  On vcpu reset, we expect all the registers to be brought back
+  to their initial state, which happens to be a bunch of zeroes.
+  
+  However, some recent commit broke this, and is now leaving a bunch
+  of registers (such as the FP state) with whatever was left by the
+  guest. My bad.
+  
+  Zero the reset of the state (32bit SPSRs and FPSIMD state).
+  --- arch/arm64/kvm/reset.c
+  @@ -241,8 +241,13 @@ int kvm_reset_vcpu(struct kvm_vcpu *vcpu)
+   	}
+   
+   	/* Reset core registers */
+   	memset(vcpu_gp_regs(vcpu), 0, sizeof(*vcpu_gp_regs(vcpu)));
+  +	memset(&vcpu->arch.ctxt.fp_regs, 0, sizeof(vcpu->arch.ctxt.fp_regs));
+  +	vcpu->arch.ctxt.spsr_abt = 0;
+  +	vcpu->arch.ctxt.spsr_und = 0;
+  +	vcpu->arch.ctxt.spsr_irq = 0;
+  +	vcpu->arch.ctxt.spsr_fiq = 0;
+   	vcpu_gp_regs(vcpu)->pstate = pstate;
+   
+   	/* Reset system registers */
+   	kvm_reset_sys_regs(vcpu);
+  
+====================================================================================================
+ff40e51043af 2021-06-02 bpf, lockdown, audit: Fix buggy SELinux lockdown permission checks
+  fixes=['59438b46471a'] used=False analysis=False tokens=['memset(dst, 0,']
+  Commit 59438b46471a ("security,lockdown,selinux: implement SELinux lockdown")
+  added an implementation of the locked_down LSM hook to SELinux, with the aim
+  to restrict which domains are allowed to perform operations that would breach
+  lockdown. This is indirectly also getting audit subsystem involved to report
+  events. The latter is problematic, as reported by Ondrej and Serhei, since it
+  can bring down the whole system via audit:
+  
+    1) The audit events that are triggered due to calls to security_locked_down()
+       can OOM kill a machine, see below details [0].
+  
+    2) It also seems to be causing a deadlock via avc_has_perm()/slow_avc_audit()
+       when trying to wake up kauditd, for example, when using trace_sched_switch()
+       tracepoint, see details in [1]. Triggering this was not via some hypothetical
+       corner case, but with existing tools like runqlat & runqslower from bcc, for
+       example, which make use of this tracepoint. Rough call sequence goes like:
+  
+       rq_lock(rq) -> -------------------------+
+         trace_sched_switch() ->               |
+           bpf_prog_xyz() ->                   +-> deadlock
+             selinux_lockdown() ->             |
+               audit_log_end() ->              |
+                 wake_up_interruptible() ->    |
+                   try_to_wake_up() ->         |
+                     rq_lock(rq) --------------+
+  
+  What's worse is that the intention of 59438b46471a to further restrict lockdown
+  setting
+  --- kernel/trace/bpf_trace.c
+  @@ -214,18 +214,13 @@ const struct bpf_func_proto bpf_probe_read_user_str_proto = {
+   
+   static __always_inline int
+   bpf_probe_read_kernel_common(void *dst, u32 size, const void *unsafe_ptr)
+   {
+  -	int ret = security_locked_down(LOCKDOWN_BPF_READ);
+  +	int ret;
+   
+  -	if (unlikely(ret < 0))
+  -		goto fail;
+   	ret = copy_from_kernel_nofault(dst, unsafe_ptr, size);
+   	if (unlikely(ret < 0))
+  -		goto fail;
+  -	return ret;
+  -fail:
+  -	memset(dst, 0, size);
+  +		memset(dst, 0, size);
+   	return ret;
+   }
+   
+   BPF_CALL_3(bpf_probe_read_kernel, void *, dst, u32, size,
+  --- kernel/trace/bpf_trace.c
+  @@ -261,13 +253,9 @@ bpf_probe_read_kernel_str_common(void *dst, u32 size, const void *unsafe_ptr)
+   	 * is returned that can be used for bpf_perf_event_output() et al.
+   	 */
+   	ret = strncpy_from_kernel_nofault(dst, unsafe_ptr, size);
+   	if (unlikely(ret < 0))
+  -		goto fail;
+  -
+  -	return ret;
+  -fail:
+  -	memset(dst, 0, size);
+  +		memset(dst, 0, size);
+   	return ret;
+   }
+   
+   BPF_CALL_3(bpf_probe_read_kernel_str, void *, dst, u32, size,
+====================================================================================================
+4f13d471e5d1 2021-06-08 KVM: SVM: Fix SEV SEND_START session length & SEND_UPDATE_DATA query length after commit 238eca821cee
+  fixes=['238eca821cee'] used=False analysis=False tokens=['memset(&data, 0,']
+  Commit 238eca821cee ("KVM: SVM: Allocate SEV command structures on local stack")
+  uses the local stack to allocate the structures used to communicate with the PSP,
+  which were earlier being kzalloced. This breaks SEV live migration for
+  computing the SEND_START session length and SEND_UPDATE_DATA query length as
+  session_len and trans_len and hdr_len fields are not zeroed respectively for
+  the above commands before issuing the SEV Firmware API call, hence the
+  firmware returns incorrect session length and update data header or trans length.
+  
+  Also the SEV Firmware API returns SEV_RET_INVALID_LEN firmware error
+  for these length query API calls, and the return value and the
+  firmware error needs to be passed to the userspace as it is, so
+  need to remove the return check in the KVM code.
+  --- arch/x86/kvm/svm/sev.c
+  @@ -1102,12 +1102,11 @@ __sev_send_start_query_session_length(struct kvm *kvm, struct kvm_sev_cmd *argp,
+   	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
+   	struct sev_data_send_start data;
+   	int ret;
+   
+  +	memset(&data, 0, sizeof(data));
+   	data.handle = sev->handle;
+   	ret = sev_issue_cmd(kvm, SEV_CMD_SEND_START, &data, &argp->error);
+  -	if (ret < 0)
+  -		return ret;
+   
+   	params->session_len = data.session_len;
+   	if (copy_to_user((void __user *)(uintptr_t)argp->data, params,
+   				sizeof(struct kvm_sev_send_start)))
+  --- arch/x86/kvm/svm/sev.c
+  @@ -1214,12 +1213,11 @@ __sev_send_update_data_query_lengths(struct kvm *kvm, struct kvm_sev_cmd *argp,
+   	struct kvm_sev_info *sev = &to_kvm_svm(kvm)->sev_info;
+   	struct sev_data_send_update_data data;
+   	int ret;
+   
+  +	memset(&data, 0, sizeof(data));
+   	data.handle = sev->handle;
+   	ret = sev_issue_cmd(kvm, SEV_CMD_SEND_UPDATE_DATA, &data, &argp->error);
+  -	if (ret < 0)
+  -		return ret;
+   
+   	params->hdr_len = data.hdr_len;
+   	params->trans_len = data.trans_len;
+   
+  
+====================================================================================================
+93c2cdc975aa 2021-06-24 x86/fpu/xstate: Clear xstate header in copy_xstate_to_uabi_buf() again
+  fixes=['eb6f51723f03'] used=False analysis=False tokens=['memset(&header, 0,']
+  The change which made copy_xstate_to_uabi_buf() usable for
+  [x]fpregs_get() removed the zeroing of the header which means the
+  header, which is copied to user space later, contains except for the
+  xfeatures member, random stack content.
+  
+  Add the memset() back to zero it before usage.
+  --- arch/x86/kernel/fpu/xstate.c
+  @@ -981,8 +981,9 @@ void copy_xstate_to_uabi_buf(struct membuf to, struct task_struct *tsk,
+   	struct xstate_header header;
+   	unsigned int zerofrom;
+   	int i;
+   
+  +	memset(&header, 0, sizeof(header));
+   	header.xfeatures = xsave->header.xfeatures;
+   
+   	/* Mask out the feature bits depending on copy mode */
+   	switch (copy_mode) {
+  
+====================================================================================================
+7f049fbdd57f 2021-06-24 perf/x86/intel/lbr: Zero the xstate buffer on allocation
+  fixes=['ce711ea3cab9'] used=False analysis=False tokens=['__GFP_ZERO']
+  XRSTORS requires a valid xstate buffer to work correctly. XSAVES does not
+  guarantee to write a fully valid buffer according to the SDM:
+  
+    "XSAVES does not write to any parts of the XSAVE header other than the
+     XSTATE_BV and XCOMP_BV fields."
+  
+  XRSTORS triggers a #GP:
+  
+    "If bytes 63:16 of the XSAVE header are not all zero."
+  
+  It's dubious at best how this can work at all when the buffer is not zeroed
+  before use.
+  
+  Allocate the buffers with __GFP_ZERO to prevent XRSTORS failure.
+  --- arch/x86/events/intel/lbr.c
+  @@ -730,9 +730,10 @@ void reserve_lbr_buffers(void)
+   		kmem_cache = x86_get_pmu(cpu)->task_ctx_cache;
+   		if (!kmem_cache || cpuc->lbr_xsave)
+   			continue;
+   
+  -		cpuc->lbr_xsave = kmem_cache_alloc_node(kmem_cache, GFP_KERNEL,
+  +		cpuc->lbr_xsave = kmem_cache_alloc_node(kmem_cache,
+  +							GFP_KERNEL | __GFP_ZERO,
+   							cpu_to_node(cpu));
+   	}
+   }
+   
+  
+====================================================================================================
+69e5d322a2fb 2021-07-23 mm: page_alloc: fix page_poison=1 / INIT_ON_ALLOC_DEFAULT_ON interaction
+  fixes=['51cba1ebc60d'] used=False analysis=False tokens=['init_on_alloc', 'init_on_free']
+  To reproduce the failure we need the following system:
+  
+   - kernel command: page_poison=1 init_on_free=0 init_on_alloc=0
+  
+   - kernel config:
+      * CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+      * CONFIG_INIT_ON_FREE_DEFAULT_ON=y
+      * CONFIG_PAGE_POISONING=y
+  
+  Resulting in:
+  
+      0000000085629bdd: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+      0000000022861832: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+      00000000c597f5b0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+      CPU: 11 PID: 15195 Comm: bash Kdump: loaded Tainted: G     U     O      5.13.1-gentoo-x86_64 #1
+      Hardware name: System manufacturer System Product Name/PRIME Z370-A, BIOS 2801 01/13/2021
+      Call Trace:
+       dump_stack+0x64/0x7c
+       __kernel_unpoison_pages.cold+0x48/0x84
+       post_alloc_hook+0x60/0xa0
+       get_page_from_freelist+0xdb8/0x1000
+       __alloc_pages+0x163/0x2b0
+       __get_free_pages+0xc/0x30
+       pgd_alloc+0x2e/0x1a0
+       mm_init+0x185/0x270
+       dup_mm+0x6b/0x4f0
+       copy_process+0x190d/0x1b10
+       kernel_clone+0xba/0x3b0
+       __do_sys_clone+0x8f/0xb0
+       do_syscall_64+0x68/0x80
+       entry_SYSCALL_64_after_hwframe+0x44/0xae
+  
+  Before commit 51cba1ebc60d ("init_on_alloc: Optimize static branches")
+  init_on_alloc never enabled static branch by default.  It could only be
+  enabed explicitly by init_mem_debugging_and_hardening().
+  
+  But after commit 51cba1ebc60d, a static bran
+  --- mm/page_alloc.c
+  @@ -839,23 +839,26 @@ void init_mem_debugging_and_hardening(void)
+   		page_poisoning_requested = true;
+   	}
+   #endif
+   
+  -	if (_init_on_alloc_enabled_early) {
+  -		if (page_poisoning_requested)
+  -			pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
+  -				"will take precedence over init_on_alloc\n");
+  -		else
+  -			static_branch_enable(&init_on_alloc);
+  -	}
+  -	if (_init_on_free_enabled_early) {
+  -		if (page_poisoning_requested)
+  -			pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
+  -				"will take precedence over init_on_free\n");
+  -		else
+  -			static_branch_enable(&init_on_free);
+  +	if ((_init_on_alloc_enabled_early || _init_on_free_enabled_early) &&
+  +	    page_poisoning_requested) {
+  +		pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
+  +			"will take precedence over init_on_alloc and init_on_free\n");
+  +		_init_on_alloc_enabled_early = false;
+  +		_init_on_free_enabled_early = false;
+   	}
+   
+  +	if (_init_on_alloc_enabled_early)
+  +		static_branch_enable(&init_on_alloc);
+  +	else
+  +		static_branch_disable(&init_on_alloc);
+====================================================================================================
+0594c58161b6 2021-09-21 xen/x86: fix PV trap handling on secondary processors
+  fixes=['f87e4cac4f4e'] used=False analysis=False tokens=['memset(&traps[out], 0,']
+  The initial observation was that in PV mode under Xen 32-bit user space
+  didn't work anymore. Attempts of system calls ended in #GP(0x402). All
+  of the sudden the vector 0x80 handler was not in place anymore. As it
+  turns out up to 5.13 redundant initialization did occur: Once from
+  cpu_initialize_context() (through its VCPUOP_initialise hypercall) and a
+  2nd time while each CPU was brought fully up. This 2nd initialization is
+  now gone, uncovering that the 1st one was flawed: Unlike for the
+  set_trap_table hypercall, a full virtual IDT needs to be specified here;
+  the "vector" fields of the individual entries are of no interest. With
+  many (kernel) IDT entries still(?) (i.e. at that point at least) empty,
+  the syscall vector 0x80 ended up in slot 0x20 of the virtual IDT, thus
+  becoming the domain's handler for vector 0x20.
+  
+  Make xen_convert_trap_info() fit for either purpose, leveraging the fact
+  that on the xen_copy_trap_info() path the table starts out zero-filled.
+  This includes moving out the writing of the sentinel, which would also
+  have lead to a buffer overrun in the xen_copy_trap_info() case if all
+  (kernel) IDT entries were populated. Convert the writing of the sentinel
+  to clearing of the entire table entry rather than just the address
+  field.
+  
+  (I didn't bother trying to identify the commit which uncovered the issue
+  in 5.14; the commit named below is the one which actually introduced the
+  bad code.)
+  --- arch/x86/xen/enlighten_pv.c
+  @@ -785,16 +786,18 @@ void xen_copy_trap_info(struct trap_info *traps)
+   static void xen_load_idt(const struct desc_ptr *desc)
+   {
+   	static DEFINE_SPINLOCK(lock);
+   	static struct trap_info traps[257];
+  +	unsigned out;
+   
+   	trace_xen_cpu_load_idt(desc);
+   
+   	spin_lock(&lock);
+   
+   	memcpy(this_cpu_ptr(&idt_desc), desc, sizeof(idt_desc));
+   
+  -	xen_convert_trap_info(desc, traps);
+  +	out = xen_convert_trap_info(desc, traps, false);
+  +	memset(&traps[out], 0, sizeof(traps[0]));
+   
+   	xen_mc_flush();
+   	if (HYPERVISOR_set_trap_table(traps))
+   		BUG();
+  
+====================================================================================================
+26dca996ea7b 2022-01-15 kasan: fix quarantine conflicting with init_on_free
+  fixes=['6471384af2a6'] used=False analysis=False tokens=['init_on_free', 'memzero_explicit', 'want_init_on_free']
+  KASAN's quarantine might save its metadata inside freed objects.  As
+  this happens after the memory is zeroed by the slab allocator when
+  init_on_free is enabled, the memory coming out of quarantine is not
+  properly zeroed.
+  
+  This causes lib/test_meminit.c tests to fail with Generic KASAN.
+  
+  Zero the metadata when the object is removed from quarantine.
+  --- mm/kasan/quarantine.c
+  @@ -131,13 +131,24 @@ static void *qlink_to_object(struct qlist_node *qlink, struct kmem_cache *cache)
+   
+   static void qlink_free(struct qlist_node *qlink, struct kmem_cache *cache)
+   {
+   	void *object = qlink_to_object(qlink, cache);
+  +	struct kasan_free_meta *meta = kasan_get_free_meta(cache, object);
+   	unsigned long flags;
+   
+   	if (IS_ENABLED(CONFIG_SLAB))
+   		local_irq_save(flags);
+   
+  +	/*
+  +	 * If init_on_free is enabled and KASAN's free metadata is stored in
+  +	 * the object, zero the metadata. Otherwise, the object's memory will
+  +	 * not be properly zeroed, as KASAN saves the metadata after the slab
+  +	 * allocator zeroes the object.
+  +	 */
+  +	if (slab_want_init_on_free(cache) &&
+  +	    cache->kasan_info.free_meta_offset == 0)
+  +		memzero_explicit(meta, sizeof(*meta));
+  +
+   	/*
+   	 * As the object now gets freed from the quarantine, assume that its
+   	 * free track is no longer valid.
+   	 */
+  
+====================================================================================================
+44cad52cc14a 2022-02-18 x86/ptrace: Fix xfpregs_set()'s incorrect xmm clearing
+  fixes=['6164331d15f7'] used=False analysis=False tokens=['memset(&fpu->fpstate->regs.fxsave.xmm_space[8*4], 0,', 'memset(&fpu->fpstate->regs.fxsave.xmm_space[8], 0,']
+  xfpregs_set() handles 32-bit REGSET_XFP and 64-bit REGSET_FP. The actual
+  code treats these regsets as modern FX state (i.e. the beginning part of
+  XSTATE). The declarations of the regsets thought they were the legacy
+  i387 format. The code thought they were the 32-bit (no xmm8..15) variant
+  of XSTATE and, for good measure, made the high bits disappear by zeroing
+  the wrong part of the buffer. The latter broke ptrace, and everything
+  else confused anyone trying to understand the code. In particular, the
+  nonsense definitions of the regsets confused me when I wrote this code.
+  
+  Clean this all up. Change the declarations to match reality (which
+  shouldn't change the generated code, let alone the ABI) and fix
+  xfpregs_set() to clear the correct bits and to only do so for 32-bit
+  callers.
+  --- arch/x86/kernel/fpu/regset.c
+  @@ -115,11 +113,12 @@ int xfpregs_set(struct task_struct *target, const struct user_regset *regset,
+   
+   	/* Copy the state  */
+   	memcpy(&fpu->fpstate->regs.fxsave, &newstate, sizeof(newstate));
+   
+  -	/* Clear xmm8..15 */
+  +	/* Clear xmm8..15 for 32-bit callers */
+   	BUILD_BUG_ON(sizeof(fpu->__fpstate.regs.fxsave.xmm_space) != 16 * 16);
+  -	memset(&fpu->fpstate->regs.fxsave.xmm_space[8], 0, 8 * 16);
+  +	if (in_ia32_syscall())
+  +		memset(&fpu->fpstate->regs.fxsave.xmm_space[8*4], 0, 8 * 16);
+   
+   	/* Mark FP and SSE as in use when XSAVE is enabled */
+   	if (use_xsave())
+   		fpu->fpstate->regs.xsave.header.xfeatures |= XFEATURE_MASK_FPSSE;
+====================================================================================================
+08999b2489b4 2022-03-11 x86/sgx: Free backing memory after faulting the enclave page
+  fixes=['1728ab54b4be'] used=False analysis=False tokens=['memset(pcmd_page + b.pcmd_offset, 0,']
+  There is a limited amount of SGX memory (EPC) on each system.  When that
+  memory is used up, SGX has its own swapping mechanism which is similar
+  in concept but totally separate from the core mm/* code.  Instead of
+  swapping to disk, SGX swaps from EPC to normal RAM.  That normal RAM
+  comes from a shared memory pseudo-file and can itself be swapped by the
+  core mm code.  There is a hierarchy like this:
+  
+  	EPC <-> shmem <-> disk
+  
+  After data is swapped back in from shmem to EPC, the shmem backing
+  storage needs to be freed.  Currently, the backing shmem is not freed.
+  This effectively wastes the shmem while the enclave is running.  The
+  memory is recovered when the enclave is destroyed and the backing
+  storage freed.
+  
+  Sort this out by freeing memory with shmem_truncate_range(), as soon as
+  a page is faulted back to the EPC.  In addition, free the memory for
+  PCMD pages as soon as all PCMD's in a page have been marked as unused
+  by zeroing its contents.
+  --- arch/x86/kernel/cpu/sgx/encl.c
+  @@ -54,13 +82,26 @@ static int __sgx_encl_eldu(struct sgx_encl_page *encl_page,
+   
+   		ret = -EFAULT;
+   	}
+   
+  -	kunmap_atomic((void *)(unsigned long)(pginfo.metadata - b.pcmd_offset));
+  +	memset(pcmd_page + b.pcmd_offset, 0, sizeof(struct sgx_pcmd));
+  +
+  +	/*
+  +	 * The area for the PCMD in the page was zeroed above.  Check if the
+  +	 * whole page is now empty meaning that all PCMD's have been zeroed:
+  +	 */
+  +	pcmd_page_empty = !memchr_inv(pcmd_page, 0, PAGE_SIZE);
+  +
+  +	kunmap_atomic(pcmd_page);
+   	kunmap_atomic((void *)(unsigned long)pginfo.contents);
+   
+   	sgx_encl_put_backing(&b, false);
+   
+  +	sgx_encl_truncate_backing_page(encl, page_index);
+  +
+  +	if (pcmd_page_empty)
+  +		sgx_encl_truncate_backing_page(encl, PFN_DOWN(page_pcmd_off));
+  +
+   	return ret;
+   }
+   
+   static struct sgx_epc_page *sgx_encl_eldu(struct sgx_encl_page *encl_page,
+====================================================================================================
+19b482c29b6f 2022-03-22 mm: shmem: fix missing cache flush in shmem_mfill_atomic_pte()
+  fixes=['4c27fe4c4c84', '8d1039634206'] used=True analysis=False tokens=['clear_highpage', 'clear_user_highpage']
+  userfaultfd calls shmem_mfill_atomic_pte() which does not do any cache
+  flushing for the target page.  Then the target page will be mapped to
+  the user space with a different address (user address), which might have
+  an alias issue with the kernel address used to copy the data from the
+  user to.  Insert flush_dcache_page() in non-zero-page case.  And replace
+  clear_highpage() with clear_user_highpage() which already considers the
+  cache maintenance.
+  --- mm/shmem.c
+  @@ -2363,10 +2363,12 @@ int shmem_mfill_atomic_pte(struct mm_struct *dst_mm,
+   				ret = -ENOENT;
+   				/* don't free the page */
+   				goto out_unacct_blocks;
+   			}
+  +
+  +			flush_dcache_page(page);
+   		} else {		/* ZEROPAGE */
+  -			clear_highpage(page);
+  +			clear_user_highpage(page, dst_addr);
+   		}
+   	} else {
+   		page = *pagep;
+   		*pagep = NULL;
+  
+====================================================================================================
+be77354a3d7e 2022-04-06 bpf: Do write access check for kfunc and global func
+  fixes=['d583691c47dc', 'e5069b9c23b3'] used=False analysis=False tokens=['memset(&meta, 0,']
+  When passing pointer to some map value to kfunc or global func, in
+  verifier we are passing meta as NULL to various functions, which uses
+  meta->raw_mode to check whether memory is being written to. Since some
+  kfunc or global funcs may also write to memory pointers they receive as
+  arguments, we must check for write access to memory. E.g. in some case
+  map may be read only and this will be missed by current checks.
+  
+  However meta->raw_mode allows for uninitialized memory (e.g. on stack),
+  since there is not enough info available through BTF, we must perform
+  one call for read access (raw_mode = false), and one for write access
+  (raw_mode = true).
+  --- kernel/bpf/verifier.c
+  @@ -4962,44 +4961,59 @@ static int check_mem_size_reg(struct bpf_verifier_env *env,
+   
+   int check_mem_reg(struct bpf_verifier_env *env, struct bpf_reg_state *reg,
+   		   u32 regno, u32 mem_size)
+   {
+  +	bool may_be_null = type_may_be_null(reg->type);
+  +	struct bpf_reg_state saved_reg;
+  +	struct bpf_call_arg_meta meta;
+  +	int err;
+  +
+   	if (register_is_null(reg))
+   		return 0;
+   
+  -	if (type_may_be_null(reg->type)) {
+  -		/* Assuming that the register contains a value check if the memory
+  -		 * access is safe. Temporarily save and restore the register's state as
+  -		 * the conversion shouldn't be visible to a caller.
+  -		 */
+  -		const struct bpf_reg_state saved_reg = *reg;
+  -		int rv;
+  -
+  +	memset(&meta, 0, sizeof(meta));
+  +	/* Assuming that the register contains a value check if the memory
+  +	 * access is safe. Temporarily save and restore the register's state as
+  +	 * the conversion shouldn't be visible to a caller.
+  +	 */
+  +	if (may_be_null) {
+  +		saved_reg = *reg;
+   		mark_ptr_not_null_reg(reg);
+  -		rv = check_helper_mem_access(env, regno, mem_size, true, NULL);
+====================================================================================================
+b4e61fc031b1 2022-04-28 Revert "mm/memory-failure.c: skip huge_zero_page in memory_failure()"
+  fixes=['6a46079cf57a', 'd173d5417fb6'] used=False analysis=False tokens=['huge_zero']
+  Patch series "mm/memory-failure: rework fix on huge_zero_page splitting".
+  
+  
+  This patch (of 2):
+  
+  This reverts commit d173d5417fb67411e623d394aab986d847e47dad.
+  
+  The commit d173d5417fb6 ("mm/memory-failure.c: skip huge_zero_page in
+  memory_failure()") explicitly skips huge_zero_page in memory_failure(), in
+  order to avoid triggering VM_BUG_ON_PAGE on huge_zero_page in
+  split_huge_page_to_list().
+  
+  This works, but Yang Shi thinks that,
+  
+      Raising BUG is overkilling for splitting huge_zero_page. The
+      huge_zero_page can't be met from normal paths other than memory
+      failure, but memory failure is a valid caller. So I tend to replace
+      the BUG to WARN + returning -EBUSY. If we don't care about the
+      reason code in memory failure, we don't have to touch memory
+      failure.
+  
+  And for the issue that huge_zero_page will be set PG_has_hwpoisoned,
+  Yang Shi comments that,
+  
+      The anonymous page fault doesn't check if the page is poisoned or
+      not since it typically gets a fresh allocated page and assumes the
+      poisoned page (isolated successfully) can't be reallocated again.
+      But huge zero page and base zero page are reused every time. So no
+      matter what fix we pick, the issue is always there.
+  
+  Finally, Yang, David, Anshuman and Naoya all agree to fix the bug, i.e.,
+  to split huge_zero_page, in split_huge_page_to_list().
+  
+  This reverts the commit d173d5417fb6 ("mm/memory-failure.c: skip
+  huge_zero_page in mem
+  --- mm/memory-failure.c
+  @@ -1859,21 +1859,8 @@ int memory_failure(unsigned long pfn, int flags)
+   		}
+   	}
+   
+   	if (PageTransHuge(hpage)) {
+  -		/*
+  -		 * Bail out before SetPageHasHWPoisoned() if hpage is
+  -		 * huge_zero_page, although PG_has_hwpoisoned is not
+  -		 * checked in set_huge_zero_page().
+  -		 *
+  -		 * TODO: Handle memory failure of huge_zero_page thoroughly.
+  -		 */
+  -		if (is_huge_zero_page(hpage)) {
+  -			action_result(pfn, MF_MSG_UNSPLIT_THP, MF_IGNORED);
+  -			res = -EBUSY;
+  -			goto unlock_mutex;
+  -		}
+  -
+   		/*
+   		 * The flag must be set after the refcount is bumped
+   		 * otherwise it may race with THP split.
+   		 * And the flag can't be set in get_hwpoison_page() since
+  
+====================================================================================================
+d22d2474e395 2022-05-25 KVM: SVM: Use kzalloc for sev ioctl interfaces to prevent kernel data leak
+  fixes=['2c07ded06427', '4cfdd47d6d95', 'd3d1af85e2c7', 'eaf78265a4ab', 'eba04b20e486'] used=False analysis=False tokens=['__GFP_ZERO', 'kzalloc']
+  For some sev ioctl interfaces, the length parameter that is passed maybe
+  less than or equal to SEV_FW_BLOB_MAX_SIZE, but larger than the data
+  that PSP firmware returns. In this case, kmalloc will allocate memory
+  that is the size of the input rather than the size of the data.
+  Since PSP firmware doesn't fully overwrite the allocated buffer, these
+  sev ioctl interface may return uninitialized kernel slab memory.
+  --- arch/x86/kvm/svm/sev.c
+  @@ -687,9 +687,9 @@ static int sev_launch_measure(struct kvm *kvm, struct kvm_sev_cmd *argp)
+   	if (p) {
+   		if (params.len > SEV_FW_BLOB_MAX_SIZE)
+   			return -EINVAL;
+   
+  -		blob = kmalloc(params.len, GFP_KERNEL_ACCOUNT);
+  +		blob = kzalloc(params.len, GFP_KERNEL_ACCOUNT);
+   		if (!blob)
+   			return -ENOMEM;
+   
+   		data.address = __psp_pa(blob);
+  --- arch/x86/kvm/svm/sev.c
+  @@ -807,9 +807,9 @@ static int __sev_dbg_decrypt_user(struct kvm *kvm, unsigned long paddr,
+   	/* if inputs are not 16-byte then use intermediate buffer */
+   	if (!IS_ALIGNED(dst_paddr, 16) ||
+   	    !IS_ALIGNED(paddr,     16) ||
+   	    !IS_ALIGNED(size,      16)) {
+  -		tpage = (void *)alloc_page(GFP_KERNEL);
+  +		tpage = (void *)alloc_page(GFP_KERNEL | __GFP_ZERO);
+   		if (!tpage)
+   			return -ENOMEM;
+   
+   		dst_paddr = __sme_page_pa(tpage);
+  --- arch/x86/kvm/svm/sev.c
+  @@ -1093,9 +1093,9 @@ static int sev_get_attestation_report(struct kvm *kvm, struct kvm_sev_cmd *argp)
+   	if (p) {
+   		if (params.len > SEV_FW_BLOB_MAX_SIZE)
+   			return -EINVAL;
+   
+  -		blob = kmalloc(params.len, GFP_KERNEL_ACCOUNT);
+  +		blob = kzalloc(params.len, GFP_KERNEL_ACCOUNT);
+   		if (!blob)
+   			return -ENOMEM;
+   
+   		data.address = __psp_pa(blob);
+====================================================================================================
+ec6d0dde71d7 2022-06-18 powerpc: Enable execve syscall exit tracepoint
+  fixes=[] used=False analysis=False tokens=['memset(&regs->gpr[1], 0,', 'memset(regs->gpr, 0,']
+  On execve[at], we are zero'ing out most of the thread register state
+  including gpr[0], which contains the syscall number. Due to this, we
+  fail to trigger the syscall exit tracepoint properly. Fix this by
+  retaining gpr[0] in the thread register state.
+  
+  Before this patch:
+    # tail /sys/kernel/debug/tracing/trace
+  	       cat-123     [000] .....    61.449351: sys_execve(filename:
+    7fffa6b23448, argv: 7fffa6b233e0, envp: 7fffa6b233f8)
+  	       cat-124     [000] .....    62.428481: sys_execve(filename:
+    7fffa6b23448, argv: 7fffa6b233e0, envp: 7fffa6b233f8)
+  	      echo-125     [000] .....    65.813702: sys_execve(filename:
+    7fffa6b23378, argv: 7fffa6b233a0, envp: 7fffa6b233b0)
+  	      echo-125     [000] .....    65.822214: sys_execveat(fd: 0,
+    filename: 1009ac48, argv: 7ffff65d0c98, envp: 7ffff65d0ca8, flags: 0)
+  
+  After this patch:
+    # tail /sys/kernel/debug/tracing/trace
+  	       cat-127     [000] .....   100.416262: sys_execve(filename:
+    7fffa41b3448, argv: 7fffa41b33e0, envp: 7fffa41b33f8)
+  	       cat-127     [000] .....   100.418203: sys_execve -> 0x0
+  	      echo-128     [000] .....   103.873968: sys_execve(filename:
+    7fffa41b3378, argv: 7fffa41b33a0, envp: 7fffa41b33b0)
+  	      echo-128     [000] .....   103.875102: sys_execve -> 0x0
+  	      echo-128     [000] .....   103.882097: sys_execveat(fd: 0,
+    filename: 1009ac48, argv: 7fffd10d2148, envp: 7fffd10d2158, flags: 0)
+  	      echo-128     [000] .....   103.883225: sys_execvea
+  --- arch/powerpc/kernel/process.c
+  @@ -1854,9 +1854,9 @@ void start_thread(struct pt_regs *regs, unsigned long start, unsigned long sp)
+   	if (MSR_TM_SUSPENDED(mfmsr()))
+   		tm_reclaim_current(0);
+   #endif
+   
+  -	memset(regs->gpr, 0, sizeof(regs->gpr));
+  +	memset(&regs->gpr[1], 0, sizeof(regs->gpr) - sizeof(regs->gpr[0]));
+   	regs->ctr = 0;
+   	regs->link = 0;
+   	regs->xer = 0;
+   	regs->ccr = 0;
+  
+====================================================================================================
+0424a7dfe912 2023-03-15 x86/resctrl: Clear staged_config[] before and after it is used
+  fixes=['75408e43509e'] used=False analysis=False tokens=['memset(dom->staged_config, 0,']
+  As a temporary storage, staged_config[] in rdt_domain should be cleared
+  before and after it is used. The stale value in staged_config[] could
+  cause an MSR access error.
+  
+  Here is a reproducer on a system with 16 usable CLOSIDs for a 15-way L3
+  Cache (MBA should be disabled if the number of CLOSIDs for MB is less than
+  16.) :
+  	mount -t resctrl resctrl -o cdp /sys/fs/resctrl
+  	mkdir /sys/fs/resctrl/p{1..7}
+  	umount /sys/fs/resctrl/
+  	mount -t resctrl resctrl /sys/fs/resctrl
+  	mkdir /sys/fs/resctrl/p{1..8}
+  
+  An error occurs when creating resource group named p8:
+      unchecked MSR access error: WRMSR to 0xca0 (tried to write 0x00000000000007ff) at rIP: 0xffffffff82249142 (cat_wrmsr+0x32/0x60)
+      Call Trace:
+       <IRQ>
+       __flush_smp_call_function_queue+0x11d/0x170
+       __sysvec_call_function+0x24/0xd0
+       sysvec_call_function+0x89/0xc0
+       </IRQ>
+       <TASK>
+       asm_sysvec_call_function+0x16/0x20
+  
+  When creating a new resource control group, hardware will be configured
+  by the following process:
+      rdtgroup_mkdir()
+        rdtgroup_mkdir_ctrl_mon()
+          rdtgroup_init_alloc()
+            resctrl_arch_update_domains()
+  
+  resctrl_arch_update_domains() iterates and updates all resctrl_conf_type
+  whose have_new_ctrl is true. Since staged_config[] holds the same values as
+  when CDP was enabled, it will continue to update the CDP_CODE and CDP_DATA
+  configurations. When group p8 is created, get_config_index() called in
+  resctrl_
+  --- arch/x86/kernel/cpu/resctrl/ctrlmondata.c
+  @@ -396,12 +395,9 @@ ssize_t rdtgroup_schemata_write(struct kernfs_open_file *of,
+   		rdt_last_cmd_puts("Resource group is pseudo-locked\n");
+   		goto out;
+   	}
+   
+  -	list_for_each_entry(s, &resctrl_schema_all, list) {
+  -		list_for_each_entry(dom, &s->res->domains, list)
+  -			memset(dom->staged_config, 0, sizeof(dom->staged_config));
+  -	}
+  +	rdt_staged_configs_clear();
+   
+   	while ((tok = strsep(&buf, "\n")) != NULL) {
+   		resname = strim(strsep(&tok, ":"));
+   		if (!tok) {
+  --- arch/x86/kernel/cpu/resctrl/rdtgroup.c
+  @@ -77,8 +77,21 @@ void rdt_last_cmd_printf(const char *fmt, ...)
+   	seq_buf_vprintf(&last_cmd_status, fmt, ap);
+   	va_end(ap);
+   }
+   
+  +void rdt_staged_configs_clear(void)
+  +{
+  +	struct rdt_resource *r;
+  +	struct rdt_domain *dom;
+  +
+  +	lockdep_assert_held(&rdtgroup_mutex);
+  +
+  +	for_each_alloc_capable_rdt_resource(r) {
+  +		list_for_each_entry(dom, &r->domains, list)
+  +			memset(dom->staged_config, 0, sizeof(dom->staged_config));
+  +	}
+  +}
+  +
+   /*
+    * Trivial allocator for CLOSIDs. Since h/w only supports a small number,
+    * we can keep a bitmap of free CLOSIDs in a single integer.
+    *
+====================================================================================================
+fdb54d96600a 2023-07-08 kasan, slub: fix HW_TAGS zeroing with slub_debug
+  fixes=['946fa0dbf2d8'] used=False analysis=False tokens=['memzero_explicit']
+  Commit 946fa0dbf2d8 ("mm/slub: extend redzone check to extra allocated
+  kmalloc space than requested") added precise kmalloc redzone poisoning to
+  the slub_debug functionality.
+  
+  However, this commit didn't account for HW_TAGS KASAN fully initializing
+  the object via its built-in memory initialization feature.  Even though
+  HW_TAGS KASAN memory initialization contains special memory initialization
+  handling for when slub_debug is enabled, it does not account for in-object
+  slub_debug redzones.  As a result, HW_TAGS KASAN can overwrite these
+  redzones and cause false-positive slub_debug reports.
+  
+  To fix the issue, avoid HW_TAGS KASAN memory initialization when
+  slub_debug is enabled altogether.  Implement this by moving the
+  __slub_debug_enabled check to slab_post_alloc_hook.  Common slab code
+  seems like a more appropriate place for a slub_debug check anyway.
+  --- mm/kasan/kasan.h
+  @@ -465,20 +465,8 @@ static inline void kasan_unpoison(const void *addr, size_t size, bool init)
+   		return;
+   
+   	if (WARN_ON((unsigned long)addr & KASAN_GRANULE_MASK))
+   		return;
+  -	/*
+  -	 * Explicitly initialize the memory with the precise object size to
+  -	 * avoid overwriting the slab redzone. This disables initialization in
+  -	 * the arch code and may thus lead to performance penalty. This penalty
+  -	 * does not affect production builds, as slab redzones are not enabled
+  -	 * there.
+  -	 */
+  -	if (__slub_debug_enabled() &&
+  -	    init && ((unsigned long)size & KASAN_GRANULE_MASK)) {
+  -		init = false;
+  -		memzero_explicit((void *)addr, size);
+  -	}
+   	size = round_up(size, KASAN_GRANULE_SIZE);
+   
+   	hw_set_mem_tag_range((void *)addr, size, tag, init);
+   }
+====================================================================================================
+079082c60aff 2023-07-31 tcx: Fix splat during dev unregister
+  fixes=['e420bed02507'] used=False analysis=False tokens=['memset(dst->fp_items, 0,']
+  During unregister_netdevice_many_notify(), the ordering of our concerned
+  function calls is like this:
+  
+    unregister_netdevice_many_notify
+      dev_shutdown
+  	qdisc_put
+              clsact_destroy
+      tcx_uninstall
+  
+  The syzbot reproducer triggered a case that the qdisc refcnt is not
+  zero during dev_shutdown().
+  
+  tcx_uninstall() will then WARN_ON_ONCE(tcx_entry(entry)->miniq_active)
+  because the miniq is still active and the entry should not be freed.
+  The latter assumed that qdisc destruction happens before tcx teardown.
+  
+  This fix is to avoid tcx_uninstall() doing tcx_entry_free() when the
+  miniq is still alive and let the clsact_destroy() do the free later, so
+  that we do not assume any specific ordering for either of them.
+  
+  If still active, tcx_uninstall() does clear the entry when flushing out
+  the prog/link. clsact_destroy() will then notice the "!tcx_entry_is_active()"
+  and then does the tcx_entry_free() eventually.
+  --- include/linux/bpf_mprog.h
+  @@ -255,8 +255,24 @@ static inline void bpf_mprog_entry_copy(struct bpf_mprog_entry *dst,
+   {
+   	memcpy(dst->fp_items, src->fp_items, sizeof(src->fp_items));
+   }
+   
+  +static inline void bpf_mprog_entry_clear(struct bpf_mprog_entry *dst)
+  +{
+  +	memset(dst->fp_items, 0, sizeof(dst->fp_items));
+  +}
+  +
+  +static inline void bpf_mprog_clear_all(struct bpf_mprog_entry *entry,
+  +				       struct bpf_mprog_entry **entry_new)
+  +{
+  +	struct bpf_mprog_entry *peer;
+  +
+  +	peer = bpf_mprog_peer(entry);
+  +	bpf_mprog_entry_clear(peer);
+  +	peer->parent->count = 0;
+  +	*entry_new = peer;
+  +}
+  +
+   static inline void bpf_mprog_entry_grow(struct bpf_mprog_entry *entry, int idx)
+   {
+   	int total = bpf_mprog_total(entry);
+   
+====================================================================================================
+8e7b58c27b3c 2023-12-21 ring-buffer: Just update the subbuffers when changing their allocation order
+  fixes=['f9b94daa542a'] used=False analysis=False tokens=['kzalloc']
+  The ring_buffer_subbuf_order_set() was creating ring_buffer_per_cpu
+  cpu_buffers with the new subbuffers with the updated order, and if they
+  all successfully were created, then they the ring_buffer's per_cpu buffers
+  would be freed and replaced by them.
+  
+  The problem is that the freed per_cpu buffers contains state that would be
+  lost. Running the following commands:
+  
+  1. # echo 3 > /sys/kernel/tracing/buffer_subbuf_order
+  2. # echo 0 > /sys/kernel/tracing/tracing_cpumask
+  3. # echo 1 > /sys/kernel/tracing/snapshot
+  4. # echo ff > /sys/kernel/tracing/tracing_cpumask
+  5. # echo test > /sys/kernel/tracing/trace_marker
+  
+  Would result in:
+  
+   -bash: echo: write error: Bad file descriptor
+  
+  That's because the state of the per_cpu buffers of the snapshot buffer is
+  lost when the order is changed (the order of a freed snapshot buffer goes
+  to 0 to save memory, and when the snapshot buffer is allocated again, it
+  goes back to what the main buffer is).
+  
+  In operation 2, the snapshot buffers were set to "disable" (as all the
+  ring buffers CPUs were disabled).
+  
+  In operation 3, the snapshot is allocated and a call to
+  ring_buffer_subbuf_order_set() replaced the per_cpu buffers losing the
+  "record_disable" count.
+  
+  When it was enabled again, the atomic_dec(&cpu_buffer->record_disable) was
+  decrementing a zero, setting it to -1. Writing 1 into the snapshot would
+  swap the snapshot buffer with the main buffer, so now the main buffer is
+  "disabled", 
+  --- kernel/trace/ring_buffer.c
+  @@ -5873,13 +5873,8 @@ int ring_buffer_subbuf_order_set(struct trace_buffer *buffer, int order)
+   	psize = (1 << order) * PAGE_SIZE;
+   	if (psize <= BUF_PAGE_HDR_SIZE)
+   		return -EINVAL;
+   
+  -	bsize = sizeof(void *) * buffer->cpus;
+  -	cpu_buffers = kzalloc(bsize, GFP_KERNEL);
+  -	if (!cpu_buffers)
+  -		return -ENOMEM;
+  -
+   	old_order = buffer->subbuf_order;
+   	old_size = buffer->subbuf_size;
+   
+   	/* prevent another thread from changing buffer sizes */

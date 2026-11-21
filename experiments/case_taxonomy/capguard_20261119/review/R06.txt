@@ -1,0 +1,62 @@
+候选 R06  规则 B2  版本 df2908090cda
+位置 kernel/sys.c:2476  所在函数 prctl_get_mdwe  调用 get_current_mdwe  能力判断 arch_memory_deny_write_exec_supported  相关架构 arm, parisc
+
+==== 所在函数 prctl_get_mdwe（kernel/sys.c）
+
+static inline int prctl_get_mdwe(unsigned long arg2, unsigned long arg3,
+				 unsigned long arg4, unsigned long arg5)
+{
+	if (arg2 || arg3 || arg4 || arg5)
+		return -EINVAL;
+	return get_current_mdwe();
+}
+
+==== 被 arch_memory_deny_write_exec_supported 保护的调用处所在函数 prctl_set_mdwe
+
+static inline int prctl_set_mdwe(unsigned long bits, unsigned long arg3,
+				 unsigned long arg4, unsigned long arg5)
+{
+	unsigned long current_bits;
+
+	if (arg3 || arg4 || arg5)
+		return -EINVAL;
+
+	if (bits & ~(PR_MDWE_REFUSE_EXEC_GAIN | PR_MDWE_NO_INHERIT))
+		return -EINVAL;
+
+	/* NO_INHERIT only makes sense with REFUSE_EXEC_GAIN */
+	if (bits & PR_MDWE_NO_INHERIT && !(bits & PR_MDWE_REFUSE_EXEC_GAIN))
+		return -EINVAL;
+
+	/*
+	 * EOPNOTSUPP might be more appropriate here in principle, but
+	 * existing userspace depends on EINVAL specifically.
+	 */
+	if (!arch_memory_deny_write_exec_supported())
+		return -EINVAL;
+
+	current_bits = get_current_mdwe();
+	if (current_bits && current_bits != bits)
+		return -EPERM; /* Cannot unset the flags */
+
+	if (bits & PR_MDWE_NO_INHERIT)
+		mm_flags_set(MMF_HAS_MDWE_NO_INHERIT, current->mm);
+	if (bits & PR_MDWE_REFUSE_EXEC_GAIN)
+		mm_flags_set(MMF_HAS_MDWE, current->mm);
+
+	return 0;
+}
+
+==== 被调用的本文件函数 get_current_mdwe
+
+static inline unsigned long get_current_mdwe(void)
+{
+	unsigned long ret = 0;
+
+	if (mm_flags_test(MMF_HAS_MDWE, current->mm))
+		ret |= PR_MDWE_REFUSE_EXEC_GAIN;
+	if (mm_flags_test(MMF_HAS_MDWE_NO_INHERIT, current->mm))
+		ret |= PR_MDWE_NO_INHERIT;
+
+	return ret;
+}

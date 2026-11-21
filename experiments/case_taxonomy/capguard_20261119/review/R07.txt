@@ -1,0 +1,109 @@
+候选 R07  规则 B2  版本 df2908090cda
+位置 mm/hugetlb.c:4499  所在函数 hugetlb_bootmem_alloc  调用 hugetlb_hstate_alloc_pages  能力判断 hugepages_supported  相关架构 powerpc, s390, x86
+
+==== 所在函数 hugetlb_bootmem_alloc（mm/hugetlb.c）
+
+void __init hugetlb_bootmem_alloc(void)
+{
+	struct hstate *h;
+	int i;
+
+	hugetlb_bootmem_set_nodes();
+
+	for (i = 0; i < MAX_NUMNODES; i++)
+		INIT_LIST_HEAD(&huge_boot_pages[i]);
+
+	hugetlb_parse_params();
+
+	for_each_hstate(h) {
+		h->next_nid_to_alloc = first_online_node;
+
+		if (hstate_is_gigantic(h))
+			hugetlb_hstate_alloc_pages(h);
+	}
+}
+
+==== 被 hugepages_supported 保护的调用处所在函数 hugetlb_init_hstates
+
+static void __init hugetlb_init_hstates(void)
+{
+	struct hstate *h, *h2;
+
+	for_each_hstate(h) {
+		/*
+		 * Always reset to first_memory_node here, even if
+		 * next_nid_to_alloc was set before - we can't
+		 * reference hugetlb_bootmem_nodes after init, and
+		 * first_memory_node is right for all further allocations.
+		 */
+		h->next_nid_to_alloc = first_memory_node;
+		h->next_nid_to_free = first_memory_node;
+
+		/* oversize hugepages were init'ed in early boot */
+		if (!hstate_is_gigantic(h))
+			hugetlb_hstate_alloc_pages(h);
+
+		/*
+		 * Set demote order for each hstate.  Note that
+		 * h->demote_order is initially 0.
+		 * - We can not demote gigantic pages if runtime freeing
+		 *   is not supported, so skip this.
+		 * - If CMA allocation is possible, we can not demote
+		 *   HUGETLB_PAGE_ORDER or smaller size pages.
+		 */
+		if (hstate_is_gigantic_no_runtime(h))
+			continue;
+		if (hugetlb_cma_total_size() && h->order <= HUGETLB_PAGE_ORDER)
+			continue;
+		for_each_hstate(h2) {
+			if (h2 == h)
+				continue;
+			if (h2->order < h->order &&
+			    h2->order > h->demote_order)
+				h->demote_order = h2->order;
+		}
+	}
+}
+
+==== 被调用的本文件函数 hugetlb_hstate_alloc_pages
+
+/*
+ * NOTE: this routine is called in different contexts for gigantic and
+ * non-gigantic pages.
+ * - For gigantic pages, this is called early in the boot process and
+ *   pages are allocated from memblock allocated or something similar.
+ *   Gigantic pages are actually added to pools later with the routine
+ *   hugetlb_bootmem_struct_page_init.
+ * - For non-gigantic pages, this is called later in the boot process after
+ *   all of mm is up and functional.  Pages are allocated from buddy and
+ *   then added to hugetlb pools.
+ */
+static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
+{
+	unsigned long allocated;
+
+	/*
+	 * Skip gigantic hugepages allocation if early CMA
+	 * reservations are not available.
+	 */
+	if (hstate_is_gigantic(h) && hugetlb_cma_total_size() &&
+	    !hugetlb_early_cma(h)) {
+		pr_warn_once("HugeTLB: hugetlb_cma is enabled, skip boot time allocation\n");
+		return;
+	}
+
+	if (!h->max_huge_pages)
+		return;
+
+	/* do node specific alloc */
+	if (hugetlb_hstate_alloc_pages_specific_nodes(h))
+		return;
+
+	/* below will do all node balanced alloc */
+	if (hstate_is_gigantic(h))
+		allocated = hugetlb_gigantic_pages_alloc_boot(h);
+	else
+		allocated = hugetlb_pages_alloc_boot(h);
+
+	hugetlb_hstate_alloc_pages_errcheck(allocated, h);
+}

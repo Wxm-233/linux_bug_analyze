@@ -1,0 +1,51 @@
+commit e1612de9e4cd
+2012-07-11|powerpc: Disable /dev/port interface on systems without an ISA bridge
+
+powerpc: Disable /dev/port interface on systems without an ISA bridge
+
+Some power systems do not have legacy ISA devices. So, /dev/port is not
+a valid interface on these systems. User level tools such as kbdrate is
+trying to access the device using this interface which is causing the
+system crash.
+
+This patch will fix this issue by not creating this interface on these
+powerpc systems.
+
+---- diff (matched files only)
+diff --git a/drivers/char/mem.c b/drivers/char/mem.c
+index 67c3371723cc..e5eedfa24c91 100644
+--- a/drivers/char/mem.c
++++ b/drivers/char/mem.c
+@@ -27,14 +27,16 @@
+ #include <linux/splice.h>
+ #include <linux/pfn.h>
+ #include <linux/export.h>
++#include <linux/io.h>
+ 
+ #include <asm/uaccess.h>
+-#include <asm/io.h>
+ 
+ #ifdef CONFIG_IA64
+ # include <linux/efi.h>
+ #endif
+ 
++#define DEVPORT_MINOR	4
++
+ static inline unsigned long size_inside_page(unsigned long start,
+ 					     unsigned long size)
+ {
+@@ -894,6 +896,13 @@ static int __init chr_dev_init(void)
+ 	for (minor = 1; minor < ARRAY_SIZE(devlist); minor++) {
+ 		if (!devlist[minor].name)
+ 			continue;
++
++		/*
++		 * Create /dev/port? 
++		 */
++		if ((minor == DEVPORT_MINOR) && !arch_has_dev_port())
++			continue;
++
+ 		device_create(mem_class, NULL, MKDEV(MEM_MAJOR, minor),
+ 			      NULL, devlist[minor].name);
+ 	}
+

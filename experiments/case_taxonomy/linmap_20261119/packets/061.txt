@@ -1,0 +1,30 @@
+commit 5a178119b0fb
+2012-07-31|mm: add support for direct_IO to highmem pages
+
+mm: add support for direct_IO to highmem pages
+
+The patch "mm: add support for a filesystem to activate swap files and use
+direct_IO for writing swap pages" added support for using direct_IO to
+write swap pages but it is insufficient for highmem pages.
+
+To support highmem pages, this patch kmaps() the page before calling the
+direct_IO() handler.  As direct_IO deals with virtual addresses an
+additional helper is necessary for get_kernel_pages() to lookup the struct
+page for a kmap virtual address.
+
+---- diff (matched files only)
+diff --git a/mm/swap.c b/mm/swap.c
+index 7d7f80c8044a..77825883298f 100644
+--- a/mm/swap.c
++++ b/mm/swap.c
+@@ -258,8 +258,7 @@ int get_kernel_pages(const struct kvec *kiov, int nr_segs, int write,
+ 		if (WARN_ON(kiov[seg].iov_len != PAGE_SIZE))
+ 			return seg;
+ 
+-		/* virt_to_page sanity checks the PFN */
+-		pages[seg] = virt_to_page(kiov[seg].iov_base);
++		pages[seg] = kmap_to_page(kiov[seg].iov_base);
+ 		page_cache_get(pages[seg]);
+ 	}
+ 
+

@@ -1,0 +1,108 @@
+commit 2d427bb01639
+2026-08-04|mm/userfaultfd: add RWP fault delivery and expose UFFDIO_REGISTER_MODE_RWP
+
+mm/userfaultfd: add RWP fault delivery and expose UFFDIO_REGISTER_MODE_RWP
+
+Wire the fault side of read-write protection tracking and turn the
+userspace interface on.
+
+An RWP-protected PTE is PAGE_NONE with the uffd bit set.  The PROT_NONE
+triggers a fault on any access; the uffd bit distinguishes it from plain
+mprotect(PROT_NONE) or NUMA hinting.
+
+Fault dispatch, per level:
+
+  PTE     handle_pte_fault()    -> do_uffd_rwp()
+  PMD     __handle_mm_fault()   -> do_huge_pmd_uffd_rwp()
+  hugetlb hugetlb_fault()       -> hugetlb_handle_userfault()
+
+The RWP branches gate on userfaultfd_pte_rwp() /
+userfaultfd_huge_pmd_rwp() (VM_UFFD_RWP plus the uffd bit) and fall
+through to do_numa_page() / do_huge_pmd_numa_page() otherwise.  Each
+delivers a UFFD_PAGEFAULT_FLAG_RWP message through handle_userfault(); the
+handler resolves it with UFFDIO_RWPROTECT clearing MODE_RWP.
+
+userfaultfd_must_wait() and userfaultfd_huge_must_wait() add matching
+protnone+uffd waiters so sync-mode fault handlers block correctly.
+
+Expose the UAPI:
+
+  UFFDIO_REGISTER_MODE_RWP   -> UFFD_API_REGISTER_MODES
+  UFFD_FEATURE_RWP           -> UFFD_API_FEATURES
+  _UFFDIO_RWPROTECT          -> UFFD_API_RANGE_IOCTLS
+                                UFFD_API_RANGE_IOCTLS_BASIC
+
+UFFD_FEATURE_RWP is masked out at UFFDIO_API time when PROT_NONE is not
+available or VM_UFFD_RWP aliases VM_NONE (32-bit), so userspace never sees
+an advertised-but-broken feature.
+
+Works on anonymous, shmem, and hugetlb memory.
+
+Assisted-by: Claude:claude-opus-4-6
+
+---- diff (matched files only)
+diff --git a/mm/userfaultfd.c b/mm/userfaultfd.c
+index 83c571ecc377..f4a64971d9dc 100644
+--- a/mm/userfaultfd.c
++++ b/mm/userfaultfd.c
+@@ -2669,6 +2669,12 @@ static inline bool userfaultfd_huge_must_wait(struct userfaultfd_ctx *ctx,
+ 	 */
+ 	if (!huge_pte_write(pte) && (reason & VM_UFFD_WP))
+ 		return true;
++	/*
++	 * PTE is still RW-protected (protnone with uffd bit), wait for
++	 * resolution. Plain PROT_NONE without the marker is not an RWP fault.
++	 */
++	if (pte_protnone(pte) && huge_pte_uffd(pte) && (reason & VM_UFFD_RWP))
++		return true;
+ 
+ 	return false;
+ }
+@@ -2729,8 +2735,14 @@ static inline bool userfaultfd_must_wait(struct userfaultfd_ctx *ctx,
+ 	if (!pmd_present(_pmd))
+ 		return false;
+ 
+-	if (pmd_trans_huge(_pmd))
+-		return !pmd_write(_pmd) && (reason & VM_UFFD_WP);
++	if (pmd_trans_huge(_pmd)) {
++		if (!pmd_write(_pmd) && (reason & VM_UFFD_WP))
++			return true;
++		if (pmd_protnone(_pmd) && pmd_uffd(_pmd) &&
++		    (reason & VM_UFFD_RWP))
++			return true;
++		return false;
++	}
+ 
+ 	pte = pte_offset_map(pmd, address);
+ 	if (!pte)
+@@ -2766,6 +2778,13 @@ static inline bool userfaultfd_must_wait(struct userfaultfd_ctx *ctx,
+ 	 */
+ 	if (!pte_write(ptent) && (reason & VM_UFFD_WP))
+ 		goto out;
++	/*
++	 * PTE is still RW-protected (protnone with uffd bit), wait for
++	 * userspace to resolve. Plain PROT_NONE without the marker is not
++	 * an RWP fault.
++	 */
++	if (pte_protnone(ptent) && pte_uffd(ptent) && (reason & VM_UFFD_RWP))
++		goto out;
+ 
+ 	ret = false;
+ out:
+@@ -4518,6 +4537,15 @@ static int userfaultfd_api(struct userfaultfd_ctx *ctx,
+ 		uffdio_api.features &= ~UFFD_FEATURE_WP_UNPOPULATED;
+ 		uffdio_api.features &= ~UFFD_FEATURE_WP_ASYNC;
+ 	}
++	/*
++	 * RWP needs both PROT_NONE support and the uffd-wp PTE bit. The
++	 * VM_UFFD_RWP check covers compile-time unavailability; the
++	 * pgtable_supports_uffd() check covers runtime (e.g. riscv
++	 * without the SVRSW60T59B extension) where the PTE bit is declared
++	 * but not actually usable.
++	 */
++	if (VM_UFFD_RWP == VM_NONE || !pgtable_supports_uffd())
++		uffdio_api.features &= ~UFFD_FEATURE_RWP;
+ 
+ 	ret = -EINVAL;
+ 	if (features & ~uffdio_api.features)
+

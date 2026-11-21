@@ -1,0 +1,279 @@
+commit 906010b2134e
+2009-10-06|perf_event: Provide vmalloc() based mmap() backing
+
+perf_event: Provide vmalloc() based mmap() backing
+
+Some architectures such as Sparc, ARM and MIPS (basically
+everything with flush_dcache_page()) need to deal with dcache
+aliases by carefully placing pages in both kernel and user maps.
+
+These architectures typically have to use vmalloc_user() for this.
+
+However, on other architectures, vmalloc() is not needed and has
+the downsides of being more restricted and slower than regular
+allocations.
+
+LKML-Reference: <1254830228.21044.272.camel@laptop>
+
+---- diff (matched files only)
+diff --git a/kernel/perf_event.c b/kernel/perf_event.c
+index e491fb087939..9d0b5c665883 100644
+--- a/kernel/perf_event.c
++++ b/kernel/perf_event.c
+@@ -20,6 +20,7 @@
+ #include <linux/percpu.h>
+ #include <linux/ptrace.h>
+ #include <linux/vmstat.h>
++#include <linux/vmalloc.h>
+ #include <linux/hardirq.h>
+ #include <linux/rculist.h>
+ #include <linux/uaccess.h>
+@@ -2091,49 +2092,31 @@ void perf_event_update_userpage(struct perf_event *event)
+ 	rcu_read_unlock();
+ }
+ 
+-static int perf_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
++static unsigned long perf_data_size(struct perf_mmap_data *data)
+ {
+-	struct perf_event *event = vma->vm_file->private_data;
+-	struct perf_mmap_data *data;
+-	int ret = VM_FAULT_SIGBUS;
+-
+-	if (vmf->flags & FAULT_FLAG_MKWRITE) {
+-		if (vmf->pgoff == 0)
+-			ret = 0;
+-		return ret;
+-	}
+-
+-	rcu_read_lock();
+-	data = rcu_dereference(event->data);
+-	if (!data)
+-		goto unlock;
+-
+-	if (vmf->pgoff == 0) {
+-		vmf->page = virt_to_page(data->user_page);
+-	} else {
+-		int nr = vmf->pgoff - 1;
+-
+-		if ((unsigned)nr > data->nr_pages)
+-			goto unlock;
++	return data->nr_pages << (PAGE_SHIFT + data->data_order);
++}
+ 
+-		if (vmf->flags & FAULT_FLAG_WRITE)
+-			goto unlock;
++#ifndef CONFIG_PERF_USE_VMALLOC
+ 
+-		vmf->page = virt_to_page(data->data_pages[nr]);
+-	}
++/*
++ * Back perf_mmap() with regular GFP_KERNEL-0 pages.
++ */
+ 
+-	get_page(vmf->page);
+-	vmf->page->mapping = vma->vm_file->f_mapping;
+-	vmf->page->index   = vmf->pgoff;
++static struct page *
++perf_mmap_to_page(struct perf_mmap_data *data, unsigned long pgoff)
++{
++	if (pgoff > data->nr_pages)
++		return NULL;
+ 
+-	ret = 0;
+-unlock:
+-	rcu_read_unlock();
++	if (pgoff == 0)
++		return virt_to_page(data->user_page);
+ 
+-	return ret;
++	return virt_to_page(data->data_pages[pgoff - 1]);
+ }
+ 
+-static int perf_mmap_data_alloc(struct perf_event *event, int nr_pages)
++static struct perf_mmap_data *
++perf_mmap_data_alloc(struct perf_event *event, int nr_pages)
+ {
+ 	struct perf_mmap_data *data;
+ 	unsigned long size;
+@@ -2158,19 +2141,10 @@ static int perf_mmap_data_alloc(struct perf_event *event, int nr_pages)
+ 			goto fail_data_pages;
+ 	}
+ 
++	data->data_order = 0;
+ 	data->nr_pages = nr_pages;
+-	atomic_set(&data->lock, -1);
+-
+-	if (event->attr.watermark) {
+-		data->watermark = min_t(long, PAGE_SIZE * nr_pages,
+-				      event->attr.wakeup_watermark);
+-	}
+-	if (!data->watermark)
+-		data->watermark = max(PAGE_SIZE, PAGE_SIZE * nr_pages / 4);
+ 
+-	rcu_assign_pointer(event->data, data);
+-
+-	return 0;
++	return data;
+ 
+ fail_data_pages:
+ 	for (i--; i >= 0; i--)
+@@ -2182,7 +2156,7 @@ static int perf_mmap_data_alloc(struct perf_event *event, int nr_pages)
+ 	kfree(data);
+ 
+ fail:
+-	return -ENOMEM;
++	return NULL;
+ }
+ 
+ static void perf_mmap_free_page(unsigned long addr)
+@@ -2193,28 +2167,169 @@ static void perf_mmap_free_page(unsigned long addr)
+ 	__free_page(page);
+ }
+ 
+-static void __perf_mmap_data_free(struct rcu_head *rcu_head)
++static void perf_mmap_data_free(struct perf_mmap_data *data)
+ {
+-	struct perf_mmap_data *data;
+ 	int i;
+ 
+-	data = container_of(rcu_head, struct perf_mmap_data, rcu_head);
+-
+ 	perf_mmap_free_page((unsigned long)data->user_page);
+ 	for (i = 0; i < data->nr_pages; i++)
+ 		perf_mmap_free_page((unsigned long)data->data_pages[i]);
++}
++
++#else
++
++/*
++ * Back perf_mmap() with vmalloc memory.
++ *
++ * Required for architectures that have d-cache aliasing issues.
++ */
++
++static struct page *
++perf_mmap_to_page(struct perf_mmap_data *data, unsigned long pgoff)
++{
++	if (pgoff > (1UL << data->data_order))
++		return NULL;
++
++	return vmalloc_to_page((void *)data->user_page + pgoff * PAGE_SIZE);
++}
++
++static void perf_mmap_unmark_page(void *addr)
++{
++	struct page *page = vmalloc_to_page(addr);
++
++	page->mapping = NULL;
++}
++
++static void perf_mmap_data_free_work(struct work_struct *work)
++{
++	struct perf_mmap_data *data;
++	void *base;
++	int i, nr;
++
++	data = container_of(work, struct perf_mmap_data, work);
++	nr = 1 << data->data_order;
++
++	base = data->user_page;
++	for (i = 0; i < nr + 1; i++)
++		perf_mmap_unmark_page(base + (i * PAGE_SIZE));
++
++	vfree(base);
++}
++
++static void perf_mmap_data_free(struct perf_mmap_data *data)
++{
++	schedule_work(&data->work);
++}
++
++static struct perf_mmap_data *
++perf_mmap_data_alloc(struct perf_event *event, int nr_pages)
++{
++	struct perf_mmap_data *data;
++	unsigned long size;
++	void *all_buf;
+ 
++	WARN_ON(atomic_read(&event->mmap_count));
++
++	size = sizeof(struct perf_mmap_data);
++	size += sizeof(void *);
++
++	data = kzalloc(size, GFP_KERNEL);
++	if (!data)
++		goto fail;
++
++	INIT_WORK(&data->work, perf_mmap_data_free_work);
++
++	all_buf = vmalloc_user((nr_pages + 1) * PAGE_SIZE);
++	if (!all_buf)
++		goto fail_all_buf;
++
++	data->user_page = all_buf;
++	data->data_pages[0] = all_buf + PAGE_SIZE;
++	data->data_order = ilog2(nr_pages);
++	data->nr_pages = 1;
++
++	return data;
++
++fail_all_buf:
++	kfree(data);
++
++fail:
++	return NULL;
++}
++
++#endif
++
++static int perf_mmap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
++{
++	struct perf_event *event = vma->vm_file->private_data;
++	struct perf_mmap_data *data;
++	int ret = VM_FAULT_SIGBUS;
++
++	if (vmf->flags & FAULT_FLAG_MKWRITE) {
++		if (vmf->pgoff == 0)
++			ret = 0;
++		return ret;
++	}
++
++	rcu_read_lock();
++	data = rcu_dereference(event->data);
++	if (!data)
++		goto unlock;
++
++	if (vmf->pgoff && (vmf->flags & FAULT_FLAG_WRITE))
++		goto unlock;
++
++	vmf->page = perf_mmap_to_page(data, vmf->pgoff);
++	if (!vmf->page)
++		goto unlock;
++
++	get_page(vmf->page);
++	vmf->page->mapping = vma->vm_file->f_mapping;
++	vmf->page->index   = vmf->pgoff;
++
++	ret = 0;
++unlock:
++	rcu_read_unlock();
++
++	return ret;
++}
++
++static void
++perf_mmap_data_init(struct perf_event *event, struct perf_mmap_data *data)
++{
++	long max_size = perf_data_size(data);
++
++	atomic_set(&data->lock, -1);
++
++	if (event->attr.watermark) {
++		data->watermark = min_t(long, max_size,
++					event->attr.wakeup_watermark);
++	}
++
++	if (!data->watermark)
++		data->watermark = max_t(long, PAGE_SIZE, max_size / 2);
++
+

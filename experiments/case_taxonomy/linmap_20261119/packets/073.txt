@@ -1,0 +1,203 @@
+commit ce3141a277ff
+2009-07-04|percpu: drop pcpu_chunk->page[]
+
+percpu: drop pcpu_chunk->page[]
+
+percpu core doesn't need to tack all the allocated pages.  It needs to
+know whether certain pages are populated and a way to reverse map
+address to page when freeing.  This patch drops pcpu_chunk->page[] and
+use populated bitmap and vmalloc_to_page() lookup instead.  Using
+vmalloc_to_page() exclusively is also possible but complicates first
+chunk handling, inflates cache footprint and prevents non-standard
+memory allocation for percpu memory.
+
+pcpu_chunk->page[] was used to track each page's allocation and
+allowed asymmetric population which happens during failure path;
+however, with single bitmap for all units, this is no longer possible.
+Bite the bullet and rewrite (de)populate functions so that things are
+done in clearly separated steps such that asymmetric population
+doesn't happen.  This makes the (de)population process much more
+modular and will also ease implementing non-standard memory usage in
+the future (e.g. large pages).
+
+This makes @get_page_fn parameter to pcpu_setup_first_chunk()
+unnecessary.  The parameter is dropped and all first chunk helpers are
+updated accordingly.  Please note that despite the volume most changes
+to first chunk helpers are symbol renames for variables which don't
+need to be referenced outside of the helper anymore.
+
+This change reduces memory usage and cache footprint of pcpu_chunk.
+Now only #unit_pages bits are necessary per chunk.
+
+[ Impact: reduced memory usage and cache footprint for bookkeeping ]
+
+---- diff (matched files only)
+diff --git a/mm/percpu.c b/mm/percpu.c
+index 639fce4d2caf..21756814d99f 100644
+--- a/mm/percpu.c
++++ b/mm/percpu.c
+@@ -94,8 +94,7 @@ struct pcpu_chunk {
+ 	int			map_alloc;	/* # of map entries allocated */
+ 	int			*map;		/* allocation map */
+ 	bool			immutable;	/* no [de]population allowed */
+-	struct page		**page;		/* points to page array */
+-	struct page		*page_ar[];	/* #cpus * UNIT_PAGES */
++	unsigned long		populated[];	/* populated bitmap */
+ };
+ 
+ static int pcpu_unit_pages __read_mostly;
+@@ -129,9 +128,9 @@ static int pcpu_reserved_chunk_limit;
+  * Synchronization rules.
+  *
+  * There are two locks - pcpu_alloc_mutex and pcpu_lock.  The former
+- * protects allocation/reclaim paths, chunks and chunk->page arrays.
+- * The latter is a spinlock and protects the index data structures -
+- * chunk slots, chunks and area maps in chunks.
++ * protects allocation/reclaim paths, chunks, populated bitmap and
++ * vmalloc mapping.  The latter is a spinlock and protects the index
++ * data structures - chunk slots, chunks and area maps in chunks.
+  *
+  * During allocation, pcpu_alloc_mutex is kept locked all the time and
+  * pcpu_lock is grabbed and released as necessary.  All actual memory
+@@ -188,16 +187,13 @@ static unsigned long pcpu_chunk_addr(struct pcpu_chunk *chunk,
+ 		(pcpu_page_idx(cpu, page_idx) << PAGE_SHIFT);
+ }
+ 
+-static struct page **pcpu_chunk_pagep(struct pcpu_chunk *chunk,
+-				      unsigned int cpu, int page_idx)
++static struct page *pcpu_chunk_page(struct pcpu_chunk *chunk,
++				    unsigned int cpu, int page_idx)
+ {
+-	return &chunk->page[pcpu_page_idx(cpu, page_idx)];
+-}
++	/* must not be used on pre-mapped chunk */
++	WARN_ON(chunk->immutable);
+ 
+-static bool pcpu_chunk_page_occupied(struct pcpu_chunk *chunk,
+-				     int page_idx)
+-{
+-	return *pcpu_chunk_pagep(chunk, 0, page_idx) != NULL;
++	return vmalloc_to_page((void *)pcpu_chunk_addr(chunk, cpu, page_idx));
+ }
+ 
+ /* set the pointer to a chunk in a page struct */
+@@ -212,6 +208,34 @@ static struct pcpu_chunk *pcpu_get_page_chunk(struct page *page)
+ 	return (struct pcpu_chunk *)page->index;
+ }
+ 
++static void pcpu_next_unpop(struct pcpu_chunk *chunk, int *rs, int *re, int end)
++{
++	*rs = find_next_zero_bit(chunk->populated, end, *rs);
++	*re = find_next_bit(chunk->populated, end, *rs + 1);
++}
++
++static void pcpu_next_pop(struct pcpu_chunk *chunk, int *rs, int *re, int end)
++{
++	*rs = find_next_bit(chunk->populated, end, *rs);
++	*re = find_next_zero_bit(chunk->populated, end, *rs + 1);
++}
++
++/*
++ * (Un)populated page region iterators.  Iterate over (un)populated
++ * page regions betwen @start and @end in @chunk.  @rs and @re should
++ * be integer variables and will be set to start and end page index of
++ * the current region.
++ */
++#define pcpu_for_each_unpop_region(chunk, rs, re, start, end)		    \
++	for ((rs) = (start), pcpu_next_unpop((chunk), &(rs), &(re), (end)); \
++	     (rs) < (re);						    \
++	     (rs) = (re) + 1, pcpu_next_unpop((chunk), &(rs), &(re), (end)))
++
++#define pcpu_for_each_pop_region(chunk, rs, re, start, end)		    \
++	for ((rs) = (start), pcpu_next_pop((chunk), &(rs), &(re), (end));   \
++	     (rs) < (re);						    \
++	     (rs) = (re) + 1, pcpu_next_pop((chunk), &(rs), &(re), (end)))
++
+ /**
+  * pcpu_mem_alloc - allocate memory
+  * @size: bytes to allocate
+@@ -545,42 +569,197 @@ static void pcpu_free_area(struct pcpu_chunk *chunk, int freeme)
+ }
+ 
+ /**
+- * pcpu_unmap - unmap pages out of a pcpu_chunk
++ * pcpu_get_pages_and_bitmap - get temp pages array and bitmap
++ * @chunk: chunk of interest
++ * @bitmapp: output parameter for bitmap
++ * @may_alloc: may allocate the array
++ *
++ * Returns pointer to array of pointers to struct page and bitmap,
++ * both of which can be indexed with pcpu_page_idx().  The returned
++ * array is cleared to zero and *@bitmapp is copied from
++ * @chunk->populated.  Note that there is only one array and bitmap
++ * and access exclusion is the caller's responsibility.
++ *
++ * CONTEXT:
++ * pcpu_alloc_mutex and does GFP_KERNEL allocation if @may_alloc.
++ * Otherwise, don't care.
++ *
++ * RETURNS:
++ * Pointer to temp pages array on success, NULL on failure.
++ */
++static struct page **pcpu_get_pages_and_bitmap(struct pcpu_chunk *chunk,
++					       unsigned long **bitmapp,
++					       bool may_alloc)
++{
++	static struct page **pages;
++	static unsigned long *bitmap;
++	size_t pages_size = num_possible_cpus() * pcpu_unit_pages *
++			    sizeof(pages[0]);
++	size_t bitmap_size = BITS_TO_LONGS(pcpu_unit_pages) *
++			     sizeof(unsigned long);
++
++	if (!pages || !bitmap) {
++		if (may_alloc && !pages)
++			pages = pcpu_mem_alloc(pages_size);
++		if (may_alloc && !bitmap)
++			bitmap = pcpu_mem_alloc(bitmap_size);
++		if (!pages || !bitmap)
++			return NULL;
++	}
++
++	memset(pages, 0, pages_size);
++	bitmap_copy(bitmap, chunk->populated, pcpu_unit_pages);
++
++	*bitmapp = bitmap;
++	return pages;
++}
++
++/**
++ * pcpu_free_pages - free pages which were allocated for @chunk
++ * @chunk: chunk pages were allocated for
++ * @pages: array of pages to be freed, indexed by pcpu_page_idx()
++ * @populated: populated bitmap
++ * @page_start: page index of the first page to be freed
++ * @page_end: page index of the last page to be freed + 1
++ *
++ * Free pages [@page_start and @page_end) in @pages for all units.
++ * The pages were allocated for @chunk.
++ */
++static void pcpu_free_pages(struct pcpu_chunk *chunk,
++			    struct page **pages, unsigned long *populated,
++			    int page_start, int page_end)
++{
++	unsigned int cpu;
++	int i;
++
++	for_each_possible_cpu(cpu) {
++		for (i = page_start; i < page_end; i++) {
++			struct page *page = pages[pcpu_page_idx(cpu, i)];
++
++			if (page)
++				__free_page(page);
++		}
++	}
++}
++
++/**
++ * pcpu_alloc_pages - allocates pages for @chunk
++ * @chunk: target chunk
++ * @pages: array to put the allocated pages into, indexed by pcpu_page_idx()
++ * @populated: populated bitmap
++ * @page_start: page index of the first page to be allocated
++ * @page_end: page index of the last page to be allocated + 

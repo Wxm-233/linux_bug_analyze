@@ -1,0 +1,15 @@
+[
+ {"rank": 1, "func": "arm_iommu_alloc_attrs", "verdict": "确认", "why": "518a2f1925c3（2018）定下 dma_alloc_* 必须清零。arm32 非一致性设备的原子分配走 __iommu_alloc_simple → __alloc_from_pool，从 genalloc 原子池取块，块在 __free_from_pool 里只 gen_pool_free、不清零，再分配时内容是上次使用者留下的。非 IOMMU 的 __dma_alloc 走 pool_allocator 也是同样（成员调用，本检查没报到）。arm64 在 2015 年因同样问题修过（6829e274a623，D1），kernel/dma/pool.c 的通用池在 318 行清零。可写补丁：在 __alloc_from_pool 里 memset。"},
+ {"rank": 2, "func": "ps3_alloc_coherent", "verdict": "排除", "why": "514 行 flag |= __GFP_ZERO 后再 __get_free_pages(flag)，已清零。检查没跟踪局部变量上的 |=。"},
+ {"rank": 3, "func": "ibmebus_alloc_coherent", "verdict": "可能", "why": "kmalloc(size, flag) 不带 __GFP_ZERO，dma_alloc_attrs 也不加，违反 518a2f1925c3 的约定；518a2f1925c3 没改到这里。但 ibmebus 设备少，没核对使用者是否依赖清零或映射给用户。"},
+ {"rank": 4, "func": "xen_grant_dma_alloc", "verdict": "确认", "why": "2022 年新加（d6aca3504c7d），alloc_pages_exact(…, gfp) 不清零，dma_alloc_attrs 不加 __GFP_ZERO。返回的页随后通过授权共享给后端域；virtio 分割环（virtio_ring.c 1306/1321 行）分配后不自己清零。这个 ops 本来就是为限制后端访问而加，残留内容会暴露给后端。可写补丁：加 __GFP_ZERO。"},
+ {"rank": 5, "func": "dma_direct_alloc", "verdict": "证据不足", "why": "DMA_ATTR_NO_KERNEL_MAPPING 时 dma_direct_alloc_no_mapping 显式去掉 __GFP_ZERO（187 行），看起来是有意的（内核不经 CPU 地址访问）；但约定的理由是映射给用户态，这条路径能否 dma_mmap 给用户、是否违反约定，需要维护者意图，没查清。"},
+ {"rank": 6, "func": "dl_seq_start", "verdict": "排除", "why": "*bucket = *pos 写满了对象；检查没认出解引用写入。seq_operations.start 本来也没有清零约定。"},
+ {"rank": 7, "func": "pgd_alloc(arm64)", "verdict": "排除", "why": "gfp = GFP_PGTABLE_USER，展开含 __GFP_ZERO；检查没跟踪局部变量里的常量。"},
+ {"rank": 8, "func": "pgd_alloc(sh)", "verdict": "排除", "why": "pgd_cachep 的构造函数 pgd_ctor 清零用户部分。"},
+ {"rank": 9, "func": "pgd_alloc(sparc64)", "verdict": "排除", "why": "pgtable_cache 的构造函数是 _clear_page。"},
+ {"rank": 10, "func": "dma_pool_alloc", "verdict": "排除", "why": "437 行 want_init_on_alloc(mem_flags) 在内部测了 __GFP_ZERO，请求被满足；检查只认字面上的请求位。"},
+ {"rank": 11, "func": "mem_dump_obj", "verdict": "排除", "why": "只打印信息，没有清零请求。"},
+ {"rank": 12, "func": "drm_atomic_helper_bridge_get_hdmi_output_bus_fmts", "verdict": "排除", "why": "按格式写数组，num_output_fmts 只计已写的项；没有清零约定。"},
+ {"rank": 13, "func": "mptscsih_info", "verdict": "排除", "why": "1277 行起写入字符串；1276 行那条返回的是 NULL。"}
+]

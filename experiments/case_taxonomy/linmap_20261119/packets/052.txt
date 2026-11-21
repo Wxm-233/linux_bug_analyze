@@ -1,0 +1,32 @@
+commit 1c34d824bd75
+2015-06-02|drm/ttm: dma: Don't crash on memory in the vmalloc range
+
+drm/ttm: dma: Don't crash on memory in the vmalloc range
+
+dma_alloc_coherent() can return memory in the vmalloc range.
+virt_to_page() cannot handle such addresses and crashes. This
+patch detects such cases and obtains the struct page * using
+vmalloc_to_page() instead.
+
+---- diff (matched files only)
+diff --git a/drivers/gpu/drm/ttm/ttm_page_alloc_dma.c b/drivers/gpu/drm/ttm/ttm_page_alloc_dma.c
+index 01e1d27eb078..3077f1554099 100644
+--- a/drivers/gpu/drm/ttm/ttm_page_alloc_dma.c
++++ b/drivers/gpu/drm/ttm/ttm_page_alloc_dma.c
+@@ -342,9 +342,12 @@ static struct dma_page *__ttm_dma_alloc_page(struct dma_pool *pool)
+ 	d_page->vaddr = dma_alloc_coherent(pool->dev, pool->size,
+ 					   &d_page->dma,
+ 					   pool->gfp_flags);
+-	if (d_page->vaddr)
+-		d_page->p = virt_to_page(d_page->vaddr);
+-	else {
++	if (d_page->vaddr) {
++		if (is_vmalloc_addr(d_page->vaddr))
++			d_page->p = vmalloc_to_page(d_page->vaddr);
++		else
++			d_page->p = virt_to_page(d_page->vaddr);
++	} else {
+ 		kfree(d_page);
+ 		d_page = NULL;
+ 	}
+

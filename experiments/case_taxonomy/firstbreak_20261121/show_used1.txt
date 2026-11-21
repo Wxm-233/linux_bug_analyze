@@ -1,0 +1,345 @@
+﻿################ 6ca445d8af0e
+6ca445d8af0e 2024-05-23 riscv: Fix early ftrace nop patching
+
+Commit c97bf629963e ("riscv: Fix text patching when IPI are used")
+converted ftrace_make_nop() to use patch_insn_write() which does not
+emit any icache flush relying entirely on __ftrace_modify_code() to do
+that.
+
+But we missed that ftrace_make_nop() was called very early directly when
+converting mcount calls into nops (actually on riscv it converts 2B nops
+emitted by the compiler into 4B nops).
+
+This caused crashes on multiple HW as reported by Conor and Björn since
+the booting core could have half-patched instructions in its icache
+which would trigger an illegal instruction trap: fix this by emitting a
+local flush icache when early patching nops.
+
+Fixes: c97bf629963e ("riscv: Fix text patching when IPI are used")
+
+
+ arch/riscv/include/asm/cacheflush.h | 6 ++++++
+ arch/riscv/kernel/ftrace.c          | 3 +++
+ 2 files changed, 9 insertions(+)
+diff --git a/arch/riscv/include/asm/cacheflush.h b/arch/riscv/include/asm/cacheflush.h
+index dd8d07146116..ce79c558a4c8 100644
+--- a/arch/riscv/include/asm/cacheflush.h
++++ b/arch/riscv/include/asm/cacheflush.h
+@@ -13,6 +13,12 @@ static inline void local_flush_icache_all(void)
+ 	asm volatile ("fence.i" ::: "memory");
+ }
+ 
++static inline void local_flush_icache_range(unsigned long start,
++					    unsigned long end)
++{
++	local_flush_icache_all();
++}
++
+ #define PG_dcache_clean PG_arch_1
+ 
+ static inline void flush_dcache_folio(struct folio *folio)
+diff --git a/arch/riscv/kernel/ftrace.c b/arch/riscv/kernel/ftrace.c
+index 4d14eadcd765..87cbd86576b2 100644
+--- a/arch/riscv/kernel/ftrace.c
++++ b/arch/riscv/kernel/ftrace.c
+@@ -120,6 +120,9 @@ int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
+ 	out = ftrace_make_nop(mod, rec, MCOUNT_ADDR);
+ 	mutex_unlock(&text_mutex);
+ 
++	if (!mod)
++		local_flush_icache_range(rec->ip, rec->ip + MCOUNT_INSN_SIZE);
++
+ 	return out;
+ }
+ 
+################ 4aaf269c768d
+4aaf269c768d 2022-11-30 mm: introduce arch_has_hw_nonleaf_pmd_young()
+
+When running as a Xen PV guests commit eed9a328aa1a ("mm: x86: add
+CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG") can cause a protection violation in
+pmdp_test_and_clear_young():
+
+ BUG: unable to handle page fault for address: ffff8880083374d0
+ #PF: supervisor write access in kernel mode
+ #PF: error_code(0x0003) - permissions violation
+ PGD 3026067 P4D 3026067 PUD 3027067 PMD 7fee5067 PTE 8010000008337065
+ Oops: 0003 [#1] PREEMPT SMP NOPTI
+ CPU: 7 PID: 158 Comm: kswapd0 Not tainted 6.1.0-rc5-20221118-doflr+ #1
+ RIP: e030:pmdp_test_and_clear_young+0x25/0x40
+
+This happens because the Xen hypervisor can't emulate direct writes to
+page table entries other than PTEs.
+
+This can easily be fixed by introducing arch_has_hw_nonleaf_pmd_young()
+similar to arch_has_hw_pte_young() and test that instead of
+CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG.
+
+Fixes: eed9a328aa1a ("mm: x86: add CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG")
+
+
+ arch/x86/include/asm/pgtable.h |  8 ++++++++
+ include/linux/pgtable.h        | 11 +++++++++++
+ mm/vmscan.c                    | 10 +++++-----
+ 3 files changed, 24 insertions(+), 5 deletions(-)
+diff --git a/arch/x86/include/asm/pgtable.h b/arch/x86/include/asm/pgtable.h
+index 1d55af8d82b9..286a71810f9e 100644
+--- a/arch/x86/include/asm/pgtable.h
++++ b/arch/x86/include/asm/pgtable.h
+@@ -1439,6 +1439,14 @@ static inline bool arch_has_hw_pte_young(void)
+ 	return true;
+ }
+ 
++#ifdef CONFIG_XEN_PV
++#define arch_has_hw_nonleaf_pmd_young arch_has_hw_nonleaf_pmd_young
++static inline bool arch_has_hw_nonleaf_pmd_young(void)
++{
++	return !cpu_feature_enabled(X86_FEATURE_XENPV);
++}
++#endif
++
+ #ifdef CONFIG_PAGE_TABLE_CHECK
+ static inline bool pte_user_accessible_page(pte_t pte)
+ {
+diff --git a/include/linux/pgtable.h b/include/linux/pgtable.h
+index 6b0d59269b33..5f0d7d0b9471 100644
+--- a/include/linux/pgtable.h
++++ b/include/linux/pgtable.h
+@@ -267,6 +267,17 @@ static inline int pmdp_clear_flush_young(struct vm_area_struct *vma,
+ #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
+ #endif
+ 
++#ifndef arch_has_hw_nonleaf_pmd_young
++/*
++ * Return whether the accessed bit in non-leaf PMD entries is supported on the
++ * local CPU.
++ */
++static inline bool arch_has_hw_nonleaf_pmd_young(void)
++{
++	return IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG);
++}
++#endif
++
+ #ifndef arch_has_hw_pte_young
+ /*
+  * Return whether the accessed bit is supported on the local CPU.
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 026199c047e0..8fcc5fa768c0 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -3987,7 +3987,7 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long next, struct vm_area
+ 			goto next;
+ 
+ 		if (!pmd_trans_huge(pmd[i])) {
+-			if (IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG) &&
++			if (arch_has_hw_nonleaf_pmd_young() &&
+ 			    get_cap(LRU_GEN_NONLEAF_YOUNG))
+ 				pmdp_test_and_clear_young(vma, addr, pmd + i);
+ 			goto next;
+@@ -4085,14 +4085,14 @@ static void walk_pmd_range(pud_t *pud, unsigned long start, unsigned long end,
+ #endif
+ 		walk->mm_stats[MM_NONLEAF_TOTAL]++;
+ 
+-#ifdef CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG
+-		if (get_cap(LRU_GEN_NONLEAF_YOUNG)) {
++		if (arch_has_hw_nonleaf_pmd_young() &&
++		    get_cap(LRU_GEN_NONLEAF_YOUNG)) {
+ 			if (!pmd_young(val))
+ 				continue;
+ 
+ 			walk_pmd_range_locked(pud, addr, vma, args, bitmap, &pos);
+ 		}
+-#endif
++
+ 		if (!walk->force_scan && !test_bloom_filter(walk->lruvec, walk->max_seq, pmd + i))
+ 			continue;
+ 
+@@ -5392,7 +5392,7 @@ static ssize_t show_enabled(struct kobject *kobj, struct kobj_attribute *attr, c
+ 	if (arch_has_hw_pte_young() && get_cap(LRU_GEN_MM_WALK))
+ 		caps |= BIT(LRU_GEN_MM_WALK);
+ 
+-	if (IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG) && get_cap(LRU_GEN_NONLEAF_YOUNG))
++	if (arch_has_hw_nonleaf_pmd_young() && get_cap(LRU_GEN_NONLEAF_YOUNG))
+ 		caps |= BIT(LRU_GEN_NONLEAF_YOUNG);
+ 
+ 	return snprintf(buf, PAGE_SIZE, "0x%04x\n", caps);
+################ 7d1d19a11cfb
+7d1d19a11cfb 2025-04-24 riscv: uprobes: Add missing fence.i after building the XOL buffer
+
+The XOL (execute out-of-line) buffer is used to single-step the
+replaced instruction(s) for uprobes. The RISC-V port was missing a
+proper fence.i (i$ flushing) after constructing the XOL buffer, which
+can result in incorrect execution of stale/broken instructions.
+
+This was found running the BPF selftests "test_progs:
+uprobe_autoattach, attach_probe" on the Spacemit K1/X60, where the
+uprobes tests randomly blew up.
+
+Fixes: 74784081aac8 ("riscv: Add uprobes supported")
+
+
+ arch/riscv/kernel/probes/uprobes.c | 10 ++--------
+ 1 file changed, 2 insertions(+), 8 deletions(-)
+diff --git a/arch/riscv/kernel/probes/uprobes.c b/arch/riscv/kernel/probes/uprobes.c
+index 4b3dc8beaf77..cc15f7ca6cc1 100644
+--- a/arch/riscv/kernel/probes/uprobes.c
++++ b/arch/riscv/kernel/probes/uprobes.c
+@@ -167,6 +167,7 @@ void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+ 	/* Initialize the slot */
+ 	void *kaddr = kmap_atomic(page);
+ 	void *dst = kaddr + (vaddr & ~PAGE_MASK);
++	unsigned long start = (unsigned long)dst;
+ 
+ 	memcpy(dst, src, len);
+ 
+@@ -176,13 +177,6 @@ void arch_uprobe_copy_ixol(struct page *page, unsigned long vaddr,
+ 		*(uprobe_opcode_t *)dst = __BUG_INSN_32;
+ 	}
+ 
++	flush_icache_range(start, start + len);
+ 	kunmap_atomic(kaddr);
+-
+-	/*
+-	 * We probably need flush_icache_user_page() but it needs vma.
+-	 * This should work on most of architectures by default. If
+-	 * architecture needs to do something different it can define
+-	 * its own version of the function.
+-	 */
+-	flush_dcache_page(page);
+ }
+################ 4b634918384c
+4b634918384c 2025-06-02 arm64/mm: Close theoretical race where stale TLB entry remains valid
+
+Commit 3ea277194daa ("mm, mprotect: flush TLB if potentially racing with
+a parallel reclaim leaving stale TLB entries") describes a race that,
+prior to the commit, could occur between reclaim and operations such as
+mprotect() when using reclaim's tlbbatch mechanism. See that commit for
+details but the summary is:
+
+"""
+Nadav Amit identified a theoritical race between page reclaim and
+mprotect due to TLB flushes being batched outside of the PTL being held.
+
+He described the race as follows:
+
+	CPU0				CPU1
+	----				----
+					user accesses memory using RW PTE
+					[PTE now cached in TLB]
+	try_to_unmap_one()
+	==> ptep_get_and_clear()
+	==> set_tlb_ubc_flush_pending()
+					mprotect(addr, PROT_READ)
+					==> change_pte_range()
+					==> [ PTE non-present - no flush ]
+
+					user writes using cached RW PTE
+	...
+
+	try_to_unmap_flush()
+"""
+
+The solution was to insert flush_tlb_batched_pending() in mprotect() and
+friends to explcitly drain any pending reclaim TLB flushes. In the
+modern version of this solution, arch_flush_tlb_batched_pending() is
+called to do that synchronisation.
+
+arm64's tlbbatch implementation simply issues TLBIs at queue-time
+(arch_tlbbatch_add_pending()), eliding the trailing dsb(ish). The
+trailing dsb(ish) is finally issued in arch_tlbbatch_flush() at the end
+of the batch to wait for all the issued TLBIs to complete.
+
+Now, the Arm ARM states:
+
+"""
+The completion of the TLB maintenance instruction is guaranteed only by
+diff --git a/arch/arm64/include/asm/tlbflush.h b/arch/arm64/include/asm/tlbflush.h
+index eba1a98657f1..aa9efee17277 100644
+--- a/arch/arm64/include/asm/tlbflush.h
++++ b/arch/arm64/include/asm/tlbflush.h
+@@ -323,13 +323,14 @@ static inline bool arch_tlbbatch_should_defer(struct mm_struct *mm)
+ }
+ 
+ /*
+- * If mprotect/munmap/etc occurs during TLB batched flushing, we need to
+- * synchronise all the TLBI issued with a DSB to avoid the race mentioned in
+- * flush_tlb_batched_pending().
++ * If mprotect/munmap/etc occurs during TLB batched flushing, we need to ensure
++ * all the previously issued TLBIs targeting mm have completed. But since we
++ * can be executing on a remote CPU, a DSB cannot guarantee this like it can
++ * for arch_tlbbatch_flush(). Our only option is to flush the entire mm.
+  */
+ static inline void arch_flush_tlb_batched_pending(struct mm_struct *mm)
+ {
+-	dsb(ish);
++	flush_tlb_mm(mm);
+ }
+ 
+ /*
+################ 96a9c287e25d
+96a9c287e25d 2023-02-17 mm/migrate: fix wrongly apply write bit after mkdirty on sparc64
+
+Nick Bowler reported another sparc64 breakage after the young/dirty
+persistent work for page migration (per "Link:" below).  That's after a
+similar report [2].
+
+It turns out page migration was overlooked, and it wasn't failing before
+because page migration was not enabled in the initial report test
+environment.
+
+David proposed another way [2] to fix this from sparc64 side, but that
+patch didn't land somehow.  Neither did I check whether there's any other
+arch that has similar issues.
+
+Let's fix it for now as simple as moving the write bit handling to be
+after dirty, like what we did before.
+
+Note: this is based on mm-unstable, because the breakage was since 6.1 and
+we're at a very late stage of 6.2 (-rc8), so I assume for this specific
+case we should target this at 6.3.
+
+[1] https://lore.kernel.org/all/20221021160603.GA23307@u164.east.ru/
+[2] https://lore.kernel.org/all/20221212130213.136267-1-david@redhat.com/
+
+Fixes: 2e3468778dbe ("mm: remember young/dirty bit for page migrations")
+
+
+ mm/huge_memory.c | 6 ++++--
+ mm/migrate.c     | 2 ++
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index abe6cfd92ffa..1b791b26d72d 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -3272,8 +3272,6 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
+ 	pmde = mk_huge_pmd(new, READ_ONCE(vma->vm_page_prot));
+ 	if (pmd_swp_soft_dirty(*pvmw->pmd))
+ 		pmde = pmd_mksoft_dirty(pmde);
+-	if (is_writable_migration_entry(entry))
+-		pmde = maybe_pmd_mkwrite(pmde, vma);
+ 	if (pmd_swp_uffd_wp(*pvmw->pmd))
+ 		pmde = pmd_wrprotect(pmd_mkuffd_wp(pmde));
+ 	if (!is_migration_entry_young(entry))
+@@ -3281,6 +3279,10 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
+ 	/* NOTE: this may contain setting soft-dirty on some archs */
+ 	if (PageDirty(new) && is_migration_entry_dirty(entry))
+ 		pmde = pmd_mkdirty(pmde);
++	if (is_writable_migration_entry(entry))
++		pmde = maybe_pmd_mkwrite(pmde, vma);
++	else
++		pmde = pmd_wrprotect(pmde);
+ 
+ 	if (PageAnon(new)) {
+ 		rmap_t rmap_flags = RMAP_COMPOUND;
+diff --git a/mm/migrate.c b/mm/migrate.c
+index a4d3fc65085f..cc5455614e01 100644
+--- a/mm/migrate.c
++++ b/mm/migrate.c
+@@ -224,6 +224,8 @@ static bool remove_migration_pte(struct folio *folio,
+ 			pte = maybe_mkwrite(pte, vma);
+ 		else if (pte_swp_uffd_wp(*pvmw.pte))
+ 			pte = pte_mkuffd_wp(pte);
++		else
++			pte = pte_wrprotect(pte);
+ 
+ 		if (folio_test_anon(folio) && !is_readable_migration_entry(entry))
+ 			rmap_flags |= RMAP_EXCLUSIVE;

@@ -1,0 +1,482 @@
+[
+  {
+    "n": 1,
+    "label": "no",
+    "addr": "无",
+    "reason": "将原先自分配的非高端内存 folio 数组改成 kvmalloc 缓冲区，并为新出现的 vmalloc 情况配套处理；属于存储方式重构，没有修复既有非线性地址误用。"
+  },
+  {
+    "n": 2,
+    "label": "no",
+    "addr": "无",
+    "reason": "仅抽取释放页循环供 memblock_free_late 复用；原有代码已经按 __is_kernel 选择 __pa_symbol 或 __pa，地址转换语义未改变。"
+  },
+  {
+    "n": 3,
+    "label": "no",
+    "addr": "无",
+    "reason": "提交明确说明现有所有调用者都传对了地址，镜像别名问题尚未发生；这里是扩大 free_reserved_area 的健壮性，并非修复既有非线性地址传入。"
+  },
+  {
+    "n": 4,
+    "label": "no",
+    "addr": "无",
+    "reason": "旧代码已用 is_vmalloc_addr 分流，并对 vmalloc 地址使用 vmalloc_to_page；本次改用 bio 辅助函数，属于等价简化。"
+  },
+  {
+    "n": 5,
+    "label": "no",
+    "addr": "无",
+    "reason": "旧实现已区分 vmalloc 与线性缓冲区，分别调用 vmalloc_to_page 和 virt_to_page；提交只是用新的 bio_add_* 辅助函数重写。"
+  },
+  {
+    "n": 6,
+    "label": "no",
+    "addr": "无",
+    "reason": "将手工分配页再 vm_map_ram 的回退路径换成 vmalloc，以简化页跟踪并复用通用优化；材料未显示旧路径把非线性地址传给受限接口。"
+  },
+  {
+    "n": 7,
+    "label": "no",
+    "addr": "无",
+    "reason": "修复的是 DMA 帧缓冲区可能没有有效 struct page，却被用于依赖页结构的 deferred I/O；改为影子缓冲区。原有受 is_vmalloc_addr 保护的 virt_to_page 转换在非影子路径原样保留，未显示所问的地址域误用。"
+  },
+  {
+    "n": 8,
+    "label": "no",
+    "addr": "无",
+    "reason": "修复的是物理地址计算遗漏页内 offset。旧代码已对 vmalloc 地址选择 vmalloc_to_page，新增辅助函数保留了这一正确分流。"
+  },
+  {
+    "n": 9,
+    "label": "no",
+    "addr": "无",
+    "reason": "把 PFN 与页内偏移两个字段合并为 phys_addr_t，属于表示方式重构；修改前已区分 vmalloc 地址，不是修复非线性地址误用。"
+  },
+  {
+    "n": 10,
+    "label": "no",
+    "addr": "无",
+    "reason": "新增每页元数据占用统计，释放路径补取页及 NUMA 节点信息；原代码已有 vmalloc 分支，virt_to_page 仅在线性分支使用。"
+  },
+  {
+    "n": 11,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "原先无条件对可能位于 vmalloc 区的 DMA 帧缓冲地址调用 virt_to_page，触发非线性地址告警；新增 is_vmalloc_addr 检查后才计算 smem_start。"
+  },
+  {
+    "n": 12,
+    "label": "no",
+    "addr": "无",
+    "reason": "原代码已经对 vmalloc 缓冲区使用 vmalloc_to_page。这里修复的是跨页缓冲区仅建一个 SG 项、错误假定物理页连续，而不是把非线性地址传给线性转换接口。"
+  },
+  {
+    "n": 13,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "栈缓冲区在 vmalloc 栈配置下属于非线性映射，原 sg_init_one 内部使用 virt_to_page 导致 ARM 上崩溃；改为按地址类型选择 vmalloc_to_page。"
+  },
+  {
+    "n": 14,
+    "label": "no",
+    "addr": "无",
+    "reason": "把调用方已有的 kmem_valid_obj 检查合入 kmem_dump_obj，消除重复接口；旧实现及调用流程已经检查 virt_addr_valid，没有修复既有非线性转换。"
+  },
+  {
+    "n": 15,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "init_vmalloc_pages 对 vmalloc 区地址错误调用 virt_to_page，使 kasan.vmalloc=off 启动崩溃；提交将其换成 vmalloc_to_page。"
+  },
+  {
+    "n": 16,
+    "label": "no",
+    "addr": "无",
+    "reason": "驱动迁移后，剩余 fbdev-generic 调用者均需影子缓冲区，提交删除已无用户的直连 GEM 路径；属于清理简化，未说明修复前存在非线性地址误用。"
+  },
+  {
+    "n": 17,
+    "label": "no",
+    "addr": "无",
+    "reason": "本次首次允许 SMC-R 使用虚拟连续缓冲区，并同时新增 vmalloc_to_page 的逐页 SG 路径；旧缓冲区物理连续，原 sg_set_buf 用法并无此类问题。"
+  },
+  {
+    "n": 18,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "mem_cgroup_from_obj 原来无条件 virt_to_folio，说明指出模块静态对象及 vmalloc 对象已会导致问题；提交新增 is_vmalloc_addr 分流并用 vmalloc_to_page。"
+  },
+  {
+    "n": 19,
+    "label": "no",
+    "addr": "无",
+    "reason": "将 page/compound_head 表示迁移到 folio 与 struct slab，且保留原有 virt_addr_valid 和 kmap_to_page 处理；没有改掉非线性地址到线性接口的误用。"
+  },
+  {
+    "n": 20,
+    "label": "no",
+    "addr": "无",
+    "reason": "把 x86 专用 SG 缓冲管理迁移到通用非连续 DMA 分配器，并补 WC 属性处理；这是后端整合，没有显示旧代码错误转换非线性地址。"
+  },
+  {
+    "n": 21,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "Xen 的 coherent DMA 分配已可能返回 vmalloc 地址，公共 mmap/get_sgtable 却直接 virt_to_page，造成 ARM 故障；新增辅助函数按地址类型转换。"
+  },
+  {
+    "n": 22,
+    "label": "yes",
+    "addr": "镜像符号",
+    "reason": "非 NUMA 配置下 pgdat 指向全局符号 contig_page_data，arm64 上不在线性映射内，却被 __pa 转换；提交对这一配置改用 __pa_symbol。"
+  },
+  {
+    "n": 23,
+    "label": "no",
+    "addr": "无",
+    "reason": "影子调用栈从 slab 分配改为虚拟映射，以增加保护页和溢出检测；vmalloc_to_page 是配合新分配方式的修改，旧 virt_to_page 对 slab 地址本来有效。"
+  },
+  {
+    "n": 24,
+    "label": "yes",
+    "addr": "ioremap",
+    "reason": "xen_alloc_coherent_pages 已可能返回 ioremap 等非线性映射地址，释放时却直接 virt_to_page；新增 is_vmalloc_addr 分流并使用 vmalloc_to_page，修复启动崩溃。"
+  },
+  {
+    "n": 25,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "tcmu_flush_dcache_range 接收 vmalloc 区地址，却用 virt_to_page 得到错误页并在 ARM 刷缓存时崩溃；提交直接换成 vmalloc_to_page。"
+  },
+  {
+    "n": 26,
+    "label": "no",
+    "addr": "无",
+    "reason": "整合 DMA 重映射辅助实现，为高端内存及无缓存段的组合支持做准备；旧释放路径已先恢复 cached_kernel_address，再 virt_to_page，没有显示既有非线性地址误用。"
+  },
+  {
+    "n": 27,
+    "label": "unsure",
+    "addr": "vmalloc",
+    "reason": "默认 page ops 原先直接 virt_to_page，本次让其自动识别 vmalloc/SG 缓冲区；说明提到驱动容易漏设回调，但未指出修复前哪些现存调用确实走错默认路径，难以区分已有误用与默认能力增强。"
+  },
+  {
+    "n": 28,
+    "label": "yes",
+    "addr": "kmap",
+    "reason": "32 位 HIGHMEM 下 execve 把 kmap 返回的地址送进 hardened usercopy，原 virt_to_head_page 经线性转换触发 BUG；改用 kmap_to_page 后再取 compound_head。"
+  },
+  {
+    "n": 29,
+    "label": "no",
+    "addr": "无",
+    "reason": "为过大的命令缓冲区新增 vmalloc 分配能力，同时新增逐页构建 SG 的路径；旧代码使用连续分配，原 sg_init_one 并未接收这次才引入的 vmalloc 地址。"
+  },
+  {
+    "n": 30,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "启用 VMAP_STACK 时加密相关缓冲区可能来自 vmalloc 栈，原 smb2_sg_set_buf 直接 virt_to_page 导致 Oops；提交按 is_vmalloc_addr 选择正确转换。"
+  },
+  {
+    "n": 31,
+    "label": "no",
+    "addr": "无",
+    "reason": "为 SCSI 后续改用 vmalloc 大缓冲区扩展 bio_map_kern 的能力；说明强调新增支持，所引用的原分区报告分配仍是 kmalloc，未体现既有非线性地址误用。"
+  },
+  {
+    "n": 32,
+    "label": "no",
+    "addr": "无",
+    "reason": "主要引入 exec_op 并把 NAND 操作串成 DMA 链以改善性能；完整提交中的原缓冲区处理已有 virt_addr_valid 检查及回退拷贝，未见本题所指地址域误用修复。"
+  },
+  {
+    "n": 33,
+    "label": "no",
+    "addr": "无",
+    "reason": "把 gpmi-lib.c 与 gpmi-nand.c 中的驱动实现搬到同一文件以改善可读性；材料所述是文件组织调整，没有地址转换纠错。"
+  },
+  {
+    "n": 34,
+    "label": "no",
+    "addr": "无",
+    "reason": "内联辅助函数并简化 IOMMU mmap 控制流；旧代码已对重映射的连续分配使用 vmalloc_to_pfn，virt_to_page 只用于非 vmalloc 分支。"
+  },
+  {
+    "n": 35,
+    "label": "no",
+    "addr": "无",
+    "reason": "内联 SG 表辅助函数、合并控制流；修改前就已按 vmalloc 与连续分配选择 vmalloc_to_page 或 virt_to_page，不存在本题所指误用。"
+  },
+  {
+    "n": 36,
+    "label": "no",
+    "addr": "无",
+    "reason": "重排 IOMMU 映射、底层页和 CPU 重映射的释放步骤；旧代码已对重映射地址使用 vmalloc_to_page，virt_to_page 仅用于 lowmem 分支。"
+  },
+  {
+    "n": 37,
+    "label": "no",
+    "addr": "无",
+    "reason": "仅将 kasan_zero_* 改名为 kasan_early_shadow_*，避免标签模式下名称误导；旧代码已正确使用 lm_alias 与 __pa_symbol。"
+  },
+  {
+    "n": 38,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "dm-bufio 的预留缓冲区已可能由 vmalloc 分配，verity_hash_update 却直接 sg_init_one；提交新增 vmalloc 分支，以 vmalloc_to_page 逐页设置 SG。"
+  },
+  {
+    "n": 39,
+    "label": "no",
+    "addr": "无",
+    "reason": "拆开 kcore 的 ELF 文件头、程序头及 note 生成以提高效率；旧代码已按 KCORE_RAM/KCORE_TEXT 分别用 __pa/__pa_symbol，没有修复地址域误用。"
+  },
+  {
+    "n": 40,
+    "label": "no",
+    "addr": "无",
+    "reason": "将结构体内保存的 buffer/len 改为显式函数参数；virt_addr_valid、栈检查和回退缓冲区策略原样保留，属于参数传递重构。"
+  },
+  {
+    "n": 41,
+    "label": "unsure",
+    "addr": "其他",
+    "reason": "主要修复地址检查失败后的调试条目泄漏，同时把 virt_to_page 有效性探测改成 virt_addr_valid；旧代码已排除 vmalloc，材料未交代其余被检测地址是否确属非线性映射，无法确认本题所指误用。"
+  },
+  {
+    "n": 42,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "dma_alloc_coherent 已可能返回非线性 DMA 映射，原调试代码一律 virt_to_page 后算 PFN，导致错误缓存行跟踪；新增 vmalloc_to_pfn 分支修正。"
+  },
+  {
+    "n": 43,
+    "label": "no",
+    "addr": "无",
+    "reason": "新增透明大页 DMA 缓冲池及对应页属性处理；旧代码已按 is_vmalloc_addr 正确选择 vmalloc_to_page 或 virt_to_page，转换规则没有纠错。"
+  },
+  {
+    "n": 44,
+    "label": "yes",
+    "addr": "ioremap",
+    "reason": "remoteproc 声明的 coherent 区域被 ioremap 到 vmalloc 区，原收发及初始化直接 sg_init_one；新 rpmsg_sg_init 对该地址改用 vmalloc_to_page 设置 SG。"
+  },
+  {
+    "n": 45,
+    "label": "yes",
+    "addr": "镜像符号",
+    "reason": "psci_system_suspend 对内核函数符号 cpu_resume 使用 virt_to_phys，在 arm64 调试配置下报警；改为 __pa_symbol。"
+  },
+  {
+    "n": 46,
+    "label": "yes",
+    "addr": "镜像符号",
+    "reason": "psci_suspend_finisher 原先对 cpu_resume 内核符号使用 virt_to_phys；改成 __pa_symbol，消除对镜像地址使用线性转换接口的问题，并支持 DEBUG_VIRTUAL 检查。"
+  },
+  {
+    "n": 47,
+    "label": "yes",
+    "addr": "镜像符号",
+    "reason": "内核文本符号 textlow/texthigh 原来通过 __va(__pa(...)) 求线性别名，其中 __pa 用于镜像地址；改为 lm_alias，让符号先按正确接口转换。"
+  },
+  {
+    "n": 48,
+    "label": "yes",
+    "addr": "镜像符号",
+    "reason": "KASAN 静态零页及页表符号原先直接使用 __pa 或传给内部调用 __pa 的 populate 接口；改用 __pa_symbol 和 lm_alias，确保转换或入参属于正确映射。"
+  },
+  {
+    "n": 49,
+    "label": "yes",
+    "addr": "镜像符号",
+    "reason": "paddr_vmcoreinfo_note 原来对静态内核符号 vmcoreinfo_note 调用 __pa；提交改成适用于镜像符号的 __pa_symbol，以便正确进行调试检查。"
+  },
+  {
+    "n": 50,
+    "label": "no",
+    "addr": "无",
+    "reason": "修复的是合法自定义多页分配被 page-span 检查误拒绝，因此将该检查置于配置开关后；原有 vmalloc 排除和 virt_addr_valid 检查均保留。"
+  },
+  {
+    "n": 51,
+    "label": "no",
+    "addr": "无",
+    "reason": "因并发验证、SKB 语义和维护成本等问题移除 mmap netlink 功能；被删除的 pgvec_to_page 本来就按 vmalloc 正确分流，不是修复这类地址转换错误。"
+  },
+  {
+    "n": 52,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "dma_alloc_coherent 返回 vmalloc 区地址时，TTM 原先直接 virt_to_page 导致崩溃；提交新增 is_vmalloc_addr 检查并改用 vmalloc_to_page。"
+  },
+  {
+    "n": 53,
+    "label": "no",
+    "addr": "无",
+    "reason": "仅清理函数名、调用括号前及自增操作周围的多余空格；vmalloc_to_page/virt_to_page 的既有分流逻辑未改变。"
+  },
+  {
+    "n": 54,
+    "label": "no",
+    "addr": "无",
+    "reason": "按 checkpatch 要求删除函数名和括号间空格，是纯格式调整，没有修复地址来源与转换接口不匹配。"
+  },
+  {
+    "n": 55,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "大认证票据原本已由 ceph_kvmalloc 回退到 vmalloc，crypto SG 却按 kmalloc 缓冲区用 sg_set_buf；新增 setup_sgtable 对 vmalloc 逐页取页并设置 SG。"
+  },
+  {
+    "n": 56,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "nx-842 原来对所有缓冲区及工作区地址使用 __pa，遇到 vmalloc 地址就向 hypervisor 提交错误物理地址；新增检查并通过 vmalloc_to_page 转换。"
+  },
+  {
+    "n": 57,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "上层原已可能提供 vmalloc 缓冲区，prepare_data_dma 却无条件 sg_init_one；新增 virt_addr_valid/栈检查，对不适合直接 DMA 的缓冲区改走自有 DMA 缓冲区拷贝。"
+  },
+  {
+    "n": 58,
+    "label": "no",
+    "addr": "无",
+    "reason": "修复 MIPS 上把 unsigned long 传给要求 void * 的 virt_to_page 所产生的编译警告；原先就按 LOGICAL 与 vmalloc 类型选择不同转换，地址域未改变。"
+  },
+  {
+    "n": 59,
+    "label": "yes",
+    "addr": "kmap",
+    "reason": "9p 内核缓冲区可能是高端页的非线性 kmap 地址，原 virt_to_page 会产生错误页并污染 virtqueue SG；改为 kmap_to_page。"
+  },
+  {
+    "n": 60,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "除修复长传输 DMA 链外，也明确修复 /dev/mtdblockX 提供 vmalloc 缓冲区时的错误 sg_set_buf；新增 vmalloc_to_page 并取线性页别名后才 sg_init_one。"
+  },
+  {
+    "n": 61,
+    "label": "no",
+    "addr": "无",
+    "reason": "本次新增 direct_IO 写高端 swap 页的支持：调用前开始 kmap，并同步让 get_kernel_pages 认识 kmap 地址；修复前尚未传入这种新映射，原问题是高端页支持不足。"
+  },
+  {
+    "n": 62,
+    "label": "no",
+    "addr": "无",
+    "reason": "仅移动 free_page_cgroup 的定义以合并 CONFIG_MEMORY_HOTPLUG 块；vmalloc 分支及线性分支的 virt_to_page 用法逐字不变。"
+  },
+  {
+    "n": 63,
+    "label": "no",
+    "addr": "无",
+    "reason": "将 kmalloc 改为 alloc_pages_exact 以减少 page_cgroup 数组的内部碎片，并配套修改释放函数；原有代码已正确区分 vmalloc，不涉及地址域纠错。"
+  },
+  {
+    "n": 64,
+    "label": "no",
+    "addr": "无",
+    "reason": "用 is_vmalloc_addr/pgv_to_page 代替显式 pgv.flags，以缩小元数据；旧代码已依据 PGV_FROM_VMALLOC 选择 vmalloc_to_page，属于等价重构。"
+  },
+  {
+    "n": 65,
+    "label": "yes",
+    "addr": "vmalloc",
+    "reason": "此前已引入 vmalloc 的 packet ring 回退分配，但状态及收包路径仍 virt_to_page，还假定底层页连续；新 pgv_to_page 对 vmalloc 正确取页并逐虚拟页遍历。"
+  },
+  {
+    "n": 66,
+    "label": "no",
+    "addr": "无",
+    "reason": "为降低高阶连续分配压力首次新增 vmalloc 回退，并同步适配 mmap；旧 ring 只由 __get_free_pages 分配，原 virt_to_page 正确，这不是修复已有非线性地址误用。"
+  },
+  {
+    "n": 67,
+    "label": "no",
+    "addr": "无",
+    "reason": "将 Hyper-V 局部变量与参数从驼峰改为小写下划线；virt_to_phys 和 vmalloc_to_pfn 的选择及实参来源没有改变。"
+  },
+  {
+    "n": 68,
+    "label": "no",
+    "addr": "无",
+    "reason": "仅重命名 Hyper-V 常量和结构体字段；原有 virt_to_phys/vmalloc_to_pfn 调用保持相同语义，不涉及非线性地址误用修复。"
+  },
+  {
+    "n": 69,
+    "label": "no",
+    "addr": "无",
+    "reason": "将 perf_mmap_data 及相关变量重命名为 perf_buffer；线性页与 vmalloc 页各自的转换路径均未改变。"
+  },
+  {
+    "n": 70,
+    "label": "no",
+    "addr": "无",
+    "reason": "抽取 percpu 首块/保留块判定，提交明确说明没有功能变化、只是为 nommu 做准备；原代码已经按 vmalloc 地址范围正确分流。"
+  },
+  {
+    "n": 71,
+    "label": "no",
+    "addr": "无",
+    "reason": "移除 Xen 兼容层并限制为 Hyper-V 初始化；hypercall 页原本已用 vmalloc_to_pfn，删去的 virt_to_phys 只是注释，未修复实际地址转换调用。"
+  },
+  {
+    "n": 72,
+    "label": "no",
+    "addr": "无",
+    "reason": "为有数据缓存别名约束的架构新增 vmalloc_user 后端，并为该新后端使用 vmalloc_to_page；旧后端分配普通页，原 virt_to_page 合法。"
+  },
+  {
+    "n": 73,
+    "label": "no",
+    "addr": "无",
+    "reason": "用 populated 位图及 vmalloc_to_page 查页取代每块的 page 指针数组，减少 percpu 管理开销；旧实现直接保存页指针，没有所问的错误线性转换。"
+  },
+  {
+    "n": 74,
+    "label": "no",
+    "addr": "无",
+    "reason": "修复 mmap 缺页处理遗漏页偏移、总返回第一页的问题；修改前已区分 UIO_MEM_LOGICAL 与 UIO_MEM_VIRTUAL 并正确选择转换函数。"
+  },
+  {
+    "n": 75,
+    "label": "no",
+    "addr": "无",
+    "reason": "将 _DRM_CONSISTENT 改为 mmap 时直接 remap_pfn_range，避免走共享内存的 nopage；对同一 map->handle 的 virt_to_page 仍然保留，仅改变映射时机和方式。"
+  },
+  {
+    "n": 76,
+    "label": "no",
+    "addr": "无",
+    "reason": "改进 swsusp 的高端页保存策略，允许更多镜像数据保存在高端内存中，以减少普通内存消耗；原实现已通过 kmap_atomic 拷贝高端页，没有显示把其结果送入线性转换接口的问题。"
+  },
+  {
+    "n": 77,
+    "label": "no",
+    "addr": "无",
+    "reason": "大幅更新摄像头驱动、增加 V4L2 与解码功能；被删除的 kvirt_to_pa 先 vmalloc_to_page、page_address 再 __pa，旧转换本来遵守地址域要求。"
+  },
+  {
+    "n": 78,
+    "label": "no",
+    "addr": "无",
+    "reason": "将 remap_pfn_range 改为 vm_insert_page；原代码已用 vmalloc_to_pfn，删除的辅助函数也先转为线性页地址才 __pa，没有修复非线性转换误用。"
+  },
+  {
+    "n": 79,
+    "label": "no",
+    "addr": "无",
+    "reason": "材料中唯一变化是三目表达式续行缩进；virt_to_page/vmalloc_to_page 的条件与实参完全相同。"
+  },
+  {
+    "n": 80,
+    "label": "no",
+    "addr": "无",
+    "reason": "对 DRM 目录运行 lindent，并修注释及尾随空白；地址转换和 _DRM_CONSISTENT 分流逻辑均未改变，属于格式整理。"
+  }
+]

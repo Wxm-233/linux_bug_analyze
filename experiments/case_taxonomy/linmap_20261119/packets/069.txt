@@ -1,0 +1,221 @@
+commit ca5135e6b4a3
+2010-06-09|perf: Rename perf_mmap_data to perf_buffer
+
+perf: Rename perf_mmap_data to perf_buffer
+
+Rename to clarify code.
+
+s/perf_mmap_data/perf_buffer/g and selective s/data/buffer/g
+
+LKML-Reference: <new-submission>
+
+---- diff (matched files only)
+diff --git a/kernel/perf_event.c b/kernel/perf_event.c
+index 6f60920772b3..93d545801e43 100644
+--- a/kernel/perf_event.c
++++ b/kernel/perf_event.c
+@@ -1876,7 +1876,7 @@ static void free_event_rcu(struct rcu_head *head)
+ }
+ 
+ static void perf_pending_sync(struct perf_event *event);
+-static void perf_mmap_data_put(struct perf_mmap_data *data);
++static void perf_buffer_put(struct perf_buffer *buffer);
+ 
+ static void free_event(struct perf_event *event)
+ {
+@@ -1892,9 +1892,9 @@ static void free_event(struct perf_event *event)
+ 			atomic_dec(&nr_task_events);
+ 	}
+ 
+-	if (event->data) {
+-		perf_mmap_data_put(event->data);
+-		event->data = NULL;
++	if (event->buffer) {
++		perf_buffer_put(event->buffer);
++		event->buffer = NULL;
+ 	}
+ 
+ 	if (event->destroy)
+@@ -2119,13 +2119,13 @@ perf_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+ static unsigned int perf_poll(struct file *file, poll_table *wait)
+ {
+ 	struct perf_event *event = file->private_data;
+-	struct perf_mmap_data *data;
++	struct perf_buffer *buffer;
+ 	unsigned int events = POLL_HUP;
+ 
+ 	rcu_read_lock();
+-	data = rcu_dereference(event->data);
+-	if (data)
+-		events = atomic_xchg(&data->poll, 0);
++	buffer = rcu_dereference(event->buffer);
++	if (buffer)
++		events = atomic_xchg(&buffer->poll, 0);
+ 	rcu_read_unlock();
+ 
+ 	poll_wait(file, &event->waitq, wait);
+@@ -2335,14 +2335,14 @@ static int perf_event_index(struct perf_event *event)
+ void perf_event_update_userpage(struct perf_event *event)
+ {
+ 	struct perf_event_mmap_page *userpg;
+-	struct perf_mmap_data *data;
++	struct perf_buffer *buffer;
+ 
+ 	rcu_read_lock();
+-	data = rcu_dereference(event->data);
+-	if (!data)
++	buffer = rcu_dereference(event->buffer);
++	if (!buffer)
+ 		goto unlock;
+ 
+-	userpg = data->user_page;
++	userpg = buffer->user_page;
+ 
+ 	/*
+ 	 * Disable preemption so as to not let the corresponding user-space
+@@ -2376,15 +2376,15 @@ void perf_event_update_userpage(struct perf_event *event)
+  */
+ 
+ static struct page *
+-perf_mmap_to_page(struct perf_mmap_data *data, unsigned long pgoff)
++perf_mmap_to_page(struct perf_buffer *buffer, unsigned long pgoff)
+ {
+-	if (pgoff > data->nr_pages)
++	if (pgoff > buffer->nr_pages)
+ 		return NULL;
+ 
+ 	if (pgoff == 0)
+-		return virt_to_page(data->user_page);
++		return virt_to_page(buffer->user_page);
+ 
+-	return virt_to_page(data->data_pages[pgoff - 1]);
++	return virt_to_page(buffer->data_pages[pgoff - 1]);
+ }
+ 
+ static void *perf_mmap_alloc_page(int cpu)
+@@ -2400,42 +2400,42 @@ static void *perf_mmap_alloc_page(int cpu)
+ 	return page_address(page);
+ }
+ 
+-static struct perf_mmap_data *
+-perf_mmap_data_alloc(struct perf_event *event, int nr_pages)
++static struct perf_buffer *
++perf_buffer_alloc(struct perf_event *event, int nr_pages)
+ {
+-	struct perf_mmap_data *data;
++	struct perf_buffer *buffer;
+ 	unsigned long size;
+ 	int i;
+ 
+-	size = sizeof(struct perf_mmap_data);
++	size = sizeof(struct perf_buffer);
+ 	size += nr_pages * sizeof(void *);
+ 
+-	data = kzalloc(size, GFP_KERNEL);
+-	if (!data)
++	buffer = kzalloc(size, GFP_KERNEL);
++	if (!buffer)
+ 		goto fail;
+ 
+-	data->user_page = perf_mmap_alloc_page(event->cpu);
+-	if (!data->user_page)
++	buffer->user_page = perf_mmap_alloc_page(event->cpu);
++	if (!buffer->user_page)
+ 		goto fail_user_page;
+ 
+ 	for (i = 0; i < nr_pages; i++) {
+-		data->data_pages[i] = perf_mmap_alloc_page(event->cpu);
+-		if (!data->data_pages[i])
++		buffer->data_pages[i] = perf_mmap_alloc_page(event->cpu);
++		if (!buffer->data_pages[i])
+ 			goto fail_data_pages;
+ 	}
+ 
+-	data->nr_pages = nr_pages;
++	buffer->nr_pages = nr_pages;
+ 
+-	return data;
++	return buffer;
+ 
+ fail_data_pages:
+ 	for (i--; i >= 0; i--)
+-		free_page((unsigned long)data->data_pages[i]);
++		free_page((unsigned long)buffer->data_pages[i]);
+ 
+-	free_page((unsigned long)data->user_page);
++	free_page((unsigned long)buffer->user_page);
+ 
+ fail_user_page:
+-	kfree(data);
++	kfree(buffer);
+ 
+ fail:
+ 	return NULL;
+@@ -2449,17 +2449,17 @@ static void perf_mmap_free_page(unsigned long addr)
+ 	__free_page(page);
+ }
+ 
+-static void perf_mmap_data_free(struct perf_mmap_data *data)
++static void perf_buffer_free(struct perf_buffer *buffer)
+ {
+ 	int i;
+ 
+-	perf_mmap_free_page((unsigned long)data->user_page);
+-	for (i = 0; i < data->nr_pages; i++)
+-		perf_mmap_free_page((unsigned long)data->data_pages[i]);
+-	kfree(data);
++	perf_mmap_free_page((unsigned long)buffer->user_page);
++	for (i = 0; i < buffer->nr_pages; i++)
++		perf_mmap_free_page((unsigned long)buffer->data_pages[i]);
++	kfree(buffer);
+ }
+ 
+-static inline int page_order(struct perf_mmap_data *data)
++static inline int page_order(struct perf_buffer *buffer)
+ {
+ 	return 0;
+ }
+@@ -2472,18 +2472,18 @@ static inline int page_order(struct perf_mmap_data *data)
+  * Required for architectures that have d-cache aliasing issues.
+  */
+ 
+-static inline int page_order(struct perf_mmap_data *data)
++static inline int page_order(struct perf_buffer *buffer)
+ {
+-	return data->page_order;
++	return buffer->page_order;
+ }
+ 
+ static struct page *
+-perf_mmap_to_page(struct perf_mmap_data *data, unsigned long pgoff)
++perf_mmap_to_page(struct perf_buffer *buffer, unsigned long pgoff)
+ {
+-	if (pgoff > (1UL << page_order(data)))
++	if (pgoff > (1UL << page_order(buffer)))
+ 		return NULL;
+ 
+-	return vmalloc_to_page((void *)data->user_page + pgoff * PAGE_SIZE);
++	return vmalloc_to_page((void *)buffer->user_page + pgoff * PAGE_SIZE);
+ }
+ 
+ static void perf_mmap_unmark_page(void *addr)
+@@ -2493,57 +2493,57 @@ static void perf_mmap_unmark_page(void *addr)
+ 	page->mapping = NULL;
+ }
+ 
+-static void perf_mmap_data_free_work(struct work_struct *work)
++static void perf_buffer_free_work(struct work_struct *work)
+ {
+-	struct perf_mmap_data *data;
++	struct perf_buffer *buffer;
+ 	void *base;
+ 	int i, nr;
+ 
+-	data = container_of(work, struct perf_mmap_data, work);
+-	nr = 1 << page_order(data);
++	buffer = container_of(work, struct perf_buffer, work);
++	nr = 1 << page_order(buffer);
+ 
+-	base = data->user_page;
++	base = buffer->user_page;
+ 	for (i = 0;

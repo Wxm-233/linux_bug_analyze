@@ -1,0 +1,314 @@
+﻿################ 09073396ea62
+09073396ea62 2022-07-18 ACPI: CPPC: Don't require flexible address space if X86_FEATURE_CPPC is supported
+
+Commit 0651ab90e4ad ("ACPI: CPPC: Check _OSC for flexible address space")
+changed _CPC probing to require flexible address space to be negotiated
+for CPPC to work.
+
+However it was observed that this caused a regression for Arek's ROG
+Zephyrus G15 GA503QM which previously CPPC worked, but now it stopped
+working.
+
+To avoid causing a regression waive this failure when the CPU is known
+to support CPPC.
+
+Fixes: 0651ab90e4ad ("ACPI: CPPC: Check _OSC for flexible address space")
+Reported-and-tested-by: Arek Ruśniak <arek.rusi@gmail.com>
+
+
+ drivers/acpi/cppc_acpi.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+diff --git a/drivers/acpi/cppc_acpi.c b/drivers/acpi/cppc_acpi.c
+index 6ff1901d7d43..3c6d4ef87be0 100644
+--- a/drivers/acpi/cppc_acpi.c
++++ b/drivers/acpi/cppc_acpi.c
+@@ -782,7 +782,8 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
+ 
+ 					if (!osc_cpc_flexible_adr_space_confirmed) {
+ 						pr_debug("Flexible address space capability not supported\n");
+-						goto out_free;
++						if (!cpc_supported_by_cpu())
++							goto out_free;
+ 					}
+ 
+ 					addr = ioremap(gas_t->address, gas_t->bit_width/8);
+@@ -809,7 +810,8 @@ int acpi_cppc_processor_probe(struct acpi_processor *pr)
+ 				}
+ 				if (!osc_cpc_flexible_adr_space_confirmed) {
+ 					pr_debug("Flexible address space capability not supported\n");
+-					goto out_free;
++					if (!cpc_supported_by_cpu())
++						goto out_free;
+ 				}
+ 			} else {
+ 				if (gas_t->space_id != ACPI_ADR_SPACE_FIXED_HARDWARE || !cpc_ffh_supported()) {
+################ 8798902f2b8b
+8798902f2b8b 2026-01-31 bpf: Add bpf_jit_supports_fsession()
+
+The added fsession does not prevent running on those architectures, that
+haven't added fsession support.
+
+For example, try to run fsession tests on arm64:
+
+test_fsession_basic:PASS:fsession_test__open_and_load 0 nsec
+test_fsession_basic:PASS:fsession_attach 0 nsec
+check_result:FAIL:test_run_opts err unexpected error: -14 (errno 14)
+
+In order to prevent such errors, add bpf_jit_supports_fsession() to guard
+those architectures.
+
+Fixes: 2d419c44658f ("bpf: add fsession support")
+
+
+ arch/x86/net/bpf_jit_comp.c                        |  5 ++++
+ include/linux/filter.h                             |  1 +
+ kernel/bpf/core.c                                  |  5 ++++
+ kernel/bpf/verifier.c                              |  5 ++++
+ .../selftests/bpf/prog_tests/fsession_test.c       | 32 ++++++++++++++++------
+ 5 files changed, 40 insertions(+), 8 deletions(-)
+diff --git a/arch/x86/net/bpf_jit_comp.c b/arch/x86/net/bpf_jit_comp.c
+index 5a075e06cf45..070ba80e39d7 100644
+--- a/arch/x86/net/bpf_jit_comp.c
++++ b/arch/x86/net/bpf_jit_comp.c
+@@ -4112,3 +4112,8 @@ bool bpf_jit_supports_timed_may_goto(void)
+ {
+ 	return true;
+ }
++
++bool bpf_jit_supports_fsession(void)
++{
++	return true;
++}
+diff --git a/include/linux/filter.h b/include/linux/filter.h
+index fd54fed8f95f..4e1cb4f91f49 100644
+--- a/include/linux/filter.h
++++ b/include/linux/filter.h
+@@ -1167,6 +1167,7 @@ bool bpf_jit_supports_arena(void);
+ bool bpf_jit_supports_insn(struct bpf_insn *insn, bool in_arena);
+ bool bpf_jit_supports_private_stack(void);
+ bool bpf_jit_supports_timed_may_goto(void);
++bool bpf_jit_supports_fsession(void);
+ u64 bpf_arch_uaddress_limit(void);
+ void arch_bpf_stack_walk(bool (*consume_fn)(void *cookie, u64 ip, u64 sp, u64 bp), void *cookie);
+ u64 arch_bpf_timed_may_goto(void);
+diff --git a/kernel/bpf/core.c b/kernel/bpf/core.c
+index 5ebece600aeb..dc906dfdff94 100644
+--- a/kernel/bpf/core.c
++++ b/kernel/bpf/core.c
+@@ -3144,6 +3144,11 @@ bool __weak bpf_jit_supports_insn(struct bpf_insn *insn, bool in_arena)
+ 	return false;
+ }
+ 
++bool __weak bpf_jit_supports_fsession(void)
++{
++	return false;
++}
++
+ u64 __weak bpf_arch_uaddress_limit(void)
+ {
+ #if defined(CONFIG_64BIT) && defined(CONFIG_ARCH_HAS_NON_OVERLAPPING_ADDRESS_SPACE)
+diff --git a/kernel/bpf/verifier.c b/kernel/bpf/verifier.c
+index 256cc5c1a7df..6b62b6d57175 100644
+--- a/kernel/bpf/verifier.c
++++ b/kernel/bpf/verifier.c
+@@ -24828,6 +24828,11 @@ int bpf_check_attach_target(struct bpf_verifier_log *log,
+ 	case BPF_TRACE_FENTRY:
+ 	case BPF_TRACE_FEXIT:
+ 	case BPF_TRACE_FSESSION:
++		if (prog->expected_attach_type == BPF_TRACE_FSESSION &&
++		    !bpf_jit_supports_fsession()) {
++			bpf_log(log, "JIT does not support fsession\n");
++			return -EOPNOTSUPP;
++		}
+ 		if (!btf_type_is_func(t)) {
+ 			bpf_log(log, "attach_btf_id %u is not a function\n",
+ 				btf_id);
+diff --git a/tools/testing/selftests/bpf/prog_tests/fsession_test.c b/tools/testing/selftests/bpf/prog_tests/fsession_test.c
+index 0c4b428e1cee..a299aeb8cc2e 100644
+--- a/tools/testing/selftests/bpf/prog_tests/fsession_test.c
++++ b/tools/testing/selftests/bpf/prog_tests/fsession_test.c
+@@ -29,8 +29,16 @@ static void test_fsession_basic(void)
+ 	struct fsession_test *skel = NULL;
+ 	int err;
+ 
+-	skel = fsession_test__open_and_load();
+-	if (!ASSERT_OK_PTR(skel, "fsession_test__open_and_load"))
++	skel = fsession_test__open();
++	if (!ASSERT_OK_PTR(skel, "fsession_test__open"))
++		return;
++
++	err = fsession_test__load(skel);
++	if (err == -EOPNOTSUPP) {
++		test__skip();
++		goto cleanup;
++	}
++	if (!ASSERT_OK(err, "fsession_test__load"))
+ 		goto cleanup;
+ 
+ 	err = fsession_test__attach(skel);
+@@ -47,8 +55,16 @@ static void test_fsession_reattach(void)
+ 	struct fsession_test *skel = NULL;
+ 	int err;
+ 
+-	skel = fsession_test__open_and_load();
+-	if (!ASSERT_OK_PTR(skel, "fsession_test__open_and_load"))
++	skel = fsession_test__open();
++	if (!ASSERT_OK_PTR(skel, "fsession_test__open"))
++		return;
++
+################ 7cd1f5f77925
+7cd1f5f77925 2024-12-02 LoongArch: Add architecture specific huge_pte_clear()
+
+When executing mm selftests run_vmtests.sh, there is such an error:
+
+ BUG: Bad page state in process uffd-unit-tests  pfn:00000
+ page: refcount:0 mapcount:0 mapping:0000000000000000 index:0x0 pfn:0x0
+ flags: 0xffff0000002000(reserved|node=0|zone=0|lastcpupid=0xffff)
+ raw: 00ffff0000002000 ffffbf0000000008 ffffbf0000000008 0000000000000000
+ raw: 0000000000000000 0000000000000000 00000000ffffffff 0000000000000000
+ page dumped because: PAGE_FLAGS_CHECK_AT_FREE flag(s) set
+ Modules linked in: snd_seq_dummy snd_seq snd_seq_device rfkill vfat fat
+    virtio_balloon efi_pstore virtio_net pstore net_failover failover fuse
+    nfnetlink virtio_scsi virtio_gpu virtio_dma_buf dm_multipath efivarfs
+ CPU: 2 UID: 0 PID: 1913 Comm: uffd-unit-tests Not tainted 6.12.0 #184
+ Hardware name: QEMU QEMU Virtual Machine, BIOS unknown 2/2/2022
+ Stack : 900000047c8ac000 0000000000000000 9000000000223a7c 900000047c8ac000
+         900000047c8af690 900000047c8af698 0000000000000000 900000047c8af7d8
+         900000047c8af7d0 900000047c8af7d0 900000047c8af5b0 0000000000000001
+         0000000000000001 900000047c8af698 10b3c7d53da40d26 0000010000000000
+         0000000000000022 0000000fffffffff fffffffffe000000 ffff800000000000
+         000000000000002f 0000800000000000 000000017a6d4000 90000000028f8940
+         0000000000000000 0000000000000000 90000000025aa5e0 9000000002905000
+         0000000000000000 90000000028f8940 ffff800000000000 0000000000000000
+         0000000000000000 0000000000000000 9000000000223a94 000000012001839c
+         00000000000000b0 0000000000000004 0000000000000000 0000000000071c1d
+         ...
+ Call Trace:
+ [<9000000000223a94>] show_stack+0x5c/0x180
+ [<9000000001c3fd64>] dump_stack_lvl+0x6c/0xa0
+ [<900000000056aa08>] bad_page+0x1a0/0x1f0
+ [<9000000000574978>] free_unref_folios+0xbf0/0xd20
+ [<90000000004e65cc>] folios_put_refs+0x1a4/0x2b8
+ [<9000000000599a0c>] free_pages_and_swap_cache+0x164/0x260
+ [<9000000000547698>] tlb_batch_pages_flush+0xa8/0x1c0
+ [<9000000000547f30>] tlb_finish_mmu+0xa8/0x218
+ [<9000000000543cb8>] exit_mmap+0x1a0/0x360
+ [<9000000000247658>] __mmput+0x78/0x200
+ [<900000000025583c>] do_exit+0x43c/0xde8
+ [<9000000000256490>] do_group_exit+0x68/0x110
+ [<9000000000256554>] sys_exit_group+0x1c/0x20
+ [<9000000001c413b4>] do_syscall+0x94/0x130
+ [<90000000002216d8>] handle_syscall+0xb8/0x158
+ Disabling lock debugging due to kernel taint
+ BUG: non-zero pgtables_bytes on freeing mm: -16384
+
+diff --git a/arch/loongarch/include/asm/hugetlb.h b/arch/loongarch/include/asm/hugetlb.h
+index b837c65a4894..c8e4057734d0 100644
+--- a/arch/loongarch/include/asm/hugetlb.h
++++ b/arch/loongarch/include/asm/hugetlb.h
+@@ -24,6 +24,16 @@ static inline int prepare_hugepage_range(struct file *file,
+ 	return 0;
+ }
+ 
++#define __HAVE_ARCH_HUGE_PTE_CLEAR
++static inline void huge_pte_clear(struct mm_struct *mm, unsigned long addr,
++				  pte_t *ptep, unsigned long sz)
++{
++	pte_t clear;
++
++	pte_val(clear) = (unsigned long)invalid_pte_table;
++	set_pte_at(mm, addr, ptep, clear);
++}
++
+ #define __HAVE_ARCH_HUGE_PTEP_GET_AND_CLEAR
+ static inline pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
+ 					    unsigned long addr, pte_t *ptep)
+################ fb1cf0878328
+fb1cf0878328 2024-05-22 riscv: rewrite __kernel_map_pages() to fix sleeping in invalid context
+
+__kernel_map_pages() is a debug function which clears the valid bit in page
+table entry for deallocated pages to detect illegal memory accesses to
+freed pages.
+
+This function set/clear the valid bit using __set_memory(). __set_memory()
+acquires init_mm's semaphore, and this operation may sleep. This is
+problematic, because  __kernel_map_pages() can be called in atomic context,
+and thus is illegal to sleep. An example warning that this causes:
+
+BUG: sleeping function called from invalid context at kernel/locking/rwsem.c:1578
+in_atomic(): 1, irqs_disabled(): 0, non_block: 0, pid: 2, name: kthreadd
+preempt_count: 2, expected: 0
+CPU: 0 PID: 2 Comm: kthreadd Not tainted 6.9.0-g1d4c6d784ef6 #37
+Hardware name: riscv-virtio,qemu (DT)
+Call Trace:
+[<ffffffff800060dc>] dump_backtrace+0x1c/0x24
+[<ffffffff8091ef6e>] show_stack+0x2c/0x38
+[<ffffffff8092baf8>] dump_stack_lvl+0x5a/0x72
+[<ffffffff8092bb24>] dump_stack+0x14/0x1c
+[<ffffffff8003b7ac>] __might_resched+0x104/0x10e
+[<ffffffff8003b7f4>] __might_sleep+0x3e/0x62
+[<ffffffff8093276a>] down_write+0x20/0x72
+[<ffffffff8000cf00>] __set_memory+0x82/0x2fa
+[<ffffffff8000d324>] __kernel_map_pages+0x5a/0xd4
+[<ffffffff80196cca>] __alloc_pages_bulk+0x3b2/0x43a
+[<ffffffff8018ee82>] __vmalloc_node_range+0x196/0x6ba
+[<ffffffff80011904>] copy_process+0x72c/0x17ec
+[<ffffffff80012ab4>] kernel_clone+0x60/0x2fe
+[<ffffffff80012f62>] kernel_thread+0x82/0xa0
+[<ffffffff8003552c>] kthreadd+0x14a/0x1be
+[<ffffffff809357de>] ret_from_fork+0xe/0x1c
+
+Rewrite this function with apply_to_existing_page_range(). It is fine to
+not have any locking, because __kernel_map_pages() works with pages being
+allocated/deallocated and those pages are not changed by anyone else in the
+meantime.
+
+Fixes: 5fde3db5eb02 ("riscv: add ARCH_SUPPORTS_DEBUG_PAGEALLOC support")
+
+
+ arch/riscv/mm/pageattr.c | 28 ++++++++++++++++++++++------
+ 1 file changed, 22 insertions(+), 6 deletions(-)
+diff --git a/arch/riscv/mm/pageattr.c b/arch/riscv/mm/pageattr.c
+index 410056a50aa9..271d01a5ba4d 100644
+--- a/arch/riscv/mm/pageattr.c
++++ b/arch/riscv/mm/pageattr.c
+@@ -387,17 +387,33 @@ int set_direct_map_default_noflush(struct page *page)
+ }
+ 
+ #ifdef CONFIG_DEBUG_PAGEALLOC
++static int debug_pagealloc_set_page(pte_t *pte, unsigned long addr, void *data)
++{
++	int enable = *(int *)data;
++
++	unsigned long val = pte_val(ptep_get(pte));
++
++	if (enable)
++		val |= _PAGE_PRESENT;
++	else
++		val &= ~_PAGE_PRESENT;
++
++	set_pte(pte, __pte(val));
++
++	return 0;
++}
++
+ void __kernel_map_pages(struct page *page, int numpages, int enable)
+ {
+ 	if (!debug_pagealloc_enabled())
+ 		return;
+ 
+-	if (enable)
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(_PAGE_PRESENT), __pgprot(0));
+-	else
+-		__set_memory((unsigned long)page_address(page), numpages,
+-			     __pgprot(0), __pgprot(_PAGE_PRESENT));
++	unsigned long start = (unsigned long)page_address(page);
++	unsigned long size = PAGE_SIZE * numpages;
++
++	apply_to_existing_page_range(&init_mm, start, size, debug_pagealloc_set_page, &enable);
++
++	flush_tlb_kernel_range(start, start + size);
+ }
+ #endif
+ 

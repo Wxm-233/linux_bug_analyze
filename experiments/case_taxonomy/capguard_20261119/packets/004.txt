@@ -1,0 +1,55 @@
+commit c0ffe79eedc1
+2026-08-04|mm: rename uffd-wp PTE accessors to uffd
+
+mm: rename uffd-wp PTE accessors to uffd
+
+Userfaultfd RWP will reuse the uffd-wp PTE bit to mark access-tracking
+PTEs, alongside the write-protected ones it already marks.  The bit's
+meaning now depends on the VMA flag (WP or RWP), not on its name.
+
+Rename the kernel-internal names that describe the bit:
+
+  - pte/pmd/huge_pte accessors (and swap variants)
+  - pgtable_supports_uffd() capability query
+  - SCAN_PTE_UFFD khugepaged enum
+
+The ftrace string emitted by mm_khugepaged_scan_pmd for this enum is
+kept as "pte_uffd_wp" so existing trace-based tooling keeps matching.
+
+Pure mechanical rename -- no behavior change.
+
+Assisted-by: Claude:claude-opus-4-6
+
+---- diff (matched files only)
+diff --git a/mm/userfaultfd.c b/mm/userfaultfd.c
+index c3adedaaf7d5..4147f247c441 100644
+--- a/mm/userfaultfd.c
++++ b/mm/userfaultfd.c
+@@ -376,7 +376,7 @@ static int mfill_atomic_install_pte(pmd_t *dst_pmd,
+ 	if (writable)
+ 		_dst_pte = pte_mkwrite(_dst_pte, dst_vma);
+ 	if (flags & MFILL_ATOMIC_WP)
+-		_dst_pte = pte_mkuffd_wp(_dst_pte);
++		_dst_pte = pte_mkuffd(_dst_pte);
+ 
+ 	ret = -EAGAIN;
+ 	dst_pte = pte_offset_map_lock(dst_mm, dst_pmd, dst_addr, &ptl);
+@@ -3601,7 +3601,7 @@ static int userfaultfd_register(struct userfaultfd_ctx *ctx,
+ 	if (uffdio_register.mode & UFFDIO_REGISTER_MODE_MISSING)
+ 		vm_flags |= VM_UFFD_MISSING;
+ 	if (uffdio_register.mode & UFFDIO_REGISTER_MODE_WP) {
+-		if (!pgtable_supports_uffd_wp())
++		if (!pgtable_supports_uffd())
+ 			goto out;
+ 
+ 		vm_flags |= VM_UFFD_WP;
+@@ -4311,7 +4311,7 @@ static int userfaultfd_api(struct userfaultfd_ctx *ctx,
+ 	uffdio_api.features &=
+ 		~(UFFD_FEATURE_MINOR_HUGETLBFS | UFFD_FEATURE_MINOR_SHMEM);
+ #endif
+-	if (!pgtable_supports_uffd_wp())
++	if (!pgtable_supports_uffd())
+ 		uffdio_api.features &= ~UFFD_FEATURE_PAGEFAULT_FLAG_WP;
+ 
+ 	if (!uffd_supports_wp_marker()) {
+

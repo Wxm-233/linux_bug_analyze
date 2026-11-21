@@ -1,0 +1,98 @@
+[
+  {
+    "n": 1,
+    "verdict": "完整线索",
+    "reason": null,
+    "why": "mm/damon/core.c:2951–2956 以 u64 微秒累计 PSI，2971–2983 将两次采样的差存入 unsigned long，再写入 current_value；32 位上超过 ULONG_MAX 微秒的差值会回绕，3300–3303 随后按回绕值计算目标得分。mm/damon/sysfs-schemes.c:1833–1842、3036 接受 unsigned long 毫秒并传入配额，core.c:3425–3435 按该周期更新，合法周期可以长于 32 位微秒量程。若能证明所有可达的相邻 PSI 采样之间累计压力时间都不超过 U32_MAX 微秒，即可推翻此判断。"
+  },
+  {
+    "n": 2,
+    "verdict": "排除",
+    "reason": "值域放得下",
+    "why": "fs/f2fs/f2fs.h:2918–2921 的 s64 返回值来自 atomic_read，计的是当前缓存量。fs/f2fs/node.c:57、85–89 将非负的 32 位计数写入 unsigned long 后与页数阈值比较，扩大返回类型没有增加源计数的有效位数。"
+  },
+  {
+    "n": 3,
+    "verdict": "排除",
+    "reason": "性质不适用",
+    "why": "mm/huge_memory.c:4181–4187 接收调用方传入的拆分阶数 new_order。4264 起用 HPAGE_PMD_ORDER 判断拆分是否跨越 PMD 映射阈值并更新统计，该常量没有作为页缓存分配阶数传给消费者。"
+  },
+  {
+    "n": 4,
+    "verdict": "排除",
+    "reason": "合法的实现差异",
+    "why": "mm/damon/ops-common.c:132–134 通过 huge 接口取出逻辑 PTE，用 pte_mkold 修改后再经 huge 接口写回。以编码不同的 s390 为例，arch/s390/mm/hugetlbpage.c:164–180 先转换表项再返回，158–162 通过架构 setter 写回；arm64 的 arch/arm64/mm/hugetlbpage.c:135–136、167–168 也用 PTE 接口合并访问位。"
+  },
+  {
+    "n": 5,
+    "verdict": "排除",
+    "reason": "已有守卫",
+    "why": "mm/damon/vaddr.c:294–301 持锁检查 present 后才调用；另一入口 mm/damon/ops-common.c:224–230 要求 hugetlb folio 且以 flags=0 遍历，mm/page_vma_mapped.c:118–142、224–227 在锁内筛除迁移等非 present 项。该遍历允许的设备专有或独占项不适用于 hugetlb，见 mm/migrate_device.c:749–751 和 mm/rmap.c:2906–2908，因此 ops-common.c:145 取 PFN 时前提成立。"
+  },
+  {
+    "n": 6,
+    "verdict": "排除",
+    "reason": "已有守卫",
+    "why": "mm/damon/vaddr.c:616–624、635–642、659–668 分别检查 PMD、普通 PTE、hugetlb PTE 是否 present，向探针传入同一局部快照的地址。597–598、575、551 和 558 将快照传到 531–534，读取访问位时不会重新取一个可能变化的表项。"
+  },
+  {
+    "n": 7,
+    "verdict": "排除",
+    "reason": "值域放得下",
+    "why": "fs/ceph/file.c:2283–2287 把内联读取限定在第一页，end 同时受文件大小、请求终点和 PAGE_SIZE 约束。2288–2292 的清零终点与复制长度均至多一页，32 位参数可以表示。"
+  },
+  {
+    "n": 8,
+    "verdict": "排除",
+    "reason": "性质不适用",
+    "why": "mm/khugepaged.c:942–954 复制可接受的空 PTE 数，并与 COLLAPSE_MAX_PTES_LIMIT 比较。954–958 的消费者是策略值检查与警告，比较对象的单位是表项个数。"
+  },
+  {
+    "n": 9,
+    "verdict": "排除",
+    "reason": "值域放得下",
+    "why": "include/linux/backing-dev.h:74–77 返回非负的汇总值，mm/page-writeback.c:2624、2646、2922 按脏页增减 WB_RECLAIMABLE。fs/fs-writeback.c:1193、1228–1234 对单个回写对象按页计数；要在赋值处超出 32 位有符号 long，单是这些驻留页的 struct page 就已无法容纳在 32 位内核虚拟地址空间。"
+  },
+  {
+    "n": 10,
+    "verdict": "排除",
+    "reason": "性质不适用",
+    "why": "mm/khugepaged.c:971–975 用 HPAGE_PMD_NR 设置三类 PTE 的数量上限。该值表示一个 PMD 覆盖的基础页数，写入的是折叠策略的计数字段。"
+  },
+  {
+    "n": 11,
+    "verdict": "排除",
+    "reason": "已有守卫",
+    "why": "mm/swap_state.c:534–547 从调用方提供的位掩码取得最高阶，检查该阶对应的页数是否超过交换簇。550–552 才将通过检查的 order 用于交换缓存分配，SWAPFILE_CLUSTER 在此仅充当上界。"
+  },
+  {
+    "n": 12,
+    "verdict": "排除",
+    "reason": "性质不适用",
+    "why": "mm/zswap.c:1614–1620 用 SWAPFILE_CLUSTER 校验一个已固定且对齐的槽位区间能被一棵树覆盖。1622 的消费者是 xa_find 范围查询，此处没有按该值分配 folio。"
+  },
+  {
+    "n": 13,
+    "verdict": "排除",
+    "reason": "已有守卫",
+    "why": "mm/damon/ops-common.c:142、149 把读取的同一 entry 传至 130；虚拟地址入口在 mm/damon/vaddr.c:294–301 持锁检查 present。反向映射入口 ops-common.c:224–230 只传已匹配的 hugetlb 项，见 mm/page_vma_mapped.c:118–142、224–227；设备项例外受 mm/migrate_device.c:749–751、mm/rmap.c:2906–2908 的 hugetlb 限制。"
+  },
+  {
+    "n": 14,
+    "verdict": "排除",
+    "reason": "合法的实现差异",
+    "why": "arch/x86/kernel/perf_regs.c:249–254、265–268 在普通路径按用户模式填写 ABI，277–281 在无法采样的 NMI 路径明确返回 ABI_NONE 和空指针。成功的 NMI 路径在 323–324 直接按用户模式填写 ABI，覆盖实现保留了调用方需要的结果。"
+  },
+  {
+    "n": 15,
+    "verdict": "排除",
+    "reason": "已有守卫",
+    "why": "arch/x86/include/uapi/asm/perf_regs.h:90–98 将向量寄存器掩码限定到位 0–31。arch/x86/kernel/perf_regs.c:163–166 在赋值前拒绝任何超出掩码的位，因此缩窄为 32 位 unsigned long 保留全部有效位。"
+  },
+  {
+    "n": 16,
+    "verdict": "排除",
+    "reason": "值域放得下",
+    "why": "mm/mm_init.c:847–853 的两个 PFN 端点均为 unsigned long，856–868 在半开区间中每访问一个有效 PFN 至多增加一次 online_pgcnt。因此 874 的返回值至多为区间长度，32 位 unsigned long 也可表示。"
+  }
+]

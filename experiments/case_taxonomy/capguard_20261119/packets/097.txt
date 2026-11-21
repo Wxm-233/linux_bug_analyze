@@ -1,0 +1,69 @@
+commit e854d8b2a82e
+2017-04-18|PCI: Add arch_can_pci_mmap_io() on architectures which can mmap() I/O space
+
+PCI: Add arch_can_pci_mmap_io() on architectures which can mmap() I/O space
+
+This is relatively esoteric, and knowing that we don't have it makes life
+easier in some cases rather than just an eventual -EINVAL from
+pci_mmap_page_range().
+
+---- diff (matched files only)
+diff --git a/drivers/pci/pci-sysfs.c b/drivers/pci/pci-sysfs.c
+index 7d494bd66a97..cb04bc29943f 100644
+--- a/drivers/pci/pci-sysfs.c
++++ b/drivers/pci/pci-sysfs.c
+@@ -1174,11 +1174,14 @@ static int pci_create_attr(struct pci_dev *pdev, int num, int write_combine)
+ 	} else {
+ 		pdev->res_attr[num] = res_attr;
+ 		sprintf(res_attr_name, "resource%d", num);
+-		res_attr->mmap = pci_mmap_resource_uc;
+-	}
+-	if (pci_resource_flags(pdev, num) & IORESOURCE_IO) {
+-		res_attr->read = pci_read_resource_io;
+-		res_attr->write = pci_write_resource_io;
++		if (pci_resource_flags(pdev, num) & IORESOURCE_IO) {
++			res_attr->read = pci_read_resource_io;
++			res_attr->write = pci_write_resource_io;
++			if (arch_can_pci_mmap_io())
++				res_attr->mmap = pci_mmap_resource_uc;
++		} else {
++			res_attr->mmap = pci_mmap_resource_uc;
++		}
+ 	}
+ 	res_attr->attr.name = res_attr_name;
+ 	res_attr->attr.mode = S_IRUSR | S_IWUSR;
+diff --git a/drivers/pci/proc.c b/drivers/pci/proc.c
+index a2aa58a8fb96..45e5cf7e9193 100644
+--- a/drivers/pci/proc.c
++++ b/drivers/pci/proc.c
+@@ -202,6 +202,8 @@ static long proc_bus_pci_ioctl(struct file *file, unsigned int cmd,
+ 
+ #ifdef HAVE_PCI_MMAP
+ 	case PCIIOC_MMAP_IS_IO:
++		if (!arch_can_pci_mmap_io())
++			return -EINVAL;
+ 		fpriv->mmap_state = pci_mmap_io;
+ 		break;
+ 
+@@ -232,15 +234,16 @@ static int proc_bus_pci_mmap(struct file *file, struct vm_area_struct *vma)
+ {
+ 	struct pci_dev *dev = PDE_DATA(file_inode(file));
+ 	struct pci_filp_private *fpriv = file->private_data;
+-	int i, ret, write_combine = 0, res_bit;
++	int i, ret, write_combine = 0, res_bit = IORESOURCE_MEM;
+ 
+ 	if (!capable(CAP_SYS_RAWIO))
+ 		return -EPERM;
+ 
+-	if (fpriv->mmap_state == pci_mmap_io)
++	if (fpriv->mmap_state == pci_mmap_io) {
++		if (!arch_can_pci_mmap_io())
++			return -EINVAL;
+ 		res_bit = IORESOURCE_IO;
+-	else
+-		res_bit = IORESOURCE_MEM;
++	}
+ 
+ 	/* Make sure the caller is mapping a real resource for this device */
+ 	for (i = 0; i < PCI_ROM_RESOURCE; i++) {
+

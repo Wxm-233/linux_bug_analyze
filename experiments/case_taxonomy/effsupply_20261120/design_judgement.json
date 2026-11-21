@@ -1,0 +1,665 @@
+[
+ {
+  "commit": "6829e274a623",
+  "date": "2015-04-27",
+  "subject": "arm64: dma-mapping: always clear allocated buffers",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D1",
+  "why": "dma_alloc_coherent 返回的缓冲区在其他架构上总是全零，驱动依赖这一点，还可能经 dma_mmap 给用户；arm64 只在带 __GFP_ZERO 时清零。修复：arm64 无条件清零"
+ },
+ {
+  "commit": "2545e5da080b",
+  "date": "2016-09-09",
+  "subject": "asm-generic: make copy_from_user() zero the destination properly",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "copy_from_user 的公共约定：没拷到的部分要清零。asm-generic 实现在 access_ok 失败时不清零；用到它的架构把未初始化内容交给调用方"
+ },
+ {
+  "commit": "8630c32275ba",
+  "date": "2016-09-13",
+  "subject": "avr32: fix copy_from_user()",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "同 D2 系列（Al Viro 2016-09），avr32 实现"
+ },
+ {
+  "commit": "e33d1f6f72cc",
+  "date": "2016-09-13",
+  "subject": "nios2: copy_from_user() should zero the tail of destination",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "同 D2 系列，nios2 实现"
+ },
+ {
+  "commit": "ae7cc577ec2a",
+  "date": "2016-09-13",
+  "subject": "mn10300: copy_from_user() should zero on access_ok() failure...",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "同 D2 系列，mn10300 实现"
+ },
+ {
+  "commit": "8ae95ed4ae5f",
+  "date": "2016-09-13",
+  "subject": "metag: copy_from_user() should zero the destination on access_ok() failure",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "同 D2 系列，metag 实现"
+ },
+ {
+  "commit": "a5e541f796f1",
+  "date": "2016-09-13",
+  "subject": "ia64: copy_from_user() should zero the destination on access_ok() failure",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "同 D2 系列，ia64 实现"
+ },
+ {
+  "commit": "eb47e0293baa",
+  "date": "2016-09-13",
+  "subject": "cris: buggered copy_from_user/copy_to_user/clear_user",
+  "fixes": [],
+  "verdict": "是",
+  "rootcause": "D2",
+  "why": "同 D2 系列，cris 实现"
+ },
+ {
+  "commit": "e89f5b370153",
+  "date": "2018-03-28",
+  "subject": "dma-mapping: Don't clear GFP_ZERO in dma_alloc_attrs",
+  "fixes": [
+   "57bf5a8963f8"
+  ],
+  "verdict": "是",
+  "rootcause": "D3",
+  "why": "公共 dma_alloc_attrs 去掉 __GFP_ZERO，假设各实现总会清零；arc、s390 的实现不带这个标志就不清零，驱动拿到脏缓冲区。修复：不再去掉标志"
+ },
+ {
+  "commit": "dd65a941f6ba",
+  "date": "2018-06-19",
+  "subject": "arm64: dma-mapping: clear buffers allocated with FORCE_CONTIGUOUS flag",
+  "fixes": [
+   "44176bb38fa4"
+  ],
+  "verdict": "是",
+  "rootcause": "D4",
+  "why": "arm64 IOMMU 的 DMA_ATTR_FORCE_CONTIGUOUS 路径从 CMA 取页，dma_alloc_from_contiguous 不认 __GFP_ZERO，缓冲区没清零就交给驱动/用户"
+ },
+ {
+  "commit": "a1da439cc0d9",
+  "date": "2018-12-05",
+  "subject": "dma-mapping: fix lack of DMA address assignment in generic remap allocator",
+  "fixes": [
+   "bfd56cd60521"
+  ],
+  "verdict": "是",
+  "rootcause": "D5",
+  "why": "通用 remap 分配器（kernel/dma/remap.c 的 arch_dma_alloc，只在选了 DMA_DIRECT_REMAP 的架构上用）改用 __dma_direct_alloc_pages 后既不设 dma_handle 也不清零"
+ },
+ {
+  "commit": "34f19ff1b5a0",
+  "date": "2017-06-23",
+  "subject": "powerpc/64: Initialise thread_info for emergency stacks",
+  "fixes": [],
+  "verdict": "说不清",
+  "rootcause": null,
+  "why": "powerpc 紧急栈的 thread_info 没初始化，公共 nmi_enter 读到垃圾 preempt_count。是“公共约定（thread_info 已初始化）+ 架构实现不满足”，但约定是“有效初始值”不是“清零”，边界上"
+ },
+ {
+  "commit": "5c7a3a3d20a4",
+  "date": "2017-06-12",
+  "subject": "posix-timers: Zero out oldval itimerspec",
+  "fixes": [
+   "eabdec043853"
+  ],
+  "verdict": "同族非架构",
+  "rootcause": null,
+  "why": "timer_settime 的 oldval 依赖 k_clock->timer_get 填满；各时钟类型的实现不全写，系统调用层原来清零、重构后漏了。实现选择是时钟类型，与架构无关"
+ },
+ {
+  "commit": "0f181f9fbea8",
+  "date": "2019-10-14",
+  "subject": "mm/slub.c: init_on_free=1 should wipe freelist ptr for bulk allocations",
+  "fixes": [
+   "6471384af2a6"
+  ],
+  "verdict": "同族非架构",
+  "rootcause": null,
+  "why": "init_on_free 要求对象全零；SLUB 批量分配路径没擦 freelist 指针。是同一实现里的另一条路径，与架构无关"
+ },
+ {
+  "commit": "26dca996ea7b",
+  "date": "2022-01-15",
+  "subject": "kasan: fix quarantine conflicting with init_on_free",
+  "fixes": [
+   "6471384af2a6"
+  ],
+  "verdict": "同族非架构",
+  "rootcause": null,
+  "why": "init_on_free 要求对象全零；Generic KASAN 隔离区在清零之后又写入元数据。实现选择是 KASAN 模式，Generic 在各主流架构都有"
+ },
+ {
+  "commit": "b75f4c9afac2",
+  "date": "2015-03-06",
+  "subject": "KVM: s390: Zero out current VMDB of STSI before including level3 data.",
+  "fixes": [],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "s390 KVM 自己的 STSI 结构体保留字段"
+ },
+ {
+  "commit": "f2ae45edbca7",
+  "date": "2015-06-23",
+  "subject": "KVM: s390: clear floating interrupt bitmap and parameters",
+  "fixes": [],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "s390 KVM 自己的中断状态复位"
+ },
+ {
+  "commit": "dfbca61af0b6",
+  "date": "2016-08-12",
+  "subject": "arm64: hibernate: handle allocation failures",
+  "fixes": [
+   "82869ac57b5d"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "arm64 hibernate 分配失败处理"
+ },
+ {
+  "commit": "e3b6a02816eb",
+  "date": "2016-10-11",
+  "subject": "parisc: Zero-initialize newly alloced memblock",
+  "fixes": [
+   "4fe9e1d957e4"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "parisc 自己的 get_memblock 给自己的页表用，没有公共请求"
+ },
+ {
+  "commit": "cbfc6c9184ce",
+  "date": "2017-05-19",
+  "subject": "KVM: X86: Fix read out-of-bounds vulnerability in kvm pio emulation",
+  "fixes": [],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "KVM x86 越界读"
+ },
+ {
+  "commit": "af54aed94bf3",
+  "date": "2017-08-10",
+  "subject": "mm/balloon_compaction.c: don't zero ballooned pages",
+  "fixes": [
+   "bb01b64cfab7"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "去掉 balloon 页清零（性能）"
+ },
+ {
+  "commit": "e10237cc76ef",
+  "date": "2017-11-10",
+  "subject": "kthread: zero the kthread data structure",
+  "fixes": [
+   "05e3db95ebfc"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "kthread 自己的结构体"
+ },
+ {
+  "commit": "6b7e633fe9c2",
+  "date": "2017-12-27",
+  "subject": "tracing: Remove extra zeroing out of the ring buffer page",
+  "fixes": [
+   "2711ca237a08"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "去掉多余清零"
+ },
+ {
+  "commit": "636e645f1f2a",
+  "date": "2018-01-21",
+  "subject": "ARM: 8740/1: NOMMU: Make sure we do not hold stale data in mem[] array",
+  "fixes": [
+   "5c9d9a1b3a54"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "ARM NOMMU 内部数组残留"
+ },
+ {
+  "commit": "09e35a4a1ca8",
+  "date": "2018-04-13",
+  "subject": "mm/gup_benchmark: handle gup failures",
+  "fixes": [],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "gup_benchmark 失败处理"
+ },
+ {
+  "commit": "0a0b98734479",
+  "date": "2018-05-10",
+  "subject": "compat: fix 4-byte infoleak via uninitialized struct field",
+  "fixes": [
+   "3a4d44b61625"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "compat adjtimex 结构体字段未初始化，属结构体忘了清零"
+ },
+ {
+  "commit": "128227e7fe40",
+  "date": "2018-06-07",
+  "subject": "slab: __GFP_ZERO is incompatible with a constructor",
+  "fixes": [
+   "d07dbea46405"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "__GFP_ZERO 与构造函数冲突的告警"
+ },
+ {
+  "commit": "d3f66e4116af",
+  "date": "2018-10-25",
+  "subject": "bpf: fix leaking uninitialized memory on pop/peek helpers",
+  "fixes": [
+   "f1a2e44a3aec"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "bpf 自己的缓冲区"
+ },
+ {
+  "commit": "2af8ff291848",
+  "date": "2018-11-30",
+  "subject": "mm/khugepaged: collapse_shmem() remember to clear holes",
+  "fixes": [
+   "f3f0e1d2150b"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "khugepaged collapse_shmem 漏清空洞，与实现选择无关"
+ },
+ {
+  "commit": "32043fa065b5",
+  "date": "2018-12-19",
+  "subject": "x86/mtrr: Don't copy uninitialized gentry fields back to userspace",
+  "fixes": [
+   "b263b31e8ad6"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "x86 mtrr 结构体泄漏"
+ },
+ {
+  "commit": "4af396ae4836",
+  "date": "2019-01-17",
+  "subject": "bpf: zero out build_id for BPF_STACK_BUILD_ID_IP",
+  "fixes": [
+   "615755a77b24"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "bpf build_id"
+ },
+ {
+  "commit": "3a33d030daaa",
+  "date": "2019-01-25",
+  "subject": "kvm: x86/vmx: Use kzalloc for cached_vmcs12",
+  "fixes": [
+   "8fcc4b5923af"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "KVM vmx 自己的结构体"
+ },
+ {
+  "commit": "98d90582be2e",
+  "date": "2019-02-20",
+  "subject": "svm: Fix AVIC DFR and LDR handling",
+  "fixes": [
+   "18f40c53e10f"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "SVM AVIC"
+ },
+ {
+  "commit": "a90118c445cc",
+  "date": "2019-08-16",
+  "subject": "x86/boot: Save fields explicitly, zero out everything else",
+  "fixes": [],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "x86 boot_params 清理写法（编译告警）"
+ },
+ {
+  "commit": "8a9093c79863",
+  "date": "2020-02-17",
+  "subject": "net: sched: correct flower port blocking",
+  "fixes": [
+   "62230715fd24"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "net sched"
+ },
+ {
+  "commit": "edd4fa37baa6",
+  "date": "2020-03-16",
+  "subject": "KVM: x86: Allocate new rmap and large page tracking when moving memslot",
+  "fixes": [
+   "05da45583de9"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "KVM x86 memslot"
+ },
+ {
+  "commit": "56df70a63ed5",
+  "date": "2020-04-21",
+  "subject": "mm/ksm: fix NULL pointer dereference when KSM zero page is enabled",
+  "fixes": [
+   "e86c59b1b12d"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "KSM 空指针"
+ },
+ {
+  "commit": "8982ae527fbe",
+  "date": "2020-06-26",
+  "subject": "mm/slab: use memzero_explicit() in kzfree()",
+  "fixes": [
+   "3ef0e5ba4673"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "kzfree 防编译器优化掉 memset"
+ },
+ {
+  "commit": "d81ae8aac85c",
+  "date": "2020-07-08",
+  "subject": "sched/uclamp: Fix initialization of struct uclamp_rq",
+  "fixes": [
+   "69842cba9ace"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "uclamp 初始化"
+ },
+ {
+  "commit": "ce5716c61852",
+  "date": "2021-01-24",
+  "subject": "kasan, mm: fix conflicts with init_on_alloc/free",
+  "fixes": [
+   "aa1ef4d7b3f6"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "清零做了，问题是 HW_TAGS 指针标签导致误报"
+ },
+ {
+  "commit": "17d8beda277a",
+  "date": "2021-02-12",
+  "subject": "bpf: Fix an unitialized value in bpf_iter",
+  "fixes": [
+   "15d83c4d7cef"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "bpf_iter"
+ },
+ {
+  "commit": "68d54ceeec0e",
+  "date": "2021-02-12",
+  "subject": "arm64: mte: Allow PTRACE_PEEKMTETAGS access to the zero page",
+  "fixes": [
+   "34bfeea4a9e9"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "MTE 零页标签已清，问题是标志位"
+ },
+ {
+  "commit": "85d703746154",
+  "date": "2021-04-09",
+  "subject": "KVM: arm64: Fully zero the vcpu state on reset",
+  "fixes": [
+   "e47c2055c68e"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "KVM arm64 vcpu 复位"
+ },
+ {
+  "commit": "ff40e51043af",
+  "date": "2021-06-02",
+  "subject": "bpf, lockdown, audit: Fix buggy SELinux lockdown permission checks",
+  "fixes": [
+   "59438b46471a"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "bpf lockdown"
+ },
+ {
+  "commit": "4f13d471e5d1",
+  "date": "2021-06-08",
+  "subject": "KVM: SVM: Fix SEV SEND_START session length & SEND_UPDATE_DATA query length after commit 238eca821cee",
+  "fixes": [
+   "238eca821cee"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "SEV 长度"
+ },
+ {
+  "commit": "93c2cdc975aa",
+  "date": "2021-06-24",
+  "subject": "x86/fpu/xstate: Clear xstate header in copy_xstate_to_uabi_buf() again",
+  "fixes": [
+   "eb6f51723f03"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "x86 xstate 头栈上未清零，架构内部"
+ },
+ {
+  "commit": "7f049fbdd57f",
+  "date": "2021-06-24",
+  "subject": "perf/x86/intel/lbr: Zero the xstate buffer on allocation",
+  "fixes": [
+   "ce711ea3cab9"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "x86 LBR 缓冲区，架构内部"
+ },
+ {
+  "commit": "69e5d322a2fb",
+  "date": "2021-07-23",
+  "subject": "mm: page_alloc: fix page_poison=1 / INIT_ON_ALLOC_DEFAULT_ON interaction",
+  "fixes": [
+   "51cba1ebc60d"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "page_poison 与 init_on_alloc 配置交互造成误报，不是漏清零"
+ },
+ {
+  "commit": "0594c58161b6",
+  "date": "2021-09-21",
+  "subject": "xen/x86: fix PV trap handling on secondary processors",
+  "fixes": [
+   "f87e4cac4f4e"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "xen x86 trap"
+ },
+ {
+  "commit": "44cad52cc14a",
+  "date": "2022-02-18",
+  "subject": "x86/ptrace: Fix xfpregs_set()'s incorrect xmm clearing",
+  "fixes": [
+   "6164331d15f7"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "x86 ptrace xmm 清理"
+ },
+ {
+  "commit": "08999b2489b4",
+  "date": "2022-03-11",
+  "subject": "x86/sgx: Free backing memory after faulting the enclave page",
+  "fixes": [
+   "1728ab54b4be"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "sgx"
+ },
+ {
+  "commit": "19b482c29b6f",
+  "date": "2022-03-22",
+  "subject": "mm: shmem: fix missing cache flush in shmem_mfill_atomic_pte()",
+  "fixes": [
+   "4c27fe4c4c84",
+   "8d1039634206"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "shmem 刷缓存（P2）"
+ },
+ {
+  "commit": "be77354a3d7e",
+  "date": "2022-04-06",
+  "subject": "bpf: Do write access check for kfunc and global func",
+  "fixes": [
+   "d583691c47dc",
+   "e5069b9c23b3"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "bpf"
+ },
+ {
+  "commit": "b4e61fc031b1",
+  "date": "2022-04-28",
+  "subject": "Revert \"mm/memory-failure.c: skip huge_zero_page in memory_failure()\"",
+  "fixes": [
+   "6a46079cf57a",
+   "d173d5417fb6"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "memory-failure 回退"
+ },
+ {
+  "commit": "d22d2474e395",
+  "date": "2022-05-25",
+  "subject": "KVM: SVM: Use kzalloc for sev ioctl interfaces to prevent kernel data leak",
+  "fixes": [
+   "2c07ded06427",
+   "4cfdd47d6d95",
+   "d3d1af85e2c7",
+   "eaf78265a4ab",
+   "eba04b20e486"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "SEV ioctl 自己的结构体"
+ },
+ {
+  "commit": "ec6d0dde71d7",
+  "date": "2022-06-18",
+  "subject": "powerpc: Enable execve syscall exit tracepoint",
+  "fixes": [],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "powerpc execve 寄存器"
+ },
+ {
+  "commit": "0424a7dfe912",
+  "date": "2023-03-15",
+  "subject": "x86/resctrl: Clear staged_config[] before and after it is used",
+  "fixes": [
+   "75408e43509e"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "resctrl"
+ },
+ {
+  "commit": "fdb54d96600a",
+  "date": "2023-07-08",
+  "subject": "kasan, slub: fix HW_TAGS zeroing with slub_debug",
+  "fixes": [
+   "946fa0dbf2d8"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "HW_TAGS 初始化写过了 slub_debug 红区，是多清，不是漏清"
+ },
+ {
+  "commit": "079082c60aff",
+  "date": "2023-07-31",
+  "subject": "tcx: Fix splat during dev unregister",
+  "fixes": [
+   "e420bed02507"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "tcx"
+ },
+ {
+  "commit": "8e7b58c27b3c",
+  "date": "2023-12-21",
+  "subject": "ring-buffer: Just update the subbuffers when changing their allocation order",
+  "fixes": [
+   "f9b94daa542a"
+  ],
+  "verdict": "不是",
+  "rootcause": null,
+  "why": "ring-buffer"
+ },
+ {
+  "commit": "5bebe8de1926",
+  "date": "2025-11-18",
+  "subject": "mm/huge_memory: Fix initialization of huge zero folio",
+  "fixes": [
+   "adfb6609c680"
+  ],
+  "in_design_json": false,
+  "verdict": "是",
+  "rootcause": "X1",
+  "why": "校准例。__GFP_ZEROTAGS 请求清零；post_alloc_hook 调 tag_clear_highpage 后把 init 设为 false；通用空实现什么都不做，零页内容没清就映射给用户",
+  "calibration": true
+ },
+ {
+  "commit": "6c2f761dad78",
+  "date": "2022-07-03",
+  "subject": "kasan: fix zeroing vmalloc memory with HW_TAGS",
+  "fixes": [
+   "23689e91fb22"
+  ],
+  "in_design_json": true,
+  "verdict": "是",
+  "rootcause": "K1",
+  "why": "校准例。调用方用 KASAN_VMALLOC_INIT 要求清零；HW_TAGS 下被调函数几条提前返回的路径不清零",
+  "calibration": true
+ }
+]

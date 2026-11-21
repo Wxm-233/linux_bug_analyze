@@ -1,0 +1,36 @@
+commit 9e75ad5d8f39
+2019-03-25|io_uring: fix big-endian compat signal mask handling
+
+io_uring: fix big-endian compat signal mask handling
+
+On big-endian architectures, the signal masks are differnet
+between 32-bit and 64-bit tasks, so we have to use a different
+function for reading them from user space.
+
+io_cqring_wait() initially got this wrong, and always interprets
+this as a native structure. This is ok on x86 and most arm64,
+but not on s390, ppc64be, mips64be, sparc64 and parisc.
+
+---- diff (matched files only)
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 6aaa30580a2b..8f48d29abf76 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -1968,7 +1968,15 @@ static int io_cqring_wait(struct io_ring_ctx *ctx, int min_events,
+ 		return 0;
+ 
+ 	if (sig) {
+-		ret = set_user_sigmask(sig, &ksigmask, &sigsaved, sigsz);
++#ifdef CONFIG_COMPAT
++		if (in_compat_syscall())
++			ret = set_compat_user_sigmask((const compat_sigset_t __user *)sig,
++						      &ksigmask, &sigsaved, sigsz);
++		else
++#endif
++			ret = set_user_sigmask(sig, &ksigmask,
++					       &sigsaved, sigsz);
++
+ 		if (ret)
+ 			return ret;
+ 	}
+

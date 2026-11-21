@@ -1,0 +1,303 @@
+commit bd74fdaea146
+2022-09-26|mm: multi-gen LRU: support page table walks
+
+mm: multi-gen LRU: support page table walks
+
+To further exploit spatial locality, the aging prefers to walk page tables
+to search for young PTEs and promote hot pages.  A kill switch will be
+added in the next patch to disable this behavior.  When disabled, the
+aging relies on the rmap only.
+
+NB: this behavior has nothing similar with the page table scanning in the
+2.4 kernel [1], which searches page tables for old PTEs, adds cold pages
+to swapcache and unmaps them.
+
+To avoid confusion, the term "iteration" specifically means the traversal
+of an entire mm_struct list; the term "walk" will be applied to page
+tables and the rmap, as usual.
+
+An mm_struct list is maintained for each memcg, and an mm_struct follows
+its owner task to the new memcg when this task is migrated.  Given an
+lruvec, the aging iterates lruvec_memcg()->mm_list and calls
+walk_page_range() with each mm_struct on this list to promote hot pages
+before it increments max_seq.
+
+When multiple page table walkers iterate the same list, each of them gets
+a unique mm_struct; therefore they can run concurrently.  Page table
+walkers ignore any misplaced pages, e.g., if an mm_struct was migrated,
+pages it left in the previous memcg will not be promoted when its current
+memcg is under reclaim.  Similarly, page table walkers will not promote
+pages from nodes other than the one under reclaim.
+
+This patch uses the following optimizations when walking page tables:
+1. It tracks the usage of mm_struct's between context switches so that
+   page table walkers can skip processes that have been sleeping since
+   the last iteration.
+2. It uses generational Bloom filters to record populated branches so
+   that page table walkers can reduce their search space based on the
+   query results, e.g., to skip page tables containing mostly holes or
+   misplaced pages.
+3. It takes advantage of the accessed bit in non-leaf PMD entries when
+   CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG=y.
+4. It does not zigzag between a PGD table and the same PMD table
+   spanning multiple VMAs. IOW, it finishes all the VMAs within the
+   range of the same PMD table before it returns to a PGD table. This
+   improves the cache performance for workloads that have large
+   numbers of tiny VMAs [2], especially when CONFIG_PGTABLE_LEVELS=5.
+
+Server benchmark results:
+  Single workload:
+    fio (buffered I/O): no change
+
+  Single workload:
+    memcached (anon): +[8, 10]%
+                Ops/sec      KB/sec
+      patch1-7: 1147696.57   44640.29
+      patch1-8: 1245274.91   48435.66
+
+  Configurations:
+    no change
+
+Client benchmark results:
+  kswapd profiles:
+    patch1-7
+      48.16%  lzo1x_1_do_compress (real work)
+       8.20%  page_vma_mapped_walk (overhead)
+       7.06%  _raw_spin_unlock_irq
+       2.92%  ptep_clear_flush
+       2.53%  __zram_bvec_write
+       2.11%  do_raw_spin_lock
+       2.02%  memmove
+       1.93%  lru_gen_look_around
+       1.56%  free_unref_page_list
+       1.40%  memset
+
+    patch1-8
+      49.44%  lzo1x_1_do_compress (real work)
+       6.19%  page_vma_mapped_walk (overhead)
+       5.97%  _raw_spin_unlock_irq
+       3.13%  get_pfn_folio
+       2.85%  ptep_clear_flush
+       2.42%  __zram_bvec_write
+       2.08%  do_raw_spin_lock
+       1.92%  memmove
+       1.44%  alloc_zspage
+       1.36%  memset
+
+  Configurations:
+    no change
+
+Thanks to the following developers for their efforts [3].
+  kernel test robot <lkp@intel.com>
+
+[1] https://lwn.net/Articles/23732/
+[2] https://llvm.org/docs/ScudoHardenedAllocator.html
+[3] https://lore.kernel.org/r/202204160827.ekEARWQo-lkp@intel.com/
+
+---- diff (matched files only)
+diff --git a/mm/vmscan.c b/mm/vmscan.c
+index 986916c15bec..f97e3cd20a33 100644
+--- a/mm/vmscan.c
++++ b/mm/vmscan.c
+@@ -49,6 +49,8 @@
+ #include <linux/printk.h>
+ #include <linux/dax.h>
+ #include <linux/psi.h>
++#include <linux/pagewalk.h>
++#include <linux/shmem_fs.h>
+ 
+ #include <asm/tlbflush.h>
+ #include <asm/div64.h>
+@@ -3082,7 +3084,7 @@ static bool can_age_anon_pages(struct pglist_data *pgdat,
+ 		for ((type) = 0; (type) < ANON_AND_FILE; (type)++)	\
+ 			for ((zone) = 0; (zone) < MAX_NR_ZONES; (zone)++)
+ 
+-static struct lruvec __maybe_unused *get_lruvec(struct mem_cgroup *memcg, int nid)
++static struct lruvec *get_lruvec(struct mem_cgroup *memcg, int nid)
+ {
+ 	struct pglist_data *pgdat = NODE_DATA(nid);
+ 
+@@ -3127,6 +3129,371 @@ static bool __maybe_unused seq_is_valid(struct lruvec *lruvec)
+ 	       get_nr_gens(lruvec, LRU_GEN_ANON) <= MAX_NR_GENS;
+ }
+ 
++/******************************************************************************
++ *                          mm_struct list
++ ******************************************************************************/
++
++static struct lru_gen_mm_list *get_mm_list(struct mem_cgroup *memcg)
++{
++	static struct lru_gen_mm_list mm_list = {
++		.fifo = LIST_HEAD_INIT(mm_list.fifo),
++		.lock = __SPIN_LOCK_UNLOCKED(mm_list.lock),
++	};
++
++#ifdef CONFIG_MEMCG
++	if (memcg)
++		return &memcg->mm_list;
++#endif
++	VM_WARN_ON_ONCE(!mem_cgroup_disabled());
++
++	return &mm_list;
++}
++
++void lru_gen_add_mm(struct mm_struct *mm)
++{
++	int nid;
++	struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
++	struct lru_gen_mm_list *mm_list = get_mm_list(memcg);
++
++	VM_WARN_ON_ONCE(!list_empty(&mm->lru_gen.list));
++#ifdef CONFIG_MEMCG
++	VM_WARN_ON_ONCE(mm->lru_gen.memcg);
++	mm->lru_gen.memcg = memcg;
++#endif
++	spin_lock(&mm_list->lock);
++
++	for_each_node_state(nid, N_MEMORY) {
++		struct lruvec *lruvec = get_lruvec(memcg, nid);
++
++		if (!lruvec)
++			continue;
++
++		/* the first addition since the last iteration */
++		if (lruvec->mm_state.tail == &mm_list->fifo)
++			lruvec->mm_state.tail = &mm->lru_gen.list;
++	}
++
++	list_add_tail(&mm->lru_gen.list, &mm_list->fifo);
++
++	spin_unlock(&mm_list->lock);
++}
++
++void lru_gen_del_mm(struct mm_struct *mm)
++{
++	int nid;
++	struct lru_gen_mm_list *mm_list;
++	struct mem_cgroup *memcg = NULL;
++
++	if (list_empty(&mm->lru_gen.list))
++		return;
++
++#ifdef CONFIG_MEMCG
++	memcg = mm->lru_gen.memcg;
++#endif
++	mm_list = get_mm_list(memcg);
++
++	spin_lock(&mm_list->lock);
++
++	for_each_node(nid) {
++		struct lruvec *lruvec = get_lruvec(memcg, nid);
++
++		if (!lruvec)
++			continue;
++
++		/* where the last iteration ended (exclusive) */
++		if (lruvec->mm_state.tail == &mm->lru_gen.list)
++			lruvec->mm_state.tail = lruvec->mm_state.tail->next;
++
++		/* where the current iteration continues (inclusive) */
++		if (lruvec->mm_state.head != &mm->lru_gen.list)
++			continue;
++
++		lruvec->mm_state.head = lruvec->mm_state.head->next;
++		/* the deletion ends the current iteration */
++		if (lruvec->mm_state.head == &mm_list->fifo)
++			WRITE_ONCE(lruvec->mm_state.seq, lruvec->mm_state.seq + 1);
++	}
++
++	list_del_init(&mm->lru_gen.list);
++
++	spin_unlock(&mm_list->lock);
++
++#ifdef CONFIG_MEMCG
++	mem_cgroup_put(mm->lru_gen.memcg);
++	mm->lru_gen.memcg = NULL;
++#endif
++}
++
++#ifdef CONFIG_MEMCG
++void lru_gen_migrate_mm(struct mm_struct *mm)
++{
++	struct mem_cgroup *memcg;
++	struct task_struct *task = rcu_dereference_protected(mm->owner, true);
++
++	VM_WARN_ON_ONCE(task->mm != mm);
++	lockdep_assert_held(&task->alloc_lock);
++
++	/* for mm_update_next_owner() */
++	if (mem_cgroup_disabled())
++		return;
++
++	rcu_read_lock();
++	memcg = mem_cgroup_from_task(task);
++	rcu_read_unlock();
++	if (memcg == mm->lru_gen.memcg)
++		return;
++
++	VM_WARN_ON_ONCE(!mm->lru_gen.memcg);
++	VM_WARN_ON_ONCE(list_empty(&mm->lru_gen.list));
++
++	lru_gen_del_mm(mm);
++	lru_gen_add_mm(mm);
++}
++#endif
++
++/*
++ * Bloom filters with m=1<<15, k=2 and the false positive rates of ~1/5 when
++ * n=10,000 and ~1/2 when n=20,000, where, conventionally, m is the number of
++ * bits in a bitmap, k is the number of hash functions and n is the number of
++ * inserted items.
++ *
++ * Page table walkers use one of the two filters to reduce their search space.
++ * To get rid of non-leaf entries that no longer have enough leaf entries, the
++ * aging uses the double-buffering technique to flip to the other filter each
++ * time it produces a new generation. For non-leaf entries that have enough
++ * leaf entries, the aging carries them over to the next generation in
++ * walk_pmd_range(); the eviction also report them when walking the rmap
++ * in lru_gen_look_around().
++ *
++ * For future optimizations:
++ * 1. It's not necessary to keep both filters all the time. The spare one can be
++ *    freed after the RCU grace period and reallocated if needed again.
++ * 2. And when reallocating, it's worth scaling its size according to the number
++ *    of inserted entries in the other filter, to reduce the memory overhead on
++ *    small systems and false positives on large systems.
++ * 3. Jenkins' hash function is an alternative to Knuth's.
++ */
++#define BLOOM_FILTER_SHIFT	15
++
++static inline int filter_gen_from_seq(unsigned long seq)
++{
++	return seq % NR_BLOOM_FILTERS;
++}
++
++static void get_item_key(void *item, int *key)
++{
++	u32 hash = hash_ptr(item, BLOOM_FILTER_SHIFT * 2);
++
++	BUILD_BUG_ON(BLOOM_FILTER_SHIFT * 2 > BITS_PER_TYPE(u32));
++
++	key[0] = hash & (BIT(BLOOM_FILTER_SHIFT) - 1);
++	key[1] = hash >> BLOOM_FILTER_SHIFT;
++}
++
++static void reset_bloom_filter(struct lruvec *lruvec, unsigned long seq)
++{
++	unsigned long *filter;
++	int gen = filter_gen_from_seq(seq);
++
++	filter = lruvec->mm_state.filters[gen];
++	if (filter) {
++		bitmap_clear(filter, 0, BIT(BLOOM_FILTER_SHIFT));
++		return;
++	}
++
++	filter = bitmap_zalloc(BIT(BLOOM_FILTER_SHIFT),
++			       __GFP_HIGH | __GFP_NOMEMALLOC | __GFP_NOWARN);
++	WRITE_ONCE(lruvec->mm_state.filters[gen], filter);
++}
++
++static void update_bloom_filter(struct lruvec *lruvec, unsigned long seq, void *item)
++{
++	int key[2

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "R01",
+    "label": "unlikely",
+    "reason": "x86 的 perf_callchain_user() 已在读取用户栈前检查 nmi_uaccess_okay()，不允许时只保留寄存器中已有的 IP 并返回。调用者按 entry->nr 使用实际取得的栈项，这种尽力采样没有把完整用户栈读取当成成功的依赖。"
+  },
+  {
+    "id": "R02",
+    "label": "unlikely",
+    "reason": "源码中只有 safe_copy_page() 发现 !kernel_page_present(s_page) 才调用临时映射和解除映射这一对助手。arm64 在 can_set_direct_map() 为假时不会通过这些接口移除线性映射，正常可保存页面仍有映射，不需要这次恢复操作。"
+  },
+  {
+    "id": "R03",
+    "label": "unlikely",
+    "reason": "这是 safe_copy_page() 临时恢复原本不可访问页面之后的配对撤销操作，并不是为新资源建立强制隔离。能力不满足时原映射不会被这些接口撤掉；对应的映射恢复和撤销均不改变状态，没有材料支持因此产生错误行为。"
+  },
+  {
+    "id": "R04",
+    "label": "unlikely",
+    "reason": "df2908090cda 中整个 execmem_set_direct_map_valid() 都在 CONFIG_ARCH_HAS_EXECMEM_ROX 条件内，arm64 的 Kconfig 没有选择该选项。该版本无法形成所报公共函数与 arm64 静默实现的实际调用组合。"
+  },
+  {
+    "id": "R05",
+    "label": "unlikely",
+    "reason": "与 R04 一样，该函数在 arm64 上受未启用的 CONFIG_ARCH_HAS_EXECMEM_ROX 排除。这里还是错误回滚调用；即使仅看给出的静默实现，能力为假时前面的调用均返回 0，也不会因这种情况进入 err_restore。"
+  },
+  {
+    "id": "R06",
+    "label": "unlikely",
+    "reason": "get_current_mdwe() 只读取当前 mm 的两个标志，不启用或执行 MDWE 保护。设置路径已经按架构能力拒绝请求，查询零状态不需要再次要求该能力。"
+  },
+  {
+    "id": "R07",
+    "label": "unlikely",
+    "reason": "补查当前源码，hugetlb_parse_params() 调用的 hugepages_setup()、hugepagesz_setup() 和 default_hugepagesz_setup() 都先检查 hugepages_supported()。能力为假时不会由启动参数写入分配数量，而 hugetlb_hstate_alloc_pages() 对 max_huge_pages 为 0 直接返回，因此所报缺少局部门控不构成实际分配问题。"
+  },
+  {
+    "id": "R08",
+    "label": "unlikely",
+    "reason": "工作队列仅处理已经从 HugeTLB 池移除、需要延迟恢复 vmemmap 的 folio，入队路径要求已有有效的大页及其 hstate。size_to_hstate() 本身只是按大小查表；大页支持在启动时缺失时，不会凭这个调用产生待释放的大页。"
+  },
+  {
+    "id": "R09",
+    "label": "unlikely",
+    "reason": "该路径由已注册的大页池降级接口触发，hugetlb_init() 在能力检查之后才初始化降级目标并注册 sysfs，能力缺失时没有这个入口。函数还拒绝 demote_order 为 0 的状态，不能把与初始化中查表的差异视为绕过能力检查。"
+  },
+  {
+    "id": "R10",
+    "label": "unlikely",
+    "reason": "size_to_hstate() 在这里只为注册 hstate 查重，是纯软件元数据操作，不分配或映射大页。公共启动参数调用方已经检查 hugepages_supported() 和具体页大小，架构注册路径也校验硬件支持的大小，缺少本地同名判断不说明会执行不支持的操作。"
+  },
+  {
+    "id": "R11",
+    "label": "unlikely",
+    "reason": "secretmem_release() 是已创建文件的资源清理，secretmem_destroy_inode_priv() 只撤销记账并释放用户引用和私有状态。当前源码在 secretmem 初始化和 memfd_secret 系统调用入口都检查 can_set_direct_map()，既没有创建绕过，也没有清理动作依赖映射修改能力。"
+  }
+]

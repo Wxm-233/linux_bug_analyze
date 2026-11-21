@@ -1,0 +1,76 @@
+commit b8de9573e6ae
+2026-04-01|memblock: make free_reserved_area() more robust
+
+memblock: make free_reserved_area() more robust
+
+There are two potential problems in free_reserved_area():
+* it may free a page with not-existent buddy page
+* it may be passed a virtual address from an alias mapping that won't
+  be properly translated by virt_to_page(), for example a symbol on arm64
+
+While first issue is quite theoretical and the second one does not manifest
+itself because all the callers do the right thing, it is easy to make
+free_reserved_area() robust enough to avoid these potential issues.
+
+Replace the loop by virtual address with a loop by pfn that uses
+for_each_valid_pfn() and use __pa() or __pa_symbol() depending on the
+virtual mapping alias to correctly determine the loop boundaries.
+
+---- diff (matched files only)
+diff --git a/mm/memblock.c b/mm/memblock.c
+index 180b8347458f..a42ec6a76ea0 100644
+--- a/mm/memblock.c
++++ b/mm/memblock.c
+@@ -896,21 +896,32 @@ int __init_memblock memblock_remove(phys_addr_t base, phys_addr_t size)
+ 
+ unsigned long free_reserved_area(void *start, void *end, int poison, const char *s)
+ {
+-	void *pos;
+-	unsigned long pages = 0;
++	phys_addr_t start_pa, end_pa;
++	unsigned long pages = 0, pfn;
+ 
+-	start = (void *)PAGE_ALIGN((unsigned long)start);
+-	end = (void *)((unsigned long)end & PAGE_MASK);
+-	for (pos = start; pos < end; pos += PAGE_SIZE, pages++) {
+-		struct page *page = virt_to_page(pos);
++	/*
++	 * end is the first address past the region and it may be beyond what
++	 * __pa() or __pa_symbol() can handle.
++	 * Use the address included in the range for the conversion and add
++	 * back 1 afterwards.
++	 */
++	if (__is_kernel((unsigned long)start)) {
++		start_pa = __pa_symbol(start);
++		end_pa = __pa_symbol(end - 1) + 1;
++	} else {
++		start_pa = __pa(start);
++		end_pa = __pa(end - 1) + 1;
++	}
++
++	for_each_valid_pfn(pfn, PFN_UP(start_pa), PFN_DOWN(end_pa)) {
++		struct page *page = pfn_to_page(pfn);
+ 		void *direct_map_addr;
+ 
+ 		/*
+-		 * 'direct_map_addr' might be different from 'pos'
+-		 * because some architectures' virt_to_page()
+-		 * work with aliases.  Getting the direct map
+-		 * address ensures that we get a _writeable_
+-		 * alias for the memset().
++		 * 'direct_map_addr' might be different from the kernel virtual
++		 * address because some architectures use aliases.
++		 * Going via physical address, pfn_to_page() and page_address()
++		 * ensures that we get a _writeable_ alias for the memset().
+ 		 */
+ 		direct_map_addr = page_address(page);
+ 		/*
+@@ -922,6 +933,7 @@ unsigned long free_reserved_area(void *start, void *end, int poison, const char
+ 			memset(direct_map_addr, poison, PAGE_SIZE);
+ 
+ 		free_reserved_page(page);
++		pages++;
+ 	}
+ 
+ 	if (pages && s)
+

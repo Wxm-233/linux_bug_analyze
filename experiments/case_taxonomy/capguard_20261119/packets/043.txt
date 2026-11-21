@@ -1,0 +1,94 @@
+commit 89939e890605
+2021-07-27|staging: rtlwifi: use siocdevprivate
+
+staging: rtlwifi: use siocdevprivate
+
+rtl8188eu has an "android private" ioctl command multiplexer
+that is not currently safe for use in compat mode because
+of its triple-indirect pointer.
+
+rtl8723bs uses a different interface on the SIOCDEVPRIVATE
+command, based on the iwpriv data structure
+
+Both also have normal unreachable iwpriv commands, and all
+of the above should probably just get removed. For the
+moment, just switch over to the new interface.
+
+---- diff (matched files only)
+diff --git a/drivers/staging/rtl8188eu/os_dep/rtw_android.c b/drivers/staging/rtl8188eu/os_dep/rtw_android.c
+index 3c5446999686..a13df3880378 100644
+--- a/drivers/staging/rtl8188eu/os_dep/rtw_android.c
++++ b/drivers/staging/rtl8188eu/os_dep/rtw_android.c
+@@ -5,6 +5,7 @@
+  *
+  ******************************************************************************/
+ 
++#include <linux/compat.h>
+ #include <linux/module.h>
+ #include <linux/netdevice.h>
+ 
+@@ -116,7 +117,8 @@ static int android_get_p2p_addr(struct net_device *net, char *command,
+ 	return ETH_ALEN;
+ }
+ 
+-int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
++int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr,
++			 void __user *data, int cmd)
+ {
+ 	int ret = 0;
+ 	char *command;
+@@ -124,9 +126,15 @@ int rtw_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
+ 	int bytes_written = 0;
+ 	struct android_wifi_priv_cmd priv_cmd;
+ 
+-	if (!ifr->ifr_data)
++	if (cmd != SIOCDEVPRIVATE)
++		return -EOPNOTSUPP;
++
++	if (in_compat_syscall()) /* to be implemented */
++		return -EOPNOTSUPP;
++
++	if (!data)
+ 		return -EINVAL;
+-	if (copy_from_user(&priv_cmd, ifr->ifr_data, sizeof(priv_cmd)))
++	if (copy_from_user(&priv_cmd, data, sizeof(priv_cmd)))
+ 		return -EFAULT;
+ 	if (priv_cmd.total_len < 1)
+ 		return -EINVAL;
+diff --git a/drivers/staging/rtl8723bs/os_dep/ioctl_linux.c b/drivers/staging/rtl8723bs/os_dep/ioctl_linux.c
+index f95000df8942..aa7bd76bb5f1 100644
+--- a/drivers/staging/rtl8723bs/os_dep/ioctl_linux.c
++++ b/drivers/staging/rtl8723bs/os_dep/ioctl_linux.c
+@@ -4485,6 +4485,21 @@ static int rtw_ioctl_wext_private(struct net_device *dev, union iwreq_data *wrq_
+ 	return err;
+ }
+ 
++int rtw_siocdevprivate(struct net_device *dev, struct ifreq *rq,
++		       void __user *data, int cmd)
++{
++	struct iwreq *wrq = (struct iwreq *)rq;
++
++	/* little hope of fixing this, better remove the whole function */
++	if (in_compat_syscall())
++		return -EOPNOTSUPP;
++
++	if (cmd != SIOCDEVPRIVATE)
++		return -EOPNOTSUPP;
++
++	return rtw_ioctl_wext_private(dev, &wrq->u);
++}
++
+ int rtw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+ {
+ 	struct iwreq *wrq = (struct iwreq *)rq;
+@@ -4497,9 +4512,6 @@ int rtw_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+ 	case RTL_IOCTL_HOSTAPD:
+ 		ret = rtw_hostapd_ioctl(dev, &wrq->u.data);
+ 		break;
+-	case SIOCDEVPRIVATE:
+-		ret = rtw_ioctl_wext_private(dev, &wrq->u);
+-		break;
+ 	default:
+ 		ret = -EOPNOTSUPP;
+ 		break;
+

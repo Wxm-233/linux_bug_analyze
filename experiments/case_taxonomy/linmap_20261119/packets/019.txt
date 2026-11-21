@@ -1,0 +1,59 @@
+commit 0b3eb091d575
+2022-01-06|mm: Convert check_heap_object() to use struct slab
+
+mm: Convert check_heap_object() to use struct slab
+
+Ensure that we're not seeing a tail page inside __check_heap_object() by
+converting to a slab instead of a page.  Take the opportunity to mark
+the slab as const since we're not modifying it.  Also move the
+declaration of __check_heap_object() to mm/slab.h so it's not available
+to the wider kernel.
+
+[ vbabka@suse.cz: in check_heap_object() only convert to struct slab for
+  actual PageSlab pages; use folio as intermediate step instead of page ]
+
+---- diff (matched files only)
+diff --git a/mm/usercopy.c b/mm/usercopy.c
+index b3de3c4eefba..d0d268135d96 100644
+--- a/mm/usercopy.c
++++ b/mm/usercopy.c
+@@ -20,6 +20,7 @@
+ #include <linux/atomic.h>
+ #include <linux/jump_label.h>
+ #include <asm/sections.h>
++#include "slab.h"
+ 
+ /*
+  * Checks if a given pointer and length is contained by the current
+@@ -223,7 +224,7 @@ static inline void check_page_span(const void *ptr, unsigned long n,
+ static inline void check_heap_object(const void *ptr, unsigned long n,
+ 				     bool to_user)
+ {
+-	struct page *page;
++	struct folio *folio;
+ 
+ 	if (!virt_addr_valid(ptr))
+ 		return;
+@@ -231,16 +232,16 @@ static inline void check_heap_object(const void *ptr, unsigned long n,
+ 	/*
+ 	 * When CONFIG_HIGHMEM=y, kmap_to_page() will give either the
+ 	 * highmem page or fallback to virt_to_page(). The following
+-	 * is effectively a highmem-aware virt_to_head_page().
++	 * is effectively a highmem-aware virt_to_slab().
+ 	 */
+-	page = compound_head(kmap_to_page((void *)ptr));
++	folio = page_folio(kmap_to_page((void *)ptr));
+ 
+-	if (PageSlab(page)) {
++	if (folio_test_slab(folio)) {
+ 		/* Check slab allocator for flags and size. */
+-		__check_heap_object(ptr, n, page, to_user);
++		__check_heap_object(ptr, n, folio_slab(folio), to_user);
+ 	} else {
+ 		/* Verify object does not incorrectly span multiple pages. */
+-		check_page_span(ptr, n, page, to_user);
++		check_page_span(ptr, n, folio_page(folio, 0), to_user);
+ 	}
+ }
+ 
+

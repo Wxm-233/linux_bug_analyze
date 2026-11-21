@@ -1,0 +1,228 @@
+commit 953c66c2b22a
+2016-12-12|mm: THP page cache support for ppc64
+
+mm: THP page cache support for ppc64
+
+Add arch specific callback in the generic THP page cache code that will
+deposit and withdarw preallocated page table.  Archs like ppc64 use this
+preallocated table to store the hash pte slot information.
+
+Testing:
+kernel build of the patch series on tmpfs mounted with option huge=always
+
+The related thp stat:
+thp_fault_alloc 72939
+thp_fault_fallback 60547
+thp_collapse_alloc 603
+thp_collapse_alloc_failed 0
+thp_file_alloc 253763
+thp_file_mapped 4251
+thp_split_page 51518
+thp_split_page_failed 1
+thp_deferred_split_page 73566
+thp_split_pmd 665
+thp_zero_page_alloc 3
+thp_zero_page_alloc_failed 0
+
+[akpm@linux-foundation.org: remove unneeded parentheses, per Kirill]
+
+---- diff (matched files only)
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index b54044c21076..2b44ac11178f 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -1380,6 +1380,15 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
+ 	return ret;
+ }
+ 
++static inline void zap_deposited_table(struct mm_struct *mm, pmd_t *pmd)
++{
++	pgtable_t pgtable;
++
++	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
++	pte_free(mm, pgtable);
++	atomic_long_dec(&mm->nr_ptes);
++}
++
+ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
+ 		 pmd_t *pmd, unsigned long addr)
+ {
+@@ -1421,6 +1430,8 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
+ 			atomic_long_dec(&tlb->mm->nr_ptes);
+ 			add_mm_counter(tlb->mm, MM_ANONPAGES, -HPAGE_PMD_NR);
+ 		} else {
++			if (arch_needs_pgtable_deposit())
++				zap_deposited_table(tlb->mm, pmd);
+ 			add_mm_counter(tlb->mm, MM_FILEPAGES, -HPAGE_PMD_NR);
+ 		}
+ 		spin_unlock(ptl);
+@@ -1607,6 +1618,12 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
+ 
+ 	if (!vma_is_anonymous(vma)) {
+ 		_pmd = pmdp_huge_clear_flush_notify(vma, haddr, pmd);
++		/*
++		 * We are going to unmap this huge page. So
++		 * just go ahead and zap it
++		 */
++		if (arch_needs_pgtable_deposit())
++			zap_deposited_table(mm, pmd);
+ 		if (vma_is_dax(vma))
+ 			return;
+ 		page = pmd_page(_pmd);
+diff --git a/mm/khugepaged.c b/mm/khugepaged.c
+index 7a50c726c5ae..09460955e818 100644
+--- a/mm/khugepaged.c
++++ b/mm/khugepaged.c
+@@ -1242,6 +1242,7 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
+ 	struct vm_area_struct *vma;
+ 	unsigned long addr;
+ 	pmd_t *pmd, _pmd;
++	bool deposited = false;
+ 
+ 	i_mmap_lock_write(mapping);
+ 	vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
+@@ -1266,10 +1267,26 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
+ 			spinlock_t *ptl = pmd_lock(vma->vm_mm, pmd);
+ 			/* assume page table is clear */
+ 			_pmd = pmdp_collapse_flush(vma, addr, pmd);
++			/*
++			 * now deposit the pgtable for arch that need it
++			 * otherwise free it.
++			 */
++			if (arch_needs_pgtable_deposit()) {
++				/*
++				 * The deposit should be visibile only after
++				 * collapse is seen by others.
++				 */
++				smp_wmb();
++				pgtable_trans_huge_deposit(vma->vm_mm, pmd,
++							   pmd_pgtable(_pmd));
++				deposited = true;
++			}
+ 			spin_unlock(ptl);
+ 			up_write(&vma->vm_mm->mmap_sem);
+-			atomic_long_dec(&vma->vm_mm->nr_ptes);
+-			pte_free(vma->vm_mm, pmd_pgtable(_pmd));
++			if (!deposited) {
++				atomic_long_dec(&vma->vm_mm->nr_ptes);
++				pte_free(vma->vm_mm, pmd_pgtable(_pmd));
++			}
+ 		}
+ 	}
+ 	i_mmap_unlock_write(mapping);
+diff --git a/mm/memory.c b/mm/memory.c
+index 0a72f821ccdc..32e9b7aec366 100644
+--- a/mm/memory.c
++++ b/mm/memory.c
+@@ -2935,6 +2935,19 @@ static inline bool transhuge_vma_suitable(struct vm_area_struct *vma,
+ 	return true;
+ }
+ 
++static void deposit_prealloc_pte(struct fault_env *fe)
++{
++	struct vm_area_struct *vma = fe->vma;
++
++	pgtable_trans_huge_deposit(vma->vm_mm, fe->pmd, fe->prealloc_pte);
++	/*
++	 * We are going to consume the prealloc table,
++	 * count that as nr_ptes.
++	 */
++	atomic_long_inc(&vma->vm_mm->nr_ptes);
++	fe->prealloc_pte = 0;
++}
++
+ static int do_set_pmd(struct fault_env *fe, struct page *page)
+ {
+ 	struct vm_area_struct *vma = fe->vma;
+@@ -2949,6 +2962,17 @@ static int do_set_pmd(struct fault_env *fe, struct page *page)
+ 	ret = VM_FAULT_FALLBACK;
+ 	page = compound_head(page);
+ 
++	/*
++	 * Archs like ppc64 need additonal space to store information
++	 * related to pte entry. Use the preallocated table for that.
++	 */
++	if (arch_needs_pgtable_deposit() && !fe->prealloc_pte) {
++		fe->prealloc_pte = pte_alloc_one(vma->vm_mm, fe->address);
++		if (!fe->prealloc_pte)
++			return VM_FAULT_OOM;
++		smp_wmb(); /* See comment in __pte_alloc() */
++	}
++
+ 	fe->ptl = pmd_lock(vma->vm_mm, fe->pmd);
+ 	if (unlikely(!pmd_none(*fe->pmd)))
+ 		goto out;
+@@ -2962,6 +2986,11 @@ static int do_set_pmd(struct fault_env *fe, struct page *page)
+ 
+ 	add_mm_counter(vma->vm_mm, MM_FILEPAGES, HPAGE_PMD_NR);
+ 	page_add_file_rmap(page, true);
++	/*
++	 * deposit and withdraw with pmd lock held
++	 */
++	if (arch_needs_pgtable_deposit())
++		deposit_prealloc_pte(fe);
+ 
+ 	set_pmd_at(vma->vm_mm, haddr, fe->pmd, entry);
+ 
+@@ -2971,6 +3000,13 @@ static int do_set_pmd(struct fault_env *fe, struct page *page)
+ 	ret = 0;
+ 	count_vm_event(THP_FILE_MAPPED);
+ out:
++	/*
++	 * If we are going to fallback to pte mapping, do a
++	 * withdraw with pmd lock held.
++	 */
++	if (arch_needs_pgtable_deposit() && ret == VM_FAULT_FALLBACK)
++		fe->prealloc_pte = pgtable_trans_huge_withdraw(vma->vm_mm,
++							       fe->pmd);
+ 	spin_unlock(fe->ptl);
+ 	return ret;
+ }
+@@ -3010,18 +3046,20 @@ int alloc_set_pte(struct fault_env *fe, struct mem_cgroup *memcg,
+ 
+ 		ret = do_set_pmd(fe, page);
+ 		if (ret != VM_FAULT_FALLBACK)
+-			return ret;
++			goto fault_handled;
+ 	}
+ 
+ 	if (!fe->pte) {
+ 		ret = pte_alloc_one_map(fe);
+ 		if (ret)
+-			return ret;
++			goto fault_handled;
+ 	}
+ 
+ 	/* Re-check under ptl */
+-	if (unlikely(!pte_none(*fe->pte)))
+-		return VM_FAULT_NOPAGE;
++	if (unlikely(!pte_none(*fe->pte))) {
++		ret = VM_FAULT_NOPAGE;
++		goto fault_handled;
++	}
+ 
+ 	flush_icache_page(vma, page);
+ 	entry = mk_pte(page, vma->vm_page_prot);
+@@ -3041,8 +3079,15 @@ int alloc_set_pte(struct fault_env *fe, struct mem_cgroup *memcg,
+ 
+ 	/* no need to invalidate: a not-present page won't be cached */
+ 	update_mmu_cache(vma, fe->address, fe->pte);
++	ret = 0;
+ 
+-	return 0;
++fault_handled:
++	/* preallocated pagetable is unused: free it */
++	if (fe->prealloc_pte) {
++		pte_free(fe->vma->vm_mm, fe->prealloc_pte);
++		fe->prealloc_pte = 0;
++	}
++	return ret;
+ }
+ 
+ static unsigned long fault_around_bytes __read_mostly =
+@@ -3141,11 +3186,6 @@ static int do_fault_around(struct fault_env *fe, pgoff_t start_pgoff)
+ 
+ 	fe->vma->vm_ops->map_pages(fe, start_pgoff, end_pgoff);
+ 
+-	/* preallocated pagetable is unused: free it */
+-	if (fe->preal

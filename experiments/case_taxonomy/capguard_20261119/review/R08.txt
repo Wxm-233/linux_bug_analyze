@@ -1,0 +1,117 @@
+候选 R08  规则 B2  版本 df2908090cda
+位置 mm/hugetlb.c:1536  所在函数 free_hpage_workfn  调用 size_to_hstate  能力判断 hugepages_supported  相关架构 powerpc, s390, x86
+
+==== 所在函数 free_hpage_workfn（mm/hugetlb.c）
+
+static void free_hpage_workfn(struct work_struct *work)
+{
+	struct llist_node *node;
+
+	node = llist_del_all(&hpage_freelist);
+
+	while (node) {
+		struct folio *folio;
+		struct hstate *h;
+
+		folio = container_of((struct address_space **)node,
+				     struct folio, mapping);
+		node = node->next;
+		folio->mapping = NULL;
+		/*
+		 * The VM_BUG_ON_FOLIO(!folio_test_hugetlb(folio), folio) in
+		 * folio_hstate() is going to trigger because a previous call to
+		 * remove_hugetlb_folio() will clear the hugetlb bit, so do
+		 * not use folio_hstate() directly.
+		 */
+		h = size_to_hstate(folio_size(folio));
+
+		__update_and_free_hugetlb_folio(h, folio);
+
+		cond_resched();
+	}
+}
+
+==== 被 hugepages_supported 保护的调用处所在函数 hugetlb_init
+
+static int __init hugetlb_init(void)
+{
+	int i;
+
+	BUILD_BUG_ON(sizeof_field(struct page, private) * BITS_PER_BYTE <
+			__NR_HPAGEFLAGS);
+	BUILD_BUG_ON_INVALID(HUGETLB_PAGE_ORDER > MAX_FOLIO_ORDER);
+
+	if (!hugepages_supported()) {
+		if (hugetlb_max_hstate || default_hstate_max_huge_pages)
+			pr_warn("HugeTLB: huge pages not supported, ignoring associated command-line parameters\n");
+		return 0;
+	}
+
+	/*
+	 * Make sure HPAGE_SIZE (HUGETLB_PAGE_ORDER) hstate exists.  Some
+	 * architectures depend on setup being done here.
+	 */
+	hugetlb_add_hstate(HUGETLB_PAGE_ORDER);
+	if (!parsed_default_hugepagesz) {
+		/*
+		 * If we did not parse a default huge page size, set
+		 * default_hstate_idx to HPAGE_SIZE hstate. And, if the
+		 * number of huge pages for this default size was implicitly
+		 * specified, set that here as well.
+		 * Note that the implicit setting will overwrite an explicit
+		 * setting.  A warning will be printed in this case.
+		 */
+		default_hstate_idx = hstate_index(size_to_hstate(HPAGE_SIZE));
+		if (default_hstate_max_huge_pages) {
+			if (default_hstate.max_huge_pages) {
+				char buf[32];
+
+				string_get_size(huge_page_size(&default_hstate),
+					1, STRING_UNITS_2, buf, 32);
+				pr_warn("HugeTLB: Ignoring hugepages=%lu associated with %s page size\n",
+					default_hstate.max_huge_pages, buf);
+				pr_warn("HugeTLB: Using hugepages=%lu for number of default huge pages\n",
+					default_hstate_max_huge_pages);
+			}
+			default_hstate.max_huge_pages =
+				default_hstate_max_huge_pages;
+
+			for_each_online_node(i)
+				default_hstate.max_huge_pages_node[i] =
+					default_hugepages_in_node[i];
+		}
+	}
+
+	hugetlb_init_hstates();
+	report_hugepages();
+
+	hugetlb_sysfs_init();
+	hugetlb_cgroup_file_init();
+	hugetlb_sysctl_init();
+
+#ifdef CONFIG_SMP
+	num_fault_mutexes = roundup_pow_of_two(8 * num_possible_cpus());
+#else
+	num_fault_mutexes = 1;
+#endif
+	hugetlb_fault_mutex_table =
+		kmalloc_objs(struct mutex, num_fault_mutexes);
+	BUG_ON(!hugetlb_fault_mutex_table);
+
+	for (i = 0; i < num_fault_mutexes; i++)
+		mutex_init(&hugetlb_fault_mutex_table[i]);
+	return 0;
+}
+
+==== 被调用的本文件函数 size_to_hstate
+
+struct hstate *size_to_hstate(unsigned long size)
+{
+	struct hstate *h;
+
+	for_each_hstate(h) {
+		if (huge_page_size(h) == size)
+			return h;
+	}
+	return NULL;
+}

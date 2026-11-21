@@ -1,0 +1,295 @@
+commit b8d199451c99
+2022-07-18|net/smc: Allow virtually contiguous sndbufs or RMBs for SMC-R
+
+net/smc: Allow virtually contiguous sndbufs or RMBs for SMC-R
+
+On long-running enterprise production servers, high-order contiguous
+memory pages are usually very rare and in most cases we can only get
+fragmented pages.
+
+When replacing TCP with SMC-R in such production scenarios, attempting
+to allocate high-order physically contiguous sndbufs and RMBs may result
+in frequent memory compaction, which will cause unexpected hung issue
+and further stability risks.
+
+So this patch is aimed to allow SMC-R link group to use virtually
+contiguous sndbufs and RMBs to avoid potential issues mentioned above.
+Whether to use physically or virtually contiguous buffers can be set
+by sysctl smcr_buf_type.
+
+Note that using virtually contiguous buffers will bring an acceptable
+performance regression, which can be mainly divided into two parts:
+
+1) regression in data path, which is brought by additional address
+   translation of sndbuf by RNIC in Tx. But in general, translating
+   address through MTT is fast.
+
+   Taking 256KB sndbuf and RMB as an example, the comparisons in qperf
+   latency and bandwidth test with physically and virtually contiguous
+   buffers are as follows:
+
+- client:
+  smc_run taskset -c <cpu> qperf <server> -oo msg_size:1:64K:*2\
+  -t 5 -vu tcp_{bw|lat}
+- server:
+  smc_run taskset -c <cpu> qperf
+
+   [latency]
+   msgsize              tcp            smcr        smcr-use-virt-buf
+   1               11.17 us         7.56 us         7.51 us (-0.67%)
+   2               10.65 us         7.74 us         7.56 us (-2.31%)
+   4               11.11 us         7.52 us         7.59 us ( 0.84%)
+   8               10.83 us         7.55 us         7.51 us (-0.48%)
+   16              11.21 us         7.46 us         7.51 us ( 0.71%)
+   32              10.65 us         7.53 us         7.58 us ( 0.61%)
+   64              10.95 us         7.74 us         7.80 us ( 0.76%)
+   128             11.14 us         7.83 us         7.87 us ( 0.47%)
+   256             10.97 us         7.94 us         7.92 us (-0.28%)
+   512             11.23 us         7.94 us         8.20 us ( 3.25%)
+   1024            11.60 us         8.12 us         8.20 us ( 0.96%)
+   2048            14.04 us         8.30 us         8.51 us ( 2.49%)
+   4096            16.88 us         9.13 us         9.07 us (-0.64%)
+   8192            22.50 us        10.56 us        11.22 us ( 6.26%)
+   16384           28.99 us        12.88 us        13.83 us ( 7.37%)
+   32768           40.13 us        16.76 us        16.95 us ( 1.16%)
+   65536           68.70 us        24.68 us        24.85 us ( 0.68%)
+   [bandwidth]
+   msgsize                tcp              smcr          smcr-use-virt-buf
+   1                1.65 MB/s         1.59 MB/s         1.53 MB/s (-3.88%)
+   2                3.32 MB/s         3.17 MB/s         3.08 MB/s (-2.67%)
+   4                6.66 MB/s         6.33 MB/s         6.09 MB/s (-3.85%)
+   8               13.67 MB/s        13.45 MB/s        11.97 MB/s (-10.99%)
+   16              25.36 MB/s        27.15 MB/s        24.16 MB/s (-11.01%)
+   32              48.22 MB/s        54.24 MB/s        49.41 MB/s (-8.89%)
+   64             106.79 MB/s       107.32 MB/s        99.05 MB/s (-7.71%)
+   128            210.21 MB/s       202.46 MB/s       201.02 MB/s (-0.71%)
+   256            400.81 MB/s       416.81 MB/s       393.52 MB/s (-5.59%)
+   512            746.49 MB/s       834.12 MB/s       809.99 MB/s (-2.89%)
+   1024          1292.33 MB/s      1641.96 MB/s      1571.82 MB/s (-4.27%)
+   2048          2007.64 MB/s      2760.44 MB/s      2717.68 MB/s (-1.55%)
+   4096          2665.17 MB/s      4157.44 MB/s      4070.76 MB/s (-2.09%)
+   8192          3159.72 MB/s      4361.57 MB/s      4270.65 MB/s (-2.08%)
+   16384         4186.70 MB/s      4574.13 MB/s      4501.17 MB/s (-1.60%)
+   32768         4093.21 MB/s      4487.42 MB/s      4322.43 MB/s (-3.68%)
+   65536         4057.14 MB/s      4735.61 MB/s      4555.17 MB/s (-3.81%)
+
+2) regression in buffer initialization and destruction path, which is
+   brought by additional MR operations of sndbufs. But thanks to link
+   group buffer reuse mechanism, the impact of this kind of regression
+   decreases as times of buffer reuse increases.
+
+   Taking 256KB sndbuf and RMB as an example, latency of some key SMC-R
+   buffer-related function obtained by bpftrace are as follows:
+
+   Function                         Phys-bufs           Virt-bufs
+   smcr_new_buf_create()             67154 ns            79164 ns
+   smc_ib_buf_map_sg()                 525 ns              928 ns
+   smc_ib_get_memory_region()       162294 ns           161191 ns
+   smc_wr_reg_send()                  9957 ns             9635 ns
+   smc_ib_put_memory_region()       203548 ns           198374 ns
+   smc_ib_buf_unmap_sg()               508 ns             1158 ns
+
+------------
+Test environment notes:
+1. Above tests run on 2 VMs within the same Host.
+2. The NIC is ConnectX-4Lx, using SRIOV and passing through 2 VFs to
+   the each VM respectively.
+3. VMs' vCPUs are binded to different physical CPUs, and the binded
+   physical CPUs are isolated by `isolcpus=xxx` cmdline.
+4. NICs' queue number are set to 1.
+
+---- diff (matched files only)
+diff --git a/net/smc/smc_core.c b/net/smc/smc_core.c
+index 86afbbce4fca..f26770c29d78 100644
+--- a/net/smc/smc_core.c
++++ b/net/smc/smc_core.c
+@@ -1087,34 +1087,37 @@ struct smc_link *smc_switch_conns(struct smc_link_group *lgr,
+ 	return NULL;
+ }
+ 
+-static void smcr_buf_unuse(struct smc_buf_desc *rmb_desc,
++static void smcr_buf_unuse(struct smc_buf_desc *buf_desc, bool is_rmb,
+ 			   struct smc_link_group *lgr)
+ {
++	struct mutex *lock;	/* lock buffer list */
+ 	int rc;
+ 
+-	if (rmb_desc->is_conf_rkey && !list_empty(&lgr->list)) {
++	if (is_rmb && buf_desc->is_conf_rkey && !list_empty(&lgr->list)) {
+ 		/* unregister rmb with peer */
+ 		rc = smc_llc_flow_initiate(lgr, SMC_LLC_FLOW_RKEY);
+ 		if (!rc) {
+ 			/* protect against smc_llc_cli_rkey_exchange() */
+ 			mutex_lock(&lgr->llc_conf_mutex);
+-			smc_llc_do_delete_rkey(lgr, rmb_desc);
+-			rmb_desc->is_conf_rkey = false;
++			smc_llc_do_delete_rkey(lgr, buf_desc);
++			buf_desc->is_conf_rkey = false;
+ 			mutex_unlock(&lgr->llc_conf_mutex);
+ 			smc_llc_flow_stop(lgr, &lgr->llc_flow_lcl);
+ 		}
+ 	}
+ 
+-	if (rmb_desc->is_reg_err) {
++	if (buf_desc->is_reg_err) {
+ 		/* buf registration failed, reuse not possible */
+-		mutex_lock(&lgr->rmbs_lock);
+-		list_del(&rmb_desc->list);
+-		mutex_unlock(&lgr->rmbs_lock);
++		lock = is_rmb ? &lgr->rmbs_lock :
++				&lgr->sndbufs_lock;
++		mutex_lock(lock);
++		list_del(&buf_desc->list);
++		mutex_unlock(lock);
+ 
+-		smc_buf_free(lgr, true, rmb_desc);
++		smc_buf_free(lgr, is_rmb, buf_desc);
+ 	} else {
+-		rmb_desc->used = 0;
+-		memset(rmb_desc->cpu_addr, 0, rmb_desc->len);
++		buf_desc->used = 0;
++		memset(buf_desc->cpu_addr, 0, buf_desc->len);
+ 	}
+ }
+ 
+@@ -1122,15 +1125,23 @@ static void smc_buf_unuse(struct smc_connection *conn,
+ 			  struct smc_link_group *lgr)
+ {
+ 	if (conn->sndbuf_desc) {
+-		conn->sndbuf_desc->used = 0;
+-		memset(conn->sndbuf_desc->cpu_addr, 0, conn->sndbuf_desc->len);
++		if (!lgr->is_smcd && conn->sndbuf_desc->is_vm) {
++			smcr_buf_unuse(conn->sndbuf_desc, false, lgr);
++		} else {
++			conn->sndbuf_desc->used = 0;
++			memset(conn->sndbuf_desc->cpu_addr, 0,
++			       conn->sndbuf_desc->len);
++		}
+ 	}
+-	if (conn->rmb_desc && lgr->is_smcd) {
+-		conn->rmb_desc->used = 0;
+-		memset(conn->rmb_desc->cpu_addr, 0, conn->rmb_desc->len +
+-		       sizeof(struct smcd_cdc_msg));
+-	} else if (conn->rmb_desc) {
+-		smcr_buf_unuse(conn->rmb_desc, lgr);
++	if (conn->rmb_desc) {
++		if (!lgr->is_smcd) {
++			smcr_buf_unuse(conn->rmb_desc, true, lgr);
++		} else {
++			conn->rmb_desc->used = 0;
++			memset(conn->rmb_desc->cpu_addr, 0,
++			       conn->rmb_desc->len +
++			       sizeof(struct smcd_cdc_msg));
++		}
+ 	}
+ }
+ 
+@@ -1178,20 +1189,21 @@ void smc_conn_free(struct smc_connection *conn)
+ static void smcr_buf_unmap_link(struct smc_buf_desc *buf_desc, bool is_rmb,
+ 				struct smc_link *lnk)
+ {
+-	if (is_rmb)
++	if (is_rmb || buf_desc->is_vm)
+ 		buf_desc->is_reg_mr[lnk->link_idx] = false;
+ 	if (!buf_desc->is_map_ib[lnk->link_idx])
+ 		return;
+-	if (is_rmb) {
+-		if (buf_desc->mr_rx[lnk->link_idx]) {
+-			smc_ib_put_memory_region(
+-					buf_desc->mr_rx[lnk->link_idx]);
+-			buf_desc->mr_rx[lnk->link_idx] = NULL;
+-		}
++
++	if ((is_rmb || buf_desc->is_vm) &&
++	    buf_desc->mr[lnk->link_idx]) {
++		smc_ib_put_memory_region(buf_desc->mr[lnk->link_idx]);
++		buf_desc->mr[lnk->link_idx] = NULL;
++	}
++	if (is_rmb)
+ 		smc_ib_buf_unmap_sg(lnk, buf_desc, DMA_FROM_DEVICE);
+-	} else {
++	else
+ 		smc_ib_buf_unmap_sg(lnk, buf_desc, DMA_TO_DEVICE);
+-	}
++
+ 	sg_free_table(&buf_desc->sgt[lnk->link_idx]);
+ 	buf_desc->is_map_ib[lnk->link_idx] = false;
+ }
+@@ -1280,8 +1292,10 @@ static void smcr_buf_free(struct smc_link_group *lgr, bool is_rmb,
+ 	for (i = 0; i < SMC_LINKS_PER_LGR_MAX; i++)
+ 		smcr_buf_unmap_link(buf_desc, is_rmb, &lgr->lnk[i]);
+ 
+-	if (buf_desc->pages)
++	if (!buf_desc->is_vm && buf_desc->pages)
+ 		__free_pages(buf_desc->pages, buf_desc->order);
++	else if (buf_desc->is_vm && buf_desc->cpu_addr)
++		vfree(buf_desc->cpu_addr);
+ 	kfree(buf_desc);
+ }
+ 
+@@ -1993,26 +2007,50 @@ static inline int smc_rmb_wnd_update_limit(int rmbe_size)
+ 	return max_t(int, rmbe_size / 10, SOCK_MIN_SNDBUF / 2);
+ }
+ 
+-/* map an rmb buf to a link */
++/* map an buf to a link */
+ static int smcr_buf_map_link(struct smc_buf_desc *buf_desc, bool is_rmb,
+ 			     struct smc_link *lnk)
+ {
+-	int rc;
++	int rc, i, nents, offset, buf_size, size, access_flags;
++	struct scatterlist *sg;
++	void *buf;
+ 
+ 	if (buf_desc->is_map_ib[lnk->link_idx])
+ 		return 0;
+ 
+-	rc = sg_alloc_table(&buf_desc->sgt[lnk->link_idx], 1, GFP_KERNEL);
++	if (buf_desc->is_vm) {
++		buf = buf_desc->cpu_addr;
++		buf_size = buf_desc->len;
++		offset = offset_in_page(buf_desc->cpu_addr);
++		nents = PAGE_ALIGN(buf_size + offset) / PAGE_SIZE;
++	} else {
++		nents = 1;
++	}
++
++	rc = sg_alloc_table(&buf_desc->sgt[lnk->link_idx], nents, GFP_KERNEL);
+ 	if (rc)
+ 		return rc;
+-	sg_set_buf(buf_desc->sgt[lnk->link_idx].sgl,
+-		   buf_desc->cpu_addr, buf_desc->len);
++
++	if (buf_desc->is_vm) {
++		/* virtually contiguous buffer */
++		for_each_sg(buf_desc->sgt[lnk->link_idx].sgl, sg, nents, i) {
++			size = min_t(int, PAGE_SIZE - offset, buf_size);
++			sg_set_page(sg, vmalloc_to_page(buf), size, offset);
++			buf += size / sizeof(*buf);
++			buf_size -= size;
++			offset = 0;
++		}
++	} else {
++		/* physically contiguous buffer */
++		sg_set_buf(buf_desc->sgt[lnk->link_idx].sgl,
++			   buf_desc->cpu_addr, buf_desc->len);
++	}
+ 
+ 	/* map sg table to DMA address */
+ 	rc = smc_ib_buf_map_sg(lnk, buf_desc,
+ 			       is_rmb ? DMA_FROM_DEVICE : DMA_TO_DEVICE);
+ 	/* SMC protocol depends on mapping to one DMA address only */
+-	if (rc != 1) {
++	if (rc != nents) {
+ 		rc = -EAGAIN;
+ 		goto free_table;
+ 	}
+@@ -2020,15 +2058,18 @@ static int smcr_buf_map_link(struct smc_buf_desc *buf_desc, bool is_rmb,
+ 	buf_desc->is_dma_need_sync |=
+ 		smc_ib_is_sg_need_sync(lnk, buf_desc) << lnk->link_idx;
+ 
+-	/* create a new memory region for the RMB */
+-	if (is_rmb) {
+-		rc = smc_ib_get_memory_region(lnk->roce_pd,
+-					      IB_ACCESS_REMOTE_WRITE |
+-					      IB

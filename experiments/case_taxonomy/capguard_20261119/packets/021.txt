@@ -1,0 +1,37 @@
+commit d6d08d24790e
+2023-09-21|futex: Extend the FUTEX2 flags
+
+futex: Extend the FUTEX2 flags
+
+Add the definition for the missing but always intended extra sizes,
+and add a NUMA flag for the planned numa extention.
+
+---- diff (matched files only)
+diff --git a/kernel/futex/syscalls.c b/kernel/futex/syscalls.c
+index ff696b0e2e5c..953f0a49de3a 100644
+--- a/kernel/futex/syscalls.c
++++ b/kernel/futex/syscalls.c
+@@ -183,7 +183,7 @@ SYSCALL_DEFINE6(futex, u32 __user *, uaddr, int, op, u32, val,
+ 	return do_futex(uaddr, op, val, tp, uaddr2, (unsigned long)utime, val3);
+ }
+ 
+-#define FUTEX2_VALID_MASK (FUTEX2_SIZE_U32 | FUTEX2_PRIVATE)
++#define FUTEX2_VALID_MASK (FUTEX2_SIZE_MASK | FUTEX2_PRIVATE)
+ 
+ /**
+  * futex_parse_waitv - Parse a waitv array from userspace
+@@ -207,7 +207,12 @@ static int futex_parse_waitv(struct futex_vector *futexv,
+ 		if ((aux.flags & ~FUTEX2_VALID_MASK) || aux.__reserved)
+ 			return -EINVAL;
+ 
+-		if (!(aux.flags & FUTEX2_SIZE_U32))
++		if (!IS_ENABLED(CONFIG_64BIT) || in_compat_syscall()) {
++			if ((aux.flags & FUTEX2_SIZE_MASK) == FUTEX2_SIZE_U64)
++				return -EINVAL;
++		}
++
++		if ((aux.flags & FUTEX2_SIZE_MASK) != FUTEX2_SIZE_U32)
+ 			return -EINVAL;
+ 
+ 		futexv[i].w.flags = aux.flags;
+

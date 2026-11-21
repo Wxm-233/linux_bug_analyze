@@ -1,0 +1,31 @@
+commit 4b7167b9ff9b
+2011-01-13|thp: don't allow transparent hugepage support without PSE
+
+thp: don't allow transparent hugepage support without PSE
+
+Archs implementing Transparent Hugepage Support must implement a function
+called has_transparent_hugepage to be sure the virtual or physical CPU
+supports Transparent Hugepages.
+
+---- diff (matched files only)
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index b6facc35e893..915809b16edf 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -487,7 +487,15 @@ static int __init hugepage_init(void)
+ 	int err;
+ #ifdef CONFIG_SYSFS
+ 	static struct kobject *hugepage_kobj;
++#endif
+ 
++	err = -EINVAL;
++	if (!has_transparent_hugepage()) {
++		transparent_hugepage_flags = 0;
++		goto out;
++	}
++
++#ifdef CONFIG_SYSFS
+ 	err = -ENOMEM;
+ 	hugepage_kobj = kobject_create_and_add("transparent_hugepage", mm_kobj);
+ 	if (unlikely(!hugepage_kobj)) {
+

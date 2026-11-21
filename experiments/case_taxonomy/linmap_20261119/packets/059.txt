@@ -1,0 +1,37 @@
+commit b9cdc88df8e6
+2012-10-22|virtio: 9p: correctly pass physical address to userspace for high pages
+
+virtio: 9p: correctly pass physical address to userspace for high pages
+
+When using a virtio transport, the 9p net device may pass the physical
+address of a kernel buffer to userspace via a scatterlist inside a
+virtqueue. If the kernel buffer is mapped outside of the linear mapping
+(e.g. highmem), then virt_to_page will return a bogus value and we will
+populate the scatterlist with junk.
+
+This patch uses kmap_to_page when populating the page array for a kernel
+buffer.
+
+---- diff (matched files only)
+diff --git a/net/9p/trans_virtio.c b/net/9p/trans_virtio.c
+index 35b8911b1c8e..fd05c81cb348 100644
+--- a/net/9p/trans_virtio.c
++++ b/net/9p/trans_virtio.c
+@@ -39,6 +39,7 @@
+ #include <linux/inet.h>
+ #include <linux/idr.h>
+ #include <linux/file.h>
++#include <linux/highmem.h>
+ #include <linux/slab.h>
+ #include <net/9p/9p.h>
+ #include <linux/parser.h>
+@@ -325,7 +326,7 @@ static int p9_get_mapped_pages(struct virtio_chan *chan,
+ 		int count = nr_pages;
+ 		while (nr_pages) {
+ 			s = rest_of_page(data);
+-			pages[index++] = virt_to_page(data);
++			pages[index++] = kmap_to_page(data);
+ 			data += s;
+ 			nr_pages--;
+ 		}
+

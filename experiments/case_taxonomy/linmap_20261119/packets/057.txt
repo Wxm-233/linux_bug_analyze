@@ -1,0 +1,63 @@
+commit 0ff76a920e35
+2014-01-27|mtd: gpmi: add sanity check when mapping DMA for read_buf/write_buf
+
+mtd: gpmi: add sanity check when mapping DMA for read_buf/write_buf
+
+The buffer pointer passed from the upper layer may points to
+a buffer in the stack or a buffer allocated by vmalloc, and etc..
+
+This patch adds more sanity check to this buffer.
+After this patch, if we meet a buffer which is allocated by vmalloc or
+a buffer in the stack, we will use our own DMA buffer @data_buffer_dma
+to do the DMA operations. If the buffer is not the cases above, we will
+map it for DMA operations directly.
+
+---- diff (matched files only)
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+index d1d13d86b7e0..ca6369fe91ff 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+@@ -367,25 +367,28 @@ void prepare_data_dma(struct gpmi_nand_data *this, enum dma_data_direction dr)
+ 	struct scatterlist *sgl = &this->data_sgl;
+ 	int ret;
+ 
+-	this->direct_dma_map_ok = true;
+-
+ 	/* first try to map the upper buffer directly */
+-	sg_init_one(sgl, this->upper_buf, this->upper_len);
+-	ret = dma_map_sg(this->dev, sgl, 1, dr);
+-	if (ret == 0) {
+-		/* We have to use our own DMA buffer. */
+-		sg_init_one(sgl, this->data_buffer_dma, PAGE_SIZE);
+-
+-		if (dr == DMA_TO_DEVICE)
+-			memcpy(this->data_buffer_dma, this->upper_buf,
+-				this->upper_len);
+-
++	if (virt_addr_valid(this->upper_buf) &&
++		!object_is_on_stack(this->upper_buf)) {
++		sg_init_one(sgl, this->upper_buf, this->upper_len);
+ 		ret = dma_map_sg(this->dev, sgl, 1, dr);
+ 		if (ret == 0)
+-			dev_err(this->dev, "DMA mapping failed.\n");
++			goto map_fail;
+ 
+-		this->direct_dma_map_ok = false;
++		this->direct_dma_map_ok = true;
++		return;
+ 	}
++
++map_fail:
++	/* We have to use our own DMA buffer. */
++	sg_init_one(sgl, this->data_buffer_dma, this->upper_len);
++
++	if (dr == DMA_TO_DEVICE)
++		memcpy(this->data_buffer_dma, this->upper_buf, this->upper_len);
++
++	dma_map_sg(this->dev, sgl, 1, dr);
++
++	this->direct_dma_map_ok = false;
+ }
+ 
+ /* This will be called after the DMA operation is finished. */
+

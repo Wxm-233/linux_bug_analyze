@@ -1,0 +1,36 @@
+候选 R03  规则 B1  版本 df2908090cda
+位置 kernel/power/snapshot.c:104  所在函数 hibernate_unmap_page  调用 set_direct_map_invalid_noflush  能力判断 can_set_direct_map  相关架构 arm64
+
+==== 所在函数 hibernate_unmap_page（kernel/power/snapshot.c）
+
+static inline void hibernate_unmap_page(struct page *page)
+{
+	if (IS_ENABLED(CONFIG_ARCH_HAS_SET_DIRECT_MAP)) {
+		unsigned long addr = (unsigned long)page_address(page);
+		int ret  = set_direct_map_invalid_noflush(page);
+
+		if (ret)
+			pr_warn_once("Failed to remap page\n");
+
+		flush_tlb_kernel_range(addr, addr + PAGE_SIZE);
+	} else {
+		debug_pagealloc_unmap_pages(page, 1);
+	}
+}
+
+==== 架构 arm64 的实现 set_direct_map_invalid_noflush（arch/arm64/include/asm/set_memory.h）
+(definition of set_direct_map_invalid_noflush not found in arch/arm64/include/asm/set_memory.h)
+
+==== 架构 arm64 的实现 set_direct_map_invalid_noflush（arch/arm64/mm/pageattr.c）
+
+int set_direct_map_invalid_noflush(struct page *page)
+{
+	pgprot_t clear_mask = __pgprot(PTE_PRESENT_VALID_KERNEL);
+	pgprot_t set_mask = __pgprot(PTE_PRESENT_INVALID);
+
+	if (!can_set_direct_map())
+		return 0;
+
+	return update_range_prot((unsigned long)page_address(page),
+				 PAGE_SIZE, set_mask, clear_mask);
+}

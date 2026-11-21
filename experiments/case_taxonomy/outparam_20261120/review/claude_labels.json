@@ -1,0 +1,11 @@
+[
+ {"id": 1, "verdict": "排除", "minutes": 4, "reason_class": "调用方不依赖", "why": "调用方第 120 行 memset(&stats, 0, sizeof(stats)) 后再调用；两份实现都是往 stats 里累加（CGROUP_WRITEBACK 开时遍历 wb 列表，关时只算 bdi->wb），列表为空时不写是正常的。差异来自功能开关，属合法差异。"},
+ {"id": 2, "verdict": "排除", "minutes": 1, "reason_class": "调用方不依赖", "why": "同第 1 条（另一个字段）。"},
+ {"id": 3, "verdict": "排除", "minutes": 1, "reason_class": "调用方不依赖", "why": "同第 1 条（另一个字段）。"},
+ {"id": 4, "verdict": "排除", "minutes": 3, "reason_class": "合法的实现差异", "why": "x86_64 没开 CGROUP_WRITEBACK，wbc_attach_fdatawrite_inode 是空桩，本来就不需要写 wbc；调用方第 374～379 行用指定初始化器设了 .nr_to_write，读的是 do_writepages 之后的值。"},
+ {"id": 5, "verdict": "排除", "minutes": 4, "reason_class": "性质表示不了", "why": "没开 CPUMASK_OFFSTACK 时 cpumask_var_t 是 struct cpumask[1]，&full_hk_cpus 指向的数组就是存储本身，alloc_cpumask_var 返回 true 不写是设计如此；调用方第 1386 行 cpumask_and 先写 full_hk_cpus 再读。"},
+ {"id": 6, "verdict": "排除", "minutes": 4, "reason_class": "性质表示不了", "why": "c.len 由 consume_entry 回调经 cookie 写入，不是实现直接写；调用方用指定初始化器构造 c，未列出的 len 被清零；x86 第 47 行返回 0 时 len 为已消费的条目数，语义正确。"},
+ {"id": 7, "verdict": "排除", "minutes": 3, "reason_class": "性质表示不了", "why": "riscv 桩写 *mpol = NULL，arm64 第 2328 行也写 *mpol，两侧都必写；arm64 判为“未知”是分析器没认出来。"},
+ {"id": 8, "verdict": "排除", "minutes": 3, "reason_class": "合法的实现差异", "why": "x86_64 没开 CGROUP_WRITEBACK，mem_cgroup_wb_stats 是空桩；调用方第 847 行把 filepages、headroom、writeback 初始化为 0；而且 !dtc_is_global 这一支只在 cgroup writeback 打开时可达。"},
+ {"id": 9, "verdict": "排除", "minutes": 5, "reason_class": "性质表示不了", "why": "x86 实现每个 case 的 unsafe_atomic_op1/2 都写 *oval，default 返回 -ENOSYS；“明确未写”的那条路径是分析器把 switch 建模成“可以整个跳过”多出来的假路径。"}
+]

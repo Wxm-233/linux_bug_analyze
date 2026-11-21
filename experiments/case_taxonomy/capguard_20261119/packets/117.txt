@@ -1,0 +1,159 @@
+commit 1da177e4c3f4
+2005-04-16|Linux-2.6.12-rc2
+
+Linux-2.6.12-rc2
+
+Initial git repository build. I'm not bothering with the full history,
+even though we have it. We can create a separate "historical" git
+archive of that later if we want to, and in the meantime it's about
+3.2GB when imported into git - space that would just make the early
+git days unnecessarily complicated, when we don't have a lot of good
+infrastructure for it.
+
+Let it rip!
+
+---- diff (matched files only)
+diff --git a/drivers/mtd/chips/cfi_cmdset_0001.c b/drivers/mtd/chips/cfi_cmdset_0001.c
+new file mode 100644
+index 000000000000..c268bcd71720
+--- /dev/null
++++ b/drivers/mtd/chips/cfi_cmdset_0001.c
+@@ -0,0 +1,2160 @@
++/*
++ * Common Flash Interface support:
++ *   Intel Extended Vendor Command Set (ID 0x0001)
++ *
++ * (C) 2000 Red Hat. GPL'd
++ *
++ * $Id: cfi_cmdset_0001.c,v 1.164 2004/11/16 18:29:00 dwmw2 Exp $
++ *
++ * 
++ * 10/10/2000	Nicolas Pitre <nico@cam.org>
++ * 	- completely revamped method functions so they are aware and
++ * 	  independent of the flash geometry (buswidth, interleave, etc.)
++ * 	- scalability vs code size is completely set at compile-time
++ * 	  (see include/linux/mtd/cfi.h for selection)
++ *	- optimized write buffer method
++ * 02/05/2002	Christopher Hoover <ch@hpl.hp.com>/<ch@murgatroid.com>
++ *	- reworked lock/unlock/erase support for var size flash
++ */
++
++#include <linux/module.h>
++#include <linux/types.h>
++#include <linux/kernel.h>
++#include <linux/sched.h>
++#include <linux/init.h>
++#include <asm/io.h>
++#include <asm/byteorder.h>
++
++#include <linux/errno.h>
++#include <linux/slab.h>
++#include <linux/delay.h>
++#include <linux/interrupt.h>
++#include <linux/mtd/xip.h>
++#include <linux/mtd/map.h>
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/compatmac.h>
++#include <linux/mtd/cfi.h>
++
++/* #define CMDSET0001_DISABLE_ERASE_SUSPEND_ON_WRITE */
++/* #define CMDSET0001_DISABLE_WRITE_SUSPEND */
++
++// debugging, turns off buffer write mode if set to 1
++#define FORCE_WORD_WRITE 0
++
++#define MANUFACTURER_INTEL	0x0089
++#define I82802AB	0x00ad
++#define I82802AC	0x00ac
++#define MANUFACTURER_ST         0x0020
++#define M50LPW080       0x002F
++
++static int cfi_intelext_read (struct mtd_info *, loff_t, size_t, size_t *, u_char *);
++//static int cfi_intelext_read_user_prot_reg (struct mtd_info *, loff_t, size_t, size_t *, u_char *);
++//static int cfi_intelext_read_fact_prot_reg (struct mtd_info *, loff_t, size_t, size_t *, u_char *);
++static int cfi_intelext_write_words(struct mtd_info *, loff_t, size_t, size_t *, const u_char *);
++static int cfi_intelext_write_buffers(struct mtd_info *, loff_t, size_t, size_t *, const u_char *);
++static int cfi_intelext_erase_varsize(struct mtd_info *, struct erase_info *);
++static void cfi_intelext_sync (struct mtd_info *);
++static int cfi_intelext_lock(struct mtd_info *mtd, loff_t ofs, size_t len);
++static int cfi_intelext_unlock(struct mtd_info *mtd, loff_t ofs, size_t len);
++static int cfi_intelext_suspend (struct mtd_info *);
++static void cfi_intelext_resume (struct mtd_info *);
++
++static void cfi_intelext_destroy(struct mtd_info *);
++
++struct mtd_info *cfi_cmdset_0001(struct map_info *, int);
++
++static struct mtd_info *cfi_intelext_setup (struct mtd_info *);
++static int cfi_intelext_partition_fixup(struct mtd_info *, struct cfi_private **);
++
++static int cfi_intelext_point (struct mtd_info *mtd, loff_t from, size_t len,
++		     size_t *retlen, u_char **mtdbuf);
++static void cfi_intelext_unpoint (struct mtd_info *mtd, u_char *addr, loff_t from,
++			size_t len);
++
++static int get_chip(struct map_info *map, struct flchip *chip, unsigned long adr, int mode);
++static void put_chip(struct map_info *map, struct flchip *chip, unsigned long adr);
++#include "fwh_lock.h"
++
++
++
++/*
++ *  *********** SETUP AND PROBE BITS  ***********
++ */
++
++static struct mtd_chip_driver cfi_intelext_chipdrv = {
++	.probe		= NULL, /* Not usable directly */
++	.destroy	= cfi_intelext_destroy,
++	.name		= "cfi_cmdset_0001",
++	.module		= THIS_MODULE
++};
++
++/* #define DEBUG_LOCK_BITS */
++/* #define DEBUG_CFI_FEATURES */
++
++#ifdef DEBUG_CFI_FEATURES
++static void cfi_tell_features(struct cfi_pri_intelext *extp)
++{
++	int i;
++	printk("  Feature/Command Support:      %4.4X\n", extp->FeatureSupport);
++	printk("     - Chip Erase:              %s\n", extp->FeatureSupport&1?"supported":"unsupported");
++	printk("     - Suspend Erase:           %s\n", extp->FeatureSupport&2?"supported":"unsupported");
++	printk("     - Suspend Program:         %s\n", extp->FeatureSupport&4?"supported":"unsupported");
++	printk("     - Legacy Lock/Unlock:      %s\n", extp->FeatureSupport&8?"supported":"unsupported");
++	printk("     - Queued Erase:            %s\n", extp->FeatureSupport&16?"supported":"unsupported");
++	printk("     - Instant block lock:      %s\n", extp->FeatureSupport&32?"supported":"unsupported");
++	printk("     - Protection Bits:         %s\n", extp->FeatureSupport&64?"supported":"unsupported");
++	printk("     - Page-mode read:          %s\n", extp->FeatureSupport&128?"supported":"unsupported");
++	printk("     - Synchronous read:        %s\n", extp->FeatureSupport&256?"supported":"unsupported");
++	printk("     - Simultaneous operations: %s\n", extp->FeatureSupport&512?"supported":"unsupported");
++	for (i=10; i<32; i++) {
++		if (extp->FeatureSupport & (1<<i)) 
++			printk("     - Unknown Bit %X:      supported\n", i);
++	}
++	
++	printk("  Supported functions after Suspend: %2.2X\n", extp->SuspendCmdSupport);
++	printk("     - Program after Erase Suspend: %s\n", extp->SuspendCmdSupport&1?"supported":"unsupported");
++	for (i=1; i<8; i++) {
++		if (extp->SuspendCmdSupport & (1<<i))
++			printk("     - Unknown Bit %X:               supported\n", i);
++	}
++	
++	printk("  Block Status Register Mask: %4.4X\n", extp->BlkStatusRegMask);
++	printk("     - Lock Bit Active:      %s\n", extp->BlkStatusRegMask&1?"yes":"no");
++	printk("     - Valid Bit Active:     %s\n", extp->BlkStatusRegMask&2?"yes":"no");
++	for (i=2; i<16; i++) {
++		if (extp->BlkStatusRegMask & (1<<i))
++			printk("     - Unknown Bit %X Active: yes\n",i);
++	}
++	
++	printk("  Vcc Logic Supply Optimum Program/Erase Voltage: %d.%d V\n", 
++	       extp->VccOptimal >> 4, extp->VccOptimal & 0xf);
++	if (extp->VppOptimal)
++		printk("  Vpp Programming Supply Optimum Program/Erase Voltage: %d.%d V\n", 
++		       extp->VppOptimal >> 4, extp->VppOptimal & 0xf);
++}
++#endif
++
++#ifdef CMDSET0001_DISABLE_ERASE_SUSPEND_ON_WRITE
++/* Some Intel Strata Flash prior to FP

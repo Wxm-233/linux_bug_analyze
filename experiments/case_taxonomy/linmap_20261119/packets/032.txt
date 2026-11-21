@@ -1,0 +1,217 @@
+commit ef347c0cfd61
+2019-06-27|mtd: rawnand: gpmi: Implement exec_op
+
+mtd: rawnand: gpmi: Implement exec_op
+
+The gpmi driver performance suffers from NAND operations being split
+in multiple small DMA transfers. This has been forced by the NAND layer
+in the former days, but now with exec_op we can use the controller as
+intended.
+
+With this patch gpmi_nfc_exec_op becomes the main entry point to NAND
+operations. Here all instructions are collected and chained as separate
+DMA transfers. In the end whole chain is fired and waited to be
+finished. gpmi_nfc_exec_op only does the hardware operations, bad block
+marker swapping and buffer scrambling is done by the callers. It's worth
+noting that the nand_*_op functions always take the buffer lengths for
+the data that the NAND chip actually transfers. When doing BCH we have
+to calculate the net data size from the raw data size in some places.
+
+This patch has been tested with 2048/64 and 2048/128 byte NAND on
+i.MX6q. mtd_oobtest, mtd_subpagetest and mtd_speedtest run without
+errors. nandbiterrs, nandpagetest and nandsubpagetest userspace tests
+from mtdutils run without errors and UBIFS can successfully be mounted.
+
+---- diff (matched files only)
+diff --git a/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c b/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c
+index d088b3e77fef..5db84178edff 100644
+--- a/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c
++++ b/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c
+@@ -528,26 +528,12 @@ static int common_nfc_set_geometry(struct gpmi_nand_data *this)
+ static int bch_set_geometry(struct gpmi_nand_data *this)
+ {
+ 	struct resources *r = &this->resources;
+-	struct bch_geometry *bch_geo = &this->bch_geometry;
+-	unsigned int block_count;
+-	unsigned int block_size;
+-	unsigned int metadata_size;
+-	unsigned int ecc_strength;
+-	unsigned int page_size;
+-	unsigned int gf_len;
+ 	int ret;
+ 
+ 	ret = common_nfc_set_geometry(this);
+ 	if (ret)
+ 		return ret;
+ 
+-	block_count   = bch_geo->ecc_chunk_count - 1;
+-	block_size    = bch_geo->ecc_chunk_size;
+-	metadata_size = bch_geo->metadata_size;
+-	ecc_strength  = bch_geo->ecc_strength >> 1;
+-	page_size     = bch_geo->page_size;
+-	gf_len        = bch_geo->gf_len;
+-
+ 	ret = pm_runtime_get_sync(this->dev);
+ 	if (ret < 0)
+ 		return ret;
+@@ -561,27 +547,9 @@ static int bch_set_geometry(struct gpmi_nand_data *this)
+ 	if (ret)
+ 		goto err_out;
+ 
+-	/* Configure layout 0. */
+-	writel(BF_BCH_FLASH0LAYOUT0_NBLOCKS(block_count)
+-			| BF_BCH_FLASH0LAYOUT0_META_SIZE(metadata_size)
+-			| BF_BCH_FLASH0LAYOUT0_ECC0(ecc_strength, this)
+-			| BF_BCH_FLASH0LAYOUT0_GF(gf_len, this)
+-			| BF_BCH_FLASH0LAYOUT0_DATA0_SIZE(block_size, this),
+-			r->bch_regs + HW_BCH_FLASH0LAYOUT0);
+-
+-	writel(BF_BCH_FLASH0LAYOUT1_PAGE_SIZE(page_size)
+-			| BF_BCH_FLASH0LAYOUT1_ECCN(ecc_strength, this)
+-			| BF_BCH_FLASH0LAYOUT1_GF(gf_len, this)
+-			| BF_BCH_FLASH0LAYOUT1_DATAN_SIZE(block_size, this),
+-			r->bch_regs + HW_BCH_FLASH0LAYOUT1);
+-
+ 	/* Set *all* chip selects to use layout 0. */
+ 	writel(0, r->bch_regs + HW_BCH_LAYOUTSELECT);
+ 
+-	/* Enable interrupts. */
+-	writel(BM_BCH_CTRL_COMPLETE_IRQ_EN,
+-				r->bch_regs + HW_BCH_CTRL_SET);
+-
+ 	ret = 0;
+ err_out:
+ 	pm_runtime_mark_last_busy(this->dev);
+@@ -795,32 +763,6 @@ static void gpmi_clear_bch(struct gpmi_nand_data *this)
+ 	writel(BM_BCH_CTRL_COMPLETE_IRQ, r->bch_regs + HW_BCH_CTRL_CLR);
+ }
+ 
+-/* Returns the Ready/Busy status of the given chip. */
+-static int gpmi_is_ready(struct gpmi_nand_data *this, unsigned chip)
+-{
+-	struct resources *r = &this->resources;
+-	uint32_t mask = 0;
+-	uint32_t reg = 0;
+-
+-	if (GPMI_IS_MX23(this)) {
+-		mask = MX23_BM_GPMI_DEBUG_READY0 << chip;
+-		reg = readl(r->gpmi_regs + HW_GPMI_DEBUG);
+-	} else if (GPMI_IS_MX28(this) || GPMI_IS_MX6(this)) {
+-		/*
+-		 * In the imx6, all the ready/busy pins are bound
+-		 * together. So we only need to check chip 0.
+-		 */
+-		if (GPMI_IS_MX6(this))
+-			chip = 0;
+-
+-		/* MX28 shares the same R/B register as MX6Q. */
+-		mask = MX28_BF_GPMI_STAT_READY_BUSY(1 << chip);
+-		reg = readl(r->gpmi_regs + HW_GPMI_STAT);
+-	} else
+-		dev_err(this->dev, "unknown arch.\n");
+-	return reg & mask;
+-}
+-
+ static struct dma_chan *get_dma_chan(struct gpmi_nand_data *this)
+ {
+ 	/* We use the DMA channel 0 to access all the nand chips. */
+@@ -836,29 +778,6 @@ static void dma_irq_callback(void *param)
+ 	complete(dma_c);
+ }
+ 
+-static int start_dma_without_bch_irq(struct gpmi_nand_data *this,
+-				     struct dma_async_tx_descriptor *desc)
+-{
+-	struct completion *dma_c = &this->dma_done;
+-	unsigned long timeout;
+-
+-	init_completion(dma_c);
+-
+-	desc->callback		= dma_irq_callback;
+-	desc->callback_param	= this;
+-	dmaengine_submit(desc);
+-	dma_async_issue_pending(get_dma_chan(this));
+-
+-	/* Wait for the interrupt from the DMA block. */
+-	timeout = wait_for_completion_timeout(dma_c, msecs_to_jiffies(1000));
+-	if (!timeout) {
+-		dev_err(this->dev, "DMA timeout, last DMA\n");
+-		gpmi_dump_info(this);
+-		return -ETIMEDOUT;
+-	}
+-	return 0;
+-}
+-
+ static irqreturn_t bch_irq(int irq, void *cookie)
+ {
+ 	struct gpmi_nand_data *this = cookie;
+@@ -868,83 +787,25 @@ static irqreturn_t bch_irq(int irq, void *cookie)
+ 	return IRQ_HANDLED;
+ }
+ 
+-/*
+- * This function is used in BCH reading or BCH writing pages.
+- * It will wait for the BCH interrupt as long as ONE second.
+- * Actually, we must wait for two interrupts :
+- *	[1] firstly the DMA interrupt and
+- *	[2] secondly the BCH interrupt.
+- */
+-static int start_dma_with_bch_irq(struct gpmi_nand_data *this,
+-				  struct dma_async_tx_descriptor *desc)
++static int gpmi_raw_len_to_len(struct gpmi_nand_data *this, int raw_len)
+ {
+-	struct completion *bch_c = &this->bch_done;
+-	unsigned long timeout;
+-
+-	/* Prepare to receive an interrupt from the BCH block. */
+-	init_completion(bch_c);
+-
+-	/* start the DMA */
+-	start_dma_without_bch_irq(this, desc);
+-
+-	/* Wait for the interrupt from the BCH block. */
+-	timeout = wait_for_completion_timeout(bch_c, msecs_to_jiffies(1000));
+-	if (!timeout) {
+-		dev_err(this->dev, "BCH timeout\n");
+-		gpmi_dump_info(this);
+-		return -ETIMEDOUT;
+-	}
+-	return 0;
+-}
+-
+-static int gpmi_send_command(struct gpmi_nand_data *this)
+-{
+-	struct dma_chan *channel = get_dma_chan(this);
+-	struct dma_async_tx_descriptor *desc;
+-	struct scatterlist *sgl;
+-	int chip = this->current_chip;
+-	int ret;
+-	u32 pio[3];
+-
+-	/* [1] send out the PIO words */
+-	pio[0] = BF_GPMI_CTRL0_COMMAND_MODE(BV_GPMI_CTRL0_COMMAND_MODE__WRITE)
+-		| BM_GPMI_CTRL0_WORD_LENGTH
+-		| BF_GPMI_CTRL0_CS(chip, this)
+-		| BF_GPMI_CTRL0_LOCK_CS(LOCK_CS_ENABLE, this)
+-		| BF_GPMI_CTRL0_ADDRESS(BV_GPMI_CTRL0_ADDRESS__NAND_CLE)
+-		| BM_GPMI_CTRL0_ADDRESS_INCREMENT
+-		| BF_GPMI_CTRL0_XFER_COUNT(this->command_length);
+-	pio[1] = pio[2] = 0;
+-	desc = mxs_dmaengine_prep_pio(channel, pio, ARRAY_SIZE(pio),
+-				      DMA_TRANS_NONE, 0);
+-	if (!desc)
+-		return -EINVAL;
+-
+-	/* [2] send out the COMMAND + ADDRESS string stored in @buffer */
+-	sgl = &this->cmd_sgl;
+-
+-	sg_init_one(sgl, this->cmd_buffer, this->command_length);
+-	dma_map_sg(this->dev, sgl, 1, DMA_TO_DEVICE);
+-	desc = dmaengine_prep_slave_sg(channel,
+-				sgl, 1, DMA_MEM_TO_DEV,
+-				MXS_DMA_CTRL_WAIT4END);
+-	if (!desc)
+-		return -EINVAL;
+-
+-	/* [3] submit the DMA */
+-	ret = st

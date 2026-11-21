@@ -1,0 +1,245 @@
+commit f05916281fd7
+2021-07-27|staging: vchiq: Move vchiq char driver to its own file
+
+staging: vchiq: Move vchiq char driver to its own file
+
+Split the initialization code of vchiq char driver and device files from
+that of vchiq platform. The char driver code now resides in vchiq_dev.c
+and the platform code resides in the original vchiq_arm.c file.
+
+This commit focuses on separating the code into different files while
+maintaining the same functionality. It does not completely decouple them
+as the cdev init code is still called from the platform's vchiq_probe()
+function.
+
+---- diff (matched files only)
+diff --git a/drivers/staging/vc04_services/interface/vchiq_arm/vchiq_dev.c b/drivers/staging/vc04_services/interface/vchiq_arm/vchiq_dev.c
+new file mode 100644
+index 000000000000..bf1a88c9d1ee
+--- /dev/null
++++ b/drivers/staging/vc04_services/interface/vchiq_arm/vchiq_dev.c
+@@ -0,0 +1,1440 @@
++// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
++/*
++ * Copyright (c) 2014 Raspberry Pi (Trading) Ltd. All rights reserved.
++ * Copyright (c) 2010-2012 Broadcom. All rights reserved.
++ */
++
++#include <linux/cdev.h>
++#include <linux/fs.h>
++#include <linux/device.h>
++#include <linux/slab.h>
++#include <linux/compat.h>
++
++#include "vchiq_core.h"
++#include "vchiq_ioctl.h"
++#include "vchiq_arm.h"
++#include "vchiq_debugfs.h"
++
++#define DEVICE_NAME "vchiq"
++
++static struct cdev    vchiq_cdev;
++static dev_t          vchiq_devid;
++static struct class  *vchiq_class;
++
++static const char *const ioctl_names[] = {
++	"CONNECT",
++	"SHUTDOWN",
++	"CREATE_SERVICE",
++	"REMOVE_SERVICE",
++	"QUEUE_MESSAGE",
++	"QUEUE_BULK_TRANSMIT",
++	"QUEUE_BULK_RECEIVE",
++	"AWAIT_COMPLETION",
++	"DEQUEUE_MESSAGE",
++	"GET_CLIENT_ID",
++	"GET_CONFIG",
++	"CLOSE_SERVICE",
++	"USE_SERVICE",
++	"RELEASE_SERVICE",
++	"SET_SERVICE_OPTION",
++	"DUMP_PHYS_MEM",
++	"LIB_VERSION",
++	"CLOSE_DELIVERED"
++};
++
++static_assert(ARRAY_SIZE(ioctl_names) == (VCHIQ_IOC_MAX + 1));
++
++static void
++user_service_free(void *userdata)
++{
++	kfree(userdata);
++}
++
++static void close_delivered(struct user_service *user_service)
++{
++	vchiq_log_info(vchiq_arm_log_level,
++		"%s(handle=%x)",
++		__func__, user_service->service->handle);
++
++	if (user_service->close_pending) {
++		/* Allow the underlying service to be culled */
++		vchiq_service_put(user_service->service);
++
++		/* Wake the user-thread blocked in close_ or remove_service */
++		complete(&user_service->close_event);
++
++		user_service->close_pending = 0;
++	}
++}
++
++struct vchiq_io_copy_callback_context {
++	struct vchiq_element *element;
++	size_t element_offset;
++	unsigned long elements_to_go;
++};
++
++static ssize_t vchiq_ioc_copy_element_data(void *context, void *dest,
++					   size_t offset, size_t maxsize)
++{
++	struct vchiq_io_copy_callback_context *cc = context;
++	size_t total_bytes_copied = 0;
++	size_t bytes_this_round;
++
++	while (total_bytes_copied < maxsize) {
++		if (!cc->elements_to_go)
++			return total_bytes_copied;
++
++		if (!cc->element->size) {
++			cc->elements_to_go--;
++			cc->element++;
++			cc->element_offset = 0;
++			continue;
++		}
++
++		bytes_this_round = min(cc->element->size - cc->element_offset,
++				       maxsize - total_bytes_copied);
++
++		if (copy_from_user(dest + total_bytes_copied,
++				  cc->element->data + cc->element_offset,
++				  bytes_this_round))
++			return -EFAULT;
++
++		cc->element_offset += bytes_this_round;
++		total_bytes_copied += bytes_this_round;
++
++		if (cc->element_offset == cc->element->size) {
++			cc->elements_to_go--;
++			cc->element++;
++			cc->element_offset = 0;
++		}
++	}
++
++	return maxsize;
++}
++
++static int
++vchiq_ioc_queue_message(unsigned int handle, struct vchiq_element *elements,
++			unsigned long count)
++{
++	struct vchiq_io_copy_callback_context context;
++	enum vchiq_status status = VCHIQ_SUCCESS;
++	unsigned long i;
++	size_t total_size = 0;
++
++	context.element = elements;
++	context.element_offset = 0;
++	context.elements_to_go = count;
++
++	for (i = 0; i < count; i++) {
++		if (!elements[i].data && elements[i].size != 0)
++			return -EFAULT;
++
++		total_size += elements[i].size;
++	}
++
++	status = vchiq_queue_message(handle, vchiq_ioc_copy_element_data,
++				     &context, total_size);
++
++	if (status == VCHIQ_ERROR)
++		return -EIO;
++	else if (status == VCHIQ_RETRY)
++		return -EINTR;
++	return 0;
++}
++
++static int vchiq_ioc_create_service(struct vchiq_instance *instance,
++				    struct vchiq_create_service *args)
++{
++	struct user_service *user_service = NULL;
++	struct vchiq_service *service;
++	enum vchiq_status status = VCHIQ_SUCCESS;
++	struct vchiq_service_params_kernel params;
++	int srvstate;
++
++	user_service = kmalloc(sizeof(*user_service), GFP_KERNEL);
++	if (!user_service)
++		return -ENOMEM;
++
++	if (args->is_open) {
++		if (!instance->connected) {
++			kfree(user_service);
++			return -ENOTCONN;
++		}
++		srvstate = VCHIQ_SRVSTATE_OPENING;
++	} else {
++		srvstate = instance->connected ?
++			 VCHIQ_SRVSTATE_LISTENING : VCHIQ_SRVSTATE_HIDDEN;
++	}
++
++	params = (struct vchiq_service_params_kernel) {
++		.fourcc   = args->params.fourcc,
++		.callback = service_callback,
++		.userdata = user_service,
++		.version  = args->params.version,
++		.version_min = args->params.version_min,
++	};
++	service = vchiq_add_service_internal(instance->state, &params,
++					     srvstate, instance,
++					     user_service_free);
++	if (!service) {
++		kfree(user_service);
++		return -EEXIST;
++	}
++
++	user_service->service = service;
++	user_service->userdata = args->params.userdata;
++	user_service->instance = instance;
++	user_service->is_vchi = (args->is_vchi != 0);
++	user_service->dequeue_pending = 0;
++	user_service->close_pending = 0;
++	user_service->message_available_pos = instance->completion_remove - 1;
++	user_service->msg_insert = 0;
++	user_service->msg_remove = 0;
++	init_completion(&user_service->insert_event);
++	init_completion(&user_service->remove_event);
++	init_completion(&user_service->close_event);
++
++	if (args->is_open) {
++		status = vchiq_open_service_internal(service, instance->pid);
++		if (status != VCHIQ_SUCCESS) {
++			vchiq_remove_service(service->handle);
++			return (status == VCHIQ_RETRY) ?
++				-EINTR : -EIO;
++		}
++	}
++	args->handle = service->handle;
++
++	return 0;
++}
++
++static int vchiq_ioc_dequeue_message(struct vchiq_instance *instance,
++				     struct vchiq_dequeue_message *args)
++{
++	struct user_service *user_service;
++	struct vchiq_service *service;
++	struct vchiq_header *header;
++	int ret;
++
++	DEBUG_INITIALISE(g_state.local)
++	DEBUG_TRACE(DEQUEUE_MESSAGE_LINE);
++	service = find_service_for_instance(instance, args->handle);
++	if (!service)
++		return -EINVAL;
++
++	user_service = (struct user

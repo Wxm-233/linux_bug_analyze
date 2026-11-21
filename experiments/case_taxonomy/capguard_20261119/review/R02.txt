@@ -1,0 +1,39 @@
+候选 R02  规则 B1  版本 df2908090cda
+位置 kernel/power/snapshot.c:91  所在函数 hibernate_map_page  调用 set_direct_map_default_noflush  能力判断 can_set_direct_map  相关架构 arm64
+
+==== 所在函数 hibernate_map_page（kernel/power/snapshot.c）
+
+/*
+ * The calls to set_direct_map_*() should not fail because remapping a page
+ * here means that we only update protection bits in an existing PTE.
+ * It is still worth to have a warning here if something changes and this
+ * will no longer be the case.
+ */
+static inline void hibernate_map_page(struct page *page)
+{
+	if (IS_ENABLED(CONFIG_ARCH_HAS_SET_DIRECT_MAP)) {
+		int ret = set_direct_map_default_noflush(page);
+
+		if (ret)
+			pr_warn_once("Failed to remap page\n");
+	} else {
+		debug_pagealloc_map_pages(page, 1);
+	}
+}
+
+==== 架构 arm64 的实现 set_direct_map_default_noflush（arch/arm64/include/asm/set_memory.h）
+(definition of set_direct_map_default_noflush not found in arch/arm64/include/asm/set_memory.h)
+
+==== 架构 arm64 的实现 set_direct_map_default_noflush（arch/arm64/mm/pageattr.c）
+
+int set_direct_map_default_noflush(struct page *page)
+{
+	pgprot_t set_mask = __pgprot(PTE_PRESENT_VALID_KERNEL | PTE_WRITE);
+	pgprot_t clear_mask = __pgprot(PTE_PRESENT_INVALID | PTE_RDONLY);
+
+	if (!can_set_direct_map())
+		return 0;
+
+	return update_range_prot((unsigned long)page_address(page),
+				 PAGE_SIZE, set_mask, clear_mask);
+}

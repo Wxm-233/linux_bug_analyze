@@ -1,0 +1,69 @@
+commit 8c918ffbbad4
+2020-07-19|net: remove compat_sock_common_{get,set}sockopt
+
+net: remove compat_sock_common_{get,set}sockopt
+
+Add the compat handling to sock_common_{get,set}sockopt instead,
+keyed of in_compat_syscall().  This allow to remove the now unused
+->compat_{get,set}sockopt methods from struct proto_ops.
+
+---- diff (matched files only)
+diff --git a/net/core/sock.c b/net/core/sock.c
+index e085df794825..018404d17626 100644
+--- a/net/core/sock.c
++++ b/net/core/sock.c
+@@ -3199,23 +3199,14 @@ int sock_common_getsockopt(struct socket *sock, int level, int optname,
+ {
+ 	struct sock *sk = sock->sk;
+ 
+-	return sk->sk_prot->getsockopt(sk, level, optname, optval, optlen);
+-}
+-EXPORT_SYMBOL(sock_common_getsockopt);
+-
+ #ifdef CONFIG_COMPAT
+-int compat_sock_common_getsockopt(struct socket *sock, int level, int optname,
+-				  char __user *optval, int __user *optlen)
+-{
+-	struct sock *sk = sock->sk;
+-
+-	if (sk->sk_prot->compat_getsockopt != NULL)
++	if (in_compat_syscal() && sk->sk_prot->compat_getsockopt)
+ 		return sk->sk_prot->compat_getsockopt(sk, level, optname,
+ 						      optval, optlen);
++#endif
+ 	return sk->sk_prot->getsockopt(sk, level, optname, optval, optlen);
+ }
+-EXPORT_SYMBOL(compat_sock_common_getsockopt);
+-#endif
++EXPORT_SYMBOL(sock_common_getsockopt);
+ 
+ int sock_common_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
+ 			int flags)
+@@ -3240,23 +3231,14 @@ int sock_common_setsockopt(struct socket *sock, int level, int optname,
+ {
+ 	struct sock *sk = sock->sk;
+ 
+-	return sk->sk_prot->setsockopt(sk, level, optname, optval, optlen);
+-}
+-EXPORT_SYMBOL(sock_common_setsockopt);
+-
+ #ifdef CONFIG_COMPAT
+-int compat_sock_common_setsockopt(struct socket *sock, int level, int optname,
+-				  char __user *optval, unsigned int optlen)
+-{
+-	struct sock *sk = sock->sk;
+-
+-	if (sk->sk_prot->compat_setsockopt != NULL)
++	if (in_compat_syscall() && sk->sk_prot->compat_setsockopt)
+ 		return sk->sk_prot->compat_setsockopt(sk, level, optname,
+ 						      optval, optlen);
++#endif
+ 	return sk->sk_prot->setsockopt(sk, level, optname, optval, optlen);
+ }
+-EXPORT_SYMBOL(compat_sock_common_setsockopt);
+-#endif
++EXPORT_SYMBOL(sock_common_setsockopt);
+ 
+ void sk_common_release(struct sock *sk)
+ {
+

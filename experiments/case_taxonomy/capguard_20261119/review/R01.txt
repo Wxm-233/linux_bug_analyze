@@ -1,0 +1,65 @@
+候选 R01  规则 B1  版本 df2908090cda
+位置 kernel/events/callchain.c:270  所在函数 get_perf_callchain  调用 perf_callchain_user  能力判断 nmi_uaccess_okay  相关架构 x86
+
+==== 所在函数 get_perf_callchain（kernel/events/callchain.c）
+
+struct perf_callchain_entry *
+get_perf_callchain(struct pt_regs *regs, bool kernel, bool user,
+		   u32 max_stack, bool crosstask, bool add_mark, u64 defer_cookie)
+{
+	struct perf_callchain_entry *entry;
+	struct perf_callchain_entry_ctx ctx;
+	int rctx, start_entry_idx;
+
+	/* crosstask is not supported for user stacks */
+	if (crosstask && user && !kernel)
+		return NULL;
+
+	entry = get_callchain_entry(&rctx);
+	if (!entry)
+		return NULL;
+
+	ctx.entry		= entry;
+	ctx.max_stack		= max_stack;
+	ctx.nr			= entry->nr = 0;
+	ctx.contexts		= 0;
+	ctx.contexts_maxed	= false;
+
+	if (kernel && !user_mode(regs)) {
+		if (add_mark)
+			perf_callchain_store_context(&ctx, PERF_CONTEXT_KERNEL);
+		perf_callchain_kernel(&ctx, regs);
+	}
+
+	if (user && !crosstask) {
+		if (!user_mode(regs)) {
+			if (!is_user_task(current))
+				goto exit_put;
+			regs = task_pt_regs(current);
+		}
+
+		if (defer_cookie) {
+			/*
+			 * Foretell the coming of PERF_RECORD_CALLCHAIN_DEFERRED
+			 * which can be stitched to this one, and add
+			 * the cookie after it (it will be cut off when the
+			 * user stack is copied to the callchain).
+			 */
+			perf_callchain_store_context(&ctx, PERF_CONTEXT_USER_DEFERRED);
+			perf_callchain_store_context(&ctx, defer_cookie);
+			goto exit_put;
+		}
+
+		if (add_mark)
+			perf_callchain_store_context(&ctx, PERF_CONTEXT_USER);
+
+		start_entry_idx = entry->nr;
+		perf_callchain_user(&ctx, regs);
+		fixup_uretprobe_trampoline_entries(entry, start_entry_idx);
+	}
+
+exit_put:
+	put_callchain_entry(rctx);
+
+	return entry;
+}

@@ -1,0 +1,31 @@
+commit 19d7df69fdb2
+2018-02-02|xfrm: Refuse to insert 32 bit userspace socket policies on 64 bit systems
+
+xfrm: Refuse to insert 32 bit userspace socket policies on 64 bit systems
+
+We don't have a compat layer for xfrm, so userspace and kernel
+structures have different sizes in this case. This results in
+a broken configuration, so refuse to configure socket policies
+when trying to insert from 32 bit userspace as we do it already
+with policies inserted via netlink.
+
+Reported-and-tested-by: syzbot+e1a1577ca8bcb47b769a@syzkaller.appspotmail.com
+
+---- diff (matched files only)
+diff --git a/net/xfrm/xfrm_state.c b/net/xfrm/xfrm_state.c
+index 54e21f19d722..f9d2f2233f09 100644
+--- a/net/xfrm/xfrm_state.c
++++ b/net/xfrm/xfrm_state.c
+@@ -2056,6 +2056,11 @@ int xfrm_user_policy(struct sock *sk, int optname, u8 __user *optval, int optlen
+ 	struct xfrm_mgr *km;
+ 	struct xfrm_policy *pol = NULL;
+ 
++#ifdef CONFIG_COMPAT
++	if (in_compat_syscall())
++		return -EOPNOTSUPP;
++#endif
++
+ 	if (!optval && !optlen) {
+ 		xfrm_sk_policy_insert(sk, XFRM_POLICY_IN, NULL);
+ 		xfrm_sk_policy_insert(sk, XFRM_POLICY_OUT, NULL);
+

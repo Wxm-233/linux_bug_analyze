@@ -1,0 +1,80 @@
+[
+  {
+    "rank": 1,
+    "func": "arm_iommu_alloc_attrs",
+    "verdict": "可能",
+    "why": "dma-mapping.c 第 874、924 行清理了后备页，第 1099 行重新映射这些页，不能据此报漏清。第 1085 行委托的分配还包含池分支，现有证据不足以将历史提交 6829e274a623 所述的驱动依赖落实到该分支的具体使用者。"
+  },
+  {
+    "rank": 2,
+    "func": "ps3_alloc_coherent",
+    "verdict": "排除",
+    "why": "system-bus.c 第 514 行无条件把 __GFP_ZERO 加入 flag，第 516 行用更新后的 flag 分配整组页。第 534 行返回同一次分配的地址。"
+  },
+  {
+    "rank": 3,
+    "func": "ibmebus_alloc_coherent",
+    "verdict": "证据不足",
+    "why": "ibmebus.c 第 76～79 行把调用者的 flag 交给 kmalloc，返回同一对象。提交 e89f5b370153 区分了显式请求和架构惯例，未核实本接口使用者要求无条件全零。"
+  },
+  {
+    "rank": 4,
+    "func": "xen_grant_dma_alloc",
+    "verdict": "证据不足",
+    "why": "grant-dma-ops.c 第 95 行将 gfp 原样传给页分配器，第 106～113 行处理同一批页。对象确有接收方，但仅据此无法判断该次分配的初值或接收方依赖的初值。"
+  },
+  {
+    "rank": 5,
+    "func": "dma_direct_alloc",
+    "verdict": "证据不足",
+    "why": "direct.c 第 327 行清零普通映射，第 231 行另走专用分支。第 194～199 行说明返回值是页句柄，这能解释返回值本身，却不能证明后备页已经初始化，特殊属性下的清零约定仍缺证据。"
+  },
+  {
+    "rank": 6,
+    "func": "dl_seq_start",
+    "verdict": "排除",
+    "why": "xt_hashlimit.c 第 1080 行只分配一个 unsigned int，第 1084 行给整个标量赋初值。第 1093 行从该位置递增，传入的非零位置同样是有效初值。"
+  },
+  {
+    "rank": 7,
+    "func": "pgd_alloc",
+    "verdict": "排除",
+    "why": "arm64/mm/pgd.c 第 33、38 行把 GFP_PGTABLE_USER 通过局部变量传给缓存分配器。include/asm-generic/pgalloc.h 第 7～8 行的两层宏展开含 __GFP_ZERO。"
+  },
+  {
+    "rank": 8,
+    "func": "pgd_alloc",
+    "verdict": "排除",
+    "why": "sh/mm/pgtable.c 第 16～19 行将用户表项清零并从 swapper_pg_dir 复制内核表项，第 24～26 行注册该构造函数。第 36 行取用这种目录，整张目录全零与内核表项的初始化要求冲突。"
+  },
+  {
+    "rank": 9,
+    "func": "pgd_alloc",
+    "verdict": "排除",
+    "why": "sparc/include/asm/pgalloc_64.h 第 28 行使用 pgtable_cache，sparc/mm/tsb.c 第 345～348 行为这个整页缓存注册 _clear_page。构造发生在新建缓存对象时，页表拆除过程另有清除父表项的操作（mm/memory.c 第 282 行），候选没有给出复用时残留有效项的证据。"
+  },
+  {
+    "rank": 10,
+    "func": "dma_pool_alloc",
+    "verdict": "排除",
+    "why": "mm/dmapool.c 第 425 行仅在申请底层页时屏蔽清零位，第 437～438 行仍用原始 mem_flags 判断是否清理返回块。include/linux/mm.h 第 4944～4949 行保证携带 __GFP_ZERO 时判断为真，候选所列假分支与请求矛盾。"
+  },
+  {
+    "rank": 11,
+    "func": "mem_dump_obj",
+    "verdict": "排除",
+    "why": "rcutorture.c 第 3148 行传入 ZERO_SIZE_PTR 作为待识别的指针值。mm/util.c 第 1093～1110 行打印对象来源或类别，接口没有待初始化的输出对象。"
+  },
+  {
+    "rank": 12,
+    "func": "drm_atomic_helper_bridge_get_hdmi_output_bus_fmts",
+    "verdict": "排除",
+    "why": "drm_atomic_helper.c 第 4125～4127 行以 *num_output_fmts 定义返回数组的有效长度。第 4152～4187 行每追加一个格式才递增计数，零个格式时有效长度也为零。"
+  },
+  {
+    "rank": 13,
+    "func": "mptscsih_info",
+    "verdict": "排除",
+    "why": "mptscsih.c 第 1276 行返回分配失败的 NULL，成功时第 1279～1282 行返回已终止的字符串。mptbase.c 第 6808 行起的摘要函数从偏移零连续格式化并回填长度，字符串接口没有要求填满 4 KiB。"
+  }
+]

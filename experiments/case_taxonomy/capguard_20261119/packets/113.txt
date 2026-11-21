@@ -1,0 +1,31 @@
+commit c305d524e5dd
+2011-02-08|softirq: Avoid stack switch from ksoftirqd
+
+softirq: Avoid stack switch from ksoftirqd
+
+ksoftirqd() calls do_softirq() which switches stacks on several
+architectures. That makes no sense at all. ksoftirqd's stack is
+sufficient.
+
+Call __do_softirq() directly.
+
+LKML-Reference: <alpine.LFD.2.00.1102021704530.31804@localhost6.localdomain6>
+
+---- diff (matched files only)
+diff --git a/kernel/softirq.c b/kernel/softirq.c
+index 68eb5efec388..c0490464e92f 100644
+--- a/kernel/softirq.c
++++ b/kernel/softirq.c
+@@ -738,7 +738,10 @@ static int run_ksoftirqd(void * __bind_cpu)
+ 			   don't process */
+ 			if (cpu_is_offline((long)__bind_cpu))
+ 				goto wait_to_die;
+-			do_softirq();
++			local_irq_disable();
++			if (local_softirq_pending())
++				__do_softirq();
++			local_irq_enable();
+ 			preempt_enable_no_resched();
+ 			cond_resched();
+ 			preempt_disable();
+

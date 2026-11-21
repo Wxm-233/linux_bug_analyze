@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1,
+    "verdict": "排除",
+    "reason_class": "调用方不依赖",
+    "why": "mm/backing-dev.c:120 清零整个 stats，第 122 行才传入其地址。第 82 行从零累加 nr_written，没有采到任何 wb 时，第 146 行仍读到已定义的零。"
+  },
+  {
+    "id": 2,
+    "verdict": "排除",
+    "reason_class": "调用方不依赖",
+    "why": "mm/backing-dev.c:120 的 memset 覆盖 nr_reclaimable。第 80 行按 wb 累加该字段，即使第 93–99 行循环没有贡献，第 141 行也有初值可读。"
+  },
+  {
+    "id": 3,
+    "verdict": "排除",
+    "reason_class": "调用方不依赖",
+    "why": "mm/backing-dev.c:120 已将 nr_io 清零，第 70–71 行每遇到一个 b_io 链表项才加一。空链表时保留零正好表示计数为零，第 149 行可以直接读取。"
+  },
+  {
+    "id": 4,
+    "verdict": "排除",
+    "reason_class": "调用方不依赖",
+    "why": "mm/filemap.c:374–379 构造 wbc 时，已把 nr_to_write 设为调用者给的预算或 LONG_MAX。第 386 行挂接 inode 时该字段已有值，第 387 行将预算传给 do_writepages，第 390–391 行在成功时回传剩余预算。"
+  },
+  {
+    "id": 5,
+    "verdict": "排除",
+    "reason_class": "合法的实现差异",
+    "why": "include/linux/cpumask.h:1039–1053、1077–1080 对应两种存储方式：arm64 分配掩码，riscv 的局部数组自带存储，直接返回 true。kernel/cgroup/cpuset.c:1386–1388 先以 full_hk_cpus 为交集运算的目的地，下一次运算才读其位值。"
+  },
+  {
+    "id": 6,
+    "verdict": "排除",
+    "reason_class": "调用方不依赖",
+    "why": "kernel/stacktrace.c:195–199 用指定成员初始化 c，省略的整数成员 len 按 C 规则初始化为零。即使 arch/x86/kernel/stacktrace.c:45–47 在首次回调前成功返回，第 211 行（kernel/stacktrace.c）也能返回已定义的空栈长度。"
+  },
+  {
+    "id": 7,
+    "verdict": "排除",
+    "reason_class": "性质表示不了",
+    "why": "include/linux/mempolicy.h:263 在 riscv 上给 *mpol 赋 NULL。mm/mempolicy.c:2328 在 arm64 上把 get_vma_policy 的结果赋给同一输出，再于第 2330 行返回节点号。mm/hugetlb.c:3018 的条件读取发生在赋值之后。"
+  },
+  {
+    "id": 8,
+    "verdict": "排除",
+    "reason_class": "合法的实现差异",
+    "why": "x86_64 关闭 cgroup 回写后，mm/page-writeback.c:199–202 的 mdtc_gdtc 恒返回 NULL，第 831 行的全局域判断恒真，第 841–849 行不会进入空实现所在的 else 分支。此外，第 847 行已显式将 filepages 初始化为零，第 853 行使用它时已有定义。"
+  },
+  {
+    "id": 9,
+    "verdict": "排除",
+    "reason_class": "性质表示不了",
+    "why": "arch/x86/include/asm/futex.h:54–66 的各个有效操作调用两个宏之一，宏在第 25、45 行写 *oval，错误出口返回负值。riscv 的 arch/riscv/include/asm/futex.h:69–72 在 ret 为零时同样写回，kernel/futex/waitwake.c:253–258 只在该条件下比较 oldval。"
+  }
+]

@@ -1,0 +1,60 @@
+commit d319f344561d
+2023-04-12|mm: Fix copy_from_user_nofault().
+
+mm: Fix copy_from_user_nofault().
+
+There are several issues with copy_from_user_nofault():
+
+- access_ok() is designed for user context only and for that reason
+it has WARN_ON_IN_IRQ() which triggers when bpf, kprobe, eprobe
+and perf on ppc are calling it from irq.
+
+- it's missing nmi_uaccess_okay() which is a nop on all architectures
+except x86 where it's required.
+The comment in arch/x86/mm/tlb.c explains the details why it's necessary.
+Calling copy_from_user_nofault() from bpf, [ke]probe without this check is not safe.
+
+- __copy_from_user_inatomic() under CONFIG_HARDENED_USERCOPY is calling
+check_object_size()->__check_object_size()->check_heap_object()->find_vmap_area()->spin_lock()
+which is not safe to do from bpf, [ke]probe and perf due to potential deadlock.
+
+Fix all three issues. At the end the copy_from_user_nofault() becomes
+equivalent to copy_from_user_nmi() from safety point of view with
+a difference in the return value.
+
+---- diff (matched files only)
+diff --git a/mm/maccess.c b/mm/maccess.c
+index 074f6b086671..518a25667323 100644
+--- a/mm/maccess.c
++++ b/mm/maccess.c
+@@ -5,6 +5,7 @@
+ #include <linux/export.h>
+ #include <linux/mm.h>
+ #include <linux/uaccess.h>
++#include <asm/tlb.h>
+ 
+ bool __weak copy_from_kernel_nofault_allowed(const void *unsafe_src,
+ 		size_t size)
+@@ -113,11 +114,16 @@ long strncpy_from_kernel_nofault(char *dst, const void *unsafe_addr, long count)
+ long copy_from_user_nofault(void *dst, const void __user *src, size_t size)
+ {
+ 	long ret = -EFAULT;
+-	if (access_ok(src, size)) {
+-		pagefault_disable();
+-		ret = __copy_from_user_inatomic(dst, src, size);
+-		pagefault_enable();
+-	}
++
++	if (!__access_ok(src, size))
++		return ret;
++
++	if (!nmi_uaccess_okay())
++		return ret;
++
++	pagefault_disable();
++	ret = __copy_from_user_inatomic(dst, src, size);
++	pagefault_enable();
+ 
+ 	if (ret)
+ 		return -EFAULT;
+

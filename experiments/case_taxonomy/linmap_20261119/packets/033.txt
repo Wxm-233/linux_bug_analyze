@@ -1,0 +1,226 @@
+commit 3045f8e36963
+2019-06-27|mtd: rawnand: gpmi: move all driver code into single file
+
+mtd: rawnand: gpmi: move all driver code into single file
+
+This moves the whole driver into a single C file. The filename gpmi-lib
+implies that it implements library functions, but in fact there are
+several cases where functions in gpmi-lib.c call back into functions in
+gpmi-nand.c. With this one has to constantly jump between those two
+files, so moving it into a single file improves readability, even when
+the file gets quite large.
+
+---- diff (matched files only)
+diff --git a/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c b/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c
+index 40df20d1adf5..53e63eeafcf4 100644
+--- a/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c
++++ b/drivers/mtd/nand/raw/gpmi-nand/gpmi-nand.c
+@@ -6,6 +6,7 @@
+  * Copyright (C) 2008 Embedded Alley Solutions, Inc.
+  */
+ #include <linux/clk.h>
++#include <linux/delay.h>
+ #include <linux/slab.h>
+ #include <linux/sched/task_stack.h>
+ #include <linux/interrupt.h>
+@@ -14,6 +15,7 @@
+ #include <linux/of.h>
+ #include <linux/of_device.h>
+ #include "gpmi-nand.h"
++#include "gpmi-regs.h"
+ #include "bch-regs.h"
+ 
+ /* Resource names for the GPMI NAND driver. */
+@@ -21,149 +23,223 @@
+ #define GPMI_NAND_BCH_REGS_ADDR_RES_NAME   "bch"
+ #define GPMI_NAND_BCH_INTERRUPT_RES_NAME   "bch"
+ 
+-/* add our owner bbt descriptor */
+-static uint8_t scan_ff_pattern[] = { 0xff };
+-static struct nand_bbt_descr gpmi_bbt_descr = {
+-	.options	= 0,
+-	.offs		= 0,
+-	.len		= 1,
+-	.pattern	= scan_ff_pattern
+-};
++/* Converts time to clock cycles */
++#define TO_CYCLES(duration, period) DIV_ROUND_UP_ULL(duration, period)
+ 
++#define MXS_SET_ADDR		0x4
++#define MXS_CLR_ADDR		0x8
+ /*
+- * We may change the layout if we can get the ECC info from the datasheet,
+- * else we will use all the (page + OOB).
++ * Clear the bit and poll it cleared.  This is usually called with
++ * a reset address and mask being either SFTRST(bit 31) or CLKGATE
++ * (bit 30).
+  */
+-static int gpmi_ooblayout_ecc(struct mtd_info *mtd, int section,
+-			      struct mtd_oob_region *oobregion)
++static int clear_poll_bit(void __iomem *addr, u32 mask)
+ {
+-	struct nand_chip *chip = mtd_to_nand(mtd);
+-	struct gpmi_nand_data *this = nand_get_controller_data(chip);
+-	struct bch_geometry *geo = &this->bch_geometry;
++	int timeout = 0x400;
+ 
+-	if (section)
+-		return -ERANGE;
++	/* clear the bit */
++	writel(mask, addr + MXS_CLR_ADDR);
+ 
+-	oobregion->offset = 0;
+-	oobregion->length = geo->page_size - mtd->writesize;
++	/*
++	 * SFTRST needs 3 GPMI clocks to settle, the reference manual
++	 * recommends to wait 1us.
++	 */
++	udelay(1);
++
++	/* poll the bit becoming clear */
++	while ((readl(addr) & mask) && --timeout)
++		/* nothing */;
++
++	return !timeout;
++}
++
++#define MODULE_CLKGATE		(1 << 30)
++#define MODULE_SFTRST		(1 << 31)
++/*
++ * The current mxs_reset_block() will do two things:
++ *  [1] enable the module.
++ *  [2] reset the module.
++ *
++ * In most of the cases, it's ok.
++ * But in MX23, there is a hardware bug in the BCH block (see erratum #2847).
++ * If you try to soft reset the BCH block, it becomes unusable until
++ * the next hard reset. This case occurs in the NAND boot mode. When the board
++ * boots by NAND, the ROM of the chip will initialize the BCH blocks itself.
++ * So If the driver tries to reset the BCH again, the BCH will not work anymore.
++ * You will see a DMA timeout in this case. The bug has been fixed
++ * in the following chips, such as MX28.
++ *
++ * To avoid this bug, just add a new parameter `just_enable` for
++ * the mxs_reset_block(), and rewrite it here.
++ */
++static int gpmi_reset_block(void __iomem *reset_addr, bool just_enable)
++{
++	int ret;
++	int timeout = 0x400;
++
++	/* clear and poll SFTRST */
++	ret = clear_poll_bit(reset_addr, MODULE_SFTRST);
++	if (unlikely(ret))
++		goto error;
++
++	/* clear CLKGATE */
++	writel(MODULE_CLKGATE, reset_addr + MXS_CLR_ADDR);
++
++	if (!just_enable) {
++		/* set SFTRST to reset the block */
++		writel(MODULE_SFTRST, reset_addr + MXS_SET_ADDR);
++		udelay(1);
++
++		/* poll CLKGATE becoming set */
++		while ((!(readl(reset_addr) & MODULE_CLKGATE)) && --timeout)
++			/* nothing */;
++		if (unlikely(!timeout))
++			goto error;
++	}
++
++	/* clear and poll SFTRST */
++	ret = clear_poll_bit(reset_addr, MODULE_SFTRST);
++	if (unlikely(ret))
++		goto error;
++
++	/* clear and poll CLKGATE */
++	ret = clear_poll_bit(reset_addr, MODULE_CLKGATE);
++	if (unlikely(ret))
++		goto error;
+ 
+ 	return 0;
++
++error:
++	pr_err("%s(%p): module reset timeout\n", __func__, reset_addr);
++	return -ETIMEDOUT;
+ }
+ 
+-static int gpmi_ooblayout_free(struct mtd_info *mtd, int section,
+-			       struct mtd_oob_region *oobregion)
++static int __gpmi_enable_clk(struct gpmi_nand_data *this, bool v)
+ {
+-	struct nand_chip *chip = mtd_to_nand(mtd);
+-	struct gpmi_nand_data *this = nand_get_controller_data(chip);
+-	struct bch_geometry *geo = &this->bch_geometry;
++	struct clk *clk;
++	int ret;
++	int i;
+ 
+-	if (section)
+-		return -ERANGE;
++	for (i = 0; i < GPMI_CLK_MAX; i++) {
++		clk = this->resources.clock[i];
++		if (!clk)
++			break;
+ 
+-	/* The available oob size we have. */
+-	if (geo->page_size < mtd->writesize + mtd->oobsize) {
+-		oobregion->offset = geo->page_size - mtd->writesize;
+-		oobregion->length = mtd->oobsize - oobregion->offset;
++		if (v) {
++			ret = clk_prepare_enable(clk);
++			if (ret)
++				goto err_clk;
++		} else {
++			clk_disable_unprepare(clk);
++		}
+ 	}
+-
+ 	return 0;
++
++err_clk:
++	for (; i > 0; i--)
++		clk_disable_unprepare(this->resources.clock[i - 1]);
++	return ret;
+ }
+ 
+-static const char * const gpmi_clks_for_mx2x[] = {
+-	"gpmi_io",
+-};
++static int gpmi_enable_clk(struct gpmi_nand_data *this)
++{
++	return __gpmi_enable_clk(this, true);
++}
+ 
+-static const struct mtd_ooblayout_ops gpmi_ooblayout_ops = {
+-	.ecc = gpmi_ooblayout_ecc,
+-	.free = gpmi_ooblayout_free,
+-};
++static int gpmi_disable_clk(struct gpmi_nand_data *this)
++{
++	return __gpmi_enable_clk(this, false);
++}
+ 
+-static const struct gpmi_devdata gpmi_devdata_imx23 = {
+-	.type = IS_MX23,
+-	.bch_max_ecc_strength = 20,
+-	.max_chain_delay = 16000,
+-	.clks = gpmi_clks_for_mx2x,
+-	.clks_count = ARRAY_SIZE(gpmi_clks_for_mx2x),
+-};
++static int gpmi_init(struct gpmi_nand_data *this)
++{
++	struct resources *r = &this->resources;
++	int ret;
+ 
+-static const struct gpmi_devdata gpmi_devdata_imx28 = {
+-	.type = IS_MX28,
+-	.bch_max_ecc_strength = 20,
+-	.max_chain_delay = 16000,
+-	.clks = gpmi_clks_for_mx2x,
+-	.clks_count = ARRAY_SIZE(gpmi_clks_for_mx2x),
+-};
++	ret = gpmi_enable_clk(this);
++	if (ret)
++		return ret;
++	ret = gpmi_reset_b

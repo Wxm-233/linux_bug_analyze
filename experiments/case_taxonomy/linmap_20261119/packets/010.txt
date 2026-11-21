@@ -1,0 +1,111 @@
+commit 15995a352474
+2024-07-03|mm: report per-page metadata information
+
+mm: report per-page metadata information
+
+Today, we do not have any observability of per-page metadata and how much
+it takes away from the machine capacity.  Thus, we want to describe the
+amount of memory that is going towards per-page metadata, which can vary
+depending on build configuration, machine architecture, and system use.
+
+This patch adds 2 fields to /proc/vmstat that can used as shown below:
+
+Accounting per-page metadata allocated by boot-allocator:
+	/proc/vmstat:nr_memmap_boot * PAGE_SIZE
+
+Accounting per-page metadata allocated by buddy-allocator:
+	/proc/vmstat:nr_memmap * PAGE_SIZE
+
+Accounting total Perpage metadata allocated on the machine:
+	(/proc/vmstat:nr_memmap_boot +
+	 /proc/vmstat:nr_memmap) * PAGE_SIZE
+
+Utility for userspace:
+
+Observability: Describe the amount of memory overhead that is going to
+per-page metadata on the system at any given time since this overhead is
+not currently observable.
+
+Debugging: Tracking the changes or absolute value in struct pages can help
+detect anomalies as they can be correlated with other metrics in the
+machine (e.g., memtotal, number of huge pages, etc).
+
+page_ext overheads: Some kernel features such as page_owner
+page_table_check that use page_ext can be optionally enabled via kernel
+parameters.  Having the total per-page metadata information helps users
+precisely measure impact.  Furthermore, page-metadata metrics will reflect
+the amount of struct pages reliquished (or overhead reduced) when
+hugetlbfs pages are reserved which will vary depending on whether hugetlb
+vmemmap optimization is enabled or not.
+
+For background and results see:
+lore.kernel.org/all/20240220214558.3377482-1-souravpanda@google.com
+
+---- diff (matched files only)
+diff --git a/mm/page_ext.c b/mm/page_ext.c
+index 95dd8ffeaf81..c191e490c401 100644
+--- a/mm/page_ext.c
++++ b/mm/page_ext.c
+@@ -214,6 +214,8 @@ static int __init alloc_node_page_ext(int nid)
+ 		return -ENOMEM;
+ 	NODE_DATA(nid)->node_page_ext = base;
+ 	total_usage += table_size;
++	mod_node_page_state(NODE_DATA(nid), NR_MEMMAP_BOOT,
++			    DIV_ROUND_UP(table_size, PAGE_SIZE));
+ 	return 0;
+ }
+ 
+@@ -268,12 +270,15 @@ static void *__meminit alloc_page_ext(size_t size, int nid)
+ 	void *addr = NULL;
+ 
+ 	addr = alloc_pages_exact_nid(nid, size, flags);
+-	if (addr) {
++	if (addr)
+ 		kmemleak_alloc(addr, size, 1, flags);
+-		return addr;
+-	}
++	else
++		addr = vzalloc_node(size, nid);
+ 
+-	addr = vzalloc_node(size, nid);
++	if (addr) {
++		mod_node_page_state(NODE_DATA(nid), NR_MEMMAP,
++				    DIV_ROUND_UP(size, PAGE_SIZE));
++	}
+ 
+ 	return addr;
+ }
+@@ -316,18 +321,27 @@ static int __meminit init_section_page_ext(unsigned long pfn, int nid)
+ 
+ static void free_page_ext(void *addr)
+ {
++	size_t table_size;
++	struct page *page;
++	struct pglist_data *pgdat;
++
++	table_size = page_ext_size * PAGES_PER_SECTION;
++
+ 	if (is_vmalloc_addr(addr)) {
++		page = vmalloc_to_page(addr);
++		pgdat = page_pgdat(page);
+ 		vfree(addr);
+ 	} else {
+-		struct page *page = virt_to_page(addr);
+-		size_t table_size;
+-
+-		table_size = page_ext_size * PAGES_PER_SECTION;
+-
++		page = virt_to_page(addr);
++		pgdat = page_pgdat(page);
+ 		BUG_ON(PageReserved(page));
+ 		kmemleak_free(addr);
+ 		free_pages_exact(addr, table_size);
+ 	}
++
++	mod_node_page_state(pgdat, NR_MEMMAP,
++			    -1L * (DIV_ROUND_UP(table_size, PAGE_SIZE)));
++
+ }
+ 
+ static void __free_page_ext(unsigned long pfn)
+

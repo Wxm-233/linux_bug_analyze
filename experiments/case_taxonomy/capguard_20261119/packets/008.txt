@@ -1,0 +1,118 @@
+commit 262ef8e55b7c
+2025-11-27|fork: stop ignoring NUMA while handling cached thread stacks
+
+fork: stop ignoring NUMA while handling cached thread stacks
+
+1. the numa parameter was straight up ignored.
+2. nothing was done to check if the to-be-cached/allocated stack matches
+   the local node
+
+The id remains ignored on free in case of memoryless nodes.
+
+Note the current caching is already bad as the cache keeps overflowing
+and a different solution is needed for the long run, to be worked
+out(tm).
+
+Stats collected over a kernel build with the patch with the following
+topology:
+  NUMA node(s):              2
+  NUMA node0 CPU(s):         0-11
+  NUMA node1 CPU(s):         12-23
+
+caller's node vs stack backing pages on free:
+matching:	50083 (70%)
+mismatched:	21492 (30%)
+
+caching efficiency:
+cached:		32651 (65.2%)
+dropped:	17432 (34.8%)
+
+---- diff (matched files only)
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 3da0f08615a9..17fcb75ca5d5 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -208,15 +208,62 @@ struct vm_stack {
+ 	struct vm_struct *stack_vm_area;
+ };
+ 
++static struct vm_struct *alloc_thread_stack_node_from_cache(struct task_struct *tsk, int node)
++{
++	struct vm_struct *vm_area;
++	unsigned int i;
++
++	/*
++	 * If the node has memory, we are guaranteed the stacks are backed by local pages.
++	 * Otherwise the pages are arbitrary.
++	 *
++	 * Note that depending on cpuset it is possible we will get migrated to a different
++	 * node immediately after allocating here, so this does *not* guarantee locality for
++	 * arbitrary callers.
++	 */
++	scoped_guard(preempt) {
++		if (node != NUMA_NO_NODE && numa_node_id() != node)
++			return NULL;
++
++		for (i = 0; i < NR_CACHED_STACKS; i++) {
++			vm_area = this_cpu_xchg(cached_stacks[i], NULL);
++			if (vm_area)
++				return vm_area;
++		}
++	}
++
++	return NULL;
++}
++
+ static bool try_release_thread_stack_to_cache(struct vm_struct *vm_area)
+ {
+ 	unsigned int i;
++	int nid;
+ 
+-	for (i = 0; i < NR_CACHED_STACKS; i++) {
+-		struct vm_struct *tmp = NULL;
++	/*
++	 * Don't cache stacks if any of the pages don't match the local domain, unless
++	 * there is no local memory to begin with.
++	 *
++	 * Note that lack of local memory does not automatically mean it makes no difference
++	 * performance-wise which other domain backs the stack. In this case we are merely
++	 * trying to avoid constantly going to vmalloc.
++	 */
++	scoped_guard(preempt) {
++		nid = numa_node_id();
++		if (node_state(nid, N_MEMORY)) {
++			for (i = 0; i < vm_area->nr_pages; i++) {
++				struct page *page = vm_area->pages[i];
++				if (page_to_nid(page) != nid)
++					return false;
++			}
++		}
++
++		for (i = 0; i < NR_CACHED_STACKS; i++) {
++			struct vm_struct *tmp = NULL;
+ 
+-		if (this_cpu_try_cmpxchg(cached_stacks[i], &tmp, vm_area))
+-			return true;
++			if (this_cpu_try_cmpxchg(cached_stacks[i], &tmp, vm_area))
++				return true;
++		}
+ 	}
+ 	return false;
+ }
+@@ -283,13 +330,9 @@ static int alloc_thread_stack_node(struct task_struct *tsk, int node)
+ {
+ 	struct vm_struct *vm_area;
+ 	void *stack;
+-	int i;
+-
+-	for (i = 0; i < NR_CACHED_STACKS; i++) {
+-		vm_area = this_cpu_xchg(cached_stacks[i], NULL);
+-		if (!vm_area)
+-			continue;
+ 
++	vm_area = alloc_thread_stack_node_from_cache(tsk, node);
++	if (vm_area) {
+ 		if (memcg_charge_kernel_stack(vm_area)) {
+ 			vfree(vm_area->addr);
+ 			return -ENOMEM;
+

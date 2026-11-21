@@ -1,0 +1,18 @@
+[
+ {"n": 1, "verdict": "排除", "reason": "值域放得下", "why": "val 是两次采样之间 PSI 内存停顿的微秒差（2976 行），一个配额周期内远小于 2^32；结果本来就存进 unsigned long 的 goal->current_value，2975 行已排除未初始化的 U64_MAX"},
+ {"n": 2, "verdict": "排除", "reason": "值域放得下", "why": "get_nr_caches 返回脏目录项页数（88 行），和 89 行比较的 avail_ram 同为页数，32 位上放得下"},
+ {"n": 3, "verdict": "排除", "reason": "性质不适用", "why": "拆分只会降低阶数，new_order < min_order 时已返回（4199 行）；HPAGE_PMD_ORDER 只用在 new_order < HPAGE_PMD_ORDER 的统计判断里，不会产生超过页缓存上限的 folio"},
+ {"n": 4, "verdict": "排除", "reason": "已有守卫", "why": "damon_hugetlb_ptep_mkold 只经 damon_hugetlb_mkold 调用；vaddr.c 296 行先查 pte_present，ops-common.c 230 行来自 page_vma_mapped_walk，非迁移模式下只返回 present 项；对 present 项 pte_mkold 合法"},
+ {"n": 5, "verdict": "排除", "reason": "已有守卫", "why": "同 4：damon_hugetlb_mkold 的两个调用方（vaddr.c 296 行 pte_present 检查、ops-common.c 230 行 pvmw）都保证 entry 是 present，pte_pfn(entry) 合法"},
+ {"n": 6, "verdict": "排除", "reason": "已有守卫", "why": "damon_va_young_addr 经 damon_va_filter_pass、damon_va_probe_folio 调用，pte 来自 damon_va_probe_pmd_entry / hugetlb_entry，636、661 行都先查 pte_present；damos_va_filter_out 的调用处（879、1044 行）也先查 present"},
+ {"n": 7, "verdict": "排除", "reason": "值域放得下", "why": "end 被 2287 行限制在 PAGE_SIZE 以内，作为 size_t 实参不会截断"},
+ {"n": 8, "verdict": "排除", "reason": "性质不适用", "why": "COLLAPSE_MAX_PTES_LIMIT 是 max_ptes_none 的上限值，不是 folio 阶数，和页缓存阶数上限无关"},
+ {"n": 9, "verdict": "排除", "reason": "值域放得下", "why": "wb_stat_sum 返回可回收页数（1228 行），work->nr_pages 本身是 long，32 位上页数放得下"},
+ {"n": 10, "verdict": "排除", "reason": "性质不适用", "why": "HPAGE_PMD_NR 赋给 max_ptes_*（971～973 行）是 PTE 个数上限，不是阶数"},
+ {"n": 11, "verdict": "排除", "reason": "已有守卫", "why": "546 行 WARN_ON_ONCE((1UL << order) > SWAPFILE_CLUSTER) 拒绝超过簇大小的阶数；SWAPFILE_CLUSTER 是交换簇大小，不受页缓存阶数上限约束"},
+ {"n": 12, "verdict": "排除", "reason": "性质不适用", "why": "SWAPFILE_CLUSTER 只用于 1620 行的 BUILD_BUG_ON，和阶数上限无关"},
+ {"n": 13, "verdict": "排除", "reason": "已有守卫", "why": "同 4：entry 由调用方保证 present，pte_young(*entry) 合法"},
+ {"n": 14, "verdict": "排除", "reason": "合法的实现差异", "why": "x86 的 perf_get_regs_user 在非 NMI 时（265～268 行）做的正是通用实现的事；NMI 下另行复制寄存器，是为了处理 NMI 打断 pt_regs 建立的情况，属于有意的架构特例，旧版本就有"},
+ {"n": 15, "verdict": "排除", "reason": "值域放得下", "why": "163 行先用 PERF_X86_SIMD_VEC_MASK 检查，该掩码是 GENMASK_ULL(31,0)（ZMM 32 个寄存器），所以 166 行 vec_mask 只有低 32 位，在 x86_32 上赋给 unsigned long 不丢位"},
+ {"n": 16, "verdict": "排除", "reason": "值域放得下", "why": "online_pgcnt 是 [spfn, epfn) 内的页数，不超过 unsigned long 能表示的 pfn 范围；函数返回类型 unsigned long（847 行），截断不可能发生"}
+]

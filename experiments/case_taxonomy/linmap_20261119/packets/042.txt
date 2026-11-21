@@ -1,0 +1,86 @@
+commit 3aaabbf1c39e
+2017-11-17|lib/dma-debug.c: fix incorrect pfn calculation
+
+lib/dma-debug.c: fix incorrect pfn calculation
+
+dma-debug reports the following warning:
+
+  WARNING: CPU: 3 PID: 298 at kernel-4.4/lib/dma-debug.c:604
+  debug _dma_assert_idle+0x1a8/0x230()
+  DMA-API: cpu touching an active dma mapped cacheline [cln=0x00000882300]
+  CPU: 3 PID: 298 Comm: vold Tainted: G        W  O    4.4.22+ #1
+  Hardware name: MT6739 (DT)
+  Call trace:
+    debug_dma_assert_idle+0x1a8/0x230
+    wp_page_copy.isra.96+0x118/0x520
+    do_wp_page+0x4fc/0x534
+    handle_mm_fault+0xd4c/0x1310
+    do_page_fault+0x1c8/0x394
+    do_mem_abort+0x50/0xec
+
+I found that debug_dma_alloc_coherent() and debug_dma_free_coherent()
+assume that dma_alloc_coherent() always returns a linear address.
+
+However it's possible that dma_alloc_coherent() returns a non-linear
+address.  In this case, page_to_pfn(virt_to_page(virt)) will return an
+incorrect pfn.  If the pfn is valid and mapped as a COW page, we will
+hit the warning when doing wp_page_copy().
+
+Fix this by calculating pfn for linear and non-linear addresses.
+
+[miles.chen@mediatek.com: v4]
+  Link: http://lkml.kernel.org/r/1510872972-23919-1-git-send-email-miles.chen@mediatek.com
+
+---- diff (matched files only)
+diff --git a/lib/dma-debug.c b/lib/dma-debug.c
+index ea4cc3dde4f1..1b34d210452c 100644
+--- a/lib/dma-debug.c
++++ b/lib/dma-debug.c
+@@ -1495,14 +1495,22 @@ void debug_dma_alloc_coherent(struct device *dev, size_t size,
+ 	if (!entry)
+ 		return;
+ 
++	/* handle vmalloc and linear addresses */
++	if (!is_vmalloc_addr(virt) && !virt_to_page(virt))
++		return;
++
+ 	entry->type      = dma_debug_coherent;
+ 	entry->dev       = dev;
+-	entry->pfn	 = page_to_pfn(virt_to_page(virt));
+ 	entry->offset	 = offset_in_page(virt);
+ 	entry->size      = size;
+ 	entry->dev_addr  = dma_addr;
+ 	entry->direction = DMA_BIDIRECTIONAL;
+ 
++	if (is_vmalloc_addr(virt))
++		entry->pfn = vmalloc_to_pfn(virt);
++	else
++		entry->pfn = page_to_pfn(virt_to_page(virt));
++
+ 	add_dma_entry(entry);
+ }
+ EXPORT_SYMBOL(debug_dma_alloc_coherent);
+@@ -1513,13 +1521,21 @@ void debug_dma_free_coherent(struct device *dev, size_t size,
+ 	struct dma_debug_entry ref = {
+ 		.type           = dma_debug_coherent,
+ 		.dev            = dev,
+-		.pfn		= page_to_pfn(virt_to_page(virt)),
+ 		.offset		= offset_in_page(virt),
+ 		.dev_addr       = addr,
+ 		.size           = size,
+ 		.direction      = DMA_BIDIRECTIONAL,
+ 	};
+ 
++	/* handle vmalloc and linear addresses */
++	if (!is_vmalloc_addr(virt) && !virt_to_page(virt))
++		return;
++
++	if (is_vmalloc_addr(virt))
++		ref.pfn = vmalloc_to_pfn(virt);
++	else
++		ref.pfn = page_to_pfn(virt_to_page(virt));
++
+ 	if (unlikely(dma_debug_disabled()))
+ 		return;
+ 
+

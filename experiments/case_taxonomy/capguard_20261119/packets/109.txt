@@ -1,0 +1,36 @@
+commit d0177639310d
+2014-08-06|mm: fix potential infinite loop in dissolve_free_huge_pages()
+
+mm: fix potential infinite loop in dissolve_free_huge_pages()
+
+It is possible for some platforms, such as powerpc to set HPAGE_SHIFT to
+0 to indicate huge pages not supported.
+
+When this is the case, hugetlbfs could be disabled during boot time:
+hugetlbfs: disabling because there are no supported hugepage sizes
+
+Then in dissolve_free_huge_pages(), order is kept maximum (64 for
+64bits), and the for loop below won't end: for (pfn = start_pfn; pfn <
+end_pfn; pfn += 1 << order)
+
+As suggested by Naoya, below fix checks hugepages_supported() before
+calling dissolve_free_huge_pages().
+
+[rientjes@google.com: no legitimate reason to call dissolve_free_huge_pages() when !hugepages_supported()]
+
+---- diff (matched files only)
+diff --git a/mm/hugetlb.c b/mm/hugetlb.c
+index d9ad93b55585..eeceeeb09019 100644
+--- a/mm/hugetlb.c
++++ b/mm/hugetlb.c
+@@ -1088,6 +1088,9 @@ void dissolve_free_huge_pages(unsigned long start_pfn, unsigned long end_pfn)
+ 	unsigned long pfn;
+ 	struct hstate *h;
+ 
++	if (!hugepages_supported())
++		return;
++
+ 	/* Set scan step to minimum hugepage size */
+ 	for_each_hstate(h)
+ 		if (order > huge_page_order(h))
+

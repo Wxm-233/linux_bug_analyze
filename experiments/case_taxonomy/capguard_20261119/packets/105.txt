@@ -1,0 +1,33 @@
+commit a25045ff32df
+2016-03-22|firewire: use in_compat_syscall to check ioctl compatness
+
+firewire: use in_compat_syscall to check ioctl compatness
+
+Firewire was using is_compat_task to check whether it was in a compat
+ioctl or a non-compat ioctl.  Use is_compat_syscall instead so it works
+properly on all architectures.
+
+---- diff (matched files only)
+diff --git a/drivers/firewire/core-cdev.c b/drivers/firewire/core-cdev.c
+index 36a7c2d89a01..aee149bdf4c0 100644
+--- a/drivers/firewire/core-cdev.c
++++ b/drivers/firewire/core-cdev.c
+@@ -221,7 +221,7 @@ struct inbound_phy_packet_event {
+ #ifdef CONFIG_COMPAT
+ static void __user *u64_to_uptr(u64 value)
+ {
+-	if (is_compat_task())
++	if (in_compat_syscall())
+ 		return compat_ptr(value);
+ 	else
+ 		return (void __user *)(unsigned long)value;
+@@ -229,7 +229,7 @@ static void __user *u64_to_uptr(u64 value)
+ 
+ static u64 uptr_to_u64(void __user *ptr)
+ {
+-	if (is_compat_task())
++	if (in_compat_syscall())
+ 		return ptr_to_compat(ptr);
+ 	else
+ 		return (u64)(unsigned long)ptr;
+

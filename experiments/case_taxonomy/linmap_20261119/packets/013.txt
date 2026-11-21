@@ -1,0 +1,29 @@
+commit c346def9af1d
+2023-10-22|bcachefs: Fix encryption path on arm
+
+bcachefs: Fix encryption path on arm
+
+flush_dcache_page() is not a noop on arm, but we were using
+virt_to_page() instead of vmalloc_to_page() for an address on the kernel
+stack - vmalloc memory, leading to an oops in flush_dcache_page().
+
+---- diff (matched files only)
+diff --git a/fs/bcachefs/checksum.c b/fs/bcachefs/checksum.c
+index 50157b4013a5..317efd047a46 100644
+--- a/fs/bcachefs/checksum.c
++++ b/fs/bcachefs/checksum.c
+@@ -116,7 +116,12 @@ static inline int do_encrypt(struct crypto_sync_skcipher *tfm,
+ {
+ 	struct scatterlist sg;
+ 
+-	sg_init_one(&sg, buf, len);
++	sg_init_table(&sg, 1);
++	sg_set_page(&sg,
++		    is_vmalloc_addr(buf)
++		    ? vmalloc_to_page(buf)
++		    : virt_to_page(buf),
++		    len, offset_in_page(buf));
+ 	return do_encrypt_sg(tfm, nonce, &sg, len);
+ }
+ 
+

@@ -80,7 +80,8 @@
       - 读缺页先把 uffd-wp 标记换成带写保护位的只读 present 项，并发的写缺页随后看到 present 项，`maybe_mkwrite()` 置了可写位，却没检查 uffd-wp；
       - 结果是页表项同时可写又带写保护位，触发 page_table_check 的 WARN，WP_ASYNC 写跟踪失效。
       - 这个场景要求 DAX 上能注册 uffd，David 的拒绝补丁合入后不会出现；2/3 本来也没被收。（同一个审阅机器人也是 18a4e5cf 那个 arm64 缺陷的发现者。）
-  状态：两个修复都有 Reviewed-by。guard 标记那半已进 mm/core 分支；“拒绝 DAX”补丁等待收进树。合入主线后补记提交号。
+  - 2026-11-19 又收到两封（`提交/19.6.14.pdf`、`19.20.11.pdf`），都是对 David《mm/userfaultfd: reject DAX mappings》的 Reviewed-by：Jose A. Perez de Azpillaga（06:14，“LGTM”）、Pankaj Gupta（AMD，20:11）。Pankaj 另问 David 能否改用 `vmf_insert_page_mkwrite`，这是问作者的，我们不用回复。这个补丁现在共有 4 个 Reviewed-by（Gregory Price、Mike Rapoport、Jose、Pankaj）。20:23 David 回复 Pankaj（`提交/19.20.23.pdf`）：`vmf_insert_mixed_mkwrite()` 正在被另外的改动删除，所以这个提交里用哪个都无所谓，补丁不改，并感谢审阅。
+  状态：两个修复都有 Reviewed-by。guard 标记那半已进 mm/core 分支；“拒绝 DAX”补丁有 4 个 Reviewed-by，等待收进树。合入主线后补记提交号。
 
 ## B-2026-11-16-2：MGLRU 回收时清 device-exclusive 页表项的访问位，arm64 上把它改成坏交换项（S4，B-2026-11-15-2 的 MGLRU 变体）
 
@@ -130,3 +131,39 @@
 - **v2 审阅（2026-11-18 17:31）**：David Hildenbrand 建议改写法：force 分支里改为 `mask = READ_ONCE(huge_shmem_orders_inherit);` 并 goto 到函数末尾的 `return THP_ORDERS_ALL_FILE_DEFAULT & mask;`（“Avoiding the goto means more churn I guess”）。需要发 v3。
 - **v3 已发出（2026-11-18 18:22，作者本人）**：按 David 的建议改用 goto 写法（Baolin 回复赞同），保留 Baolin 的 Reviewed-by；发送前用 `s6v3_20261118` 重测：原内核 3/3 复现，v3 内核 0/3。Message-ID 记在外层进度日志。等待 Andrew 收进 mm 树。
 - **v3 审阅（2026-11-18 18:26）**：David Hildenbrand（shmem 维护者之一）给出 Reviewed-by，并说 “I'll queue this later.”。补丁已有两个 Reviewed-by，维护者表示会收下。
+
+## B-2026-11-20-1：arm32 原子 DMA 池再分配时不清零，返回上一个使用者留下的内容（E-ZERO 第 1 条）
+
+- **确认**：2026-11-20，用户确认（“先记录下来吧”）。**属于独立重新发现的已知问题**：上游 2018 年起已有人报过、交过补丁，一直没合入。
+- **位置**：`arch/arm/mm/dma-mapping.c`，`__alloc_from_pool()`（`df2908090cda` 第 355～374 行）。从 genalloc 原子池取块后直接返回，不清零；`__free_from_pool()` 只把块还给池。
+- **问题**：`518a2f1925c3`（2018-12，“dma-mapping: zero memory returned from dma_alloc_*”）定下 DMA 分配器返回的内存必须清零（可能映射给用户态，防止残留数据泄漏）。arm32 其他分配器经 `__dma_clear_buffer` 清零，通用池 `kernel/dma/pool.c` 第 318 行也清零，唯独 arm32 自己的原子池没有。arm64 在 2015 年因同一问题修过（`6829e274a623`）。
+- **架构**：arm32（有 MMU）。走到的路径：dma-direct → `arch_dma_alloc` → `__dma_alloc`，非一致性设备、不能睡眠的分配（`GFP_ATOMIC`）用 `pool_allocator`；IOMMU 路径 `arm_iommu_alloc_attrs` → `__iommu_alloc_simple` 也会用到。所以影响**所有非一致性设备上的原子 DMA 分配**。
+- **触发**：驱动在原子上下文里对非一致性设备调 `dma_alloc_coherent(…, GFP_ATOMIC)`，释放后同样大小再分配。
+- **后果**：拿到的缓冲区是上一个使用者的数据。依赖缓冲区为零的驱动（描述符环、状态区）会读到垃圾；缓冲区经 `dma_mmap_*` 映射给用户态时会泄漏内核数据。
+- **证据**：`case_taxonomy/zeroleads_20261120/`。`multi_v7_defconfig`、QEMU `virt`/`cortex-a15`，开机自测 8 轮：修复前原子路径第 1～7 轮每轮 4096/4096 字节都是上一轮写入的 `0xA5`（同一地址），`GFP_KERNEL` 对照全零；加上游那一行 `memset(ptr, 0, size);` 后全零。
+- **发现路径**：效果依赖版实现一致性检查 `effzero_20261120`（E-ZERO，同一接口多数实现清零、少数不清零）在当前版本报第 1 条 `arm_iommu_alloc_attrs`（来源函数 `__alloc_from_pool`）→ 我判确认、Codex 判可能，裁定“可能（强）”→ 上游检索和 QEMU 验证 `zeroleads_20261120`。
+- **上游状态（2026-11-20，lore.kernel.org 只读检索）**：**已知，未合入**。
+  - 2018-07 YueHaibing《ARM: dma-mapping: always clear allocated buffers》（两版）；
+  - 2019-03 YueHaibing《ARM: dma-mapping: always clear allocated buffers in __alloc_from_pool》，Christoph Hellwig 回复观察正确，希望 Russell King 也审；
+  - 2022-12 Igor Klochko《arch/arm/mm/dma-mapping.c: fix __alloc_from_pool returning a dirty buffer》（https://lore.kernel.org/all/43ef46fc-2fbc-31b7-d683-f7496b39dae5@gmail.com/T/ ，带 `Fixes: 36d0fd2198da`），Hellwig 认可，Russell King 担心弄脏缓存行，Robin Murphy 解释池是非缓存映射没有问题；线程停在 2023-01-03。
+  - `df2908090cda`（2026-09）里仍没有这行。我们的发现晚于这些报告，不算首次发现。
+- **状态**：未对外报告。QEMU 复现可以作为补充证据回复到 2022 年的线程，是否回复、以谁的名义由用户决定。
+- **v7.4-rc3 核对（2026-11-20，`incscan_20261120`）**：E-ZERO 在 v7.4-rc3 上仍把这条报为第 1 条，`__alloc_from_pool` 仍不清零，上游仍未修。
+
+## B-2026-11-20-2：x86_32 不开 PAE 时 `amd_get_mmconfig_range()` 截断 MMCONFIG 地址，pnp quirk 和 amd_bus 用错地址（证据卡第 1 条）
+
+- **确认**：2026-11-20，用户要求登记（“把这个缺陷记下来吧”）。**只有静态证据，没有动态验证**；用户决定验证不了就先不追（“验证不了的话就先不管它了”）。
+- **位置**：`arch/x86/kernel/amd_nb.c`，`amd_get_mmconfig_range()`（`df2908090cda` 第 160～167 行）。
+- **问题**：从 `MSR_FAM10H_MMIO_CONF_BASE`（0xC0010058）取基址，掩码是 `0xfffffff << 20`，占第 20～47 位，最多 48 位。这个值直接写进 `res->start`、`res->end`（类型 `resource_size_t`），不检查放不放得下。x86_32 不开 PAE 时没选 `PHYS_ADDR_T_64BIT`，`resource_size_t` 只有 32 位，高位丢掉。
+- **架构**：只有不开 PAE 的 x86_32。`i386_defconfig` 就是这样，而且 `AMD_NB`、`PNP`、`PCI_MMCONFIG` 都编入。x86_64 和开 PAE 的 x86_32 不受影响。
+- **触发**：上面这种内核跑在 AMD Fam10h 及以后（或 Hygon）的机器上，BIOS 打开了 MMCONFIG，并把基址放在 4G 以上。64 位内核在 BIOS 没开 MMCONFIG 时，会主动把它设到 4G 以上（`arch/x86/kernel/mmconf-fam10h_64.c`，只在 64 位上编译）；32 位内核只认 BIOS 设的位置。
+- **后果**：两个使用者都拿截断后的低地址做事：
+  - `drivers/pnp/quirks.c` 的 `quirk_amd_mmconfig_area()`（挂在 `PNP0c01` 上）：按这个范围判断重叠，并用 `pnp_add_mem_resource()` 补加保留区，保留的是错误的低地址；
+  - `arch/x86/pci/amd_bus.c` 的 `early_root_info_init()`（`postcore_initcall`）：用它从根总线的 MMIO 范围里扣除、调整 MMIO 窗口，扣掉的是错误的低地址范围。
+
+  可能的结果是低地址的一段 MMIO 被误保留、PCI 窗口被错误切分。会不会进一步导致设备分配失败，没有评估。
+- **证据**：`case_taxonomy/amdmmcfg_20261121/`，包括 `i386_defconfig.config`（配置事实）和读代码记录。同一个 `amd_bus.c` 第 54 行已有 `cap_resource()`（第 317 行在用），说明作者处理过别处的位宽问题，但 MMCONFIG 的范围在传进来之前就已经截断了。**没有动态验证**：QEMU 没有 AMD 北桥 PCI 设备，也不提供这个 MSR，代码会提前返回；伪造这两样只能证明 C 语言的截断规则。
+- **发现路径**：WT 检查（64 位的值在 32 位上被截断）的当前版本候选 → 证据卡排序 `evcard_20261121`，新排序前 12 → 我和 Codex 盲判都判“完整线索” → 上游检索和配置核对 `amdmmcfg_20261121`，判“可能（强）”。
+- **上游状态（2026-11-20，git 历史和 lore.kernel.org 只读检索）**：函数 2012 年由 `24d25dbfa63c` 分出，之后的改动（`de6bd0835ac1`、`c6babb5806b7`、`14cb5d83068e` 和 MSR 函数改名）都与位宽无关。没找到相关报告或补丁。只核对了 `df2908090cda`，没看最新主线。
+- **可能的修法（没写补丁）**：仿照 `e820__reserve_resources()` 的 `if (end != (resource_size_t)end)`，范围放不进 `resource_size_t` 时返回 NULL。
+- **状态**：未对外报告。影响面很窄：不开 PAE 的 32 位内核跑在新的 AMD 机器上本来就少见。

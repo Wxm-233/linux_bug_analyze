@@ -1,0 +1,235 @@
+commit 277a1ae3879a
+2025-11-24|mm: softdirty: add pgtable_supports_soft_dirty()
+
+mm: softdirty: add pgtable_supports_soft_dirty()
+
+Patch series "mm: Add soft-dirty and uffd-wp support for RISC-V", v15.
+
+This patchset adds support for Svrsw60t59b [1] extension which is ratified
+now, also add soft dirty and userfaultfd write protect tracking for
+RISC-V.
+
+The patches 1 and 2 add macros to allow architectures to define their own
+checks if the soft-dirty / uffd_wp PTE bits are available, in other words
+for RISC-V, the Svrsw60t59b extension is supported on which device the
+kernel is running.  Also patch1-2 are removing "ifdef
+CONFIG_MEM_SOFT_DIRTY" "ifdef CONFIG_HAVE_ARCH_USERFAULTFD_WP" and "ifdef
+CONFIG_PTE_MARKER_UFFD_WP" in favor of checks which if not overridden by
+the architecture, no change in behavior is expected.
+
+This patchset has been tested with kselftest mm suite in which soft-dirty,
+madv_populate, test_unmerge_uffd_wp, and uffd-unit-tests run and pass, and
+no regressions are observed in any of the other tests.
+
+
+This patch (of 6):
+
+Some platforms can customize the PTE PMD entry soft-dirty bit making it
+unavailable even if the architecture provides the resource.
+
+Add an API which architectures can define their specific implementations
+to detect if soft-dirty bit is available on which device the kernel is
+running.
+
+This patch is removing "ifdef CONFIG_MEM_SOFT_DIRTY" in favor of
+pgtable_supports_soft_dirty() checks that defaults to
+IS_ENABLED(CONFIG_MEM_SOFT_DIRTY), if not overridden by the architecture,
+no change in behavior is expected.
+
+We make sure to never set VM_SOFTDIRTY if !pgtable_supports_soft_dirty(),
+so we will never run into VM_SOFTDIRTY checks.
+
+[lorenzo.stoakes@oracle.com: fix VMA selftests]
+  Link: https://lkml.kernel.org/r/dac6ddfe-773a-43d5-8f69-021b9ca4d24b@lucifer.local
+
+---- diff (matched files only)
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index 41b062ce6ad8..2b4ab5718ab5 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -1584,8 +1584,6 @@ struct clear_refs_private {
+ 	enum clear_refs_types type;
+ };
+ 
+-#ifdef CONFIG_MEM_SOFT_DIRTY
+-
+ static inline bool pte_is_pinned(struct vm_area_struct *vma, unsigned long addr, pte_t pte)
+ {
+ 	struct folio *folio;
+@@ -1605,6 +1603,8 @@ static inline bool pte_is_pinned(struct vm_area_struct *vma, unsigned long addr,
+ static inline void clear_soft_dirty(struct vm_area_struct *vma,
+ 		unsigned long addr, pte_t *pte)
+ {
++	if (!pgtable_supports_soft_dirty())
++		return;
+ 	/*
+ 	 * The soft-dirty tracker uses #PF-s to catch writes
+ 	 * to pages, so write-protect the pte as well. See the
+@@ -1630,19 +1630,16 @@ static inline void clear_soft_dirty(struct vm_area_struct *vma,
+ 		set_pte_at(vma->vm_mm, addr, pte, ptent);
+ 	}
+ }
+-#else
+-static inline void clear_soft_dirty(struct vm_area_struct *vma,
+-		unsigned long addr, pte_t *pte)
+-{
+-}
+-#endif
+ 
+-#if defined(CONFIG_MEM_SOFT_DIRTY) && defined(CONFIG_TRANSPARENT_HUGEPAGE)
++#if defined(CONFIG_TRANSPARENT_HUGEPAGE)
+ static inline void clear_soft_dirty_pmd(struct vm_area_struct *vma,
+ 		unsigned long addr, pmd_t *pmdp)
+ {
+ 	pmd_t old, pmd = *pmdp;
+ 
++	if (!pgtable_supports_soft_dirty())
++		return;
++
+ 	if (pmd_present(pmd)) {
+ 		/* See comment in change_huge_pmd() */
+ 		old = pmdp_invalidate(vma, addr, pmdp);
+diff --git a/mm/debug_vm_pgtable.c b/mm/debug_vm_pgtable.c
+index 1eae87dbef73..ae9b9310d96f 100644
+--- a/mm/debug_vm_pgtable.c
++++ b/mm/debug_vm_pgtable.c
+@@ -704,7 +704,7 @@ static void __init pte_soft_dirty_tests(struct pgtable_debug_args *args)
+ {
+ 	pte_t pte = pfn_pte(args->fixed_pte_pfn, args->page_prot);
+ 
+-	if (!IS_ENABLED(CONFIG_MEM_SOFT_DIRTY))
++	if (!pgtable_supports_soft_dirty())
+ 		return;
+ 
+ 	pr_debug("Validating PTE soft dirty\n");
+@@ -717,7 +717,7 @@ static void __init pte_swap_soft_dirty_tests(struct pgtable_debug_args *args)
+ 	pte_t pte;
+ 	softleaf_t entry;
+ 
+-	if (!IS_ENABLED(CONFIG_MEM_SOFT_DIRTY))
++	if (!pgtable_supports_soft_dirty())
+ 		return;
+ 
+ 	pr_debug("Validating PTE swap soft dirty\n");
+@@ -734,7 +734,7 @@ static void __init pmd_soft_dirty_tests(struct pgtable_debug_args *args)
+ {
+ 	pmd_t pmd;
+ 
+-	if (!IS_ENABLED(CONFIG_MEM_SOFT_DIRTY))
++	if (!pgtable_supports_soft_dirty())
+ 		return;
+ 
+ 	if (!has_transparent_hugepage())
+@@ -750,8 +750,8 @@ static void __init pmd_leaf_soft_dirty_tests(struct pgtable_debug_args *args)
+ {
+ 	pmd_t pmd;
+ 
+-	if (!IS_ENABLED(CONFIG_MEM_SOFT_DIRTY) ||
+-		!IS_ENABLED(CONFIG_ARCH_ENABLE_THP_MIGRATION))
++	if (!pgtable_supports_soft_dirty() ||
++	    !IS_ENABLED(CONFIG_ARCH_ENABLE_THP_MIGRATION))
+ 		return;
+ 
+ 	if (!has_transparent_hugepage())
+diff --git a/mm/huge_memory.c b/mm/huge_memory.c
+index 7af3e037d891..041b554c7115 100644
+--- a/mm/huge_memory.c
++++ b/mm/huge_memory.c
+@@ -2427,12 +2427,13 @@ static inline int pmd_move_must_withdraw(spinlock_t *new_pmd_ptl,
+ 
+ static pmd_t move_soft_dirty_pmd(pmd_t pmd)
+ {
+-#ifdef CONFIG_MEM_SOFT_DIRTY
+-	if (unlikely(pmd_is_migration_entry(pmd)))
+-		pmd = pmd_swp_mksoft_dirty(pmd);
+-	else if (pmd_present(pmd))
+-		pmd = pmd_mksoft_dirty(pmd);
+-#endif
++	if (pgtable_supports_soft_dirty()) {
++		if (unlikely(pmd_is_migration_entry(pmd)))
++			pmd = pmd_swp_mksoft_dirty(pmd);
++		else if (pmd_present(pmd))
++			pmd = pmd_mksoft_dirty(pmd);
++	}
++
+ 	return pmd;
+ }
+ 
+diff --git a/mm/mmap.c b/mm/mmap.c
+index dc51680824ec..4bdb9ffa9e25 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -1448,8 +1448,10 @@ static struct vm_area_struct *__install_special_mapping(
+ 		return ERR_PTR(-ENOMEM);
+ 
+ 	vma_set_range(vma, addr, addr + len, 0);
+-	vm_flags_init(vma, (vm_flags | mm->def_flags |
+-		      VM_DONTEXPAND | VM_SOFTDIRTY) & ~VM_LOCKED_MASK);
++	vm_flags |= mm->def_flags | VM_DONTEXPAND;
++	if (pgtable_supports_soft_dirty())
++		vm_flags |= VM_SOFTDIRTY;
++	vm_flags_init(vma, vm_flags & ~VM_LOCKED_MASK);
+ 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
+ 
+ 	vma->vm_ops = ops;
+diff --git a/mm/mremap.c b/mm/mremap.c
+index fdb0485ede74..672264807db6 100644
+--- a/mm/mremap.c
++++ b/mm/mremap.c
+@@ -165,12 +165,13 @@ static pte_t move_soft_dirty_pte(pte_t pte)
+ 	 * Set soft dirty bit so we can notice
+ 	 * in userspace the ptes were moved.
+ 	 */
+-#ifdef CONFIG_MEM_SOFT_DIRTY
+-	if (pte_present(pte))
+-		pte = pte_mksoft_dirty(pte);
+-	else
+-		pte = pte_swp_mksoft_dirty(pte);
+-#endif
++	if (pgtable_supports_soft_dirty()) {
++		if (pte_present(pte))
++			pte = pte_mksoft_dirty(pte);
++		else
++			pte = pte_swp_mksoft_dirty(pte);
++	}
++
+ 	return pte;
+ }
+ 
+diff --git a/mm/userfaultfd.c b/mm/userfaultfd.c
+index bd1f74a7a5ac..e6dfd5f28acd 100644
+--- a/mm/userfaultfd.c
++++ b/mm/userfaultfd.c
+@@ -1119,9 +1119,8 @@ static long move_present_ptes(struct mm_struct *mm,
+ 
+ 		orig_dst_pte = folio_mk_pte(src_folio, dst_vma->vm_page_prot);
+ 		/* Set soft dirty bit so userspace can notice the pte was moved */
+-#ifdef CONFIG_MEM_SOFT_DIRTY
+-		orig_dst_pte = pte_mksoft_dirty(orig_dst_pte);
+-#endif
++		if (pgtable_supports_soft_dirty())
++			orig_dst_pte = pte_mksoft_dirty(orig_dst_pte);
+ 		if (pte_dirty(orig_src_pte))
+ 			orig_dst_pte = pte_mkdirty(orig_dst_pte);
+ 		orig_dst_pte = pte_mkwrite(orig_dst_pte, dst_vma);
+@@ -1208,9 +1207,8 @@ static int move_swap_pte(struct mm_struct *mm, struct vm_area_struct *dst_vma,
+ 	}
+ 
+ 	orig_src_pte = ptep_get_and_clear(mm, src_addr, src_pte);
+-#ifdef CONFIG_MEM_SOFT_DIRTY
+-	orig_src_pte = pte_swp_mksoft_dirty(orig_src_pte);
+-#endif
++	if (pgtable_supports_soft_dirty())
++		orig_src_pte = pte_swp_mksoft_dirty(orig_src_pte);
+ 	set_pte_at(mm, dst_addr, dst_pte, orig_src_pte);
+ 	double_pt_unlock(dst_ptl, src_ptl);
+ 
+diff --git a/mm/vma.c b/mm/vma.c
+index 4e21c988054d..fc90befd162f 100644
+--- a/mm/vma.c
++++ b/mm/vma.c
+@@ -2559,7 +2559,8 @@ static void __mmap_complete(struct mmap_state *map, struct vm_area_struct *vma)
+ 	 * then new mapped in-place (which must be aimed as
+ 	 * a completely new data area).
+ 	 */
+-	vm_flags_set(vm
