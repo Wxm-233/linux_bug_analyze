@@ -1,0 +1,20 @@
+{
+ "agreement": {"agree": 6, "total": 8, "cohen_kappa": 0.68, "note": "五类：真实问题、可能、不可达、不是问题、测试缺陷（R7/R8 的漏测、误报种类也一致）"},
+ "items": [
+  {"id": "R1", "claude": "真实问题", "codex": "真实问题", "final": "真实问题", "note": "一致。现实平台未找到这一点照旧保留"},
+  {"id": "R2", "claude": "可能", "codex": "不可达", "final": "不可达（maltaup_xpa_defconfig / Malta）",
+   "why": "采纳 Codex。我的原判有两处错：(1) 这个配置是 16K 页（CONFIG_PAGE_SIZE_16KB=y），我按 4K 页算出“32GB 以上截断”，实际截断从页帧号 2^23 即物理地址 2^37 = 128GB 开始；(2) 没核对平台：Malta 的内存映射都在 32 位物理地址内（arch/mips/mti-malta/malta-dtshim.c:76-127）。另查 CPU_MIPS32_R5_XPA 依赖 !PAGE_SIZE_4KB（arch/mips/Kconfig:1771-1785），所以任何 XPA 配置至少 16K 页，截断起点至少 128GB；XPA 规范允许 40 位以上物理地址，其他 XPA 平台上属于“可能（很弱）”，本条对象是 Malta 配置，判不可达"},
+  {"id": "R3", "claude": "不可达", "codex": "不可达", "final": "不可达", "note": "一致"},
+  {"id": "R4", "claude": "不可达", "codex": "可能", "final": "不可达",
+   "why": "维持原判，补证据：MIPS 的 arch/mips/include/asm/sparsemem.h 对所有 MIPS 定义 MAX_PHYSMEM_BITS 48（“how much memory we can have”），即内核自己认定 MIPS 物理内存不超过 2^48；mips64（4K 页）截断从页帧号 2^40 即物理地址 2^52 开始，高于 2^48。Codex 判“可能”是因为没找到上限证据（它引用的 XKPHYS 地址字段宽度是寻址格式，不是可装内存的范围）。我原来写的“实际约 48 位”没有给出处，这次补上内核出处"},
+  {"id": "R5", "claude": "不是问题", "codex": "不是问题", "final": "不是问题", "note": "一致（对照）"},
+  {"id": "R6", "claude": "不是问题", "codex": "不是问题", "final": "不是问题", "note": "一致（对照）"},
+  {"id": "R7", "claude": "测试缺陷/漏测", "codex": "测试缺陷/漏测", "final": "测试缺陷/漏测", "note": "一致，引入提交 a3a3e215c9c1 也一致"},
+  {"id": "R8", "claude": "测试缺陷/误报", "codex": "测试缺陷/误报", "final": "测试缺陷/误报", "note": "一致，第 60 位 PRESENT_INVALID、合法页帧号 34 位、引入提交 c0a80c2ce68d 都一致"}
+ ],
+ "corrections": [
+  "pfnswap_20261121：mips32xpa 的截断起点应为 128GB（16K 页），不是 32GB；在 Malta 配置上不可达，不是“可能（弱）”",
+  "swapcmp_20261122：mips32 XPA 3 格应归入“输入不合法、不计入”，计入的违反只剩 arm LPAE 3 格",
+  "confirmed_bugs.md B-2026-11-22-1 与 lpaeqemu_20261122 中“mips32 XPA（23 位，物理地址 ≥ 32GB）”一句同样更正"
+ ]
+}

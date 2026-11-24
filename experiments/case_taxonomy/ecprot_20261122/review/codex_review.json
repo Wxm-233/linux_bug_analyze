@@ -1,0 +1,86 @@
+[
+  {
+    "id": "N1",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/mips/include/asm/pgtable.h:333、385 两个实现均置 _PAGE_MODIFIED，第 292、356 行正是读该位。包内四个内核保护常量的初值都已为真。公共自检先清脏再置脏（mm/debug_vm_pgtable.c:99），此时结果为真。"
+  },
+  {
+    "id": "N2",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/mips/include/asm/pgtable.h:322、377 均无条件置 _PAGE_WRITE，第 291、355 行读同一位。所取四个初值都已可写，重复置位当然保持。公共自检先写保护再恢复写权限（mm/debug_vm_pgtable.c:110），该实现满足约定。"
+  },
+  {
+    "id": "N3",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/x86/include/asm/pgtable.h:148、430 对同一个 _PAGE_DIRTY_BITS 掩码分别读取和清零。可判定的初值已经干净，故出现 0→0。mm/debug_vm_pgtable.c:102 先置脏再清脏，结果同样符合预期。"
+  },
+  {
+    "id": "N4",
+    "verdict": "排除",
+    "reason": "求值不精确",
+    "why": "arch/x86/include/asm/pgtable.h:205、401 分别判断普通写或影子栈写、清除 RW 并处理脏位。包中 PAGE_SHARED 的修改前值未能确定，被排除在投票之外。普通可写项经写保护变成不可写，正符合 mm/debug_vm_pgtable.c:103。"
+  },
+  {
+    "id": "N5",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/powerpc/include/asm/book3s/64/pgtable.h:494 以存在的叶项且 RWX 全零表示 protnone，第 598 行注明写权限蕴含读权限，故同时置读写位。赋予权限后观察值由真变假符合该编码，跨架构保持性并非授权操作的约定。"
+  },
+  {
+    "id": "N6",
+    "verdict": "排除",
+    "reason": "求值不精确",
+    "why": "arch/hexagon/include/asm/pgtable.h:104 的缓存属性是变量。第 106 行的 PAGE_NONE 未指定执行权限，其前值在包中为 imprecise；其余可比常量本已可执行。第 304、324 行分别置位和读取 EXECUTE，故“保持”遗漏了无执行权限的输入。"
+  },
+  {
+    "id": "N7",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/hexagon/include/asm/pgtable.h:297 只置 _PAGE_WRITE，第 311 行独立读取 _PAGE_READ。第 108、110 行的 PAGE_COPY 原本可读，授写后仍可读；即使初值不可读，单独置写位也不改变该读位。多数关系无法约束此编码。"
+  },
+  {
+    "id": "N8",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/loongarch/include/asm/pgtable-bits.h:107、118 的内核模板预置 DIRTY。pgtable.h:554、565、608 表明失效清 DIRTY，却保留正常置脏操作设置的 MODIFIED。mm/pgtable-generic.c:205 还取回原项；模板上的 1→0 不能证明公共层丢失脏记录。"
+  },
+  {
+    "id": "N9",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/loongarch/include/asm/pgtable.h:532、545 分别检查和清除 _PAGE_WRITE，可写 PMD 经写保护得到 1→0。mm/debug_vm_pgtable.c:202 明确以恢复写权限后的 PMD 作输入，并检查写保护后不可写；偏离构建恰好满足该断言。"
+  },
+  {
+    "id": "N10",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/loongarch/include/asm/pgtable-bits.h:112 的 PAGE_NONE 未置 ACCESSED；arch/loongarch/include/asm/pgtable.h:400、409 读、置同一位。初值为零时变真是接口的预期结果，mm/debug_vm_pgtable.c:98 专门用旧项检查这一点。"
+  },
+  {
+    "id": "N11",
+    "verdict": "可能",
+    "reason": "",
+    "why": "arch/powerpc/include/asm/nohash/32/pte-8xx.h:46、87、94 给出 NA=0x0200、RO=0x0600。写保护按位或 RO，使 NA 变成 RO，pte_read 因此从假变真。已确认软件观察值改变，尚未证实公共路径依赖此输入上的读权限保持性或产生可见错误。"
+  },
+  {
+    "id": "N12",
+    "verdict": "排除",
+    "reason": "平台不可达",
+    "why": "arch/riscv/mm/pgtable.c:168 只在 VM_SHADOW_STACK 下调用该助手。arch/riscv/Kconfig:1202 的用户 CFI 要求 64BIT，未启用相应支持时 include/linux/mm.h:473 将该标志定义为 VM_NONE。rv32 的直接宏组合无法代表实际影子栈映射。"
+  },
+  {
+    "id": "N13",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/riscv/include/asm/pgtable.h:169 的 PAGE_NONE 未带 ACCESSED，第 395、475 行分别读取和置该位，故包内唯一的假→真符合定义。mm/debug_vm_pgtable.c:98 明确要求旧项经 mkyoung 后可观察为 young。"
+  },
+  {
+    "id": "N14",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/x86/include/asm/pgtable.h:440 只清 NX，第 989 行以 PRESENT 和 PROTNONE 的组合判断 protnone，两个掩码互不重叠。因此 PAGE_SHARED 仍为假，PAGE_NONE 仍为真；调整执行位没有改变后者的存在状态。"
+  }
+]

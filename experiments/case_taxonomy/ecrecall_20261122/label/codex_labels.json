@@ -1,0 +1,127 @@
+[
+    {
+        "hash":  "018e9828eb52",
+        "label":  "是",
+        "why":  "LoongArch 的 pte_wrprotect 和 pmd_wrprotect 清除 _PAGE_DIRTY 前未将其转存为 _PAGE_MODIFIED，只有硬件脏位的表项在写保护后丢失脏状态。"
+    },
+    {
+        "hash":  "d4bb00704a66",
+        "label":  "否",
+        "why":  "s390 修复的是 set_pte 写回及 gmap 原子置位时对 _PAGE_UNUSED 的处理，涉及指针写入，不满足 (b)。"
+    },
+    {
+        "hash":  "a073d637c8cf",
+        "label":  "否",
+        "why":  "LoongArch 丢失脏状态的操作是同时接收旧表项和新保护值的 pte_modify、pmd_modify，不满足 (b)。"
+    },
+    {
+        "hash":  "403d1338a4a5",
+        "label":  "否",
+        "why":  "pte_swp_exclusive 将高位掩码截为 int 而误报假的实例在 Alpha，所列构建上的非零掩码仍表示真，不满足 (c)。"
+    },
+    {
+        "hash":  "144bb0aee33a",
+        "label":  "是",
+        "why":  "x86 的 pud_leaf 额外要求 _PAGE_PRESENT，使保留 _PAGE_PSE 的非 present 大页叶项被误判为非叶。"
+    },
+    {
+        "hash":  "cb67ea121cdd",
+        "label":  "否",
+        "why":  "arm64 两级页表缺少 pud_valid 定义，导致 pud_user_accessible_page 无法编译，修复前没有可比较的返回值，不满足 (a)。"
+    },
+    {
+        "hash":  "e0fe5ab4192c",
+        "label":  "是",
+        "why":  "RISC-V 的 pte_leaf_size 沿用公共层的 PAGE_SIZE，对带 NAPOT 编码的 PTE 返回了小于其映射大小的值。"
+    },
+    {
+        "hash":  "5d9cea8a552e",
+        "label":  "是",
+        "why":  "PowerPC 8xx 的单参数 pte_read 沿用恒为真的实现，因而把 PAGE_NONE 构造的禁止访问表项判为可读。"
+    },
+    {
+        "hash":  "f441ff73f1ec",
+        "label":  "否",
+        "why":  "PowerPC 的 pud_mkwrite 用一个实参调用签名已变的 pte_mkwrite，宏展开后无法编译，不满足 (a)。"
+    },
+    {
+        "hash":  "ddc1729b07cc",
+        "label":  "是",
+        "why":  "LoongArch 的 pmd_mkinvalid 清除大页 PMD 的存在标志后未保留拆分状态，导致 pmd_present 对拆分中的映射返回假。"
+    },
+    {
+        "hash":  "0f88130e8a6f",
+        "label":  "否",
+        "why":  "x86 的 __swp_entry_to_pte 绕过 Xen PV 的表项转换，错误依赖虚拟化环境，不满足 (b)。"
+    },
+    {
+        "hash":  "1492c6b1874a",
+        "label":  "否",
+        "why":  "MIPS 的 _PAGE_CHG_MASK 漏掉 _PAGE_SPECIAL，使双参数 pte_modify 更换保护属性时丢位，不满足 (b)。"
+    },
+    {
+        "hash":  "6f74c0ec2095",
+        "label":  "是",
+        "why":  "ARM 的 __swp_entry 把类型位数当作掩码，导致部分合法 type 经 __swp_type 解码后与输入不同。"
+    },
+    {
+        "hash":  "024d232ae4fc",
+        "label":  "否",
+        "why":  "pmd_read_atomic 修复的是并发更新期间通过指针读取 PMD 的原子性，不满足 (b)。"
+    },
+    {
+        "hash":  "ad1ac596e8a8",
+        "label":  "否",
+        "why":  "迁移路径对未映射的 PTE 调用 pte_unmap，错误涉及页表映射与指针的使用，不满足 (b)。"
+    },
+    {
+        "hash":  "23bc8f69f0ec",
+        "label":  "是",
+        "why":  "arm64 的 pmd_leaf 和 pud_leaf 仅按 section 描述符判定，对 PROT_NONE 映射的叶项返回假。"
+    },
+    {
+        "hash":  "7106c51ee9a1",
+        "label":  "否",
+        "why":  "该提交为缺少 pmd_pfn 的架构或配置补定义，原先缺失的接口没有返回错误 PFN，不满足 (a)。"
+    },
+    {
+        "hash":  "4a366f519a3c",
+        "label":  "否",
+        "why":  "s390 将以 pte_val 或 pXd_val 为左值的赋值改写为显式构造及位操作，同一输入的表项取值未变，不满足 (a)。"
+    },
+    {
+        "hash":  "fba88ede6a31",
+        "label":  "是",
+        "why":  "RISC-V 将 _PAGE_PROT_NONE 与 _PAGE_READ 复用，导致 pmd_mkinvalid 清除只读大页唯一的叶权限位后 pmd_present 误报假。"
+    },
+    {
+        "hash":  "c7d19189d724",
+        "label":  "否",
+        "why":  "PowerPC 32 位调整 pte_t 的结构体表示方式，__pte 与 pte_val 保留相同的位值，不满足 (a)。"
+    },
+    {
+        "hash":  "099dd6878b9b",
+        "label":  "否",
+        "why":  "漏清 uffd-wp 位的是 mm/swapfile.c 中的双参数比较 pte_same_as_swp，头文件里的 pte_to_swp_entry 在修复前已清除此位，不满足 (b)。"
+    },
+    {
+        "hash":  "972472c7466b",
+        "label":  "否",
+        "why":  "ARM 两级页表缺少 pud_page 定义，修复的是接口缺失，不满足 (a)。"
+    },
+    {
+        "hash":  "ff1712f953e2",
+        "label":  "是",
+        "why":  "arm64 的 pte_wrprotect 对仅由硬件位表示为脏的 PTE 设置只读前未保存软件脏位，导致 pte_dirty 在写保护后返回假。"
+    },
+    {
+        "hash":  "07509e10dcc7",
+        "label":  "否",
+        "why":  "arm64 的 pte_accessible 接收 mm 和 pte，且判定依赖 mm 的 TLB 刷新状态，不满足 (b)。"
+    },
+    {
+        "hash":  "6453f9ed9d4e",
+        "label":  "否",
+        "why":  "PowerPC 32 位的 pte_offset_map 更改获取页表指针的映射方式，涉及 kmap_atomic，不满足 (b)。"
+    }
+]

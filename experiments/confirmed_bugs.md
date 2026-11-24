@@ -82,6 +82,7 @@
       - 这个场景要求 DAX 上能注册 uffd，David 的拒绝补丁合入后不会出现；2/3 本来也没被收。（同一个审阅机器人也是 18a4e5cf 那个 arm64 缺陷的发现者。）
   - 2026-11-19 又收到两封（`提交/19.6.14.pdf`、`19.20.11.pdf`），都是对 David《mm/userfaultfd: reject DAX mappings》的 Reviewed-by：Jose A. Perez de Azpillaga（06:14，“LGTM”）、Pankaj Gupta（AMD，20:11）。Pankaj 另问 David 能否改用 `vmf_insert_page_mkwrite`，这是问作者的，我们不用回复。这个补丁现在共有 4 个 Reviewed-by（Gregory Price、Mike Rapoport、Jose、Pankaj）。20:23 David 回复 Pankaj（`提交/19.20.23.pdf`）：`vmf_insert_mixed_mkwrite()` 正在被另外的改动删除，所以这个提交里用哪个都无所谓，补丁不改，并感谢审阅。
   状态：两个修复都有 Reviewed-by。guard 标记那半已进 mm/core 分支；“拒绝 DAX”补丁有 4 个 Reviewed-by，等待收进树。合入主线后补记提交号。
+- **上游状态（2026-11-24，联网只读，kernel.googlesource 镜像读源码）**：guard 标记那半（Mike 3/3，`insert_page_into_pte_locked()` 里 `!mkwrite || !pte_present(pteval)`）已在 mm 新树 `mm/linux.git` 的 `for-next` 和 linux-next（next-20261123）里，主线 v7.4-rc4 还没有；David《mm/userfaultfd: reject DAX mappings》在主线、linux-next、`mm/linux.git` 的 for-next/for-next-fixes/for-test、akpm/mm 各分支都**还没有**（`vma_can_userfault()` 里没有 DAX 判断）。
 
 ## B-2026-11-16-2：MGLRU 回收时清 device-exclusive 页表项的访问位，arm64 上把它改成坏交换项（S4，B-2026-11-15-2 的 MGLRU 变体）
 
@@ -131,6 +132,7 @@
 - **v2 审阅（2026-11-18 17:31）**：David Hildenbrand 建议改写法：force 分支里改为 `mask = READ_ONCE(huge_shmem_orders_inherit);` 并 goto 到函数末尾的 `return THP_ORDERS_ALL_FILE_DEFAULT & mask;`（“Avoiding the goto means more churn I guess”）。需要发 v3。
 - **v3 已发出（2026-11-18 18:22，作者本人）**：按 David 的建议改用 goto 写法（Baolin 回复赞同），保留 Baolin 的 Reviewed-by；发送前用 `s6v3_20261118` 重测：原内核 3/3 复现，v3 内核 0/3。Message-ID 记在外层进度日志。等待 Andrew 收进 mm 树。
 - **v3 审阅（2026-11-18 18:26）**：David Hildenbrand（shmem 维护者之一）给出 Reviewed-by，并说 “I'll queue this later.”。补丁已有两个 Reviewed-by，维护者表示会收下。
+- **已收进树（2026-11-24，联网只读，kernel.googlesource 镜像读源码）**：v3 的改法（force 分支 `mask = READ_ONCE(huge_shmem_orders_inherit); goto out;`）已在 mm 新树 `mm/linux.git` 的 `for-next`（David 维护，linux-next 的 mm 来源）和 linux-next（next-20261123）里；主线 v7.4-rc4、akpm/mm 各分支还没有。提交号未取（googlesource 的历史页要登录），进主线后补记。
 
 ## B-2026-11-20-1：arm32 原子 DMA 池再分配时不清零，返回上一个使用者留下的内容（E-ZERO 第 1 条）
 
@@ -167,3 +169,53 @@
 - **上游状态（2026-11-20，git 历史和 lore.kernel.org 只读检索）**：函数 2012 年由 `24d25dbfa63c` 分出，之后的改动（`de6bd0835ac1`、`c6babb5806b7`、`14cb5d83068e` 和 MSR 函数改名）都与位宽无关。没找到相关报告或补丁。只核对了 `df2908090cda`，没看最新主线。
 - **可能的修法（没写补丁）**：仿照 `e820__reserve_resources()` 的 `if (end != (resource_size_t)end)`，范围放不进 `resource_size_t` 时返回 NULL。
 - **状态**：未对外报告。影响面很窄：不开 PAE 的 32 位内核跑在新的 AMD 机器上本来就少见。
+
+## B-2026-11-22-1：arm LPAE（flatmem）上物理地址 64GB 以上的页，迁移项会截断页帧号，迁移后迁移项残留、进程卡死（第五轮逐位求值、第六轮 QEMU 确认）
+
+- **确认**：2026-11-22，用户要求登记（“登记”）。QEMU 动态确认，平台是合成的（见“触发”）。
+- **位置**：架构编码 `arch/arm/include/asm/pgtable.h:279-293`（交换项偏移从第 8 位开始，32 位页表项里只剩 24 位；注释写的是“64GB per swap file”，只考虑了交换区大小）；公共层 `include/linux/swapops.h:37-43`（`SWP_PFN_BITS`）、`include/linux/leafops.h:358`（只有 `BUILD_BUG_ON(SWP_TYPE_SHIFT < SWP_PFN_BITS)`，检查公共表示放不放得下，不检查架构编码）。版本 `df2908090cda`。
+- **问题**：迁移项、hwpoison、设备私有项在交换项偏移里存页帧号，需要 `SWP_PFN_BITS` 位。arm 在 flatmem 下没有 `MAX_PHYSMEM_BITS`，`SWP_PFN_BITS` 按 `phys_addr_t`（LPAE 下 64 位）回退为 min(52, 26) = 26，而 arm 的交换项编码只能保持 24 位。页帧号 ≥ 2^24（物理地址 ≥ 64GB，4K 页）时，高位被丢掉。
+- **架构**：32 位 arm、`ARM_LPAE=y`、flatmem（`multi_v7_defconfig` 加 LPAE 时的默认值）。开 sparsemem 时 `MAX_PHYSMEM_BITS = 36`，64GB 以上内存不会被使用，不受影响。逐位求值的 20 个构建里，同类截断还有 mips32 XPA（23 位，物理地址 ≥ 32GB，未动态验证）；ppc44x（物理地址只有 36 位）、mips64（实际物理地址约 48 位）编码同样窄于 `SWP_PFN_BITS`，但碰不到。
+- **触发**：物理地址 64GB 以上有内存，并且这些页参与迁移（拆分大页、内存压缩、内存热插拔等）。QEMU 复现：`-M virt,highmem=on -cpu cortex-a15 -m 64G`，内核参数 `mem=1G@0x40000000 mem=512M@0x1000000000`，用户程序建 THP 后写 `/sys/kernel/debug/split_huge_pages` 强制拆分。现实中没找到在 64GB 以上放内存的 ARM LPAE 平台（TI Keystone2 的高端内存在 32～40GB）。
+- **后果**：拆分时迁移项里的页帧号被截断（实测 0x1000a00 → 0xa00），`remove_migration_ptes()` 对不上原来的页，迁移项残留在页表里。之后读 `/proc/self/pagemap` 触发 `WARNING: include/linux/leafops.h:400 at softleaf_to_page`；进程访问这些页时触发 `WARNING ... at softleaf_entry_wait_on_locked`（`do_swap_page`→`migration_entry_wait`），然后进程永久卡死，那块内存也拿不回来。不开 `DEBUG_VM` 时没有告警，只会无声卡死。截断后的页帧号指向 RAM 之外（flatmem 下是 `mem_map` 之前的伪 `struct page`），可能还有更坏的后果，没有评估。
+- **证据**：`case_taxonomy/lpaeqemu_20261122/`：`logs/run_nohighpte_test.log`（实验组：拆分后 pagemap 变成类型 30 `SWP_MIGRATION_WRITE`、偏移 0xa00 的条目，两次告警、超时）、`logs/run_nohighpte_ctrl.log`（同一内核、第二段内存放在 32GB 的对照组：拆分后正常、1024 页校验通过）、`kernel_nohighpte.config`、`init.c`、`run.sh`。内核和 initramfs 在 WSL `/root/work/lpaeqemu/keep/`，`K=nohighpte bash run.sh test|ctrl` 可复现。静态部分：`case_taxonomy/pfnswap_20261121/`（`pfn_arm_lpae.json`：P3 违反，第 24 位开始丢失，clang 折叠复现）。
+- **发现路径**：交换项编解码保持性的逐位求值（`swapsym_20261121`，第三、四轮，20 个构建）→ 换到 PFN 交换项（`pfnswap_20261121`，第五轮），发现 4 个构建 `SWP_PFN_BITS` 大于架构编码容量 → QEMU 动态验证（`lpaeqemu_20261122`，第六轮）。
+- **上游状态（2026-11-22，本地 git 只读，未联网）**：同类问题 `630dc25e43da mm/swap: fix SWP_PFN_BITS with CONFIG_PHYS_ADDR_T_64BIT on 32bit`（2022-12，David Hildenbrand）修过：当时 8GB x86 PAE 上公共层 `SWP_PFN_BITS` 只算到 20 位，后果同上（迁移项残留，读 pagemap 触发 BUG_ON）。那次只改了公共层，x86 PAE 的编码有 26 位正好够，arm LPAE 的 24 位不够，缺口留到现在。本地最新主线 `65e4fd942f72`（11-19）上 `SWP_PFN_BITS` 的定义和 arm 交换项布局都没改。没查邮件列表。
+- **可能的修法（没写补丁）**：让 `SWP_PFN_BITS` 不超过架构交换项偏移的位数（例如由架构声明偏移位数）；或者在启动时发现 `max_pfn` 超出编码容量就告警，并不使用超出部分的内存。
+- **另记（不是本条缺陷）**：同一 QEMU 环境里，`HIGHPTE=y` 时只要用户页表页落在 4GB 以上，exec 写用户栈就缺页死循环（`handle_mm_fault`→`flush_tlb_page`）；关 `HIGHPTE` 后正常。是 QEMU 还是内核的问题没有追。
+- **状态**：未对外报告。影响面取决于有没有 ARM LPAE 平台在 64GB 以上放内存，目前没找到。
+- **复核（2026-11-22，`case_taxonomy/swaprev_20261122/`）**：Codex 盲判同样判“真实问题”；它审查 QEMU 实验后判“基本确认（有可补的漏洞）”。据此更正上文：“永久卡死”“内存拿不回来”应为“300 秒内没有完成”；“不开 `DEBUG_VM` 时只会无声卡死”是推断，没测过；“清除迁移项时对不上”是由源码和 pagemap 输出推出的，日志没有直接记录。对照组同时改变了 `mem_map` 跨度，更硬的对照是同一段内存跨过 64GB、比较 2^24 两侧的页。另，上文“同类截断还有 mips32 XPA（23 位，物理地址 ≥ 32GB）”有误：该配置是 16K 页，截断从 128GB 开始，且 Malta 内存都在 32 位物理地址内，判不可达。
+
+## B-2026-11-22-2：arm LPAE 的 `pmd_mkinvalid()` 不满足通用约定，THP 拆分失效后 `pmd_present`/`pmd_leaf` 变假（低危；编码一致性引擎第三轮、QEMU 确认约定违反）
+
+- **确认**：2026-11-22，用户要求登记为低危（“登记为低危”）。约定违反已在运行时确认；**实际后果没有观察到**。
+- **位置**：`arch/arm/include/asm/pgtable-3level.h`（`df2908090cda`）：`:180` `#define pmd_present(pmd) (pmd_isset((pmd), L_PMD_SECT_VALID))`；`:217-220` `pmd_mkinvalid()` 清掉 `L_PMD_SECT_VALID`（第 0 位）；`:121` `pmd_leaf = pmd_sect`（类型位为 01，清掉第 0 位后变 00）。这几处不受 THP 开关影响。
+- **约定**：`mm/debug_vm_pgtable.c:913-930` 写明，THP 拆分去掉在场位时，`pmd_trans_huge()`、`pmd_present()` 必须仍为真，并断言 `pmd_trans_huge/pmd_present/pmd_leaf(pmd_mkinvalid(pmd_mkhuge(pmd)))`（只对没定义 `__HAVE_ARCH_PMDP_INVALIDATE` 的架构，arm 在内）。约定来自 `027ef6c87853`（2012，x86），2020 年改名时（`86ec2da037b8`）写进说明。arm LPAE 上 `pmd_trans_huge` 仍为真，`pmd_present`、`pmd_leaf` 变假。
+- **架构**：32 位 arm、`ARM_LPAE=y`、`TRANSPARENT_HUGEPAGE=y`（`arch/arm/Kconfig:100` 在 LPAE 下支持 THP）。arm64（`b65399f6111b`，2020）、loongarch（`ddc1729b07cc`，2023，说明原话 “otherwise it would be treated as a swap pmd”）都已按这条约定改过；arm32 现在的写法来自 `624531886987`（2016，那时的语义是“失效后不在场”），之后没跟上。
+- **触发**：THP 拆分经 `mm/huge_memory.c:2761` → `pmdp_invalidate()`（`mm/pgtable-generic.c:205`）写入 `pmd_mkinvalid()` 后的项，到拆分完成前的窗口里有人读这个 PMD。
+- **后果**：
+  - 确定的：公共自测 `debug_vm_pgtable` 在 arm LPAE 上会报两条 WARNING（arm 不选 `ARCH_HAS_DEBUG_VM_PGTABLE`，所以平时从不运行，没人发现）；语义与其他架构不一致。
+  - 没观察到的：数据错误或进程异常。现在的公共代码在窗口里读到“不在场”的 PMD 时，大多让调用者重试（缺页返回 0、GUP 走 `no_page_table`、`__pte_offset_map` 不映射），或者先查仍为真的 `pmd_trans_huge` 再加锁。只测了下面这些路径，不能证明没有后果。
+- **证据**：
+  - 静态：`case_taxonomy/ecnoise_20261122/`（引擎自动比出，`review/` 里我和 Codex 盲审，裁定完整线索）。
+  - 动态：`case_taxonomy/lpaeinv_20261122/`。只改 `arch/arm/Kconfig` 让 arm LPAE 选 `ARCH_HAS_DEBUG_VM_PGTABLE`：启动时 `debug_vm_pgtable.c:929`、`:930` 报 WARNING，`:928` 不报（`logs/run_inv_run1.log`、`run_inv_run2.log`）。QEMU `-smp 2` 并发压力 480 秒（PMD 拆分 8332 次、`MADV_COLLAPSE` 成功 1229 次、`process_vm_readv` 12498 轮、pagemap 检查），0 异常。内核与 initramfs 在 WSL `/root/work/lpaeinv/keep/`，`K=inv bash run.sh <tag>` 可复现。
+- **发现路径**：编码一致性引擎（整版扫描第 9 个引擎 EC）第三轮加上“大页项先过 `pmd_mkhuge`”后，`pmd_present/pmd_leaf(pmd_mkinvalid(pmd_mkhuge(pfn_pmd(...))))` 在 arm_lpae 上为假、多数构建为真 → 两人盲审 → QEMU 验证。前两轮的组合方式比不出来。
+- **上游状态（2026-11-22，本地 git 只读，未联网）**：本地最新主线 `65e4fd942f72`（11-19）上 `pmd_present`、`pmd_mkinvalid` 没改。没查邮件列表。
+- **邮件列表核对（2026-11-24，lore.kernel.org）**：**已有人交过补丁，未合入**。Karl Mehltretter《[PATCH] ARM: mm: LPAE: Change THP helpers to comply with generic MM semantics》（https://lore.kernel.org/all/20260824055938.27594-1-kmehltretter@gmail.com/ ，2026-08-24；2026-09-19 再发一次 https://lore.kernel.org/all/20260919052344.23653-1-kmehltretter@gmail.com/ ），`Fixes: 624531886987`、Cc stable，仿 arm64 `b65399f6111b`：留一个软件位（第 56 位）表示“失效但仍在场”，让 `pmd_present` 认它和 `L_PMD_SECT_NONE`。他给出的后果比我们记的重：PROT_NONE 的大页同样被当成不在场，`zap_huge_pmd` 找不到页，**普通用户每做一次 mprotect(PROT_NONE)+munmap 泄漏 2MB**（QEMU 1GB 内存 400 次后 MemFree 981→160MB）。讨论串里没有回复、没有 Reviewed-by；主线 v7.4-rc4、linux-next（next-20261123）的 `pmd_present` 都没改。我们的发现（11-22）晚于他的补丁，属于独立重新发现。
+- **可能的修法（没写补丁）**：仿照 arm64、loongarch，`pmd_mkinvalid()` 清有效位的同时置一个软件位（“在场但无效”），`pmd_present()`、`pmd_leaf()` 认这个软件位；之后可让 arm LPAE 选 `ARCH_HAS_DEBUG_VM_PGTABLE`。
+- **状态**：低危，未对外报告。
+
+## B-2026-11-24-1：riscv 上 PROT_NONE 的 1GB（PUD）大页不再被认作大页，munmap 报 bad pud，改回可读写时内核崩溃（EC 引擎线索、QEMU 确认）
+
+- **确认**：2026-11-24，用户确认（“登记一下吧”）。
+- **位置**：`arch/riscv/include/asm/pgtable-64.h`（`df2908090cda`）：`pud_present` 只看 `_PAGE_PRESENT`；`pud_leaf = pud_present(pud) && (pud_val(pud) & _PAGE_LEAF)`；`pgtable.h` 里 `pud_trans_huge` 等于 `pud_leaf`；`PAGE_NONE = _PAGE_PROT_NONE | _PAGE_READ`，不带 `_PAGE_PRESENT`。PMD 级的 `pmd_present` 专门把 `_PAGE_PROT_NONE` 算作在位，PUD 级没跟上。
+- **问题**：1GB 大页经 `mprotect(PROT_NONE)` 由 `change_huge_pud` → `pud_modify(PAGE_NONE)` 写回后，`pud_leaf`/`pud_trans_huge` 变假。之后：
+  - `munmap`：`zap_pud_range` 走 `pud_none_or_clear_bad`，打印 `bad pud` 并清掉这一项（不走 `zap_huge_pud`）；
+  - 再 `mprotect` 回可读写：`change_pud_range` 把叶子项当 PMD 表，`change_pmd_range` 按叶子项里的物理地址去读“页表”，地址不在线性映射里时内核 Oops、panic。
+- **架构**：riscv64，v6.16 起（`c3cc2a4a3a23` 引入 PUD 大页、`ARCH_SUPPORTS_PUD_PFNMAP`）。x86 的同一问题已由 `144bb0aee33a` 修过（`pud_leaf` 只看 PSE 位）。
+- **触发**：需要 1GB 的 PUD 级映射：VFIO 设备 BAR（`vfio_pci_mmap_huge_fault` → `vmf_insert_pfn_pud`），或 1GB 对齐的 device-dax。然后 `mprotect(PROT_NONE)` → `munmap`（bad pud），或 `mprotect(PROT_NONE)` → `mprotect(PROT_READ|PROT_WRITE)`（崩溃）。
+- **证据**：`case_taxonomy/rvpud_20261124/`。QEMU ivshmem-plain 2GB BAR 经 vfio-pci（no-IOMMU）映射 1GB，每次先确认 `order = 18 ... 0x100`：原内核 bad pud 3/3、崩溃 3/3（`change_protection+0x470` 访问 BAR 起点的线性映射地址 `ff60000380000000`）；只读对照 0/3；`pud_leaf` 只看 `_PAGE_LEAF` 的修复 0/3，改回可读写后数据读写正常。
+- **怎么发现的**：EC 引擎（编码一致性检查）`ecunreach_20261123` 在 df 上报 riscv PAGE_NONE 的 PUD `pud_leaf` 为假、其他架构为真（规则 4），盲审裁定可能·强；`rvpud_20261124` 动态确认。
+- **上游状态（2026-11-24 联网只读核对）**：主线 v7.4-rc4、linux-next、riscv 树 for-next/fixes、mm 各树都没修；lore 上没有报告或补丁。看来是首次发现。
+- **复核（2026-11-24，主线 65e4fd942f72，开 DEBUG_VM/DEBUG_VM_PGTABLE/PAGE_TABLE_CHECK）**：bad pud 3/3、崩溃 3/3、只读对照 0/3；修复后 0/3、数据读写正常，开机自检和页表检查无报错；x86_64 对照正常。修复后“PROT_NONE 改回可读写”会触发 `pudp_invalidate` 的 `VM_WARN_ON_ONCE(!pud_present)`，x86 主线同样触发，属另一处已有问题（只在 DEBUG_VM 下）。
+- **已报告（2026-11-24 16:05，作者本人用 git send-email 发出，返回 250）**：补丁《[PATCH] riscv: mm: make pud_leaf() only care about the leaf bits》，Message-ID 记在外层进度日志，基于主线 8d7fe9885c62。To：Paul Walmsley、Palmer Dabbelt、Albert Ou；Cc：Alexandre Ghiti、linux-riscv、linux-kernel、David Hildenbrand、linux-mm、stable。无 Assisted-by（用户决定）。等待维护者回复；进入 riscv 树或主线后记提交号。

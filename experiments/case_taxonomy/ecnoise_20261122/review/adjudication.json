@@ -1,0 +1,89 @@
+{
+ "stat": {
+  "一致率": 0.5,
+  "期望一致": 0.25,
+  "kappa": 0.333,
+  "分布": {
+   "Claude": {
+    "排除": 2,
+    "可能": 2
+   },
+   "Codex": {
+    "排除": 2,
+    "完整线索": 2
+   }
+  }
+ },
+ "rows": [
+  {
+   "id": "N1",
+   "claude": [
+    "排除",
+    "规则误报"
+   ],
+   "codex": [
+    "排除",
+    "规则误报"
+   ],
+   "final": [
+    "排除",
+    "规则误报"
+   ],
+   "why": "一致：riscv 开 THP 时 pmd_present 查 _PAGE_LEAF，为真；样本构建没开 THP。"
+  },
+  {
+   "id": "N2",
+   "claude": [
+    "排除",
+    "规则误报"
+   ],
+   "codex": [
+    "排除",
+    "规则误报"
+   ],
+   "final": [
+    "排除",
+    "规则误报"
+   ],
+   "why": "一致，同 N1。"
+  },
+  {
+   "id": "N3",
+   "claude": [
+    "可能",
+    ""
+   ],
+   "codex": [
+    "完整线索",
+    ""
+   ],
+   "final": [
+    "完整线索",
+    ""
+   ],
+   "why": "采纳 Codex。双方代码层面的分析一致：arm LPAE pmd_present 只看 L_PMD_SECT_VALID（pgtable-3level.h:180），pmd_mkinvalid 清的正是这一位（:217-220），pmd_leaf=pmd_sect 也随之为假；这些宏不受 THP 开关影响，LPAE 声明支持 THP（arch/arm/Kconfig:100），THP 拆分经 huge_memory.c:2761 → pgtable-generic.c:205 实际走这条组合，违反 debug_vm_pgtable.c:913-930 明写的约定。我判“可能”是因为没找到具体后果路径；封存之后查到旁证：arm64 b65399f6111b（2020）和 loongarch ddc1729b07cc（2023，说明原话“otherwise it would be treated as a swap pmd”）都把同一问题当缺陷修过，约定来自 027ef6c87853（2012，x86，修一个偶发 BUG_ON）和 86ec2da037b8（2020 改名时写明）。arm32 的现行写法来自 624531886987（2016），当时约定还是“失效后不在场”，之后没有跟上；arm 不选 ARCH_HAS_DEBUG_VM_PGTABLE，这条自测从不运行；主线 65e4fd942f72 未改。限定：只有静态证据，没有动态验证，具体后果未观察到。N3、N4 是同一根因。"
+  },
+  {
+   "id": "N4",
+   "claude": [
+    "可能",
+    ""
+   ],
+   "codex": [
+    "完整线索",
+    ""
+   ],
+   "final": [
+    "完整线索",
+    ""
+   ],
+   "why": "同 N3（同一根因）。"
+  }
+ ],
+ "carried_over": {
+  "E01": "排除（平台不可达，第二轮裁定）",
+  "E02": "完整线索（arm LPAE 交换项截断，B-2026-11-22-1）",
+  "E03": "排除（平台不可达）",
+  "E04": "排除（平台不可达，第二轮裁定）"
+ }
+}

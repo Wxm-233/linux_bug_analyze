@@ -1,0 +1,26 @@
+[
+    {
+        "verdict":  "排除",
+        "why":  "样本关闭透明大页（THP）。arch/riscv/include/asm/pgtable.h:782 清除 PRESENT 和 PROT_NONE，关闭 THP 时第 220 行仅检查这两位，故求值为零。公共层检查受 mm/debug_vm_pgtable.c:904 的 THP 条件保护；开启后第 215 行还检查保留下来的叶权限位，有效大页仍返回真。",
+        "id":  "N1",
+        "reason":  "规则误报"
+    },
+    {
+        "verdict":  "排除",
+        "why":  "arch/riscv/include/asm/pgtable.h:237 要求 present 且含叶权限位。样本关闭 THP，失效后第 220 行的 present 为假，足以解释报警。开启 THP 时第 215 行认可叶权限位，第 782 行保留这些位，合法大页满足 mm/debug_vm_pgtable.c:930 的断言。",
+        "id":  "N2",
+        "reason":  "规则误报"
+    },
+    {
+        "verdict":  "完整线索",
+        "why":  "arch/arm/Kconfig:100 声明 LPAE 支持 THP。arch/arm/include/asm/pgtable-3level.h:219 清除有效位，第 180 行的 present 却只检查该位。通用失效路径在 mm/pgtable-generic.c:205 写入该项，开启 THP 时合法大页失效后返回零，违反 mm/debug_vm_pgtable.c:929 的明确断言。",
+        "id":  "N3",
+        "reason":  ""
+    },
+    {
+        "verdict":  "完整线索",
+        "why":  "arch/arm/include/asm/pgtable-3level.h:119 按低两位识别节映射，第 121 行以此定义 leaf。合法大页的类型为二进制 01，第 219 行清有效位后变为 00，leaf 随即为假。这些宏在开启 THP 后仍相同，通用失效路径写入的结果违反 mm/debug_vm_pgtable.c:930 的叶项断言。",
+        "id":  "N4",
+        "reason":  ""
+    }
+]

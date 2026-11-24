@@ -1,0 +1,206 @@
+[
+ {
+  "id": "E01",
+  "verdict": "排除",
+  "reason": "平台不可达",
+  "why": "校准行。mips32xpa 16K 页，交换偏移第 23 位起截断即物理 128GB 起，Malta 内存在 32 位物理地址内；mips64 第 40 位以上，MIPS sparsemem.h MAX_PHYSMEM_BITS 48 远低于截断点对应地址。第八轮已裁定不可达。"
+ },
+ {
+  "id": "E02",
+  "verdict": "完整线索",
+  "reason": "",
+  "why": "校准行。arm LPAE __swp_entry 在 32 位字内左移 8 位，迁移项页帧号只保留 24 位，LPAE 物理地址 40 位；已登记 B-2026-11-22-1 并在 QEMU 上确认。"
+ },
+ {
+  "id": "E03",
+  "verdict": "排除",
+  "reason": "平台不可达",
+  "why": "校准行。ppc44x nohash/32 __swp_entry 偏移左移 5 位再左移 3 位，保留 24 位；44x 物理地址 36 位、页 4K，页帧号 24 位以内，碰不到。"
+ },
+ {
+  "id": "E04",
+  "verdict": "可能",
+  "reason": "",
+  "why": "mips32xpa：pgtable-32.h:158 XPA 的 pfn_pte 把页帧号拆成 pte_high=pfn<<PFN_PTE_SHIFT（32 位）和 pte_low=pfn>>_PAGE_PRESENT_SHIFT(24)。PFN_PTE_SHIFT=PAGE_SHIFT-12+_CACHE_SHIFT(5)+3，只有 4K 页时为 8、pte_high 正好容 24 位；但 Kconfig CPU_MIPS32_R5_XPA depends on !PAGE_SIZE_4KB，16K 页时为 10，pte_high 只容 22 位，第 22、23 位（物理 64GB～256GB）两边都不存，64K 页时 36～39 位全丢。XPA 声明 MAX_POSSIBLE_PHYSMEM_BITS 40，代码层面成立；但本构建是 Malta（32 位物理地址），树内其他 XPA 平台是否有 64GB 以上内存缺证据。mips64 部分（第 51 位、只在 NC 下）不可达（MAX_PHYSMEM_BITS 48）。"
+ },
+ {
+  "id": "E05",
+  "verdict": "排除",
+  "reason": "合理的实现差异",
+  "why": "book3s64 pte_mkdirty 同时置 _PAGE_DIRTY|_PAGE_SOFT_DIRTY（_PAGE_SOFT_DIRTY 无条件定义，pte_soft_dirty 在 HAVE_ARCH_SOFT_DIRTY 下）；x86、s390 开 MEM_SOFT_DIRTY 时也这样做。多数构建为假是因为没有软脏支持或没开配置，不是约定。"
+ },
+ {
+  "id": "E06",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv 影子栈项 W=1、R=0，pmd_write 为真；x86 的 pmd_write 也把影子栈项算可写（pmd_shstk），但要求 PSE 和 X86_USER_SHADOW_STACK，本组合没加 pmd_mkhuge、x86 构建也没开影子栈，多数的“假”是组合和配置造成的。"
+ },
+ {
+  "id": "E07",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E08",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E09",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E10",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E11",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E12",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E13",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E14",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E15",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pte_huge = present && 叶子位（RWX 任一），任何叶子项都为真；x86 等要 pte_mkhuge 置 PSE。pte_huge 只在 hugetlb.c:7155、riscv hugetlbpage.c:79、debug_vm_pgtable.c:894 对大页项调用，组合里没有 pte_mkhuge，比较没有意义。"
+ },
+ {
+  "id": "E16",
+  "verdict": "排除",
+  "reason": "合理的实现差异",
+  "why": "非 PAE 的 i386 没有 NX 位，pte_exec 恒为真；多数的“假”来自 riscv 影子栈编码（X=0）。硬件差异。"
+ },
+ {
+  "id": "E17",
+  "verdict": "排除",
+  "reason": "合理的实现差异",
+  "why": "i386 PAE 的 PUD 折叠到顶层 PDPTE，native_make_pgd 用 PGD_ALLOWED_BITS（pgtable_types.h:317）掩掉 RW/A/D 等硬件保留位，所以 pud_mkdirty/mkwrite/mkyoung 后读回为假；32 位 x86 也没有 PUD 大页，这些组合用不到。"
+ },
+ {
+  "id": "E18",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "非 PAE i386 两级页表，PUD 折叠，pud_present 恒为 1（pgtable-nopud），pud_mkinvalid 对折叠层没有意义。"
+ },
+ {
+  "id": "E19",
+  "verdict": "排除",
+  "reason": "合理的实现差异",
+  "why": "i386 PAE 的 PUD 折叠到顶层 PDPTE，native_make_pgd 用 PGD_ALLOWED_BITS（pgtable_types.h:317）掩掉 RW/A/D 等硬件保留位，所以 pud_mkdirty/mkwrite/mkyoung 后读回为假；32 位 x86 也没有 PUD 大页，这些组合用不到。"
+ },
+ {
+  "id": "E20",
+  "verdict": "排除",
+  "reason": "合理的实现差异",
+  "why": "i386 PAE 的 PUD 折叠到顶层 PDPTE，native_make_pgd 用 PGD_ALLOWED_BITS（pgtable_types.h:317）掩掉 RW/A/D 等硬件保留位，所以 pud_mkdirty/mkwrite/mkyoung 后读回为假；32 位 x86 也没有 PUD 大页，这些组合用不到。"
+ },
+ {
+  "id": "E21",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pud_bad = !present || 叶子位，pfn_pud 带 R/X 的保护值就是叶子，判坏；x86 要 pud_mkhuge 置 PSE 才是叶子，加上后同样判坏。组合缺 pud_mkhuge，调用方也先查 pud_leaf 再查 pud_bad。"
+ },
+ {
+  "id": "E22",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pmd_mkinvalid 置 PTE_PRESENT_INVALID，pmd_present/pmd_leaf 保持为真，这正是 pmd_mkinvalid 的约定（debug_vm_pgtable 对大页项检查 pmd_present(pmd_mkinvalid(pmd_mkhuge(...)))）；x86 等要 PSE 才保持，组合缺 pmd_mkhuge，多数的“假”是组合造成的。"
+ },
+ {
+  "id": "E23",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pmd_mkinvalid 置 PTE_PRESENT_INVALID，pmd_present/pmd_leaf 保持为真，这正是 pmd_mkinvalid 的约定（debug_vm_pgtable 对大页项检查 pmd_present(pmd_mkinvalid(pmd_mkhuge(...)))）；x86 等要 PSE 才保持，组合缺 pmd_mkhuge，多数的“假”是组合造成的。"
+ },
+ {
+  "id": "E24",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E25",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E26",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E27",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "配置差异：只有 arm64、loongarch、ppc64le、s390 构建开了 TRANSPARENT_HUGEPAGE，x86/arm_lpae 构建没开，pmd_trans_huge 退到恒 0 的通用定义。开了 THP 的架构给出真才是对的。"
+ },
+ {
+  "id": "E28",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E29",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E30",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E31",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "arm64 pfn_pmd 用 PAGE_* 保护值时类型位是 0b11，在 PMD 级是表描述符，pmd_bad=!pmd_table 为假；要 pmd_mkhuge 清 PMD_TABLE_BIT 才是块映射。内核里 pfn_pmd 总配 pmd_mkhuge，组合本身不出现。"
+ },
+ {
+  "id": "E32",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "x86_64 pud_mkdirty 对不可写项置 SavedDirty/软件位，pud_bad 的掩码不含这些位；pud_bad 对叶子项（未加 pud_mkhuge 的数据项）本来没有意义，调用方先查 pud_leaf。"
+ },
+ {
+  "id": "E33",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "配置差异：只有 arm64、loongarch、ppc64le、s390 构建开了 TRANSPARENT_HUGEPAGE，x86/arm_lpae 构建没开，pmd_trans_huge 退到恒 0 的通用定义。开了 THP 的架构给出真才是对的。"
+ },
+ {
+  "id": "E34",
+  "verdict": "排除",
+  "reason": "合理的实现差异",
+  "why": "s390 pte_mkdirty 置 _PAGE_DIRTY|_PAGE_SOFT_DIRTY（pgtable.h:1089），s390 构建开了 MEM_SOFT_DIRTY；与 E05 同理。"
+ }
+]

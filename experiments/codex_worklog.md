@@ -314,3 +314,16 @@ wsl -u root -- bash /mnt/d/homework/software/linux_bug_analyze/linux_bug_analyze
 2026-11-21　完成晚期候选盲判、根因归并和汇总核对。输出位于 experiments/case_taxonomy/abisupply_20261121/sealed_late/ 下的 scorer_judgement.json、rootcauses.json 和 summary.json。
 
 2026-11-21　完成晚期候选盲判、父版本核对及根因去重。逐条记录、根因表和汇总均存于 experiments/case_taxonomy/capsupply_20261121/sealed_late/。
+
+2026-11-22　swaprev_20261122 第二审查人完成 df2908090cda 的 R1～R8 静态盲判，结果与依据见 review/codex_review.json、review/codex_notes.md；内核构建及运行均为 0。
+2026-11-22　完成 R1 QEMU 动态证据复核，四组实测前后页号吻合，一组拆分前页号为推算；总评基本确认，见 swaprev_20261122/review/codex_qemu_review.md，本次未运行 QEMU。
+
+2026-11-22　完成 ecscan 第二审查人独立盲审，34 组中完整线索 0、可能 2、排除 32；逐项依据及审查边界见 ecscan_20261122/review/codex_review.json 和 codex_notes.md。
+2026-11-22 独立盲审 ecnoise 四条候选（df2908090cda）：N1、N2 排除为规则误报，N3、N4 为完整线索；判定与静态依据见 ecnoise_20261122/review/codex_review.json、codex_notes.md，未运行内核。
+2026-11-22：依据 pool.tsv 与本地 Linux Git 历史独立盲标 EC 历史召回候选，25 条中 9 是、16 否；已写入 ecrecall_20261122/label/codex_labels.json 并核对哈希及顺序。
+
+2026-11-22　独立盲审 df2908090cda 的 14 条编码一致性候选，13 条排除、N11 可能、完整线索 0 条；结果和依据见 ecprot_20261122/review/codex_review.json 与 codex_notes.md。
+
+2026-11-23 独立盲审 ecsrc 的 M1～M4，对照 df2908090cda 源码手算，4 条均排除；结论和行号见 ecsrc_20261123/review/codex_review.json、codex_notes.md。未运行内核。
+
+2026-11-23 第二审查人完成 ecunreach 本轮 17 条独立盲审，完整线索 0、可能 7（同源）、排除 10。结果见 ecunreach_20261123/review/codex_review.json 和 codex_notes.md。

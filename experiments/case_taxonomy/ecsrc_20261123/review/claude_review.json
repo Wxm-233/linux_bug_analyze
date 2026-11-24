@@ -1,0 +1,10 @@
+[
+ {"id": "M1", "verdict": "排除", "reason": "规则误报",
+  "why": "ppc64le/ppc64le_hash 上 PAGE_NONE 的大页 pmd_protnone 为真，pmd_mkwrite_novma 置 _PAGE_WRITE 后不再是 protnone（book3s/64/pgtable.h pte_protnone 要求 RWX 位全空），这是 powerpc 用 RWX 全空表示 PROT_NONE 的编码，合理。多数“保持”来自 arm64、loongarch、x86_64 上可确定的保护常量里 protnone 本来就恒为假（arm64 关 NUMA_BALANCING 时 pmd_protnone 恒 0），没有可比的输入；内核也不会对 PROT_NONE 大页直接 mkwrite（写权限由 pmd_modify/maybe_pmd_mkwrite 按 vma 给出）。输入覆盖假象。"},
+ {"id": "M2", "verdict": "排除", "reason": "规则误报",
+  "why": "x86 的用户态保护常量都不带 _PAGE_DIRTY（arch/x86/include/asm/pgtable_types.h），能确定的 9～10 个常量上 pmd_dirty 修改前本来就是假，pmd_mkclean 自然“保持”；带脏位的内核常量在 x86 上是 imprecise（不参加）。多数“改变”的构建（arm64、loongarch、ppc64le、ppc64le_hash）是因为它们有保护常量本身带脏位。x86 pmd_mkclean 清 _PAGE_DIRTY_BITS（含 SAVED_DIRTY），实现正确。输入覆盖假象。"},
+ {"id": "M3", "verdict": "排除", "reason": "规则误报",
+  "why": "x86 能确定的保护常量（PAGE_READONLY、PAGE_COPY 等）本身不可写，pmd_write 修改前就是假，pmd_wrprotect 只能“保持”；可写的 PAGE_SHARED、PAGE_KERNEL 在 x86 上 imprecise（影子栈相关的 _PAGE_SAVED_DIRTY 处理使求值不精确），不参加。x86 pmd_wrprotect 清 _PAGE_RW（arch/x86/include/asm/pgtable.h:516 一带），实现正确。输入覆盖假象。"},
+ {"id": "M4", "verdict": "排除", "reason": "规则误报",
+  "why": "loongarch 的用户态保护常量 PAGE_NONE/READONLY/SHARED 不带 _PAGE_ACCESSED，pmd_young 修改前为假，pmd_mkyoung 置位后为真，这正是 mkyoung 的语义；其余可比构建（arm64、ppc64le、ppc64le_hash）的保护常量本来就带访问位，pmd_young 恒真，所以“保持”。是输入覆盖造成的反向假象，loongarch 实现正确。"}
+]

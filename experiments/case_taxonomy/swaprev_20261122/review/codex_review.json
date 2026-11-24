@@ -1,0 +1,95 @@
+[
+  {
+    "id": "R1",
+    "verdict": "真实问题",
+    "nums": {
+      "SWP_PFN_BITS": 26,
+      "offset_bits": 24,
+      "PAGE_SHIFT": 12,
+      "arch_phys_bits": 40
+    },
+    "why": "arch/arm/include/asm/pgtable.h:282-293 在 32 位字内将偏移左移 8 位，高位在写入宽 PTE 前已丢失。arch/arm/include/asm/pgtable-3level-hwdef.h:73-76 明定 40 位物理地址。FLATMEM 允许非零起始页帧，公共迁移项保存绝对页帧号。按架构支持范围判定，回读可能使 mm/page_vma_mapped.c:124-140 的页帧范围比较失配。"
+  },
+  {
+    "id": "R2",
+    "verdict": "不可达",
+    "nums": {
+      "SWP_PFN_BITS": 26,
+      "offset_bits": 23,
+      "PAGE_SHIFT": 14,
+      "XPA_phys_bits": 40,
+      "Malta_map_bits": 32
+    },
+    "why": "arch/mips/include/asm/pgtable-32.h:239-243 仅在高半 PTE 内存储偏移，32 位左移 9 位后保留 23 位。指定构建选择 Malta。arch/mips/mti-malta/malta-dtshim.c:76-127 说明板上两种 DDR 映射均处于 32 位物理空间。16 KiB 页至多需要 18 位页帧号，因此 Malta 的合法 RAM 页完整往返；其他 XPA 平台需单独判断。"
+  },
+  {
+    "id": "R3",
+    "verdict": "不可达",
+    "nums": {
+      "SWP_PFN_BITS": 26,
+      "offset_bits": 24,
+      "PAGE_SHIFT": 12,
+      "phys_bits": 36
+    },
+    "why": "arch/powerpc/include/asm/nohash/32/pgtable.h:191-195 先在 unsigned long 中将偏移左移 5 位，再将结果左移 3 位。赋给宽 PTE 时两次移位已经完成，偏移仅余 24 位。arch/powerpc/mm/init_32.c:9 标明 44x 采用 36 位物理地址，扣除 12 位页内偏移正好需要 24 位。公共掩码较宽，合法页帧仍全部可表示。"
+  },
+  {
+    "id": "R4",
+    "verdict": "可能",
+    "nums": {
+      "SWP_PFN_BITS": 52,
+      "offset_bits": 40,
+      "PAGE_SHIFT": 12,
+      "platform_RAM_address_bits": null
+    },
+    "why": "arch/mips/include/asm/pgtable-64.h:340-347 将偏移左移 24 位写入 64 位字。FLATMEM 下公共层按 64 位物理地址类型计算 52 位 PFN。arch/mips/include/asm/addrspace.h:136-141 区分 XKPHYS 的地址字段与处理器实现宽度。前者容得下超过编码范围的地址，但所查材料未证实该 R6 配置有相应 RAM；若有，回读将改变公共层比较的页帧号。"
+  },
+  {
+    "id": "R5",
+    "verdict": "不是问题",
+    "nums": {
+      "SWP_PFN_BITS": 26,
+      "arch_offset_bits": 27,
+      "public_offset_bits": 26,
+      "PAGE_SHIFT": 12
+    },
+    "why": "arch/x86/include/asm/pgtable-3level.h:173-176 在 32 位架构中间值内给类型留 5 位，偏移可用 27 位。该文件第 186-202 行将两字段拆开重编码进 64 位 PTE，逆变换后再合并。include/linux/swapops.h:28-43 对本 FLATMEM 构建给出 26 位公共偏移和 PFN，均在往返容量内。"
+  },
+  {
+    "id": "R6",
+    "verdict": "不是问题",
+    "nums": {
+      "SWP_PFN_BITS": 20,
+      "offset_bits": 24,
+      "PAGE_SHIFT": 12,
+      "phys_bits": 32
+    },
+    "why": "arch/arm/include/asm/pgtable.h:282-293 将类型放在位 2 至 6，偏移从位 8 开始，32 位字可往返 24 位偏移。本构建使用 32 位 phys_addr_t 和 4 KiB 页，include/linux/swapops.h:35-43 算得 PFN 宽度为 20 位。arch/arm/kernel/setup.c:775-792 也对 32 位空间以外的内存作了限制。"
+  },
+  {
+    "id": "R7",
+    "verdict": "测试缺陷",
+    "kind": "漏测",
+    "nums": {
+      "max_swap_offset": 0,
+      "encoded_offset_bits": 50,
+      "intended_max_offset": 1125899906842623,
+      "generic_max_swapfile_size": 1125899906842624
+    },
+    "why": "mm/debug_vm_pgtable.c:1228-1231 用类型零和全一偏移探测。arch/x86/include/asm/pgtable_64.h:211-237 对偏移取反，得到零 PTE。include/linux/leafops.h:55-60 将空 PTE 返回为空项，所得偏移为零。mm/swapfile.c:3449-3462 直接解架构字段，可恢复 50 个一。提交 a3a3e215c9c1 将测试改经空项判定，从此最大偏移没有被测到。"
+  },
+  {
+    "id": "R8",
+    "verdict": "测试缺陷",
+    "kind": "误报",
+    "nums": {
+      "PAGE_SHIFT": 14,
+      "SWP_PFN_BITS": 34,
+      "offset_shift": 24,
+      "offset_bit": 36,
+      "PMD_PRESENT_INVALID_bit": 60,
+      "assertion": false
+    },
+    "why": "mm/debug_vm_pgtable.c:1233 把全一值当作 PFN。arch/loongarch/include/asm/pgtable.h:329-346 将偏移位 36 移到 PMD 位 60 并置 HUGE。该位是 PRESENT_INVALID，故第 258-261 行判为 present，第 834 行的测试断言失败。合法 PFN 仅 34 位，迁移标志也在位 36 以下。提交 c0a80c2ce68d 引入这组输入与断言。"
+  }
+]

@@ -1,0 +1,26 @@
+[
+ {
+  "id": "N1",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "riscv pmd_present 有两套定义（pgtable.h:206-222）：开 THP 时检查 _PAGE_PRESENT|_PAGE_PROT_NONE|_PAGE_LEAF，pmd_mkinvalid（:780）只清前两位，叶子位还在，结果为真，满足 debug_vm_pgtable.c:929；本构建 riscv_defconfig 没开 THP，用的是不查叶子位的版本。pmd_mkinvalid 只经 pmdp_invalidate（pgtable-generic.c:205，THP 下）使用，没开 THP 时用不到。配置差异，三条规则没覆盖（观察接口按配置换了定义但不是常量）。"
+ },
+ {
+  "id": "N2",
+  "verdict": "排除",
+  "reason": "规则误报",
+  "why": "同 N1：riscv pmd_leaf = pmd_present && _PAGE_LEAF（:235-238），开 THP 时 pmd_present 为真，pmd_leaf 也为真；本构建没开 THP。"
+ },
+ {
+  "id": "N3",
+  "verdict": "可能",
+  "reason": "",
+  "why": "arm LPAE：pmd_present 只看 L_PMD_SECT_VALID（pgtable-3level.h:180，不受 THP 开关影响），pmd_mkinvalid 清掉的正是这一位（:217-220），所以开 THP（arch/arm/Kconfig:100 HAVE_ARCH_TRANSPARENT_HUGEPAGE if ARM_LPAE）后 pmd_present(pmd_mkinvalid(pmd_mkhuge(x))) 仍为假，违反 debug_vm_pgtable.c:913-930 写明的约定（THP 拆分去掉 present 位时 pmd_present、pmd_trans_huge 必须仍为真）。arm 不选 ARCH_HAS_DEBUG_VM_PGTABLE，这条自测在 arm 上从不运行。代码层面成立；但 arm 的 pmd_trans_huge（:195）在失效后仍为真，多数无锁遍历先查 pmd_trans_huge 或 is_swap_pmd 再加锁，实际后果（拆分窗口里被当成非在场项处理）没有找到具体路径，判可能。"
+ },
+ {
+  "id": "N4",
+  "verdict": "可能",
+  "reason": "",
+  "why": "同 N3：arm LPAE pmd_leaf = pmd_sect（类型位 == PMD_TYPE_SECT，bit0 为 1），pmd_mkinvalid 清 bit0 后类型变成 0，pmd_leaf 为假，违反 debug_vm_pgtable.c:930。与 N3 同一根因（失效后不保留叶子/在场判断），后果同样未找到具体路径。"
+ }
+]

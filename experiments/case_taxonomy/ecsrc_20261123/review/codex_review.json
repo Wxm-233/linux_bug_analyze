@@ -1,0 +1,6 @@
+[
+  {"id":"M1","verdict":"排除","reason":"合理的实现差异","why":"arch/powerpc/include/asm/book3s/64/pgtable.h:496 用“在场叶项且读写执行位全零”识别无访问权限；同文件:598、:1056 的 PMD 加写操作同时授予读写，故 PAGE_NONE 从真变假符合编码。mm/huge_memory.c:2341 先恢复 VMA 保护，再按 writable 决定是否加写。"},
+  {"id":"M2","verdict":"排除","reason":"求值不精确","why":"arch/x86/include/asm/pgtable.h:172、:552 分别检测和清除同一组脏位。PAGE_COPY 初始干净，清后仍干净；arch/x86/include/asm/pgtable_types.h:226 的内核执行映射带脏位，其清理前结果在表决中却为 imprecise。mm/debug_vm_pgtable.c:201 检查先置脏再清理，预期结果为零。"},
+  {"id":"M3","verdict":"排除","reason":"求值不精确","why":"arch/x86/include/asm/pgtable_types.h:206 的 PAGE_SHARED 带写位，:209 的 PAGE_COPY_EXEC 无写位。前者清写应从真变假，却因初值不确定而未计票。arch/x86/include/asm/pgtable.h:221、:518 显示查询兼查影子栈，写保护清 RW 并转存硬件脏位，避免产生仍被视作可写的编码。"},
+  {"id":"M4","verdict":"排除","reason":"合理的实现差异","why":"arch/loongarch/include/asm/pgtable-bits.h:116 的 PAGE_READONLY 初始不含访问位；arch/loongarch/include/asm/pgtable.h:576、:587 分别读取和置位同一 _PAGE_ACCESSED，故从零变一。mm/debug_vm_pgtable.c:197 明确要求对旧项置 young 后读到真，多数构建初值已真也满足该约定。"}
+]

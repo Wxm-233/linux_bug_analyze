@@ -1,0 +1,19 @@
+[
+ {"id": "R1", "verdict": "排除", "reason": "合理的实现差异", "why": "同 R6：ppc64le 的 PAGE_NONE（pgtable-masks.h:23，_PAGE_BASE 含 _PAGE_PRESENT）PUD 大页 pud_present 为真，各修改都不动 PRESENT 位，所以每个修改后仍为真。多数为假来自 x86_64（pud_present 只看 _PAGE_PRESENT，PROT_NONE 用 _PAGE_PROTNONE）和 riscv64_thp（同理）；PROT_NONE 的 PUD 叶子是否算 present 各架构本来不同，公共代码识别 PUD 叶子靠 pud_leaf/pud_trans_huge 而不是 pud_present，这里没有约定被违反。"},
+ {"id": "R2", "verdict": "排除", "reason": "合理的实现差异", "why": "同 R1。"},
+ {"id": "R3", "verdict": "排除", "reason": "合理的实现差异", "why": "同 R1。"},
+ {"id": "R4", "verdict": "排除", "reason": "合理的实现差异", "why": "同 R1。"},
+ {"id": "R5", "verdict": "排除", "reason": "合理的实现差异", "why": "同 R1。"},
+ {"id": "R6", "verdict": "排除", "reason": "合理的实现差异", "why": "book3s/64/pgtable.h:875-878 pud_present 看 _PAGE_PRESENT，ppc 的 PAGE_NONE 带 _PAGE_PRESENT，为真；x86、riscv 的 PAGE_NONE 不带 PRESENT 位，pud_present 为假。PROT_NONE 叶子的 present 语义不是公共代码依赖的约定（mm/mprotect.c、mm/memory.c 在 PUD 级用 pud_leaf / pud_trans_huge 判断叶子），ppc 为真不会让公共代码出错。"},
+ {"id": "R7", "verdict": "排除", "reason": "合理的实现差异", "why": "同 R1。"},
+ {"id": "R8", "verdict": "完整线索", "reason": "", "why": "riscv pgtable-64.h:177-180 pud_present 只看 _PAGE_PRESENT，:193-196 pud_leaf = pud_present && _PAGE_LEAF，而 PAGE_NONE = _PAGE_PROT_NONE|_PAGE_READ（pgtable.h:169）不带 PRESENT，所以 PROT_NONE 的 PUD 大页 pud_leaf、pud_trans_huge（:1067-1070 直接等于 pud_leaf）都为假；同文件 pmd_present（pgtable.h:207-220）专门把 _PAGE_PROT_NONE 和 _PAGE_LEAF 算作在位，PUD 级没有跟上。riscv 自 c3cc2a4a3a23（v6.16）支持 PUD THP（DAX、ARCH_SUPPORTS_PUD_PFNMAP）。mprotect(PROT_NONE)：change_pud_range（mm/mprotect.c:606）见 pud_leaf 为真→change_huge_pud→pud_modify(PAGE_NONE)（huge_memory.c:2801-2836）写回后叶子判断变假；之后 munmap 的 zap_pud_range 因 pud_trans_huge 为假走 pud_none_or_clear_bad，pud_bad 为真→pud_clear_bad 报 bad pud 并清掉；再 mprotect 回来则 pud_leaf 为假，change_pmd_range 把 1GB 叶子的物理页当 PMD 表遍历。x86 同一问题由 144bb0aee33a（mm/x86: make pud_leaf() only care about PSE bit）修过。主线 65e4fd942f72 未改。未做动态验证。"},
+ {"id": "R9", "verdict": "完整线索", "reason": "", "why": "同 R8（pud_mkclean 不改 PRESENT/LEAF 位，结论相同，与 R8 同一根因）。"},
+ {"id": "R10", "verdict": "完整线索", "reason": "", "why": "同 R8。"},
+ {"id": "R11", "verdict": "完整线索", "reason": "", "why": "同 R8。"},
+ {"id": "R12", "verdict": "完整线索", "reason": "", "why": "同 R8。"},
+ {"id": "R13", "verdict": "完整线索", "reason": "", "why": "同 R8。"},
+ {"id": "R14", "verdict": "排除", "reason": "规则误报", "why": "riscv 的用户态保护常量（含 PAGE_NONE）不带 _PAGE_ACCESSED，pud_young 修改前为假，pud_mkyoung 后为真，正是 mkyoung 的语义；x86_64、ppc64le 的保护常量带访问位，pud_young 本来恒真，所以“保持”。输入覆盖假象。"},
+ {"id": "R15", "verdict": "完整线索", "reason": "", "why": "同 R8。"},
+ {"id": "R16", "verdict": "排除", "reason": "规则误报", "why": "x86 用户态保护常量不带 _PAGE_DIRTY，能确定的常量上 pud_dirty 修改前就是假，pud_mkclean 只能“保持”；带脏位的内核常量在 x86 上 imprecise 不参加。输入覆盖假象（与上一轮 PMD 级 x86 两行同类）。"},
+ {"id": "R17", "verdict": "排除", "reason": "规则误报", "why": "x86 能确定的保护常量本身不可写，pud_write 修改前为假，pud_wrprotect 只能“保持”；可写常量 imprecise 不参加。输入覆盖假象。"}
+]

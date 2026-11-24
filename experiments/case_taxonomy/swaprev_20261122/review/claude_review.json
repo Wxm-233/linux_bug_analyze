@@ -1,0 +1,10 @@
+[
+ {"id": "R1", "verdict": "真实问题", "nums": {"SWP_PFN_BITS": 26, "enc_bits": 24, "phys_cut": "64GB"}, "why": "flatmem 下无 MAX_PHYSMEM_BITS，SWP_PFN_BITS=min(64-12,26)=26；arm 交换项偏移从第 8 位起，32 位 PTE 只剩 24 位；LPAE 允许 40 位物理地址，flatmem 不限制使用 64GB 以上内存；截断后 remove_migration_pte/check_pte 对不上，迁移项残留，migration_entry_wait 等错误的页。现实平台未找到，但架构规范与内核配置都允许，且同类问题 630dc25e43da 在 x86 PAE 上已有真实后果；我判真实问题（另有 QEMU 动态确认，未给第二审查人）"},
+ {"id": "R2", "verdict": "可能", "nums": {"SWP_PFN_BITS": 26, "enc_bits": 23, "phys_cut": "32GB"}, "why": "XPA 分支交换项在 pte_high 第 9 位起，23 位；XPA 允许 40 位物理地址；maltaup_xpa 不用 sparsemem；没找到 32GB 以上有内存的 XPA 平台，也没有动态验证"},
+ {"id": "R3", "verdict": "不可达", "nums": {"SWP_PFN_BITS": 26, "enc_bits": 24, "phys_bits": 36}, "why": "44x 物理地址 36 位，4K 页时页帧号最多 24 位，正好放得下；26 是无 MAX_PHYSMEM_BITS 时的回退值"},
+ {"id": "R4", "verdict": "不可达", "nums": {"SWP_PFN_BITS": 52, "enc_bits": 40, "phys_bits": "约 48"}, "why": "MIPS64 实际物理地址不超过约 48 位，页帧号约 36 位，40 位放得下"},
+ {"id": "R5", "verdict": "不是问题", "nums": {"SWP_PFN_BITS": 26, "enc_bits": 26}, "why": "PAE 架构项 27 位、页表项取反段 50 位，公共偏移 26 位，全部保持"},
+ {"id": "R6", "verdict": "不是问题", "nums": {"SWP_PFN_BITS": 20, "enc_bits": 24}, "why": "不开 LPAE 时 phys_addr_t 32 位，SWP_PFN_BITS=20 < 24"},
+ {"id": "R7", "verdict": "测试缺陷", "kind": "漏测", "nums": {"max_swap_offset": 0, "intended": "2^50-1"}, "why": "类型 0、偏移全 1 在 x86_64 上取反后整项为 0，softleaf_from_pte 判 none 返回空项，max_swap_offset=0；generic_max_swapfile_size 手工解码得 2^50；a3a3e215c9c1（v6.19-rc1）把 pte_to_swp_entry 换成 softleaf_from_pte 引入"},
+ {"id": "R8", "verdict": "测试缺陷", "kind": "误报", "nums": {"first_bad_pfn_bit": 36, "legal_pfn_bits": 34}, "why": "页帧号全 1 编码后第 60 位 _PAGE_PRESENT_INVALID 置位，_PAGE_HUGE 也在，pmd_present 为真，softleaf_from_pmd 返回空，断言失败；合法页帧号 34 位（含 A/D 位到第 59 位）不受影响；c0a80c2ce68d（v6.19-rc1）引入"}
+]

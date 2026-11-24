@@ -1,0 +1,206 @@
+[
+  {
+    "id": "E01",
+    "verdict": "可能",
+    "reason": "",
+    "why": "arch/mips/include/asm/pgtable-32.h:241 的 32 位偏移左移 9 位，保留 23 位。Malta 的 16 KiB 页覆盖至 128 GiB，其 DDR 位于 32 位地址图内（arch/mips/mti-malta/malta-dtshim.c:97）。64 位编码在 arch/mips/include/asm/pgtable-64.h:341 保留 40 位，4 KiB 页覆盖至 4 PiB。未证实该通用内核可取得更高的迁移页，合并条目保留可能。"
+  },
+  {
+    "id": "E02",
+    "verdict": "可能",
+    "reason": "",
+    "why": "arch/arm/include/asm/pgtable.h:285 将偏移左移 8 位，32 位交换项仅余 24 位。4 KiB 页对应 36 位物理地址，而 LPAE 的掩码为 40 位（arch/arm/include/asm/pgtable-3level-hwdef.h:75）。该构建启用迁移，mm/rmap.c:2735 确实用页帧号构造迁移项；尚缺支持平台在 64 GiB 地址及以上存在可迁移 RAM 的证据。"
+  },
+  {
+    "id": "E03",
+    "verdict": "排除",
+    "reason": "平台不可达",
+    "why": "arch/powerpc/include/asm/nohash/32/pgtable.h:193 的 24 位偏移配 4 KiB 页可覆盖 36 位物理地址。此构建启用 44x、关闭 PPC_47x；arch/powerpc/include/asm/nohash/32/mmu-44x.h:32 的扩展页号掩码仅四位，合法 RAM 页号均可表示。普通交换文件另受 mm/swapfile.c:3449 的容量检查。"
+  },
+  {
+    "id": "E04",
+    "verdict": "排除",
+    "reason": "平台不可达",
+    "why": "arch/mips/include/asm/pgtable-32.h:156 分两段还原 XPA 页号。16 KiB 页时低段传 22 位，高段从第 24 位接续，中间确有缺口；Malta 的 32 位内存图用不到缺失位（arch/mips/mti-malta/malta-dtshim.c:97）。MIPS64 的 51 位页号加 12 位页内偏移已超过 arch/mips/include/asm/addrspace.h:141 的 59 位物理地址掩码。"
+  },
+  {
+    "id": "E05",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/powerpc/include/asm/book3s/64/pgtable.h:608 明确同时置硬件脏位和软件脏位，同文件第 479 行读取软件脏位。两种 Book3S 构建均按此定义返回真；公共调用没有要求标脏操作必须保留原来的软件脏状态。"
+  },
+  {
+    "id": "E06",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/riscv/mm/pgtable.c:178 按 VM_SHADOW_STACK 选择专用编码。arch/riscv/include/asm/pgtable.h:866 清除叶权限再置 W，形成影子栈的 XWR=010；同文件第 818 行通过 PTE 查询写位，返回真符合这种编码。"
+  },
+  {
+    "id": "E07",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "构造普通映射后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E08",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "清除脏位后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E09",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "设置脏位后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E10",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "清除访问位后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E11",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "设置特殊页标志后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E12",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "置写位后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E13",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "将权限改为影子栈的仅 W 编码后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E14",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "设置访问位后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E15",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "清 W 并置 R 后仍满足 arch/riscv/include/asm/pgtable.h:387 的 present 且有叶权限条件。arch/riscv/mm/hugetlbpage.c:79 在按大页尺寸选好槽位后才用此谓词核对叶项；把它用于独立构造的普通 PTE，缺少决定映射大小的层级信息。"
+  },
+  {
+    "id": "E16",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/x86/Kconfig:1851 要求用户影子栈依赖 X86_64，i386 无该 VMA 路径。arch/x86/include/asm/pgtable.h:452 只处理 RW 和 DIRTY；非 PAE 的 NX 掩码在 arch/x86/include/asm/pgtable_types.h:125 为零，查询可执行性返回真与此修改无关。"
+  },
+  {
+    "id": "E17",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "i386 PAE 的三层页表将 PUD 折叠到顶层，arch/x86/include/asm/pgtable_types.h:389 经 native_pgd_val 取值。第 317 行的 PAE 顶层允许位不含 DIRTY。把大页叶项的修改与查询用于这个目录层，读回假符合硬件保留位约束。"
+  },
+  {
+    "id": "E18",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "i386 构建仅有两层页表。include/asm-generic/pgtable-nopmd.h:32 为折叠层定义恒真的 pud_present；arch/x86/include/asm/pgtable.h:763 清除表项标志后，该占位查询仍返回真。此配置没有可供该组合操作的独立 PUD 叶项。"
+  },
+  {
+    "id": "E19",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "i386 PAE 的三层页表将 PUD 折叠到顶层，arch/x86/include/asm/pgtable_types.h:389 经 native_pgd_val 取值。第 317 行的 PAE 顶层允许位不含 RW。把大页叶项的修改与查询用于这个目录层，读回假符合硬件保留位约束。"
+  },
+  {
+    "id": "E20",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "i386 PAE 的三层页表将 PUD 折叠到顶层，arch/x86/include/asm/pgtable_types.h:389 经 native_pgd_val 取值。第 317 行的 PAE 顶层允许位不含 ACCESSED。把大页叶项的修改与查询用于这个目录层，读回假符合硬件保留位约束。"
+  },
+  {
+    "id": "E21",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/riscv/include/asm/pgtable-64.h:189 把不在场或带叶权限的 PUD 判为不能向下遍历。以映射保护值构造的 PUD 具有叶权限，本来就应在此终止；arch/riscv/mm/pgtable.c:81 单独识别 PUD 叶项。规则把下级页表指针的要求套在了叶项上。"
+  },
+  {
+    "id": "E22",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/arm64/include/asm/pgtable.h:330 在清除硬件 VALID 时设置软件 PRESENT_INVALID，第 581 行沿用 PTE 的在场判断。mm/huge_memory.c:2412 有临时失效 PMD 的调用；软件保留映射状态时，硬件已不能使用该项。"
+  },
+  {
+    "id": "E23",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:786 以软件在场且非表描述符识别叶项。第 330 行清硬件有效位后，原有低位不再匹配完整表类型。mm/huge_memory.c:1632 构造大页叶时还调用 pmd_mkhuge；规则从未经类型转换的中间项出发，不能要求失效后叶查询恒假。"
+  },
+  {
+    "id": "E24",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；直接查询保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E25",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；清脏位保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E26",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；置脏位保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E27",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:615 将类型改成块描述符，第 801 行对在场非表项识别透明大页，结果为真符合构造目的。include/linux/pgtable.h:2067 在关闭透明大页时提供恒假查询，跨配置多数票不能约束启用该功能的构建。"
+  },
+  {
+    "id": "E28",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；清访问位保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E29",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；修改写权限保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E30",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；置访问位保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E31",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/arm64/include/asm/pgtable.h:632 原样合入保护值；写保护保留这里的描述符类型，第 789 行 pmd_bad 仅测试是否为表类型。mm/huge_memory.c:1632 在构造映射时另用 pmd_mkhuge 选择块类型。比较中间项的目录检查值缺少这一步。"
+  },
+  {
+    "id": "E32",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/x86/include/asm/pgtable.h:1062 用目录允许标志检查 PUD；第 627 行的脏位修改针对叶项。公共层在 mm/huge_memory.c:1750 用 pud_mkhuge 完成叶项构造。把带叶属性的中间值交给子目录检查器，返回真不能说明映射损坏。"
+  },
+  {
+    "id": "E33",
+    "verdict": "排除",
+    "reason": "规则误报",
+    "why": "arch/loongarch/include/asm/pgtable.h:526 明确置 HUGE，第 519 行检查 HUGE 和在场状态。该构建启用透明大页，构造后识别成功符合约定；include/linux/pgtable.h:2068 为关闭透明大页的构建提供恒假查询，不能据此要求返回假。"
+  },
+  {
+    "id": "E34",
+    "verdict": "排除",
+    "reason": "合理的实现差异",
+    "why": "arch/s390/include/asm/pgtable.h:1091 同时置 DIRTY 和 SOFT_DIRTY。该构建启用 MEM_SOFT_DIRTY，第 199 行的软件脏位非零，第 875 行读取同一位；关闭该功能时掩码为零，构建之间的布尔差异符合配置和标脏实现。"
+  }
+]
