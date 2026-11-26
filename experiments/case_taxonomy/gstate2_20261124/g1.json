@@ -1,0 +1,172 @@
+[
+ {
+  "class": "运行时可变",
+  "arch_decl": [
+   "arch/x86/mm/mm_internal.h:25 extern unsigned long tlb_single_page_flush_ceiling;",
+   "arch/x86/mm/tlb.c:1374 unsigned long tlb_single_page_flush_ceiling __read_mostly = 33;"
+  ],
+  "runtime_writes": [
+   {
+    "at": "arch/x86/mm/tlb.c:1770",
+    "func": "tlbflush_write_file",
+    "boot": false,
+    "why": "回调（地址被取用）",
+    "text": "tlb_single_page_flush_ceiling = ceiling;"
+   }
+  ],
+  "boot_writes": [],
+  "n_writes": 1,
+  "X": "tlb_single_page_flush_ceiling",
+  "build": "x86_64",
+  "want": "运行时可变",
+  "ok": true
+ },
+ {
+  "class": "运行时可变",
+  "arch_decl": [
+   "arch/x86/include/asm/tlbflush.h:154 DECLARE_PER_CPU_ALIGNED(struct tlb_state, cpu_tlbstate);",
+   "arch/x86/mm/init.c:1013 __visible DEFINE_PER_CPU_ALIGNED(struct tlb_state, cpu_tlbstate) = {"
+  ],
+  "runtime_writes": [
+   {
+    "at": "arch/x86/kernel/cpu/common.c:505",
+    "func": "cr4_update_irqsoff",
+    "boot": false,
+    "why": "经 cr4_clear_bits_irqsoff：经 cr4_clear_bits：经 cpu_init：调用链过深",
+    "text": "this_cpu_write(cpu_tlbstate.cr4, newval);"
+   },
+   {
+    "at": "arch/x86/kernel/cpu/common.c:530",
+    "func": "cr4_init",
+    "boot": false,
+    "why": "经 start_secondary：回调（地址被取用）",
+    "text": "this_cpu_write(cpu_tlbstate.cr4, cr4);"
+   },
+   {
+    "at": "arch/x86/kernel/process.c:713",
+    "func": "cr4_toggle_bits_irqsoff",
+    "boot": false,
+    "why": "经 __switch_to_xtra：经 switch_to_extra：经 __switch_to：回调（地址被取用）",
+    "text": "this_cpu_write(cpu_tlbstate.cr4, newval);"
+   },
+   {
+    "at": "arch/x86/mm/tlb.c:213",
+    "func": "clear_asid_other",
+    "boot": false,
+    "why": "经 choose_new_asid：经 switch_mm_irqs_off：经 context_switch：调用链过深",
+    "text": "this_cpu_write(cpu_tlbstate.ctxs[asid].ctx_id, 0);"
+   },
+   {
+    "at": "arch/x86/mm/tlb.c:215",
+    "func": "clear_asid_other",
+    "boot": false,
+    "why": "经 choose_new_asid：经 switch_mm_irqs_off：经 context_switch：调用链过深",
+    "text": "this_cpu_write(cpu_tlbstate.invalidate_other, false);"
+   },
+   {
+    "at": "arch/x86/mm/tlb.c:267",
+    "func": "choose_new_asid",
+    "boot": false,
+    "why": "经 switch_mm_irqs_off：经 context_switch：经 __schedule：调用链过深",
+    "text": "ns.asid = this_cpu_add_return(cpu_tlbstate.next_asid, 1) - 1;"
+   }
+  ],
+  "boot_writes": [
+   {
+    "at": "arch/x86/include/asm/tlbflush.h:204",
+    "func": "cr4_init_shadow",
+    "boot": true,
+    "why": "所有调用者都在启动阶段",
+    "text": "this_cpu_write(cpu_tlbstate.cr4, __read_cr4());"
+   }
+  ],
+  "n_writes": 22,
+  "X": "cpu_tlbstate",
+  "build": "x86_64",
+  "want": "运行时可变",
+  "ok": true
+ },
+ {
+  "class": "启动时设定",
+  "arch_decl": [
+   "arch/riscv/include/asm/pgtable-64.h:13 extern bool pgtable_l4_enabled;",
+   "arch/riscv/include/asm/vmalloc.h:7 extern bool pgtable_l4_enabled, pgtable_l5_enabled;",
+   "arch/riscv/mm/init.c:55 bool pgtable_l4_enabled __ro_after_init = true;"
+  ],
+  "runtime_writes": [],
+  "boot_writes": [
+   {
+    "at": "arch/riscv/mm/init.c:779",
+    "func": "disable_pgtable_l4",
+    "boot": true,
+    "why": "__init",
+    "text": "pgtable_l4_enabled = false;"
+   }
+  ],
+  "n_writes": 1,
+  "X": "pgtable_l4_enabled",
+  "build": "riscv",
+  "want": "启动时设定",
+  "ok": true
+ },
+ {
+  "class": "启动时设定",
+  "arch_decl": [
+   "arch/x86/include/asm/page_64.h:18 extern unsigned long page_offset_base;",
+   "arch/x86/kernel/head64.c:63 unsigned long page_offset_base __ro_after_init = __PAGE_OFFSET_BASE_L4;",
+   "arch/x86/kernel/head64.c:64 EXPORT_SYMBOL(page_offset_base);"
+  ],
+  "runtime_writes": [],
+  "boot_writes": [
+   {
+    "at": "arch/x86/kernel/head64.c:244",
+    "func": "x86_64_start_kernel",
+    "boot": true,
+    "why": "__init",
+    "text": "page_offset_base\t= __PAGE_OFFSET_BASE_L5;"
+   }
+  ],
+  "n_writes": 1,
+  "X": "page_offset_base",
+  "build": "x86_64",
+  "want": "启动时设定",
+  "ok": true
+ },
+ {
+  "class": "启动时设定",
+  "arch_decl": [
+   "arch/arm64/include/asm/memory.h:242 extern s64\t\t\tmemstart_addr;",
+   "arch/arm64/mm/init.c:60 s64 memstart_addr __ro_after_init = -1;",
+   "arch/arm64/mm/init.c:61 EXPORT_SYMBOL(memstart_addr);"
+  ],
+  "runtime_writes": [],
+  "boot_writes": [
+   {
+    "at": "arch/arm64/mm/init.c:220",
+    "func": "arm64_memblock_init",
+    "boot": true,
+    "why": "__init",
+    "text": "memstart_addr = round_down(memblock_start_of_DRAM(),"
+   },
+   {
+    "at": "arch/arm64/mm/init.c:235",
+    "func": "arm64_memblock_init",
+    "boot": true,
+    "why": "__init",
+    "text": "memstart_addr = round_up(memblock_end_of_DRAM() - linear_region_size,"
+   },
+   {
+    "at": "arch/arm64/mm/init.c:248",
+    "func": "arm64_memblock_init",
+    "boot": true,
+    "why": "__init",
+    "text": "memstart_addr -= _PAGE_OFFSET(vabits_actual) - _PAGE_OFFSET(52);"
+   }
+  ],
+  "n_writes": 3,
+  "X": "memstart_addr",
+  "build": "arm64",
+  "want": "启动时设定",
+  "ok": true
+ }
+]

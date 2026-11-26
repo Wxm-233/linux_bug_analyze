@@ -1,0 +1,712 @@
+{
+ "no": 31,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/swap_table.h:253 swap_table_get",
+  "engine": "ORD",
+  "consumers": [
+   "mm/swap_table.h:257 swap_table_get"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "PMD_SHIFT（arch/riscv/include/asm/pgtable-64.h:39）"
+   ],
+   "arm64": [
+    "PMD_SHIFT（arch/arm64/include/asm/pgtable-hwdef.h:55）"
+   ],
+   "x86_64": [
+    "PMD_SHIFT（arch/x86/include/asm/pgtable_64_types.h:74）"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "由页大小派生的阶数/大小 SWAPFILE_CLUSTER",
+  "property": "在每种“架构 × 页大小”下都不超过页缓存上限 MAX_PAGECACHE_ORDER",
+  "ok_if": "所有组合下都不超过上限，或使用前已和上限比较",
+  "expected_actual": [
+   {
+    "来源": "SWAPFILE_CLUSTER",
+    "期望": "阶数 ≤ MAX_PAGECACHE_ORDER",
+    "违例组合": [
+     "arm64-64k",
+     "loongarch-64k",
+     "mips-64k"
+    ]
+   }
+  ]
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/swap_table.h:253",
+    "ifs": [],
+    "makefile": []
+   },
+   {
+    "at": "mm/swap_table.h:257",
+    "ifs": [],
+    "makefile": []
+   }
+  ],
+  "compile_configs": [],
+  "path_configs": {
+   "CACHESTAT_SYSCALL": [
+    "filemap_cachestat",
+    "sys_cachestat"
+   ],
+   "SWAP": [
+    "swap_cache_get_folio",
+    "swap_cache_get_shadow",
+    "swap_reclaim_full_clusters"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_cachestat",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_cachestat",
+     "—调用→",
+     "filemap_cachestat",
+     "—调用→",
+     "swap_cache_get_shadow",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_swapoff",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_swapoff",
+     "—调用→",
+     "try_to_unuse",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_swapon",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_swapon",
+     "—函数指针→",
+     "swap_reclaim_work",
+     "—调用→",
+     "swap_reclaim_full_clusters",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_move_pages",
+    "kind": "系统调用",
+    "depth": 4,
+    "path": [
+     "sys_move_pages",
+     "—函数指针→",
+     "move_pages",
+     "—调用→",
+     "move_pages_ptes",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_mincore",
+    "kind": "系统调用",
+    "depth": 6,
+    "path": [
+     "sys_mincore",
+     "—调用→",
+     "do_mincore",
+     "—引用结构→",
+     "var:mincore_walk_ops",
+     "—登记在 mincore_walk_ops.pmd_entry→",
+     "mincore_pte_range",
+     "—调用→",
+     "mincore_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_reboot",
+    "kind": "系统调用",
+    "depth": 8,
+    "path": [
+     "sys_reboot",
+     "—调用→",
+     "hibernate",
+     "—调用→",
+     "swsusp_write",
+     "—调用→",
+     "swap_write_page",
+     "—调用→",
+     "alloc_swapdev_block",
+     "—调用→",
+     "swap_free_hibernation_slot",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_userfaultfd",
+    "kind": "系统调用",
+    "depth": 8,
+    "path": [
+     "sys_userfaultfd",
+     "—调用→",
+     "new_userfaultfd",
+     "—引用结构→",
+     "var:userfaultfd_fops",
+     "—登记在 userfaultfd_fops.unlocked_ioctl→",
+     "userfaultfd_ioctl",
+     "—调用→",
+     "userfaultfd_move",
+     "—调用→",
+     "move_pages",
+     "—调用→",
+     "move_pages_ptes",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_futex_requeue",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_futex_requeue",
+     "—调用→",
+     "futex_requeue",
+     "—调用→",
+     "fault_in_user_writeable",
+     "—调用→",
+     "fixup_user_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_futex",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_futex",
+     "—调用→",
+     "do_futex",
+     "—调用→",
+     "futex_wake_op",
+     "—调用→",
+     "fault_in_user_writeable",
+     "—调用→",
+     "fixup_user_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_futex_time32",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_futex_time32",
+     "—调用→",
+     "do_futex",
+     "—调用→",
+     "futex_wake_op",
+     "—调用→",
+     "fault_in_user_writeable",
+     "—调用→",
+     "fixup_user_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_madvise",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_madvise",
+     "—调用→",
+     "do_madvise",
+     "—调用→",
+     "madvise_do_behavior",
+     "—调用→",
+     "madvise_walk_vmas",
+     "—调用→",
+     "madvise_vma_behavior",
+     "—调用→",
+     "madvise_willneed",
+     "—调用→",
+     "shmem_swapin_range",
+     "—调用→",
+     "read_swap_cache_async",
+     "—调用→",
+     "swap_cache_read_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_memfd_create",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_memfd_create",
+     "—调用→",
+     "memfd_alloc_file",
+     "—调用→",
+     "shmem_file_setup",
+     "—调用→",
+     "__shmem_file_setup",
+     "—引用结构→",
+     "var:shmem_file_operations",
+     "—登记在 shmem_file_operations.read_iter→",
+     "shmem_file_read_iter",
+     "—调用→",
+     "shmem_get_folio",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_mremap",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_mremap",
+     "—调用→",
+     "do_mremap",
+     "—调用→",
+     "remap_move",
+     "—调用→",
+     "vma_multi_allowed",
+     "—调用→",
+     "vma_is_shmem",
+     "—引用结构→",
+     "var:shmem_vm_ops",
+     "—登记在 shmem_vm_ops.fault→",
+     "shmem_fault",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_prctl",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_prctl",
+     "—调用→",
+     "ksm_disable_merge_any",
+     "—调用→",
+     "ksm_del_vmas",
+     "—调用→",
+     "__ksm_del_vma",
+     "—调用→",
+     "break_ksm",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_process_madvise",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_process_madvise",
+     "—调用→",
+     "vector_madvise",
+     "—调用→",
+     "madvise_do_behavior",
+     "—调用→",
+     "madvise_walk_vmas",
+     "—调用→",
+     "madvise_vma_behavior",
+     "—调用→",
+     "madvise_willneed",
+     "—调用→",
+     "shmem_swapin_range",
+     "—调用→",
+     "read_swap_cache_async",
+     "—调用→",
+     "swap_cache_read_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "sys_remap_file_pages",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_remap_file_pages",
+     "—调用→",
+     "do_mmap",
+     "—调用→",
+     "__get_unmapped_area",
+     "—函数指针→",
+     "shmem_get_unmapped_area",
+     "—引用结构→",
+     "var:shmem_file_operations",
+     "—登记在 shmem_file_operations.read_iter→",
+     "shmem_file_read_iter",
+     "—调用→",
+     "shmem_get_folio",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_fstatfs64",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "compat_sys_aarch32_fstatfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "swap_put_entries_direct",
+     "—调用→",
+     "swap_put_entries_cluster",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_pread64",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "compat_sys_aarch32_pread64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "swap_put_entries_direct",
+     "—调用→",
+     "swap_put_entries_cluster",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_pwrite64",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "compat_sys_aarch32_pwrite64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "swap_put_entries_direct",
+     "—调用→",
+     "swap_put_entries_cluster",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_statfs64",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "compat_sys_aarch32_statfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "swap_put_entries_direct",
+     "—调用→",
+     "swap_put_entries_cluster",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swap_table_get"
+    ]
+   }
+  ],
+  "n_entries": 7805,
+  "n_reached": 188524
+ },
+ "运行时开关": [
+  {
+   "read_in": "filemap_cachestat",
+   "switch": "workingset_test_recent（经 flush）",
+   "writers": [
+    "deep_flush_store"
+   ]
+  },
+  {
+   "read_in": "sys_swapoff",
+   "switch": "capable",
+   "writers": [
+    "allow_restart_store",
+    "cpu_store",
+    "enable_store"
+   ]
+  },
+  {
+   "read_in": "sys_swapoff",
+   "switch": "IS_ERR",
+   "writers": [
+    "create_store",
+    "disksize_store",
+    "export_store"
+   ]
+  },
+  {
+   "read_in": "sys_swapon",
+   "switch": "error",
+   "writers": [
+    "acquire_store",
+    "apparmor_enabled_setup",
+    "calibrate_store"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "页大小较大的配置，使阶数超过 MAX_PAGECACHE_ORDER",
+  "combos": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "swap_table_get",
+    "file": "mm/swap_table.h",
+    "line": 257,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(off >= SWAPFILE_CLUSTER);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "__rcu_read_unlock",
+    "file": "kernel/rcu/tree_plugin.h",
+    "line": 443,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(rrln < 0 || rrln > RCU_NEST_PMAX);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "__rcu_read_lock",
+    "file": "kernel/rcu/tree_plugin.h",
+    "line": 416,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(rcu_preempt_depth() > RCU_NEST_PMAX);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "instrument_atomic_check_alignment",
+    "file": "include/linux/instrumented.h",
+    "line": 67,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE((unsigned long)v & mask);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "sys_swapoff",
+    "file": "mm/swapfile.c",
+    "line": 3095,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!current->mm);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "sys_swapon",
+    "file": "mm/swapfile.c",
+    "line": 3717,
+    "kind": "pr_err",
+    "text": "pr_err(\"swap:%u != (max:%u - 1)\\n\", si->pages, si->max);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "sys_swapon",
+    "file": "mm/swapfile.c",
+    "line": 3768,
+    "kind": "pr_err",
+    "text": "pr_err(\"swapon: discard_swap(%p): %d\\n\",",
+    "why": "到达路径上"
+   }
+  ],
+  "n": 7,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ],
+  "normal": [
+   "arm64-16k",
+   "arm64-4k",
+   "loongarch-16k",
+   "loongarch-4k",
+   "mips-16k",
+   "mips-4k"
+  ],
+  "source": "ORD 违例组合；正常取同架构的不违例组合"
+ },
+ "平台需求": [
+  {
+   "config": "ARM64_64K_PAGES",
+   "need": "arm64 64K 页内核：QEMU -cpu cortex-a72，大内存（≥ 4G）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动",
+  "观测点": "半自动",
+  "差分对照": "自动",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

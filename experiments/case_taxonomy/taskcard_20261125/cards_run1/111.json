@@ -1,0 +1,491 @@
+{
+ "no": 111,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "fs/proc/task_mmu.c:2510 make_uffd_wp_pte",
+  "engine": "XV",
+  "consumers": [
+   "fs/proc/task_mmu.c:2510 make_uffd_wp_pte"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:421"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:353"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:419"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "页表项 `*pte`（交给 pte_mkuffd()）",
+  "property": "调用 pte_mkuffd() 时该项是 present 项（修改接口，用在非 present 项上会把项改坏）",
+  "ok_if": "调用前已确认是 present 项",
+  "expected_actual": "期望：调用时页表项是 present 项；实际：可能传入非 present 项（引擎判为未受保护）"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "fs/proc/task_mmu.c:2510",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_PROC_PAGE_MONITOR",
+      "line": 891,
+      "configs": [
+       "PROC_PAGE_MONITOR"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "fs/proc/Makefile",
+      "line": "proc-$(CONFIG_MMU)\t:= task_mmu.o",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_PROC_FS)\t\t+= proc/",
+      "configs": [
+       "PROC_FS"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "fs/proc/task_mmu.c:2510",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_PROC_PAGE_MONITOR",
+      "line": 891,
+      "configs": [
+       "PROC_PAGE_MONITOR"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "fs/proc/Makefile",
+      "line": "proc-$(CONFIG_MMU)\t:= task_mmu.o",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_PROC_FS)\t\t+= proc/",
+      "configs": [
+       "PROC_FS"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "MMU",
+   "PROC_FS",
+   "PROC_PAGE_MONITOR"
+  ],
+  "path_configs": {
+   "MMU": [
+    "do_pagemap_cmd",
+    "do_pagemap_scan",
+    "make_uffd_wp_pte"
+   ],
+   "PROC_FS": [
+    "do_pagemap_cmd",
+    "do_pagemap_scan",
+    "make_uffd_wp_pte"
+   ],
+   "PROC_PAGE_MONITOR": [
+    "do_pagemap_cmd",
+    "do_pagemap_scan",
+    "make_uffd_wp_pte"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_pidfd_send_signal",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_pidfd_send_signal",
+     "—调用→",
+     "pidfd_to_pid",
+     "—调用→",
+     "tgid_pidfd_to_pid",
+     "—引用结构→",
+     "var:proc_tgid_base_operations",
+     "—登记在 proc_tgid_base_operations.iterate_shared→",
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "do_pagemap_cmd",
+    "kind": "回调：file_operations proc_pagemap_operations.compat_ioctl",
+    "depth": 4,
+    "path": [
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "proc_tgid_base_readdir",
+    "kind": "回调：file_operations proc_tgid_base_operations.iterate_shared",
+    "depth": 7,
+    "path": [
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "proc_tid_base_readdir",
+    "kind": "回调：file_operations proc_tid_base_operations.iterate_shared",
+    "depth": 7,
+    "path": [
+     "proc_tid_base_readdir",
+     "—引用结构→",
+     "var:tid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "proc_task_readdir",
+    "kind": "回调：file_operations proc_task_operations.iterate_shared",
+    "depth": 10,
+    "path": [
+     "proc_task_readdir",
+     "—函数指针→",
+     "proc_task_instantiate",
+     "—引用结构→",
+     "var:proc_tid_base_inode_operations",
+     "—登记在 proc_tid_base_inode_operations.lookup→",
+     "proc_tid_base_lookup",
+     "—引用结构→",
+     "var:tid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "proc_root_readdir",
+    "kind": "回调：file_operations proc_root_operations.iterate_shared",
+    "depth": 11,
+    "path": [
+     "proc_root_readdir",
+     "—调用→",
+     "proc_pid_readdir",
+     "—函数指针→",
+     "proc_pid_instantiate",
+     "—引用结构→",
+     "var:proc_tgid_base_operations",
+     "—登记在 proc_tgid_base_operations.iterate_shared→",
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "id_store",
+    "kind": "回调：device_attribute dev_attr_id.store",
+    "depth": 15,
+    "path": [
+     "id_store",
+     "—调用→",
+     "snd_info_card_id_change",
+     "—引用结构→",
+     "var:proc_root",
+     "—结构内引用→",
+     "var:proc_root_operations",
+     "—登记在 proc_root_operations.iterate_shared→",
+     "proc_root_readdir",
+     "—调用→",
+     "proc_pid_readdir",
+     "—函数指针→",
+     "proc_pid_instantiate",
+     "—引用结构→",
+     "var:proc_tgid_base_operations",
+     "—登记在 proc_tgid_base_operations.iterate_shared→",
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "x86_64_start_kernel",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 11,
+    "path": [
+     "x86_64_start_kernel",
+     "—调用→",
+     "x86_64_start_reservations",
+     "—调用→",
+     "start_kernel",
+     "—调用→",
+     "proc_root_init",
+     "—调用→",
+     "set_proc_pid_nlink",
+     "—引用结构→",
+     "var:tid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   },
+   {
+    "entry": "proc_ppc64_create",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 16,
+    "path": [
+     "proc_ppc64_create",
+     "—调用→",
+     "proc_symlink",
+     "—调用→",
+     "__proc_create",
+     "—引用结构→",
+     "var:proc_root",
+     "—结构内引用→",
+     "var:proc_root_operations",
+     "—登记在 proc_root_operations.iterate_shared→",
+     "proc_root_readdir",
+     "—调用→",
+     "proc_pid_readdir",
+     "—函数指针→",
+     "proc_pid_instantiate",
+     "—引用结构→",
+     "var:proc_tgid_base_operations",
+     "—登记在 proc_tgid_base_operations.iterate_shared→",
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pagemap_operations",
+     "—登记在 proc_pagemap_operations.unlocked_ioctl→",
+     "do_pagemap_cmd",
+     "—调用→",
+     "do_pagemap_scan",
+     "—引用结构→",
+     "var:pagemap_scan_ops",
+     "—登记在 pagemap_scan_ops.pmd_entry→",
+     "pagemap_scan_pmd_entry",
+     "—调用→",
+     "make_uffd_wp_pte"
+    ]
+   }
+  ],
+  "n_entries": 9,
+  "n_reached": 198
+ },
+ "运行时开关": [
+  {
+   "read_in": "sys_pidfd_send_signal",
+   "switch": "IS_ERR",
+   "writers": [
+    "create_store",
+    "disksize_store",
+    "export_store"
+   ]
+  },
+  {
+   "read_in": "sys_pidfd_send_signal",
+   "switch": "access_pidfd_pidns（经 parent）",
+   "writers": [
+    "alt_name_store",
+    "disable_store",
+    "frequency_test_store"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "调用 pte_mkuffd 时页表项不 present",
+  "kinds": [
+   {
+    "kind": "交换项",
+    "config": "SWAP"
+   },
+   {
+    "kind": "迁移项",
+    "config": "MIGRATION"
+   },
+   {
+    "kind": "device-private 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "device-exclusive 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "uffd-wp 标记",
+    "config": "PTE_MARKER_UFFD_WP"
+   },
+   {
+    "kind": "hwpoison 标记",
+    "config": "MEMORY_FAILURE"
+   },
+   {
+    "kind": "guard 标记（MADV_GUARD_INSTALL）",
+    "config": "MMU"
+   }
+  ],
+  "guards": [
+   "包住（then）：pte_present(ptent)"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "set_ptes",
+    "file": "arch/powerpc/mm/pgtable.c",
+    "line": 219,
+    "kind": "VM_WARN_ON",
+    "text": "VM_WARN_ON(pte_hw_valid(*ptep) && !pte_protnone(*ptep));",
+    "why": "消费函数往下第 3 层"
+   }
+  ],
+  "n": 1,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": true,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:421"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:353"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:419"
+   ]
+  }
+ },
+ "平台需求": [
+  {
+   "config": "DEVICE_PRIVATE",
+   "need": "HMM 测试模块 lib/test_hmm（TEST_HMM）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动（按页表级别查表）",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

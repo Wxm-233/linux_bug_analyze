@@ -1,0 +1,346 @@
+{
+ "no": 213,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "fs/aio.c:1200 flush_dcache_folio",
+  "engine": "CTX",
+  "consumers": [
+   "fs/aio.c:1200 aio_complete"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/cacheflush.h:24"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/cacheflush.h:132（声明）"
+   ],
+   "x86_64": [
+    "include/linux/cacheflush.h:14"
+   ],
+   "arm": [
+    "arch/arm/include/asm/cacheflush.h:296（声明）"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/cacheflush.h:38"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "架构钩子 flush_dcache_folio() 的 sh 实现（调用点 fs/aio.c:1200 aio_complete）",
+  "property": "在调用点的上下文（关中断）里调用它不会发 IPI 并等待",
+  "ok_if": "调用点实际没有关中断，或这种调用走不到发 IPI 的路径"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "fs/aio.c:1200",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_AIO)               += aio.o",
+      "configs": [
+       "AIO"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "fs/aio.c:1200",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_AIO)               += aio.o",
+      "configs": [
+       "AIO"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "AIO"
+  ],
+  "path_configs": {
+   "AIO": [
+    "aio_complete",
+    "compat_sys_io_submit",
+    "io_submit_one"
+   ],
+   "COMPAT": [
+    "compat_sys_io_submit"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "compat_sys_io_submit",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "compat_sys_io_submit",
+     "—调用→",
+     "io_submit_one",
+     "—调用→",
+     "iocb_put",
+     "—调用→",
+     "aio_complete"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_io_submit",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_io_submit",
+     "—调用→",
+     "io_submit_one",
+     "—调用→",
+     "iocb_put",
+     "—调用→",
+     "aio_complete"
+    ],
+    "dispatcher": null
+   }
+  ],
+  "n_entries": 2,
+  "n_reached": 16
+ },
+ "运行时开关": [
+  {
+   "read_in": "flush_dcache_folio",
+   "switch": "flags",
+   "writers": [
+    "consistency_policy_store",
+    "console_store",
+    "control_va_addr_alignment"
+   ]
+  }
+ ],
+ "前置状态": "需人工",
+ "观测点": {
+  "n": 10,
+  "debug_configs": [],
+  "near": [
+   {
+    "func": "try_to_wake_up",
+    "file": "kernel/sched/core.c",
+    "line": 4290,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(p->se.sched_delayed);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "try_to_wake_up",
+    "file": "kernel/sched/core.c",
+    "line": 4291,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(p->is_blocked);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "eventfd_signal_mask",
+    "file": "fs/eventfd.c",
+    "line": 68,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(current->in_eventfd))",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "ttwu_state_match",
+    "file": "kernel/sched/core.c",
+    "line": 4121,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE((state & TASK_RTLOCK_WAIT) &&",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3359,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(state != TASK_RUNNING && state != TASK_WAKING && !p->on_rq);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3366,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(state == TASK_RUNNING &&",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3381,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(debug_locks && !(lockdep_is_held(&p->pi_lock) ||",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3387,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!cpu_online(new_cpu));",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "kunmap_high",
+    "file": "mm/highmem.c",
+    "line": 371,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!vaddr);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "kunmap_high",
+    "file": "mm/highmem.c",
+    "line": 381,
+    "kind": "BUG",
+    "text": "BUG();",
+    "why": "消费函数往下第 3 层"
+   }
+  ],
+  "consequence": [
+   {
+    "func": "smp_call_function_many_cond",
+    "file": "kernel/smp.c",
+    "line": 925,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!in_task());",
+    "why": "后果处：CTX 效果链（smp_call_function 往下第 1 层）"
+   }
+  ],
+  "points": [
+   {
+    "func": "try_to_wake_up",
+    "file": "kernel/sched/core.c",
+    "line": 4290,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(p->se.sched_delayed);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "try_to_wake_up",
+    "file": "kernel/sched/core.c",
+    "line": 4291,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(p->is_blocked);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "eventfd_signal_mask",
+    "file": "fs/eventfd.c",
+    "line": 68,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(current->in_eventfd))",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "ttwu_state_match",
+    "file": "kernel/sched/core.c",
+    "line": 4121,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE((state & TASK_RTLOCK_WAIT) &&",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3359,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(state != TASK_RUNNING && state != TASK_WAKING && !p->on_rq);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3366,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(state == TASK_RUNNING &&",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3381,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(debug_locks && !(lockdep_is_held(&p->pi_lock) ||",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "set_task_cpu",
+    "file": "kernel/sched/core.c",
+    "line": 3387,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!cpu_online(new_cpu));",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "kunmap_high",
+    "file": "mm/highmem.c",
+    "line": 371,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!vaddr);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "kunmap_high",
+    "file": "mm/highmem.c",
+    "line": 381,
+    "kind": "BUG",
+    "text": "BUG();",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "smp_call_function_many_cond",
+    "file": "kernel/smp.c",
+    "line": 925,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!in_task());",
+    "why": "后果处：CTX 效果链（smp_call_function 往下第 1 层）"
+   }
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "sh"
+  ],
+  "normal": [
+   "riscv",
+   "arm64",
+   "x86_64",
+   "arm",
+   "powerpc"
+  ],
+  "source": "CTX 引擎：报告的架构有这个效果，其余架构的实现判为没有"
+ },
+ "平台需求": "需人工",
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "半自动（只有主表三列）",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "需人工",
+  "观测点": "半自动（附近 + 后果处）",
+  "差分对照": "自动",
+  "平台需求": "需人工"
+ }
+}

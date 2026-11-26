@@ -1,0 +1,226 @@
+{
+ "no": 65,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/damon/vaddr.c:530 damos_va_filter_young_match",
+  "engine": "P1",
+  "consumers": [
+   "mm/damon/vaddr.c:530 damos_va_filter_young_match"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:395"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:154"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:159"
+   ],
+   "arm": [
+    "arch/arm/include/asm/pgtable.h:175"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/book3s/64/pgtable.h:460"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "页表项 `*ptep`（交给 pte_young()）",
+  "property": "调用 pte_young() 时该项是 present 项（pte_young 只对 present 项有定义）",
+  "ok_if": "调用前已确认 present，或这条路径上不可能出现非 present 项",
+  "expected_actual": "期望：调用时页表项是 present 项；实际：可能传入非 present 项（引擎判为未受保护）"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/damon/vaddr.c:530",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/damon/Makefile",
+      "line": "obj-$(CONFIG_DAMON_VADDR)\t+= ops-common.o vaddr.o",
+      "configs": [
+       "DAMON_VADDR"
+      ]
+     },
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_DAMON) += damon/",
+      "configs": [
+       "DAMON"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/damon/vaddr.c:530",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/damon/Makefile",
+      "line": "obj-$(CONFIG_DAMON_VADDR)\t+= ops-common.o vaddr.o",
+      "configs": [
+       "DAMON_VADDR"
+      ]
+     },
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_DAMON) += damon/",
+      "configs": [
+       "DAMON"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "DAMON",
+   "DAMON_VADDR"
+  ],
+  "path_configs": {}
+ },
+ "到达路径": {
+  "entries": [],
+  "n_entries": 0,
+  "n_reached": 8
+ },
+ "运行时开关": "需人工",
+ "前置状态": {
+  "needs": "调用 pte_young 时页表项不 present",
+  "kinds": [
+   {
+    "kind": "交换项",
+    "config": "SWAP"
+   },
+   {
+    "kind": "迁移项",
+    "config": "MIGRATION"
+   },
+   {
+    "kind": "device-private 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "device-exclusive 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "uffd-wp 标记",
+    "config": "PTE_MARKER_UFFD_WP"
+   },
+   {
+    "kind": "hwpoison 标记",
+    "config": "MEMORY_FAILURE"
+   },
+   {
+    "kind": "guard 标记（MADV_GUARD_INSTALL）",
+    "config": "MMU"
+   }
+  ],
+  "guards": [
+   "包住（then）：ptep"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "pmdp_test_and_clear_young",
+    "file": "arch/arm64/include/asm/pgtable.h",
+    "line": 1348,
+    "kind": "VM_WARN_ON",
+    "text": "VM_WARN_ON(pmd_table(READ_ONCE(*pmdp)) && !system_supports_haft());",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "softleaf_to_pfn",
+    "file": "include/linux/leafops.h",
+    "line": 380,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(!softleaf_has_pfn(entry));",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "lookup_page_ext",
+    "file": "mm/page_ext.c",
+    "line": 173,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!rcu_read_lock_held());",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "lookup_page_ext",
+    "file": "mm/page_ext.c",
+    "line": 253,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!rcu_read_lock_held());",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "srcu_read_unlock",
+    "file": "include/linux/srcu.h",
+    "line": 495,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(idx & ~0x1);",
+    "why": "消费函数往下第 3 层"
+   }
+  ],
+  "n": 5,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": true,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:395"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:154"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:159"
+   ],
+   "arm": [
+    "arch/arm/include/asm/pgtable.h:175"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/book3s/64/pgtable.h:460"
+   ]
+  }
+ },
+ "平台需求": [
+  {
+   "config": "DEVICE_PRIVATE",
+   "need": "HMM 测试模块 lib/test_hmm（TEST_HMM）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "需人工（找不到入口）",
+  "触发配置": "自动",
+  "运行时开关": "需人工（没找到 sysfs / 启动参数开关）",
+  "前置状态": "半自动（按页表级别查表）",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

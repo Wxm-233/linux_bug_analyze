@@ -1,0 +1,233 @@
+{
+ "no": 70,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/hmm.c:578 hmm_vma_walk_hugetlb_entry",
+  "engine": "P1",
+  "consumers": [
+   "mm/hmm.c:578 hmm_vma_walk_hugetlb_entry"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:317"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:136"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:256"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/pgtable.h:49"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "页表项 `*pte`（交给 pte_pfn()）",
+  "property": "调用 pte_pfn() 时该项是 present 项（pte_pfn 只对 present 项有定义）",
+  "ok_if": "调用前已确认 present，或这条路径上不可能出现非 present 项",
+  "expected_actual": "期望：调用时页表项是 present 项；实际：可能传入非 present 项（引擎判为未受保护）"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/hmm.c:578",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_HUGETLB_PAGE",
+      "line": 549,
+      "configs": [
+       "HUGETLB_PAGE"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_HMM_MIRROR) += hmm.o",
+      "configs": [
+       "HMM_MIRROR"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/hmm.c:578",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_HUGETLB_PAGE",
+      "line": 549,
+      "configs": [
+       "HUGETLB_PAGE"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_HMM_MIRROR) += hmm.o",
+      "configs": [
+       "HMM_MIRROR"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "HMM_MIRROR",
+   "HUGETLB_PAGE"
+  ],
+  "path_configs": {
+   "HMM_MIRROR": [
+    "hmm_range_fault",
+    "hmm_range_fault_locked",
+    "hmm_vma_walk_hugetlb_entry"
+   ],
+   "HUGETLB_PAGE": [
+    "hmm_vma_walk_hugetlb_entry"
+   ],
+   "TEST_HMM": [
+    "dmirror_fops_unlocked_ioctl",
+    "dmirror_range_snapshot",
+    "dmirror_snapshot"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "dmirror_fops_unlocked_ioctl",
+    "kind": "回调：file_operations dmirror_fops.unlocked_ioctl",
+    "depth": 6,
+    "path": [
+     "dmirror_fops_unlocked_ioctl",
+     "—调用→",
+     "dmirror_snapshot",
+     "—调用→",
+     "dmirror_range_snapshot",
+     "—调用→",
+     "hmm_range_fault",
+     "—调用→",
+     "hmm_range_fault_locked",
+     "—引用结构→",
+     "var:hmm_walk_ops",
+     "—登记在 hmm_walk_ops.hugetlb_entry→",
+     "hmm_vma_walk_hugetlb_entry"
+    ]
+   }
+  ],
+  "n_entries": 1,
+  "n_reached": 18
+ },
+ "运行时开关": "需人工",
+ "前置状态": {
+  "needs": "调用 pte_pfn 时页表项不 present",
+  "kinds": [
+   {
+    "kind": "交换项",
+    "config": "SWAP"
+   },
+   {
+    "kind": "迁移项",
+    "config": "MIGRATION"
+   },
+   {
+    "kind": "device-private 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "device-exclusive 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "uffd-wp 标记",
+    "config": "PTE_MARKER_UFFD_WP"
+   },
+   {
+    "kind": "hwpoison 标记",
+    "config": "MEMORY_FAILURE"
+   },
+   {
+    "kind": "guard 标记（MADV_GUARD_INSTALL）",
+    "config": "MMU"
+   }
+  ],
+  "guards": [
+   "提前返回：required_fault"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "hmm_record_fault",
+    "file": "mm/hmm.c",
+    "line": 96,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!required_fault);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "huge_pte_lockptr",
+    "file": "include/linux/hugetlb.h",
+    "line": 996,
+    "kind": "VM_WARN_ON",
+    "text": "VM_WARN_ON(size == PAGE_SIZE);",
+    "why": "消费函数往下第 2 层"
+   }
+  ],
+  "n": 2,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": true,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:317"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:136"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:256"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/pgtable.h:49"
+   ]
+  }
+ },
+ "平台需求": [
+  {
+   "config": "DEVICE_PRIVATE",
+   "need": "HMM 测试模块 lib/test_hmm（TEST_HMM）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "需人工（没找到 sysfs / 启动参数开关）",
+  "前置状态": "半自动（按页表级别查表）",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

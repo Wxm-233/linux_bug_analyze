@@ -1,0 +1,765 @@
+{
+ "no": 25,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/swap.h:124 __swap_offset_to_cluster",
+  "engine": "ORD",
+  "consumers": [
+   "mm/swap.h:126 __swap_offset_to_cluster",
+   "mm/swap.h:127 __swap_offset_to_cluster"
+  ],
+  "n_consumers": 2,
+  "bindings": {
+   "riscv": [
+    "PMD_SHIFT（arch/riscv/include/asm/pgtable-64.h:39）"
+   ],
+   "arm64": [
+    "PMD_SHIFT（arch/arm64/include/asm/pgtable-hwdef.h:55）"
+   ],
+   "x86_64": [
+    "PMD_SHIFT（arch/x86/include/asm/pgtable_64_types.h:74）"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "由页大小派生的阶数/大小 SWAPFILE_CLUSTER",
+  "property": "在每种“架构 × 页大小”下都不超过页缓存上限 MAX_PAGECACHE_ORDER",
+  "ok_if": "所有组合下都不超过上限，或使用前已和上限比较",
+  "expected_actual": [
+   {
+    "来源": "SWAPFILE_CLUSTER",
+    "期望": "阶数 ≤ MAX_PAGECACHE_ORDER",
+    "违例组合": [
+     "arm64-64k",
+     "loongarch-64k",
+     "mips-64k"
+    ]
+   }
+  ]
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/swap.h:124",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_SWAP",
+      "line": 95,
+      "configs": [
+       "SWAP"
+      ]
+     }
+    ],
+    "makefile": []
+   },
+   {
+    "at": "mm/swap.h:126",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_SWAP",
+      "line": 95,
+      "configs": [
+       "SWAP"
+      ]
+     }
+    ],
+    "makefile": []
+   },
+   {
+    "at": "mm/swap.h:127",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_SWAP",
+      "line": 95,
+      "configs": [
+       "SWAP"
+      ]
+     }
+    ],
+    "makefile": []
+   }
+  ],
+  "compile_configs": [
+   "SWAP"
+  ],
+  "path_configs": {
+   "CACHESTAT_SYSCALL": [
+    "filemap_cachestat",
+    "sys_cachestat"
+   ],
+   "MIGRATION": [
+    "sys_move_pages"
+   ],
+   "NUMA_MIGRATION": [
+    "sys_move_pages"
+   ],
+   "SWAP": [
+    "__swap_entry_to_cluster",
+    "__swap_offset_to_cluster",
+    "find_next_to_unuse"
+   ],
+   "USERFAULTFD": [
+    "move_pages",
+    "move_pages_ptes"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_swapoff",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_swapoff",
+     "—调用→",
+     "try_to_unuse",
+     "—调用→",
+     "find_next_to_unuse",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "sys_cachestat",
+    "kind": "系统调用",
+    "depth": 4,
+    "path": [
+     "sys_cachestat",
+     "—调用→",
+     "filemap_cachestat",
+     "—调用→",
+     "swap_cache_get_shadow",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "sys_move_pages",
+    "kind": "系统调用",
+    "depth": 5,
+    "path": [
+     "sys_move_pages",
+     "—函数指针→",
+     "move_pages",
+     "—调用→",
+     "move_pages_ptes",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "sys_swapon",
+    "kind": "系统调用",
+    "depth": 6,
+    "path": [
+     "sys_swapon",
+     "—函数指针→",
+     "swap_reclaim_work",
+     "—调用→",
+     "swap_reclaim_full_clusters",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "sys_mincore",
+    "kind": "系统调用",
+    "depth": 7,
+    "path": [
+     "sys_mincore",
+     "—调用→",
+     "do_mincore",
+     "—引用结构→",
+     "var:mincore_walk_ops",
+     "—登记在 mincore_walk_ops.pmd_entry→",
+     "mincore_pte_range",
+     "—调用→",
+     "mincore_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "sys_reboot",
+    "kind": "系统调用",
+    "depth": 8,
+    "path": [
+     "sys_reboot",
+     "—调用→",
+     "hibernate",
+     "—调用→",
+     "swsusp_write",
+     "—调用→",
+     "swap_write_page",
+     "—调用→",
+     "alloc_swapdev_block",
+     "—调用→",
+     "swap_alloc_hibernation_slot",
+     "—调用→",
+     "swap_cluster_lock",
+     "—调用→",
+     "__swap_cluster_lock",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "sys_userfaultfd",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_userfaultfd",
+     "—调用→",
+     "new_userfaultfd",
+     "—引用结构→",
+     "var:userfaultfd_fops",
+     "—登记在 userfaultfd_fops.unlocked_ioctl→",
+     "userfaultfd_ioctl",
+     "—调用→",
+     "userfaultfd_move",
+     "—调用→",
+     "move_pages",
+     "—调用→",
+     "move_pages_ptes",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_fstatfs64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_aarch32_fstatfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_pread64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_aarch32_pread64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_pwrite64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_aarch32_pwrite64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_statfs64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_aarch32_statfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_fstatfs",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_fstatfs",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_fstatfs64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_fstatfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_getdents",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_getdents",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_io_setup",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_io_setup",
+     "—引用结构→",
+     "var:ctx",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_io_submit",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_io_submit",
+     "—引用结构→",
+     "var:ctx",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_kexec_load",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_kexec_load",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_old_readdir",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_old_readdir",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_pread64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_pread64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   },
+   {
+    "entry": "compat_sys_ptrace",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_ptrace",
+     "—引用结构→",
+     "var:data",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.apply_scheme→",
+     "damon_va_apply_scheme",
+     "—调用→",
+     "damos_va_migrate",
+     "—引用结构→",
+     "var:walk_ops",
+     "—登记在 walk_ops.pmd_entry→",
+     "madvise_free_pte_range",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "__swap_entry_to_cluster",
+     "—调用→",
+     "__swap_offset_to_cluster"
+    ]
+   }
+  ],
+  "n_entries": 7819,
+  "n_reached": 189084
+ },
+ "运行时开关": [
+  {
+   "read_in": "sys_swapoff",
+   "switch": "capable",
+   "writers": [
+    "allow_restart_store",
+    "cpu_store",
+    "enable_store"
+   ]
+  },
+  {
+   "read_in": "sys_swapoff",
+   "switch": "IS_ERR",
+   "writers": [
+    "create_store",
+    "disksize_store",
+    "export_store"
+   ]
+  },
+  {
+   "read_in": "filemap_cachestat",
+   "switch": "workingset_test_recent（经 flush）",
+   "writers": [
+    "deep_flush_store"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "页大小较大的配置，使阶数超过 MAX_PAGECACHE_ORDER",
+  "combos": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "__swap_offset_to_cluster",
+    "file": "mm/swap.h",
+    "line": 125,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(percpu_ref_is_zero(&si->users)); /* race with swapoff */",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "__swap_offset_to_cluster",
+    "file": "mm/swap.h",
+    "line": 126,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(offset >= roundup(si->max, SWAPFILE_CLUSTER));",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "sys_swapoff",
+    "file": "mm/swapfile.c",
+    "line": 3095,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!current->mm);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2031,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(src_start & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2032,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(dst_start & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2033,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(len & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2036,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(src_start + len < src_start);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages_ptes",
+    "file": "mm/userfaultfd.c",
+    "line": 1653,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(!folio_test_anon(src_folio))) {",
+    "why": "到达路径上"
+   }
+  ],
+  "n": 8,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ],
+  "normal": [
+   "arm64-16k",
+   "arm64-4k",
+   "loongarch-16k",
+   "loongarch-4k",
+   "mips-16k",
+   "mips-4k"
+  ],
+  "source": "ORD 违例组合；正常取同架构的不违例组合"
+ },
+ "平台需求": [
+  {
+   "config": "ARM64_64K_PAGES",
+   "need": "arm64 64K 页内核：QEMU -cpu cortex-a72，大内存（≥ 4G）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  },
+  {
+   "config": "USERFAULTFD",
+   "need": "用户态 userfaultfd（root 或 vm.unprivileged_userfaultfd）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动",
+  "观测点": "半自动",
+  "差分对照": "自动",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

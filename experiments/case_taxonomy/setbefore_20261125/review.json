@@ -1,0 +1,123 @@
+{
+ "n": 9,
+ "可能": 0,
+ "rows": [
+  {
+   "build": "x86_64",
+   "var": "__default_kernel_pte_mask",
+   "F": "early_memremap",
+   "file": "mm/early_ioremap.c",
+   "line": 233,
+   "macro": "FIXMAP_PAGE_NORMAL",
+   "before_any_write": true,
+   "done": "probe_page_size_mask（arch/x86/mm/init.c:251，start_kernel→setup_arch）",
+   "init": "~0",
+   "verdict": "已知设计",
+   "why": "x86 的 __default_kernel_pte_mask 初值是 ~0（init_64.c:108 注释“Bits allowed in normal kernel mappings”），probe_page_size_mask（init.c:248-251）才按硬件 PGE 和 PTI 收窄。之前建立的早期 fixmap 临时映射可能带 _PAGE_GLOBAL；pfn_pte 另经 check_pgprot/massage_pgprot 按 __supported_pte_mask 过滤；这些映射在 early_memunmap 时逐页清除并刷新，且此时还没有用户态。属于“先放宽、后收窄”的有意设计，读到初值无害。"
+  },
+  {
+   "build": "x86_64",
+   "var": "__default_kernel_pte_mask",
+   "F": "early_memremap_ro",
+   "file": "mm/early_ioremap.c",
+   "line": 242,
+   "macro": "FIXMAP_PAGE_RO",
+   "before_any_write": true,
+   "done": "probe_page_size_mask（arch/x86/mm/init.c:251，start_kernel→setup_arch）",
+   "init": "~0",
+   "verdict": "已知设计",
+   "why": "x86 的 __default_kernel_pte_mask 初值是 ~0（init_64.c:108 注释“Bits allowed in normal kernel mappings”），probe_page_size_mask（init.c:248-251）才按硬件 PGE 和 PTI 收窄。之前建立的早期 fixmap 临时映射可能带 _PAGE_GLOBAL；pfn_pte 另经 check_pgprot/massage_pgprot 按 __supported_pte_mask 过滤；这些映射在 early_memunmap 时逐页清除并刷新，且此时还没有用户态。属于“先放宽、后收窄”的有意设计，读到初值无害。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "is_vmalloc_addr",
+   "file": "mm/vmalloc.c",
+   "line": 85,
+   "macro": "VMALLOC_START",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（路径不可达）",
+   "why": "路径经 load_ucode_amd_bsp → add_taint → panic → … → schedule/io_uring/cgroup → kfree/vfree，启动早期既不会因加载微码而 panic 后再调度 io_uring 工作线程，slab/vmalloc 也还没初始化；是按名字连调用边、不看条件造成的。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "is_vmalloc_addr",
+   "file": "mm/vmalloc.c",
+   "line": 85,
+   "macro": "VMALLOC_END",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（路径不可达）",
+   "why": "路径经 load_ucode_amd_bsp → add_taint → panic → … → schedule/io_uring/cgroup → kfree/vfree，启动早期既不会因加载微码而 panic 后再调度 io_uring 工作线程，slab/vmalloc 也还没初始化；是按名字连调用边、不看条件造成的。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "node_alloc",
+   "file": "mm/vmalloc.c",
+   "line": 2017,
+   "macro": "VMALLOC_START",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（条件挡住）",
+   "why": "路径经 efi_memblock_x86_reserve_range → efi_memmap_init_early → __efi_memmap_init → memremap。但 __efi_memmap_init 只有在 data->flags 含 EFI_MEMMAP_LATE 时才调用 memremap（drivers/firmware/efi/memmap.c:40-43），早期路径不含该标志，走 early_memremap（源码注释：启动时 vmalloc 还不可用）。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "node_alloc",
+   "file": "mm/vmalloc.c",
+   "line": 2017,
+   "macro": "VMALLOC_END",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（条件挡住）",
+   "why": "路径经 efi_memblock_x86_reserve_range → efi_memmap_init_early → __efi_memmap_init → memremap。但 __efi_memmap_init 只有在 data->flags 含 EFI_MEMMAP_LATE 时才调用 memremap（drivers/firmware/efi/memmap.c:40-43），早期路径不含该标志，走 early_memremap（源码注释：启动时 vmalloc 还不可用）。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "addr_to_vb_idx",
+   "file": "mm/vmalloc.c",
+   "line": 2697,
+   "macro": "VMALLOC_START",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（路径不可达）",
+   "why": "路径经 load_ucode_amd_bsp → add_taint → panic → … → schedule/io_uring/cgroup → kfree/vfree，启动早期既不会因加载微码而 panic 后再调度 io_uring 工作线程，slab/vmalloc 也还没初始化；是按名字连调用边、不看条件造成的。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "get_vm_area_caller",
+   "file": "mm/vmalloc.c",
+   "line": 3300,
+   "macro": "VMALLOC_START",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（条件挡住）",
+   "why": "路径经 efi_memblock_x86_reserve_range → efi_memmap_init_early → __efi_memmap_init → memremap。但 __efi_memmap_init 只有在 data->flags 含 EFI_MEMMAP_LATE 时才调用 memremap（drivers/firmware/efi/memmap.c:40-43），早期路径不含该标志，走 early_memremap（源码注释：启动时 vmalloc 还不可用）。"
+  },
+  {
+   "build": "x86_64",
+   "var": "vmalloc_base",
+   "F": "get_vm_area_caller",
+   "file": "mm/vmalloc.c",
+   "line": 3300,
+   "macro": "VMALLOC_END",
+   "before_any_write": false,
+   "done": "kernel_randomize_memory（arch/x86/mm/kaslr.c:152，start_kernel→setup_arch）",
+   "init": "__VMALLOC_BASE_L4",
+   "verdict": "排除（条件挡住）",
+   "why": "路径经 efi_memblock_x86_reserve_range → efi_memmap_init_early → __efi_memmap_init → memremap。但 __efi_memmap_init 只有在 data->flags 含 EFI_MEMMAP_LATE 时才调用 memremap（drivers/firmware/efi/memmap.c:40-43），早期路径不含该标志，走 early_memremap（源码注释：启动时 vmalloc 还不可用）。"
+  }
+ ]
+}

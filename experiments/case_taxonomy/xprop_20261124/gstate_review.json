@@ -1,0 +1,147 @@
+{
+ "note": "criteria 一.C：9 条候选全部人工审查，0 可能、9 不可能；误报来源：取地址算写入、只在启动时调用的内联辅助函数、公共代码自己的运行时状态",
+ "rows": [
+  {
+   "build": "x86_64",
+   "X": "boot_cpu_data",
+   "read_by": [
+    "arch_has_pfn_modify_check（arch/x86/include/asm/pgtable.h）",
+    "arch_override_mprotect_pkey（arch/x86/include/asm/pkeys.h）",
+    "arch_pkeys_enabled（arch/x86/include/asm/pkeys.h）",
+    "arch_vmap_pmd_supported（arch/x86/include/asm/vmalloc.h）",
+    "arch_vmap_pud_supported（arch/x86/include/asm/vmalloc.h）",
+    "execute_only_pkey（arch/x86/include/asm/pkeys.h）",
+    "get_cycles（arch/x86/include/asm/tsc.h）",
+    "gup_fast_permitted（arch/x86/include/asm/pgtable_64.h）",
+    "has_transparent_hugepage（arch/x86/include/asm/pgtable.h）",
+    "mm_pkey_is_allocated（arch/x86/include/asm/pkeys.h）",
+    "p4d_offset（arch/x86/include/asm/pgtable.h）",
+    "pcpu_populate_pte（arch/x86/kernel/setup_percpu.c）",
+    "pgd_bad（arch/x86/include/asm/pgtable.h）",
+    "pgd_none（arch/x86/include/asm/pgtable.h）",
+    "pgd_populate（arch/x86/include/asm/pgalloc.h）",
+    "pgd_present（arch/x86/include/asm/pgtable.h）"
+   ],
+   "runtime_writes": [
+    "arch/x86/events/amd/ibs.c:1262 perf_ibs_get_op_data2",
+    "arch/x86/events/amd/uncore.c:339 amd_f17h_uncore_is_visible",
+    "arch/x86/include/asm/amd/nb.h:58 amd_gart_present",
+    "arch/x86/kernel/acpi/cppc.c:33 cpc_supported_by_cpu",
+    "arch/x86/kernel/acpi/cppc.c:36 cpc_supported_by_cpu",
+    "arch/x86/kernel/cpu/amd.c:751 init_amd_gh"
+   ],
+   "结论": "不可能：命中的“写入”是 &boot_cpu_data 传给 cpu_has() 等只读用途；真正的写入在启动阶段（取地址算可能写，规则过宽）"
+  },
+  {
+   "build": "arm64",
+   "X": "elfcorehdr_addr",
+   "read_by": [
+    "is_kdump_kernel（include/linux/crash_dump.h）"
+   ],
+   "runtime_writes": [
+    "include/linux/crash_dump.h:94 vmcore_unusable"
+   ],
+   "结论": "不可能：公共代码 vmcore_unusable() 在 vmcore 不可用时置 ERR，is_kdump_kernel() 照样为真，设计如此；也不是架构状态"
+  },
+  {
+   "build": "x86_64",
+   "X": "elfcorehdr_addr",
+   "read_by": [
+    "is_kdump_kernel（include/linux/crash_dump.h）"
+   ],
+   "runtime_writes": [
+    "include/linux/crash_dump.h:94 vmcore_unusable"
+   ],
+   "结论": "不可能：同上"
+  },
+  {
+   "build": "x86_64",
+   "X": "execmem_cache",
+   "read_by": [
+    "execmem_cache_free（mm/execmem.c）"
+   ],
+   "runtime_writes": [
+    "mm/execmem.c:161 execmem_cache_clean",
+    "mm/execmem.c:162 execmem_cache_clean",
+    "mm/execmem.c:186 execmem_cache_add_locked",
+    "mm/execmem.c:224 execmem_cache_alloc_locked",
+    "mm/execmem.c:225 execmem_cache_alloc_locked",
+    "mm/execmem.c:273 __execmem_cache_alloc"
+   ],
+   "结论": "不可能：mm/execmem.c 自己的缓存，运行时可变是设计如此，受 mutex 保护；读它的 execmem_cache_free 因架构条件归 A1，但变量不是架构状态"
+  },
+  {
+   "build": "x86_64",
+   "X": "execmem_cache_clean_work",
+   "read_by": [
+    "execmem_cache_free（mm/execmem.c）"
+   ],
+   "runtime_writes": [
+    "mm/execmem.c:406 execmem_cache_free_slow",
+    "mm/execmem.c:438 execmem_cache_free"
+   ],
+   "结论": "不可能：同上（工作队列项）"
+  },
+  {
+   "build": "x86_64",
+   "X": "execmem_cache_free_work",
+   "read_by": [
+    "execmem_cache_free（mm/execmem.c）"
+   ],
+   "runtime_writes": [
+    "mm/execmem.c:404 execmem_cache_free_slow",
+    "mm/execmem.c:434 execmem_cache_free"
+   ],
+   "结论": "不可能：同上"
+  },
+  {
+   "build": "arm64",
+   "X": "init_mm",
+   "read_by": [
+    "p4d_populate（arch/arm64/include/asm/pgalloc.h）",
+    "pgd_populate（arch/arm64/include/asm/pgalloc.h）",
+    "pmd_populate_kernel（arch/arm64/include/asm/pgalloc.h）",
+    "pmd_populate（arch/arm64/include/asm/pgalloc.h）",
+    "pud_populate（arch/arm64/include/asm/pgalloc.h）"
+   ],
+   "runtime_writes": [
+    "arch/arm64/include/asm/mmu_context.h:100 cpu_uninstall_idmap",
+    "arch/arm64/include/asm/mmu_context.h:110 cpu_install_idmap",
+    "arch/arm64/include/asm/mmu_context.h:233 enter_lazy_tlb",
+    "arch/arm64/include/asm/mmu_context.h:242 __switch_mm",
+    "arch/arm64/include/asm/pgalloc.h:33 pud_populate",
+    "arch/arm64/include/asm/pgalloc.h:55 p4d_populate"
+   ],
+   "结论": "不可能：命中的是 &init_mm 传参（只读取地址）；init_mm 是内核地址空间对象，页表本来就在运行时修改，有自己的锁"
+  },
+  {
+   "build": "x86_64",
+   "X": "init_mm",
+   "read_by": [
+    "pcpu_populate_pte（arch/x86/kernel/setup_percpu.c）"
+   ],
+   "runtime_writes": [
+    "arch/x86/include/asm/tlbflush.h:192 enter_lazy_tlb",
+    "arch/x86/kernel/cpu/common.c:2504 cpu_init",
+    "arch/x86/kernel/cpu/common.c:2505 cpu_init",
+    "arch/x86/kernel/cpu/common.c:2508 cpu_init",
+    "arch/x86/kernel/cpu/common.c:2516 cpu_init",
+    "arch/x86/kernel/espfix_64.c:169 init_espfix_ap"
+   ],
+   "结论": "不可能：同上"
+  },
+  {
+   "build": "x86_64",
+   "X": "nr_cpu_ids",
+   "read_by": [
+    "arch_tlbbatch_should_defer（arch/x86/include/asm/tlbflush.h）"
+   ],
+   "runtime_writes": [
+    "drivers/base/cpu.c:261 print_cpus_offline",
+    "include/linux/cpumask.h:41 set_nr_cpu_ids",
+    "kernel/rcu/tree.c:4876 rcu_init_geometry"
+   ],
+   "结论": "不可能：写入在 set_nr_cpu_ids()（未标 __init 的内联辅助函数，只在启动时调用）等处，实际是启动时设定；print_cpus_offline 的命中是取地址"
+  }
+ ]
+}

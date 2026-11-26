@@ -1,0 +1,1301 @@
+{
+ "no": 24,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/swap.h:100 swp_cluster_offset",
+  "engine": "ORD",
+  "consumers": [
+   "mm/swap.h:101 swp_cluster_offset"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "PMD_SHIFT（arch/riscv/include/asm/pgtable-64.h:39）"
+   ],
+   "arm64": [
+    "PMD_SHIFT（arch/arm64/include/asm/pgtable-hwdef.h:55）"
+   ],
+   "x86_64": [
+    "PMD_SHIFT（arch/x86/include/asm/pgtable_64_types.h:74）"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "由页大小派生的阶数/大小 SWAPFILE_CLUSTER",
+  "property": "在每种“架构 × 页大小”下都不超过页缓存上限 MAX_PAGECACHE_ORDER",
+  "ok_if": "所有组合下都不超过上限，或使用前已和上限比较",
+  "expected_actual": [
+   {
+    "来源": "SWAPFILE_CLUSTER",
+    "期望": "阶数 ≤ MAX_PAGECACHE_ORDER",
+    "违例组合": [
+     "arm64-64k",
+     "loongarch-64k",
+     "mips-64k"
+    ]
+   }
+  ]
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/swap.h:100",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_SWAP",
+      "line": 95,
+      "configs": [
+       "SWAP"
+      ]
+     }
+    ],
+    "makefile": []
+   },
+   {
+    "at": "mm/swap.h:101",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_SWAP",
+      "line": 95,
+      "configs": [
+       "SWAP"
+      ]
+     }
+    ],
+    "makefile": []
+   }
+  ],
+  "compile_configs": [
+   "SWAP"
+  ],
+  "path_configs": {
+   "CACHESTAT_SYSCALL": [
+    "filemap_cachestat",
+    "sys_cachestat"
+   ],
+   "MIGRATION": [
+    "sys_move_pages"
+   ],
+   "NUMA_MIGRATION": [
+    "sys_move_pages"
+   ],
+   "SWAP": [
+    "swap_cache_get_folio",
+    "swap_cache_get_shadow",
+    "swp_cluster_offset"
+   ],
+   "USERFAULTFD": [
+    "move_pages",
+    "move_pages_ptes"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_cachestat",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_cachestat",
+     "—调用→",
+     "filemap_cachestat",
+     "—调用→",
+     "swap_cache_get_shadow",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_swapoff",
+    "kind": "系统调用",
+    "depth": 3,
+    "path": [
+     "sys_swapoff",
+     "—调用→",
+     "try_to_unuse",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_move_pages",
+    "kind": "系统调用",
+    "depth": 4,
+    "path": [
+     "sys_move_pages",
+     "—函数指针→",
+     "move_pages",
+     "—调用→",
+     "move_pages_ptes",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_swapon",
+    "kind": "系统调用",
+    "depth": 5,
+    "path": [
+     "sys_swapon",
+     "—函数指针→",
+     "swap_reclaim_work",
+     "—调用→",
+     "swap_reclaim_full_clusters",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_mincore",
+    "kind": "系统调用",
+    "depth": 6,
+    "path": [
+     "sys_mincore",
+     "—调用→",
+     "do_mincore",
+     "—引用结构→",
+     "var:mm/mincore.c::mincore_walk_ops",
+     "—登记在 mincore_walk_ops.pmd_entry→",
+     "mincore_pte_range",
+     "—调用→",
+     "mincore_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_reboot",
+    "kind": "系统调用",
+    "depth": 8,
+    "path": [
+     "sys_reboot",
+     "—调用→",
+     "hibernate",
+     "—调用→",
+     "swsusp_write",
+     "—调用→",
+     "get_swap_writer",
+     "—调用→",
+     "alloc_swapdev_block",
+     "—调用→",
+     "swap_free_hibernation_slot",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "compat_sys_io_setup",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_io_setup",
+     "—调用→",
+     "ioctx_alloc",
+     "—调用→",
+     "aio_setup_ring",
+     "—调用→",
+     "aio_private_file",
+     "—引用结构→",
+     "var:fs/aio.c::aio_ctx_aops",
+     "—登记在 aio_ctx_aops.migrate_folio→",
+     "aio_migrate_folio",
+     "—调用→",
+     "folio_migrate_mapping",
+     "—调用→",
+     "__folio_migrate_mapping",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_futex_requeue",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_futex_requeue",
+     "—调用→",
+     "futex_requeue",
+     "—调用→",
+     "fault_in_user_writeable",
+     "—调用→",
+     "fixup_user_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_io_setup",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_io_setup",
+     "—调用→",
+     "ioctx_alloc",
+     "—调用→",
+     "aio_setup_ring",
+     "—调用→",
+     "aio_private_file",
+     "—引用结构→",
+     "var:fs/aio.c::aio_ctx_aops",
+     "—登记在 aio_ctx_aops.migrate_folio→",
+     "aio_migrate_folio",
+     "—调用→",
+     "folio_migrate_mapping",
+     "—调用→",
+     "__folio_migrate_mapping",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_migrate_pages",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_migrate_pages",
+     "—函数指针→",
+     "migrate_pages",
+     "—调用→",
+     "migrate_hugetlbs",
+     "—调用→",
+     "unmap_and_move_hugetlb_folio",
+     "—调用→",
+     "move_to_new_folio",
+     "—调用→",
+     "migrate_folio",
+     "—调用→",
+     "__migrate_folio",
+     "—调用→",
+     "__folio_migrate_mapping",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "sys_pivot_root",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_pivot_root",
+     "—调用→",
+     "path_pivot_root",
+     "—调用→",
+     "umount_mnt",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "compat_sys_aarch32_fadvise64_64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_aarch32_fadvise64_64",
+     "—调用→",
+     "ksys_fadvise64_64",
+     "—调用→",
+     "vfs_fadvise",
+     "—调用→",
+     "generic_fadvise",
+     "—调用→",
+     "mapping_try_invalidate",
+     "—调用→",
+     "mapping_evict_folio",
+     "—调用→",
+     "remove_mapping",
+     "—调用→",
+     "__remove_mapping",
+     "—调用→",
+     "__swap_cache_del_folio",
+     "—调用→",
+     "__swap_cache_do_del_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "compat_sys_aarch32_readahead",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_aarch32_readahead",
+     "—调用→",
+     "ksys_readahead",
+     "—调用→",
+     "vfs_fadvise",
+     "—调用→",
+     "generic_fadvise",
+     "—调用→",
+     "mapping_try_invalidate",
+     "—调用→",
+     "mapping_evict_folio",
+     "—调用→",
+     "remove_mapping",
+     "—调用→",
+     "__remove_mapping",
+     "—调用→",
+     "__swap_cache_del_folio",
+     "—调用→",
+     "__swap_cache_do_del_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "compat_sys_fadvise64_64",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_fadvise64_64",
+     "—调用→",
+     "ksys_fadvise64_64",
+     "—调用→",
+     "vfs_fadvise",
+     "—调用→",
+     "generic_fadvise",
+     "—调用→",
+     "mapping_try_invalidate",
+     "—调用→",
+     "mapping_evict_folio",
+     "—调用→",
+     "remove_mapping",
+     "—调用→",
+     "__remove_mapping",
+     "—调用→",
+     "__swap_cache_del_folio",
+     "—调用→",
+     "__swap_cache_do_del_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "compat_sys_readahead",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "compat_sys_readahead",
+     "—调用→",
+     "ksys_readahead",
+     "—调用→",
+     "vfs_fadvise",
+     "—调用→",
+     "generic_fadvise",
+     "—调用→",
+     "mapping_try_invalidate",
+     "—调用→",
+     "mapping_evict_folio",
+     "—调用→",
+     "remove_mapping",
+     "—调用→",
+     "__remove_mapping",
+     "—调用→",
+     "__swap_cache_del_folio",
+     "—调用→",
+     "__swap_cache_do_del_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "shmem_fault",
+    "kind": "回调：vm_operations_struct shmem_anon_vm_ops.fault",
+    "depth": 4,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.fault 分发→",
+     "shmem_fault",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "shmem_fallocate",
+    "kind": "回调：file_operations shmem_file_operations.fallocate",
+    "depth": 5,
+    "path": [
+     "shmem_fallocate",
+     "—调用→",
+     "shmem_get_folio",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "shmem_file_read_iter",
+    "kind": "回调：file_operations shmem_file_operations.read_iter",
+    "depth": 5,
+    "path": [
+     "sys_read",
+     "—经 file_operations.read_iter 分发→",
+     "shmem_file_read_iter",
+     "—调用→",
+     "shmem_get_folio",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "sys_read"
+   },
+   {
+    "entry": "shmem_file_splice_read",
+    "kind": "回调：file_operations shmem_file_operations.splice_read",
+    "depth": 5,
+    "path": [
+     "shmem_file_splice_read",
+     "—调用→",
+     "shmem_get_folio",
+     "—调用→",
+     "shmem_get_folio_gfp",
+     "—调用→",
+     "shmem_swapin_folio",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "snapshot_ioctl",
+    "kind": "回调：file_operations snapshot_fops.unlocked_ioctl",
+    "depth": 5,
+    "path": [
+     "sys_ioctl",
+     "—经 file_operations.unlocked_ioctl 分发→",
+     "snapshot_ioctl",
+     "—调用→",
+     "alloc_swapdev_block",
+     "—调用→",
+     "swap_free_hibernation_slot",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "sys_ioctl"
+   },
+   {
+    "entry": "snapshot_release",
+    "kind": "回调：file_operations snapshot_fops.release",
+    "depth": 5,
+    "path": [
+     "snapshot_release",
+     "—调用→",
+     "free_all_swap_pages",
+     "—调用→",
+     "swap_free_hibernation_slot",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "userfaultfd_ioctl",
+    "kind": "回调：file_operations userfaultfd_fops.unlocked_ioctl",
+    "depth": 5,
+    "path": [
+     "sys_ioctl",
+     "—经 file_operations.unlocked_ioctl 分发→",
+     "userfaultfd_ioctl",
+     "—调用→",
+     "userfaultfd_move",
+     "—调用→",
+     "move_pages",
+     "—调用→",
+     "move_pages_ptes",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "sys_ioctl"
+   },
+   {
+    "entry": "dmirror_fops_release",
+    "kind": "回调：file_operations dmirror_fops.release",
+    "depth": 6,
+    "path": [
+     "dmirror_fops_release",
+     "—调用→",
+     "dmirror_device_evict_chunk",
+     "—调用→",
+     "migrate_device_pages",
+     "—调用→",
+     "__migrate_device_pages",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "dmirror_fops_unlocked_ioctl",
+    "kind": "回调：file_operations dmirror_fops.unlocked_ioctl",
+    "depth": 6,
+    "path": [
+     "sys_ioctl",
+     "—经 file_operations.unlocked_ioctl 分发→",
+     "dmirror_fops_unlocked_ioctl",
+     "—调用→",
+     "dmirror_migrate_to_system",
+     "—调用→",
+     "migrate_vma_pages",
+     "—调用→",
+     "__migrate_device_pages",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "sys_ioctl"
+   },
+   {
+    "entry": "snapshot_compat_ioctl",
+    "kind": "回调：file_operations snapshot_fops.compat_ioctl",
+    "depth": 6,
+    "path": [
+     "snapshot_compat_ioctl",
+     "—调用→",
+     "snapshot_ioctl",
+     "—调用→",
+     "alloc_swapdev_block",
+     "—调用→",
+     "swap_free_hibernation_slot",
+     "—调用→",
+     "__try_to_reclaim_swap",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "split_huge_pages_write",
+    "kind": "回调：file_operations split_huge_pages_fops.write",
+    "depth": 6,
+    "path": [
+     "sys_write",
+     "—经 file_operations.write 分发→",
+     "split_huge_pages_write",
+     "—调用→",
+     "split_huge_pages_in_file",
+     "—调用→",
+     "folio_split",
+     "—调用→",
+     "__folio_split",
+     "—调用→",
+     "__folio_freeze_and_split_unmapped",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "sys_write"
+   },
+   {
+    "entry": "filemap_map_pages",
+    "kind": "回调：vm_operations_struct aio_ring_vm_ops.map_pages",
+    "depth": 7,
+    "path": [
+     "filemap_map_pages",
+     "—调用→",
+     "shmem_mapping",
+     "—引用结构→",
+     "var:mm/shmem.c::shmem_aops",
+     "—登记在 shmem_aops.migrate_folio→",
+     "migrate_folio",
+     "—调用→",
+     "__migrate_folio",
+     "—调用→",
+     "__folio_migrate_mapping",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "lru_gen_seq_write",
+    "kind": "回调：file_operations lru_gen_rw_fops.write",
+    "depth": 7,
+    "path": [
+     "sys_write",
+     "—经 file_operations.write 分发→",
+     "lru_gen_seq_write",
+     "—调用→",
+     "run_cmd",
+     "—调用→",
+     "run_eviction",
+     "—调用→",
+     "evict_folios",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "sys_write"
+   },
+   {
+    "entry": "show_smap",
+    "kind": "回调：seq_operations proc_pid_smaps_op.show",
+    "depth": 7,
+    "path": [
+     "seq_read（读这个文件）",
+     "—经 seq_operations.show 分发→",
+     "show_smap",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:fs/proc/task_mmu.c::smaps_walk_ops",
+     "—登记在 smaps_walk_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pte_entry",
+     "—调用→",
+     "swp_swapcount",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": "seq_read（读这个文件）"
+   },
+   {
+    "entry": "filemap_splice_read",
+    "kind": "回调：file_operations def_blk_fops.splice_read",
+    "depth": 8,
+    "path": [
+     "filemap_splice_read",
+     "—调用→",
+     "splice_folio_into_pipe",
+     "—引用结构→",
+     "var:page_cache_pipe_buf_ops",
+     "—登记在 page_cache_pipe_buf_ops.try_steal→",
+     "page_cache_pipe_buf_try_steal",
+     "—调用→",
+     "remove_mapping",
+     "—调用→",
+     "__remove_mapping",
+     "—调用→",
+     "__swap_cache_del_folio",
+     "—调用→",
+     "__swap_cache_do_del_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "dma_atomic_pool_init",
+    "kind": "启动时（initcall）",
+    "depth": 7,
+    "path": [
+     "dma_atomic_pool_init",
+     "—调用→",
+     "__dma_atomic_pool_init",
+     "—调用→",
+     "atomic_pool_expand",
+     "—函数指针→",
+     "remove_mapping",
+     "—调用→",
+     "__remove_mapping",
+     "—调用→",
+     "__swap_cache_del_folio",
+     "—调用→",
+     "__swap_cache_do_del_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "damon_pa_initcall",
+    "kind": "启动时（initcall）",
+    "depth": 8,
+    "path": [
+     "damon_pa_initcall",
+     "—函数指针→",
+     "damon_pa_apply_scheme",
+     "—调用→",
+     "damon_pa_pageout",
+     "—调用→",
+     "reclaim_pages",
+     "—调用→",
+     "reclaim_folio_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "swap_init",
+    "kind": "启动时（initcall）",
+    "depth": 8,
+    "path": [
+     "swap_init",
+     "—调用→",
+     "swap_sysfs_init",
+     "—引用结构→",
+     "var:swap_space",
+     "—结构内引用→",
+     "var:mm/swap_state.c::swap_aops",
+     "—登记在 swap_aops.migrate_folio→",
+     "migrate_folio",
+     "—调用→",
+     "__migrate_folio",
+     "—调用→",
+     "__folio_migrate_mapping",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "hmm_dmirror_init",
+    "kind": "启动时（initcall）",
+    "depth": 9,
+    "path": [
+     "hmm_dmirror_init",
+     "—调用→",
+     "dmirror_device_init",
+     "—调用→",
+     "dmirror_allocate_chunk",
+     "—引用结构→",
+     "var:lib/test_hmm.c::dmirror_devmem_ops",
+     "—登记在 dmirror_devmem_ops.migrate_to_ram→",
+     "dmirror_devmem_fault",
+     "—调用→",
+     "migrate_vma_pages",
+     "—调用→",
+     "__migrate_device_pages",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "ksm_init",
+    "kind": "启动时（initcall）",
+    "depth": 9,
+    "path": [
+     "ksm_init",
+     "—函数指针→",
+     "ksm_scan_thread",
+     "—调用→",
+     "ksm_do_scan",
+     "—调用→",
+     "cmp_and_merge_page",
+     "—调用→",
+     "try_to_merge_with_zero_page",
+     "—调用→",
+     "try_to_merge_one_page",
+     "—调用→",
+     "replace_page",
+     "—调用→",
+     "folio_free_swap",
+     "—调用→",
+     "folio_maybe_swapped",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "DEFINE_IDTENTRY_RAW_ERRORCODE",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 7,
+    "path": [
+     "DEFINE_IDTENTRY_RAW_ERRORCODE",
+     "—调用→",
+     "handle_page_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "DEFINE_INTERRUPT_HANDLER",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 7,
+    "path": [
+     "DEFINE_INTERRUPT_HANDLER",
+     "—函数指针→",
+     "do_page_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "do_translation_fault",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 7,
+    "path": [
+     "do_translation_fault",
+     "—调用→",
+     "do_page_fault",
+     "—调用→",
+     "handle_mm_fault",
+     "—调用→",
+     "__handle_mm_fault",
+     "—调用→",
+     "handle_pte_fault",
+     "—调用→",
+     "do_swap_page",
+     "—调用→",
+     "swap_cache_get_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "machine_process_ue_event",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 9,
+    "path": [
+     "machine_process_ue_event",
+     "—调用→",
+     "memory_failure",
+     "—调用→",
+     "try_to_split_thp_page",
+     "—调用→",
+     "split_huge_page_to_order",
+     "—调用→",
+     "split_huge_page_to_list_to_order",
+     "—调用→",
+     "__split_huge_page_to_list_to_order",
+     "—调用→",
+     "__folio_split",
+     "—调用→",
+     "__folio_freeze_and_split_unmapped",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   },
+   {
+    "entry": "uc_decode_notifier",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 9,
+    "path": [
+     "uc_decode_notifier",
+     "—调用→",
+     "memory_failure",
+     "—调用→",
+     "try_to_split_thp_page",
+     "—调用→",
+     "split_huge_page_to_order",
+     "—调用→",
+     "split_huge_page_to_list_to_order",
+     "—调用→",
+     "__split_huge_page_to_list_to_order",
+     "—调用→",
+     "__folio_split",
+     "—调用→",
+     "__folio_freeze_and_split_unmapped",
+     "—调用→",
+     "__swap_cache_replace_folio",
+     "—调用→",
+     "swp_cluster_offset"
+    ],
+    "dispatcher": null
+   }
+  ],
+  "n_entries": 2657,
+  "n_reached": 61195
+ },
+ "运行时开关": [
+  {
+   "read_in": "sys_cachestat",
+   "switch": "flags",
+   "writers": [
+    "consistency_policy_store",
+    "console_store",
+    "control_va_addr_alignment"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "页大小较大的配置，使阶数超过 MAX_PAGECACHE_ORDER",
+  "combos": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ]
+ },
+ "观测点": {
+  "n": 6,
+  "debug_configs": [
+   "DEBUG_VM"
+  ],
+  "near": [
+   {
+    "func": "sys_swapoff",
+    "file": "mm/swapfile.c",
+    "line": 3095,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!current->mm);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2031,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(src_start & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2032,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(dst_start & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2033,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(len & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2036,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(src_start + len < src_start);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages_ptes",
+    "file": "mm/userfaultfd.c",
+    "line": 1653,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(!folio_test_anon(src_folio))) {",
+    "why": "到达路径上"
+   }
+  ],
+  "consequence": [
+   {
+    "func": "xas_split_alloc",
+    "file": "lib/xarray.c",
+    "line": 1051,
+    "kind": "WARN_ON",
+    "text": "if (WARN_ON(xas->xa_shift + 2 * XA_CHUNK_SHIFT <= order))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "hugetlb_add_hstate",
+    "file": "mm/hugetlb.c",
+    "line": 4196,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "folio_set_order",
+    "file": "mm/internal.h",
+    "line": 739,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "free_reserved_pages",
+    "file": "mm/page_alloc.c",
+    "line": 6451,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_PAGE_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "alloc_contig_frozen_range_noprof",
+    "file": "mm/page_alloc.c",
+    "line": 7309,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "__fragmentation_index",
+    "file": "mm/vmstat.c",
+    "line": 1118,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(order > MAX_PAGE_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   }
+  ],
+  "points": [
+   {
+    "func": "sys_swapoff",
+    "file": "mm/swapfile.c",
+    "line": 3095,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!current->mm);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2031,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(src_start & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2032,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(dst_start & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2033,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(len & ~PAGE_MASK);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages",
+    "file": "mm/userfaultfd.c",
+    "line": 2036,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(src_start + len < src_start);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "move_pages_ptes",
+    "file": "mm/userfaultfd.c",
+    "line": 1653,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(!folio_test_anon(src_folio))) {",
+    "why": "到达路径上"
+   },
+   {
+    "func": "xas_split_alloc",
+    "file": "lib/xarray.c",
+    "line": 1051,
+    "kind": "WARN_ON",
+    "text": "if (WARN_ON(xas->xa_shift + 2 * XA_CHUNK_SHIFT <= order))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "hugetlb_add_hstate",
+    "file": "mm/hugetlb.c",
+    "line": 4196,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "folio_set_order",
+    "file": "mm/internal.h",
+    "line": 739,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "free_reserved_pages",
+    "file": "mm/page_alloc.c",
+    "line": 6451,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_PAGE_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "alloc_contig_frozen_range_noprof",
+    "file": "mm/page_alloc.c",
+    "line": 7309,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "__fragmentation_index",
+    "file": "mm/vmstat.c",
+    "line": 1118,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(order > MAX_PAGE_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   }
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ],
+  "normal": [
+   "arm64-16k",
+   "arm64-4k",
+   "loongarch-16k",
+   "loongarch-4k",
+   "mips-16k",
+   "mips-4k"
+  ],
+  "source": "ORD 违例组合；正常取同架构的不违例组合"
+ },
+ "平台需求": [
+  {
+   "config": "ARM64_64K_PAGES",
+   "need": "arm64 64K 页内核：QEMU -cpu cortex-a72，大内存（≥ 4G）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  },
+  {
+   "config": "USERFAULTFD",
+   "need": "用户态 userfaultfd（root 或 vm.unprivileged_userfaultfd）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动",
+  "观测点": "半自动（附近 + 后果处）",
+  "差分对照": "自动",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

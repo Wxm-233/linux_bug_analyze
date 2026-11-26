@@ -1,0 +1,228 @@
+{
+ "no": 54,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/swapfile.c:2711 find_next_to_unuse",
+  "engine": "ORD",
+  "consumers": [
+   "mm/swapfile.c:2723 find_next_to_unuse"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "PMD_SHIFT（arch/riscv/include/asm/pgtable-64.h:39）"
+   ],
+   "arm64": [
+    "PMD_SHIFT（arch/arm64/include/asm/pgtable-hwdef.h:55）"
+   ],
+   "x86_64": [
+    "PMD_SHIFT（arch/x86/include/asm/pgtable_64_types.h:74）"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "由页大小派生的阶数/大小 SWAPFILE_CLUSTER",
+  "property": "在每种“架构 × 页大小”下都不超过页缓存上限 MAX_PAGECACHE_ORDER",
+  "ok_if": "所有组合下都不超过上限，或使用前已和上限比较",
+  "expected_actual": [
+   {
+    "来源": "SWAPFILE_CLUSTER",
+    "期望": "阶数 ≤ MAX_PAGECACHE_ORDER",
+    "违例组合": [
+     "arm64-64k",
+     "loongarch-64k",
+     "mips-64k"
+    ]
+   }
+  ]
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/swapfile.c:2711",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_SWAP)\t+= page_io.o swap_state.o swapfile.o",
+      "configs": [
+       "SWAP"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/swapfile.c:2723",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_SWAP)\t+= page_io.o swap_state.o swapfile.o",
+      "configs": [
+       "SWAP"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "SWAP"
+  ],
+  "path_configs": {
+   "SWAP": [
+    "find_next_to_unuse",
+    "sys_swapoff",
+    "try_to_unuse"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_swapoff",
+    "kind": "系统调用",
+    "depth": 2,
+    "path": [
+     "sys_swapoff",
+     "—调用→",
+     "try_to_unuse",
+     "—调用→",
+     "find_next_to_unuse"
+    ]
+   }
+  ],
+  "n_entries": 1,
+  "n_reached": 3
+ },
+ "运行时开关": [
+  {
+   "read_in": "sys_swapoff",
+   "switch": "capable",
+   "writers": [
+    "allow_restart_store",
+    "cpu_store",
+    "enable_store"
+   ]
+  },
+  {
+   "read_in": "sys_swapoff",
+   "switch": "IS_ERR",
+   "writers": [
+    "create_store",
+    "disksize_store",
+    "export_store"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "页大小较大的配置，使阶数超过 MAX_PAGECACHE_ORDER",
+  "combos": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "swap_table_get",
+    "file": "mm/swap_table.h",
+    "line": 257,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(off >= SWAPFILE_CLUSTER);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__swap_offset_to_cluster",
+    "file": "mm/swap.h",
+    "line": 125,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(percpu_ref_is_zero(&si->users)); /* race with swapoff */",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__swap_offset_to_cluster",
+    "file": "mm/swap.h",
+    "line": 126,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(offset >= roundup(si->max, SWAPFILE_CLUSTER));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__rcu_read_unlock",
+    "file": "kernel/rcu/tree_plugin.h",
+    "line": 443,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(rrln < 0 || rrln > RCU_NEST_PMAX);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__rcu_read_lock",
+    "file": "kernel/rcu/tree_plugin.h",
+    "line": 416,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(rcu_preempt_depth() > RCU_NEST_PMAX);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "sys_swapoff",
+    "file": "mm/swapfile.c",
+    "line": 3095,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!current->mm);",
+    "why": "到达路径上"
+   }
+  ],
+  "n": 6,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ],
+  "normal": [
+   "arm64-16k",
+   "arm64-4k",
+   "loongarch-16k",
+   "loongarch-4k",
+   "mips-16k",
+   "mips-4k"
+  ],
+  "source": "ORD 违例组合；正常取同架构的不违例组合"
+ },
+ "平台需求": [
+  {
+   "config": "ARM64_64K_PAGES",
+   "need": "arm64 64K 页内核：QEMU -cpu cortex-a72，大内存（≥ 4G）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动",
+  "观测点": "半自动",
+  "差分对照": "自动",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

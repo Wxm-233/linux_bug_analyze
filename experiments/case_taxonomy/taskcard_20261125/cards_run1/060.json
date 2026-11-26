@@ -1,0 +1,563 @@
+{
+ "no": 60,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "fs/proc/task_mmu.c:1129 smaps_pmd_entry",
+  "engine": "P1",
+  "consumers": [
+   "fs/proc/task_mmu.c:1129 smaps_pmd_entry"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:836"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:583"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:183"
+   ],
+   "arm": [
+    "arch/arm/include/asm/pgtable-3level.h:181"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/book3s/64/pgtable.h:1050"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "页表项 `*pmd`（交给 pmd_young()）",
+  "property": "调用 pmd_young() 时该项是 present 项（pmd_young 只对 present 项有定义）",
+  "ok_if": "调用前已确认 present，或这条路径上不可能出现非 present 项",
+  "expected_actual": "期望：调用时页表项是 present 项；实际：可能传入非 present 项（引擎判为未受保护）"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "fs/proc/task_mmu.c:1129",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_PROC_PAGE_MONITOR",
+      "line": 891,
+      "configs": [
+       "PROC_PAGE_MONITOR"
+      ]
+     },
+     {
+      "cond": "#ifdef CONFIG_TRANSPARENT_HUGEPAGE",
+      "line": 1095,
+      "configs": [
+       "TRANSPARENT_HUGEPAGE"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "fs/proc/Makefile",
+      "line": "proc-$(CONFIG_MMU)\t:= task_mmu.o",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_PROC_FS)\t\t+= proc/",
+      "configs": [
+       "PROC_FS"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "fs/proc/task_mmu.c:1129",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_PROC_PAGE_MONITOR",
+      "line": 891,
+      "configs": [
+       "PROC_PAGE_MONITOR"
+      ]
+     },
+     {
+      "cond": "#ifdef CONFIG_TRANSPARENT_HUGEPAGE",
+      "line": 1095,
+      "configs": [
+       "TRANSPARENT_HUGEPAGE"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "fs/proc/Makefile",
+      "line": "proc-$(CONFIG_MMU)\t:= task_mmu.o",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_PROC_FS)\t\t+= proc/",
+      "configs": [
+       "PROC_FS"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "MMU",
+   "PROC_FS",
+   "PROC_PAGE_MONITOR",
+   "TRANSPARENT_HUGEPAGE"
+  ],
+  "path_configs": {
+   "MMU": [
+    "get_smaps_walk_ops",
+    "show_smap",
+    "show_smaps_rollup"
+   ],
+   "PER_VMA_LOCK": [
+    "get_smaps_walk_ops"
+   ],
+   "PROC_FS": [
+    "get_smaps_walk_ops",
+    "proc_tgid_base_readdir",
+    "show_smap"
+   ],
+   "PROC_PAGE_MONITOR": [
+    "get_smaps_walk_ops",
+    "show_smap",
+    "show_smaps_rollup"
+   ],
+   "TRANSPARENT_HUGEPAGE": [
+    "smaps_pmd_entry"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_pidfd_send_signal",
+    "kind": "系统调用",
+    "depth": 13,
+    "path": [
+     "sys_pidfd_send_signal",
+     "—调用→",
+     "pidfd_to_pid",
+     "—调用→",
+     "tgid_pidfd_to_pid",
+     "—引用结构→",
+     "var:proc_tgid_base_operations",
+     "—登记在 proc_tgid_base_operations.iterate_shared→",
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pid_smaps_rollup_operations",
+     "—登记在 proc_pid_smaps_rollup_operations.open→",
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "show_smap",
+    "kind": "回调：seq_operations proc_pid_smaps_op.show",
+    "depth": 5,
+    "path": [
+     "show_smap",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "smaps_rollup_open",
+    "kind": "回调：file_operations proc_pid_smaps_rollup_operations.open",
+    "depth": 6,
+    "path": [
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "pid_smaps_open",
+    "kind": "回调：file_operations proc_pid_smaps_operations.open",
+    "depth": 7,
+    "path": [
+     "pid_smaps_open",
+     "—引用结构→",
+     "var:proc_pid_smaps_op",
+     "—登记在 proc_pid_smaps_op.show→",
+     "show_smap",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "proc_tgid_base_readdir",
+    "kind": "回调：file_operations proc_tgid_base_operations.iterate_shared",
+    "depth": 9,
+    "path": [
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pid_smaps_rollup_operations",
+     "—登记在 proc_pid_smaps_rollup_operations.open→",
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "proc_tid_base_readdir",
+    "kind": "回调：file_operations proc_tid_base_operations.iterate_shared",
+    "depth": 9,
+    "path": [
+     "proc_tid_base_readdir",
+     "—引用结构→",
+     "var:tid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pid_smaps_rollup_operations",
+     "—登记在 proc_pid_smaps_rollup_operations.open→",
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "proc_task_readdir",
+    "kind": "回调：file_operations proc_task_operations.iterate_shared",
+    "depth": 12,
+    "path": [
+     "proc_task_readdir",
+     "—函数指针→",
+     "proc_task_instantiate",
+     "—引用结构→",
+     "var:proc_tid_base_inode_operations",
+     "—登记在 proc_tid_base_inode_operations.lookup→",
+     "proc_tid_base_lookup",
+     "—引用结构→",
+     "var:tid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pid_smaps_rollup_operations",
+     "—登记在 proc_pid_smaps_rollup_operations.open→",
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "proc_root_readdir",
+    "kind": "回调：file_operations proc_root_operations.iterate_shared",
+    "depth": 13,
+    "path": [
+     "proc_root_readdir",
+     "—调用→",
+     "proc_pid_readdir",
+     "—函数指针→",
+     "proc_pid_instantiate",
+     "—引用结构→",
+     "var:proc_tgid_base_operations",
+     "—登记在 proc_tgid_base_operations.iterate_shared→",
+     "proc_tgid_base_readdir",
+     "—引用结构→",
+     "var:tgid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pid_smaps_rollup_operations",
+     "—登记在 proc_pid_smaps_rollup_operations.open→",
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   },
+   {
+    "entry": "x86_64_start_kernel",
+    "kind": "架构入口（没有 C 调用者）",
+    "depth": 13,
+    "path": [
+     "x86_64_start_kernel",
+     "—调用→",
+     "x86_64_start_reservations",
+     "—调用→",
+     "start_kernel",
+     "—调用→",
+     "proc_root_init",
+     "—调用→",
+     "set_proc_pid_nlink",
+     "—引用结构→",
+     "var:tid_base_stuff",
+     "—结构内引用→",
+     "var:proc_pid_smaps_rollup_operations",
+     "—登记在 proc_pid_smaps_rollup_operations.open→",
+     "smaps_rollup_open",
+     "—函数指针→",
+     "show_smaps_rollup",
+     "—调用→",
+     "smap_gather_stats",
+     "—调用→",
+     "get_smaps_walk_ops",
+     "—引用结构→",
+     "var:smaps_walk_vma_lock_ops",
+     "—登记在 smaps_walk_vma_lock_ops.pmd_entry→",
+     "smaps_pte_range",
+     "—调用→",
+     "smaps_pmd_entry"
+    ]
+   }
+  ],
+  "n_entries": 9,
+  "n_reached": 70
+ },
+ "运行时开关": [
+  {
+   "read_in": "sys_pidfd_send_signal",
+   "switch": "IS_ERR",
+   "writers": [
+    "create_store",
+    "disksize_store",
+    "export_store"
+   ]
+  },
+  {
+   "read_in": "sys_pidfd_send_signal",
+   "switch": "access_pidfd_pidns（经 parent）",
+   "writers": [
+    "alt_name_store",
+    "disable_store",
+    "frequency_test_store"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "调用 pmd_young 时页表项不 present",
+  "kinds": [
+   {
+    "kind": "THP 迁移项",
+    "config": "ARCH_ENABLE_THP_MIGRATION"
+   },
+   {
+    "kind": "device-private PMD 项",
+    "config": "DEVICE_PRIVATE"
+   }
+  ],
+  "guards": [
+   "提前返回：IS_ERR_OR_NULL(page)",
+   "提前返回：pmd_none(*pmd)"
+  ]
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "softleaf_to_page",
+    "file": "include/linux/leafops.h",
+    "line": 413,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(!softleaf_has_pfn(entry));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__vm_normal_page",
+    "file": "mm/memory.c",
+    "line": 808,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(is_zero_pfn(pfn) || is_huge_zero_pfn(pfn));",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "softleaf_migration_sync",
+    "file": "include/linux/leafops.h",
+    "line": 400,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(!folio_test_locked(folio));",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "softleaf_to_pfn",
+    "file": "include/linux/leafops.h",
+    "line": 380,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(!softleaf_has_pfn(entry));",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "folio_entire_mapcount",
+    "file": "include/linux/mm.h",
+    "line": 1915,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(!folio_test_large(folio), folio);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "folio_large_mapcount",
+    "file": "include/linux/mm.h",
+    "line": 1923,
+    "kind": "VM_WARN_ON_FOLIO",
+    "text": "VM_WARN_ON_FOLIO(!folio_test_large(folio), folio);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "print_bad_page_map",
+    "file": "mm/memory.c",
+    "line": 644,
+    "kind": "pr_alert",
+    "text": "pr_alert(\"BUG: Bad page map in process %s  %s:%s\", current->comm,",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "print_bad_page_map",
+    "file": "mm/memory.c",
+    "line": 649,
+    "kind": "pr_alert",
+    "text": "pr_alert(\"addr:%px vm_flags:%08lx anon_vma:%px mapping:%px\",",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "print_bad_page_map",
+    "file": "mm/memory.c",
+    "line": 657,
+    "kind": "pr_alert",
+    "text": "pr_alert(\"file:%pD fault:%ps mmap:%ps mmap_prepare: %ps read_folio:%ps\\n\",",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "softleaf_type",
+    "file": "include/linux/leafops.h",
+    "line": 198,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(1);",
+    "why": "消费函数往下第 3 层"
+   }
+  ],
+  "n": 10,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": true,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:836"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:583"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:183"
+   ],
+   "arm": [
+    "arch/arm/include/asm/pgtable-3level.h:181"
+   ],
+   "powerpc": [
+    "arch/powerpc/include/asm/book3s/64/pgtable.h:1050"
+   ]
+  }
+ },
+ "平台需求": [
+  {
+   "config": "DEVICE_PRIVATE",
+   "need": "HMM 测试模块 lib/test_hmm（TEST_HMM）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动（按页表级别查表）",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

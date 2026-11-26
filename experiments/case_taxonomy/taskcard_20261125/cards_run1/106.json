@@ -1,0 +1,784 @@
+{
+ "no": 106,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/rmap.c:747 set_tlb_ubc_flush_pending",
+  "engine": "P1",
+  "consumers": [
+   "mm/rmap.c:747 set_tlb_ubc_flush_pending"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:390"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:176"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:148"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "页表项 `pteval`（交给 pte_dirty()）",
+  "property": "调用 pte_dirty() 时该项是 present 项（pte_dirty 只对 present 项有定义）",
+  "ok_if": "调用前已确认 present，或这条路径上不可能出现非 present 项",
+  "expected_actual": "期望：调用时页表项是 present 项；实际：可能传入非 present 项（引擎判为未受保护）"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/rmap.c:747",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH",
+      "line": 704,
+      "configs": [
+       "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "mmu-$(CONFIG_MMU)\t:= highmem.o memory.o mincore.o  \t\t\t   mlock.o mmap.o mmu_gather.o mprotect.o mremap.o  \t\t\t   msync.o ",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/rmap.c:747",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH",
+      "line": 704,
+      "configs": [
+       "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "mmu-$(CONFIG_MMU)\t:= highmem.o memory.o mincore.o  \t\t\t   mlock.o mmap.o mmu_gather.o mprotect.o mremap.o  \t\t\t   msync.o ",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH",
+   "MMU"
+  ],
+  "path_configs": {
+   "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH": [
+    "set_tlb_ubc_flush_pending"
+   ],
+   "COMPAT": [
+    "compat_sys_aarch32_fstatfs64"
+   ],
+   "DAMON": [
+    "__damon_pa_check_access",
+    "damon_folio_young",
+    "damon_pa_check_accesses"
+   ],
+   "DAMON_PADDR": [
+    "__damon_pa_check_access",
+    "damon_folio_young",
+    "damon_pa_check_accesses"
+   ],
+   "DAMON_VADDR": [
+    "damon_folio_young"
+   ],
+   "MIGRATION": [
+    "migrate_hugetlbs",
+    "migrate_pages",
+    "unmap_and_move_hugetlb_folio"
+   ],
+   "MMU": [
+    "set_tlb_ubc_flush_pending",
+    "try_to_migrate",
+    "try_to_migrate_one"
+   ],
+   "NUMA": [
+    "do_mbind",
+    "kernel_mbind",
+    "sys_mbind"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_migrate_pages",
+    "kind": "系统调用",
+    "depth": 6,
+    "path": [
+     "sys_migrate_pages",
+     "—函数指针→",
+     "migrate_pages",
+     "—调用→",
+     "migrate_hugetlbs",
+     "—调用→",
+     "unmap_and_move_hugetlb_folio",
+     "—调用→",
+     "try_to_migrate",
+     "—函数指针→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_mbind",
+    "kind": "系统调用",
+    "depth": 8,
+    "path": [
+     "sys_mbind",
+     "—调用→",
+     "kernel_mbind",
+     "—调用→",
+     "do_mbind",
+     "—调用→",
+     "migrate_pages",
+     "—调用→",
+     "migrate_hugetlbs",
+     "—调用→",
+     "unmap_and_move_hugetlb_folio",
+     "—调用→",
+     "try_to_migrate",
+     "—函数指针→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_fstatfs64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_aarch32_fstatfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_pread64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_aarch32_pread64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_pwrite64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_aarch32_pwrite64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_aarch32_statfs64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_aarch32_statfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_fstatfs",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_fstatfs",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_fstatfs64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_fstatfs64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_getdents",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_getdents",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_io_setup",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_io_setup",
+     "—引用结构→",
+     "var:ctx",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_io_submit",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_io_submit",
+     "—引用结构→",
+     "var:ctx",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_kexec_load",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_kexec_load",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_old_readdir",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_old_readdir",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_pread64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_pread64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_ptrace",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_ptrace",
+     "—引用结构→",
+     "var:data",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_pwrite64",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_pwrite64",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_recv",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_recv",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_recvfrom",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_recvfrom",
+     "—引用结构→",
+     "var:buf",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_rt_sigqueueinfo",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_rt_sigqueueinfo",
+     "—引用结构→",
+     "var:info",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "compat_sys_rt_sigtimedwait_time32",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "compat_sys_rt_sigtimedwait_time32",
+     "—引用结构→",
+     "var:info",
+     "—结构内引用→",
+     "var:ops",
+     "—登记在 ops.check_accesses→",
+     "damon_pa_check_accesses",
+     "—调用→",
+     "__damon_pa_check_access",
+     "—调用→",
+     "damon_pa_young",
+     "—调用→",
+     "damon_folio_young",
+     "—引用结构→",
+     "var:rwc",
+     "—登记在 rwc.rmap_one→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   }
+  ],
+  "n_entries": 7824,
+  "n_reached": 189240
+ },
+ "运行时开关": [
+  {
+   "read_in": "migrate_pages",
+   "switch": "list_empty",
+   "writers": [
+    "bus_rescan_store",
+    "metadata_store",
+    "new_dev_store"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "调用 pte_dirty 时页表项不 present",
+  "kinds": [
+   {
+    "kind": "交换项",
+    "config": "SWAP"
+   },
+   {
+    "kind": "迁移项",
+    "config": "MIGRATION"
+   },
+   {
+    "kind": "device-private 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "device-exclusive 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "uffd-wp 标记",
+    "config": "PTE_MARKER_UFFD_WP"
+   },
+   {
+    "kind": "hwpoison 标记",
+    "config": "MEMORY_FAILURE"
+   },
+   {
+    "kind": "guard 标记（MADV_GUARD_INSTALL）",
+    "config": "MMU"
+   }
+  ],
+  "guards": []
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "instrument_atomic_check_alignment",
+    "file": "include/linux/instrumented.h",
+    "line": 67,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE((unsigned long)v & mask);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "try_to_migrate",
+    "file": "mm/rmap.c",
+    "line": 2805,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(flags & ~(TTU_RMAP_LOCKED | TTU_SPLIT_HUGE_PMD |",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2539,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(folio_test_hugetlb(folio) ||",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2552,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(!pvmw.pte, folio);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2569,
+    "kind": "VM_WARN_ON_FOLIO",
+    "text": "VM_WARN_ON_FOLIO(folio_test_hugetlb(folio), folio);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2601,
+    "kind": "VM_BUG_ON",
+    "text": "VM_BUG_ON(!(flags & TTU_RMAP_LOCKED));",
+    "why": "到达路径上"
+   }
+  ],
+  "n": 6,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": true,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:390"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:176"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:148"
+   ]
+  }
+ },
+ "平台需求": [
+  {
+   "config": "DEVICE_PRIVATE",
+   "need": "HMM 测试模块 lib/test_hmm（TEST_HMM）"
+  },
+  {
+   "config": "NUMA",
+   "need": "多个 NUMA 节点（QEMU -numa node,...）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动（按页表级别查表）",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

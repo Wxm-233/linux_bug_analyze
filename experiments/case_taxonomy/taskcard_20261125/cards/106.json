@@ -1,0 +1,918 @@
+{
+ "no": 106,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/rmap.c:747 set_tlb_ubc_flush_pending",
+  "engine": "P1",
+  "consumers": [
+   "mm/rmap.c:747 set_tlb_ubc_flush_pending"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:390"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:176"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:148"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "页表项 `pteval`（交给 pte_dirty()）",
+  "property": "调用 pte_dirty() 时该项是 present 项（pte_dirty 只对 present 项有定义）",
+  "ok_if": "调用前已确认 present，或这条路径上不可能出现非 present 项",
+  "expected_actual": "期望：调用时页表项是 present 项；实际：可能传入非 present 项（引擎判为未受保护）"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/rmap.c:747",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH",
+      "line": 704,
+      "configs": [
+       "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "mmu-$(CONFIG_MMU)\t:= highmem.o memory.o mincore.o  \t\t\t   mlock.o mmap.o mmu_gather.o mprotect.o mremap.o  \t\t\t   msync.o ",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/rmap.c:747",
+    "ifs": [
+     {
+      "cond": "#ifdef CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH",
+      "line": 704,
+      "configs": [
+       "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH"
+      ]
+     }
+    ],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "mmu-$(CONFIG_MMU)\t:= highmem.o memory.o mincore.o  \t\t\t   mlock.o mmap.o mmu_gather.o mprotect.o mremap.o  \t\t\t   msync.o ",
+      "configs": [
+       "MMU"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH",
+   "MMU"
+  ],
+  "path_configs": {
+   "ADVISE_SYSCALLS": [
+    "do_madvise",
+    "madvise_do_behavior",
+    "madvise_inject_error"
+   ],
+   "ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH": [
+    "set_tlb_ubc_flush_pending"
+   ],
+   "MEMORY_FAILURE": [
+    "hwpoison_user_mappings",
+    "madvise_inject_error",
+    "memory_failure"
+   ],
+   "MIGRATION": [
+    "migrate_folio_unmap",
+    "migrate_pages",
+    "migrate_pages_batch"
+   ],
+   "MMU": [
+    "set_tlb_ubc_flush_pending",
+    "try_to_migrate",
+    "try_to_migrate_one"
+   ],
+   "NUMA": [
+    "do_mbind",
+    "kernel_mbind",
+    "sys_mbind"
+   ],
+   "X86_MCE": [
+    "memory_failure"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_migrate_pages",
+    "kind": "系统调用",
+    "depth": 6,
+    "path": [
+     "sys_migrate_pages",
+     "—函数指针→",
+     "migrate_pages",
+     "—调用→",
+     "migrate_pages_batch",
+     "—调用→",
+     "migrate_folio_unmap",
+     "—调用→",
+     "try_to_migrate",
+     "—函数指针→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_mbind",
+    "kind": "系统调用",
+    "depth": 8,
+    "path": [
+     "sys_mbind",
+     "—调用→",
+     "kernel_mbind",
+     "—调用→",
+     "do_mbind",
+     "—调用→",
+     "migrate_pages",
+     "—调用→",
+     "migrate_pages_batch",
+     "—调用→",
+     "migrate_folio_unmap",
+     "—调用→",
+     "try_to_migrate",
+     "—函数指针→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_madvise",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_madvise",
+     "—调用→",
+     "do_madvise",
+     "—调用→",
+     "madvise_do_behavior",
+     "—调用→",
+     "madvise_inject_error",
+     "—调用→",
+     "memory_failure",
+     "—调用→",
+     "hwpoison_user_mappings",
+     "—调用→",
+     "unmap_poisoned_folio",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_pivot_root",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_pivot_root",
+     "—调用→",
+     "path_pivot_root",
+     "—调用→",
+     "umount_mnt",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_process_madvise",
+    "kind": "系统调用",
+    "depth": 9,
+    "path": [
+     "sys_process_madvise",
+     "—调用→",
+     "vector_madvise",
+     "—调用→",
+     "madvise_do_behavior",
+     "—调用→",
+     "madvise_inject_error",
+     "—调用→",
+     "memory_failure",
+     "—调用→",
+     "hwpoison_user_mappings",
+     "—调用→",
+     "unmap_poisoned_folio",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_fsmount",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_fsmount",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_move_pages",
+    "kind": "系统调用",
+    "depth": 10,
+    "path": [
+     "sys_move_pages",
+     "—调用→",
+     "kernel_move_pages",
+     "—调用→",
+     "do_pages_move",
+     "—调用→",
+     "move_pages_and_store_status",
+     "—调用→",
+     "do_move_pages_to_node",
+     "—调用→",
+     "migrate_pages",
+     "—调用→",
+     "migrate_pages_batch",
+     "—调用→",
+     "migrate_folio_unmap",
+     "—调用→",
+     "try_to_migrate",
+     "—函数指针→",
+     "try_to_migrate_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_chdir",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_chdir",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_chroot",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_chroot",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_fchroot",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_fchroot",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_file_getattr",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_file_getattr",
+     "—函数指针→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_file_setattr",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_file_setattr",
+     "—函数指针→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_fspick",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_fspick",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_inotify_add_watch",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_inotify_add_watch",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_mount_setattr",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_mount_setattr",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_move_mount",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_move_mount",
+     "—函数指针→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_mq_unlink",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_mq_unlink",
+     "—调用→",
+     "iput",
+     "—调用→",
+     "iput_final",
+     "—调用→",
+     "evict",
+     "—调用→",
+     "truncate_inode_pages_final",
+     "—调用→",
+     "truncate_inode_pages",
+     "—调用→",
+     "truncate_inode_pages_range",
+     "—调用→",
+     "truncate_inode_partial_folio",
+     "—调用→",
+     "folio_split_or_unmap",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_name_to_handle_at",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_name_to_handle_at",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_oldumount",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_oldumount",
+     "—调用→",
+     "ksys_umount",
+     "—调用→",
+     "path_umount",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   },
+   {
+    "entry": "sys_quotactl",
+    "kind": "系统调用",
+    "depth": 11,
+    "path": [
+     "sys_quotactl",
+     "—调用→",
+     "path_put",
+     "—调用→",
+     "mntput",
+     "—调用→",
+     "mntput_no_expire",
+     "—调用→",
+     "mntput_no_expire_slowpath",
+     "—调用→",
+     "__umount_mnt",
+     "—函数指针→",
+     "shrink_list",
+     "—调用→",
+     "shrink_inactive_list",
+     "—调用→",
+     "shrink_folio_list",
+     "—调用→",
+     "try_to_unmap",
+     "—函数指针→",
+     "try_to_unmap_one",
+     "—调用→",
+     "set_tlb_ubc_flush_pending"
+    ]
+   }
+  ],
+  "n_entries": 1033,
+  "n_reached": 39937
+ },
+ "运行时开关": [
+  {
+   "read_in": "migrate_pages",
+   "switch": "mode",
+   "writers": [
+    "acquire_store",
+    "analysis_trigger_store",
+    "anon_enabled_store"
+   ]
+  },
+  {
+   "read_in": "migrate_folio_unmap",
+   "switch": "flags",
+   "writers": [
+    "consistency_policy_store",
+    "console_store",
+    "control_va_addr_alignment"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "调用 pte_dirty 时页表项不 present",
+  "kinds": [
+   {
+    "kind": "交换项",
+    "config": "SWAP"
+   },
+   {
+    "kind": "迁移项",
+    "config": "MIGRATION"
+   },
+   {
+    "kind": "device-private 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "device-exclusive 项",
+    "config": "DEVICE_PRIVATE"
+   },
+   {
+    "kind": "uffd-wp 标记",
+    "config": "PTE_MARKER_UFFD_WP"
+   },
+   {
+    "kind": "hwpoison 标记",
+    "config": "MEMORY_FAILURE"
+   },
+   {
+    "kind": "guard 标记（MADV_GUARD_INSTALL）",
+    "config": "MMU"
+   }
+  ],
+  "guards": []
+ },
+ "观测点": {
+  "points": [
+   {
+    "func": "instrument_atomic_check_alignment",
+    "file": "include/linux/instrumented.h",
+    "line": 67,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE((unsigned long)v & mask);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "migrate_pages_batch",
+    "file": "mm/migrate.c",
+    "line": 1830,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(mode != MIGRATE_ASYNC &&",
+    "why": "到达路径上"
+   },
+   {
+    "func": "migrate_folio_unmap",
+    "file": "mm/migrate.c",
+    "line": 1336,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(folio_test_anon(src) &&",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate",
+    "file": "mm/rmap.c",
+    "line": 2805,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(flags & ~(TTU_RMAP_LOCKED | TTU_SPLIT_HUGE_PMD |",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2539,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(folio_test_hugetlb(folio) ||",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2552,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(!pvmw.pte, folio);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2569,
+    "kind": "VM_WARN_ON_FOLIO",
+    "text": "VM_WARN_ON_FOLIO(folio_test_hugetlb(folio), folio);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_migrate_one",
+    "file": "mm/rmap.c",
+    "line": 2601,
+    "kind": "VM_BUG_ON",
+    "text": "VM_BUG_ON(!(flags & TTU_RMAP_LOCKED));",
+    "why": "到达路径上"
+   },
+   {
+    "func": "memory_failure",
+    "file": "arch/x86/kernel/cpu/mce/core.c",
+    "line": 1721,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(flags & MF_ACTION_REQUIRED);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "memory_failure",
+    "file": "arch/x86/kernel/cpu/mce/core.c",
+    "line": 1722,
+    "kind": "pr_err",
+    "text": "pr_err(\"Uncorrected memory error in page 0x%lx ignored\\n\"",
+    "why": "到达路径上"
+   },
+   {
+    "func": "memory_failure",
+    "file": "mm/memory-failure.c",
+    "line": 2426,
+    "kind": "pr_err",
+    "text": "pr_err(\"%#lx: memory outside kernel control\\n\", pfn);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "memory_failure",
+    "file": "mm/memory-failure.c",
+    "line": 2545,
+    "kind": "VM_BUG_ON_PAGE",
+    "text": "VM_BUG_ON_PAGE(!page_count(p), p);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "hwpoison_user_mappings",
+    "file": "mm/memory-failure.c",
+    "line": 1658,
+    "kind": "pr_err",
+    "text": "pr_err(\"%#lx: failed to unmap page (folio mapcount=%d)\\n\",",
+    "why": "到达路径上"
+   },
+   {
+    "func": "unmap_poisoned_folio",
+    "file": "mm/memory-failure.c",
+    "line": 1574,
+    "kind": "pr_err",
+    "text": "pr_err(\"%#lx: keeping poisoned page in swap cache\\n\", pfn);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "try_to_unmap_one",
+    "file": "mm/rmap.c",
+    "line": 2299,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(!pvmw.pte, folio);",
+    "why": "到达路径上"
+   }
+  ],
+  "n": 15,
+  "debug_configs": [
+   "DEBUG_VM"
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": true,
+  "bindings": {
+   "riscv": [
+    "arch/riscv/include/asm/pgtable.h:390"
+   ],
+   "arm64": [
+    "arch/arm64/include/asm/pgtable.h:176"
+   ],
+   "x86_64": [
+    "arch/x86/include/asm/pgtable.h:148"
+   ]
+  }
+ },
+ "平台需求": [
+  {
+   "config": "DEVICE_PRIVATE",
+   "need": "HMM 测试模块 lib/test_hmm（TEST_HMM）"
+  },
+  {
+   "config": "NUMA",
+   "need": "多个 NUMA 节点（QEMU -numa node,...）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动（按页表级别查表）",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

@@ -47,6 +47,12 @@ $KB list
 | `mglru` | `dyn` + MGLRU（`LRU_GEN`、`LRU_GEN_ENABLED`）（11-16 加，`s4dyn_20261116` 用，三架构） | 需要 MGLRU 回收路径的动态测试；运行时可写 `/sys/kernel/mm/lru_gen/enabled` 开关 |
 | `dbgvm` | `dyn` + `DEBUG_KERNEL`、`DEBUG_VM`（11-16 加，`s5dyn_20261116` 用，三架构） | 需要 `VM_WARN_ON_*` 等调试断言生效的动态测试 |
 | `pg64k` | arm64 defconfig + 64K 页 + THP + zram（11-16 加，`s6dyn_20261116` 用，只有 arm64） | 64K 页相关的动态测试。QEMU 要用 `-cpu cortex-a72`（`-cpu max` 进不了 `/init`），内存给 4G 才有空闲的 512MB 连续块 |
+| `wide` | `mglru` + `ZSWAP`（11-25 加，`widebuild_20261125` 用，riscv、x86_64、powerpc） | 5 架构分层与边界 |
+| `widearm` | `wide` + `ARM_LPAE`、`HIGHMEM`（arm，multi_v7） | 同上；arm 上 NUMA、内存热插拔、ZONE_DEVICE、HMM 开不上 |
+| `widemte` | `wide` + `ARM64_MTE`、`KASAN`、`KASAN_HW_TAGS`（arm64） | 同上 |
+| `wide2`、`widemte2`、`widearm2` | 对应原档 + `USERFAULTFD`、`PTE_MARKER_UFFD_WP`、`DAMON`（vaddr/paddr/sysfs）、`PAGE_TABLE_CHECK`（+`STRICT_DEVMEM`）、`DEBUG_VM`、`DEBUG_VM_PGTABLE`（11-25 加，`covgap_20261125` 用） | 5 架构边界的正式构建（之后的轮次都用它）；arm 上没有 uffd-wp、PAGE_TABLE_CHECK、DEBUG_VM_PGTABLE，powerpc 上没有 uffd-wp、PAGE_TABLE_CHECK |
+
+11-25 起支持 `arm`（multi_v7_defconfig，出 zImage）和 `powerpc`（ppc64le_defconfig，只编 vmlinux，镜像登记为 vmlinux）。
 
 ## 变异（`mutations/*.json`）
 

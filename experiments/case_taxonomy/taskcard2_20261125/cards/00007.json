@@ -1,0 +1,623 @@
+{
+ "no": 7,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/huge_memory.c:1588 insert_pmd",
+  "engine": "ORD",
+  "consumers": [
+   "mm/huge_memory.c:1629 insert_pmd"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "PMD_SHIFT（arch/riscv/include/asm/pgtable-64.h:39）"
+   ],
+   "arm64": [
+    "PMD_SHIFT（arch/arm64/include/asm/pgtable-hwdef.h:55）"
+   ],
+   "x86_64": [
+    "PMD_SHIFT（arch/x86/include/asm/pgtable_64_types.h:74）"
+   ],
+   "arm": [
+    "PMD_SHIFT（arch/arm/include/asm/pgtable-3level.h:38）"
+   ],
+   "powerpc": [
+    "PMD_SHIFT（arch/powerpc/include/asm/book3s/64/pgtable.h:208）"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "由页大小派生的阶数/大小 HPAGE_PMD_NR",
+  "property": "在每种“架构 × 页大小”下都不超过页缓存上限 MAX_PAGECACHE_ORDER",
+  "ok_if": "所有组合下都不超过上限，或使用前已和上限比较",
+  "expected_actual": [
+   {
+    "来源": "HPAGE_PMD_NR",
+    "期望": "阶数 ≤ MAX_PAGECACHE_ORDER",
+    "违例组合": [
+     "arm64-64k",
+     "loongarch-64k",
+     "mips-64k"
+    ]
+   }
+  ]
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/huge_memory.c:1588",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_TRANSPARENT_HUGEPAGE) += huge_memory.o khugepaged.o",
+      "configs": [
+       "TRANSPARENT_HUGEPAGE"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/huge_memory.c:1629",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_TRANSPARENT_HUGEPAGE) += huge_memory.o khugepaged.o",
+      "configs": [
+       "TRANSPARENT_HUGEPAGE"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "TRANSPARENT_HUGEPAGE"
+  ],
+  "path_configs": {
+   "MMU": [
+    "handle_mm_fault"
+   ],
+   "TRANSPARENT_HUGEPAGE": [
+    "insert_pmd",
+    "vmf_insert_pfn_pmd"
+   ],
+   "VFIO": [
+    "vfio_pci_mmap_huge_fault",
+    "vfio_pci_vmf_insert_pfn"
+   ],
+   "VFIO_PCI_CORE": [
+    "vfio_pci_mmap_huge_fault",
+    "vfio_pci_vmf_insert_pfn"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "drm_gem_shmem_any_fault",
+    "kind": "回调：vm_operations_struct drm_gem_shmem_vm_ops.huge_fault",
+    "depth": 3,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.huge_fault 分发→",
+     "drm_gem_shmem_any_fault",
+     "—调用→",
+     "try_insert_pfn",
+     "—调用→",
+     "vmf_insert_pfn_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "vfio_pci_mmap_huge_fault",
+    "kind": "回调：vm_operations_struct vfio_pci_mmap_ops.huge_fault",
+    "depth": 3,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.huge_fault 分发→",
+     "vfio_pci_mmap_huge_fault",
+     "—调用→",
+     "vfio_pci_vmf_insert_pfn",
+     "—调用→",
+     "vmf_insert_pfn_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "drm_gem_shmem_fault",
+    "kind": "回调：vm_operations_struct drm_gem_shmem_vm_ops.fault",
+    "depth": 4,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.fault 分发→",
+     "drm_gem_shmem_fault",
+     "—调用→",
+     "drm_gem_shmem_any_fault",
+     "—调用→",
+     "try_insert_pfn",
+     "—调用→",
+     "vmf_insert_pfn_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "ext4_dax_huge_fault",
+    "kind": "回调：vm_operations_struct ext4_dax_vm_ops.huge_fault",
+    "depth": 4,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.huge_fault 分发→",
+     "ext4_dax_huge_fault",
+     "—调用→",
+     "dax_finish_sync_fault",
+     "—调用→",
+     "dax_insert_pfn_mkwrite",
+     "—调用→",
+     "vmf_insert_folio_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "vfio_pci_mmap_page_fault",
+    "kind": "回调：vm_operations_struct vfio_pci_mmap_ops.fault",
+    "depth": 4,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.fault 分发→",
+     "vfio_pci_mmap_page_fault",
+     "—调用→",
+     "vfio_pci_mmap_huge_fault",
+     "—调用→",
+     "vfio_pci_vmf_insert_pfn",
+     "—调用→",
+     "vmf_insert_pfn_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "ext4_dax_fault",
+    "kind": "回调：vm_operations_struct ext4_dax_vm_ops.fault",
+    "depth": 5,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.fault 分发→",
+     "ext4_dax_fault",
+     "—调用→",
+     "ext4_dax_huge_fault",
+     "—调用→",
+     "dax_finish_sync_fault",
+     "—调用→",
+     "dax_insert_pfn_mkwrite",
+     "—调用→",
+     "vmf_insert_folio_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "xfs_filemap_fault",
+    "kind": "回调：vm_operations_struct xfs_file_vm_ops.fault",
+    "depth": 6,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.fault 分发→",
+     "xfs_filemap_fault",
+     "—调用→",
+     "xfs_dax_read_fault",
+     "—调用→",
+     "xfs_dax_fault_locked",
+     "—调用→",
+     "dax_finish_sync_fault",
+     "—调用→",
+     "dax_insert_pfn_mkwrite",
+     "—调用→",
+     "vmf_insert_folio_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "xfs_filemap_huge_fault",
+    "kind": "回调：vm_operations_struct xfs_file_vm_ops.huge_fault",
+    "depth": 6,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.huge_fault 分发→",
+     "xfs_filemap_huge_fault",
+     "—调用→",
+     "xfs_dax_read_fault",
+     "—调用→",
+     "xfs_dax_fault_locked",
+     "—调用→",
+     "dax_finish_sync_fault",
+     "—调用→",
+     "dax_insert_pfn_mkwrite",
+     "—调用→",
+     "vmf_insert_folio_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "xfs_filemap_page_mkwrite",
+    "kind": "回调：vm_operations_struct xfs_file_vm_ops.page_mkwrite",
+    "depth": 7,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.page_mkwrite 分发→",
+     "xfs_filemap_page_mkwrite",
+     "—调用→",
+     "xfs_write_fault",
+     "—调用→",
+     "__xfs_write_fault",
+     "—调用→",
+     "xfs_dax_fault_locked",
+     "—调用→",
+     "dax_finish_sync_fault",
+     "—调用→",
+     "dax_insert_pfn_mkwrite",
+     "—调用→",
+     "vmf_insert_folio_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   },
+   {
+    "entry": "xfs_filemap_pfn_mkwrite",
+    "kind": "回调：vm_operations_struct xfs_file_vm_ops.pfn_mkwrite",
+    "depth": 7,
+    "path": [
+     "handle_mm_fault",
+     "—经 vm_operations_struct.pfn_mkwrite 分发→",
+     "xfs_filemap_pfn_mkwrite",
+     "—调用→",
+     "xfs_write_fault",
+     "—调用→",
+     "__xfs_write_fault",
+     "—调用→",
+     "xfs_dax_fault_locked",
+     "—调用→",
+     "dax_finish_sync_fault",
+     "—调用→",
+     "dax_insert_pfn_mkwrite",
+     "—调用→",
+     "vmf_insert_folio_pmd",
+     "—调用→",
+     "insert_pmd"
+    ],
+    "dispatcher": "handle_mm_fault"
+   }
+  ],
+  "n_entries": 10,
+  "n_reached": 31
+ },
+ "运行时开关": [
+  {
+   "read_in": "handle_mm_fault",
+   "switch": "flags",
+   "writers": [
+    "consistency_policy_store",
+    "console_store",
+    "control_va_addr_alignment"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "页大小较大的配置，使阶数超过 MAX_PAGECACHE_ORDER",
+  "combos": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ]
+ },
+ "观测点": {
+  "n": 9,
+  "debug_configs": [
+   "DEBUG_VM"
+  ],
+  "near": [
+   {
+    "func": "insert_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1610,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!is_huge_zero_pmd(*pmd));",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "is_huge_zero_folio",
+    "file": "include/linux/huge_mm.h",
+    "line": 560,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(!folio);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "folio_get",
+    "file": "include/linux/mm.h",
+    "line": 2121,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(folio_ref_zero_or_close_to_overflow(folio), folio);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "folio_add_file_rmap_pmd",
+    "file": "mm/rmap.c",
+    "line": 1757,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(true);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "pmdp_set_access_flags",
+    "file": "arch/powerpc/mm/book3s64/pgtable.c",
+    "line": 64,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(!pmd_trans_huge(*pmdp));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__folio_add_file_rmap",
+    "file": "mm/rmap.c",
+    "line": 1710,
+    "kind": "VM_WARN_ON_FOLIO",
+    "text": "VM_WARN_ON_FOLIO(folio_test_anon(folio), folio);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "vmf_insert_pfn_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1681,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!(vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)));",
+    "why": "到达路径上"
+   },
+   {
+    "func": "vmf_insert_pfn_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1682,
+    "kind": "BUG_ON",
+    "text": "BUG_ON((vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)) ==",
+    "why": "到达路径上"
+   },
+   {
+    "func": "vmf_insert_pfn_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1684,
+    "kind": "BUG_ON",
+    "text": "BUG_ON((vma->vm_flags & VM_PFNMAP) && vma_is_cow_mapping(vma));",
+    "why": "到达路径上"
+   }
+  ],
+  "consequence": [
+   {
+    "func": "xas_split_alloc",
+    "file": "lib/xarray.c",
+    "line": 1051,
+    "kind": "WARN_ON",
+    "text": "if (WARN_ON(xas->xa_shift + 2 * XA_CHUNK_SHIFT <= order))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "hugetlb_add_hstate",
+    "file": "mm/hugetlb.c",
+    "line": 4196,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "folio_set_order",
+    "file": "mm/internal.h",
+    "line": 739,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "free_reserved_pages",
+    "file": "mm/page_alloc.c",
+    "line": 6451,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_PAGE_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "alloc_contig_frozen_range_noprof",
+    "file": "mm/page_alloc.c",
+    "line": 7309,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "__fragmentation_index",
+    "file": "mm/vmstat.c",
+    "line": 1118,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(order > MAX_PAGE_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   }
+  ],
+  "points": [
+   {
+    "func": "insert_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1610,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(!is_huge_zero_pmd(*pmd));",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "is_huge_zero_folio",
+    "file": "include/linux/huge_mm.h",
+    "line": 560,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(!folio);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "folio_get",
+    "file": "include/linux/mm.h",
+    "line": 2121,
+    "kind": "VM_BUG_ON_FOLIO",
+    "text": "VM_BUG_ON_FOLIO(folio_ref_zero_or_close_to_overflow(folio), folio);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "folio_add_file_rmap_pmd",
+    "file": "mm/rmap.c",
+    "line": 1757,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(true);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "pmdp_set_access_flags",
+    "file": "arch/powerpc/mm/book3s64/pgtable.c",
+    "line": 64,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(!pmd_trans_huge(*pmdp));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__folio_add_file_rmap",
+    "file": "mm/rmap.c",
+    "line": 1710,
+    "kind": "VM_WARN_ON_FOLIO",
+    "text": "VM_WARN_ON_FOLIO(folio_test_anon(folio), folio);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "vmf_insert_pfn_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1681,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!(vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)));",
+    "why": "到达路径上"
+   },
+   {
+    "func": "vmf_insert_pfn_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1682,
+    "kind": "BUG_ON",
+    "text": "BUG_ON((vma->vm_flags & (VM_PFNMAP|VM_MIXEDMAP)) ==",
+    "why": "到达路径上"
+   },
+   {
+    "func": "vmf_insert_pfn_pmd",
+    "file": "mm/huge_memory.c",
+    "line": 1684,
+    "kind": "BUG_ON",
+    "text": "BUG_ON((vma->vm_flags & VM_PFNMAP) && vma_is_cow_mapping(vma));",
+    "why": "到达路径上"
+   },
+   {
+    "func": "xas_split_alloc",
+    "file": "lib/xarray.c",
+    "line": 1051,
+    "kind": "WARN_ON",
+    "text": "if (WARN_ON(xas->xa_shift + 2 * XA_CHUNK_SHIFT <= order))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "hugetlb_add_hstate",
+    "file": "mm/hugetlb.c",
+    "line": 4196,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "folio_set_order",
+    "file": "mm/internal.h",
+    "line": 739,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "free_reserved_pages",
+    "file": "mm/page_alloc.c",
+    "line": 6451,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_PAGE_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "alloc_contig_frozen_range_noprof",
+    "file": "mm/page_alloc.c",
+    "line": 7309,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "__fragmentation_index",
+    "file": "mm/vmstat.c",
+    "line": 1118,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(order > MAX_PAGE_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   }
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ],
+  "normal": [
+   "arm64-16k",
+   "arm64-4k",
+   "loongarch-16k",
+   "loongarch-4k",
+   "mips-16k",
+   "mips-4k"
+  ],
+  "source": "ORD 违例组合；正常取同架构的不违例组合"
+ },
+ "平台需求": [
+  {
+   "config": "ARM64_64K_PAGES",
+   "need": "arm64 64K 页内核：QEMU -cpu cortex-a72，大内存（≥ 4G）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动",
+  "观测点": "半自动（附近 + 后果处）",
+  "差分对照": "自动",
+  "平台需求": "半自动（按配置查表）"
+ }
+}

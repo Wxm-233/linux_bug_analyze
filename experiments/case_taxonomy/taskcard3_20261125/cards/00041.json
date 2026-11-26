@@ -1,0 +1,504 @@
+{
+ "no": 41,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "mm/swapfile.c:790 swap_cluster_setup_bad_slot",
+  "engine": "ORD",
+  "consumers": [
+   "mm/swapfile.c:791 swap_cluster_setup_bad_slot",
+   "mm/swapfile.c:792 swap_cluster_setup_bad_slot",
+   "mm/swapfile.c:827 swap_cluster_setup_bad_slot"
+  ],
+  "n_consumers": 3,
+  "bindings": {
+   "riscv": [
+    "PMD_SHIFT（arch/riscv/include/asm/pgtable-64.h:39）"
+   ],
+   "arm64": [
+    "PMD_SHIFT（arch/arm64/include/asm/pgtable-hwdef.h:55）"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "由页大小派生的阶数/大小 SWAPFILE_CLUSTER",
+  "property": "在每种“架构 × 页大小”下都不超过页缓存上限 MAX_PAGECACHE_ORDER",
+  "ok_if": "所有组合下都不超过上限，或使用前已和上限比较",
+  "expected_actual": [
+   {
+    "来源": "SWAPFILE_CLUSTER",
+    "期望": "阶数 ≤ MAX_PAGECACHE_ORDER",
+    "违例组合": [
+     "arm64-64k",
+     "loongarch-64k",
+     "mips-64k"
+    ]
+   }
+  ]
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "mm/swapfile.c:790",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_SWAP)\t+= page_io.o swap_state.o swapfile.o",
+      "configs": [
+       "SWAP"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/swapfile.c:791",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_SWAP)\t+= page_io.o swap_state.o swapfile.o",
+      "configs": [
+       "SWAP"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/swapfile.c:792",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_SWAP)\t+= page_io.o swap_state.o swapfile.o",
+      "configs": [
+       "SWAP"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "mm/swapfile.c:827",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "mm/Makefile",
+      "line": "obj-$(CONFIG_SWAP)\t+= page_io.o swap_state.o swapfile.o",
+      "configs": [
+       "SWAP"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= mm/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "SWAP"
+  ],
+  "path_configs": {
+   "SWAP": [
+    "setup_swap_clusters_info",
+    "swap_cluster_setup_bad_slot",
+    "sys_swapon"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "sys_swapon",
+    "kind": "系统调用",
+    "depth": 2,
+    "hubs": 0,
+    "path": [
+     "sys_swapon",
+     "—调用→",
+     "setup_swap_clusters_info",
+     "—调用→",
+     "swap_cluster_setup_bad_slot"
+    ],
+    "dispatcher": null
+   }
+  ],
+  "n_entries": 1,
+  "n_reached": 3
+ },
+ "运行时开关": [
+  {
+   "read_in": "swap_cluster_setup_bad_slot",
+   "switch": "offset",
+   "writers": [
+    "contrast_store",
+    "location_store",
+    "param_setup_earlycon"
+   ]
+  },
+  {
+   "read_in": "swap_cluster_setup_bad_slot",
+   "switch": "mask",
+   "writers": [
+    "irq_affinity_setup",
+    "rcu_nocb_setup",
+    "store_rps_dev_flow_table_cnt"
+   ]
+  },
+  {
+   "read_in": "sys_swapon",
+   "switch": "flags",
+   "writers": [
+    "consistency_policy_store",
+    "console_store",
+    "control_va_addr_alignment"
+   ]
+  }
+ ],
+ "前置状态": {
+  "needs": "页大小较大的配置，使阶数超过 MAX_PAGECACHE_ORDER",
+  "combos": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ]
+ },
+ "观测点": {
+  "n": 11,
+  "debug_configs": [
+   "DEBUG_VM"
+  ],
+  "near": [
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 809,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"Empty swap-file\\n\");",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 820,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"Duplicated bad slot offset %d\\n\", offset);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 827,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(ci->count > SWAPFILE_CLUSTER);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 828,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(ci->flags);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_alloc_table",
+    "file": "mm/swapfile.c",
+    "line": 455,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(ci->flags || !cluster_is_empty(ci));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "swap_cluster_alloc_table",
+    "file": "mm/swapfile.c",
+    "line": 473,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(ci->memcg_table);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "swap_cluster_alloc_table",
+    "file": "mm/swapfile.c",
+    "line": 483,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(ci->zero_bitmap);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__swap_table_xchg",
+    "file": "mm/swap_table.h",
+    "line": 235,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(off >= SWAPFILE_CLUSTER);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "sys_swapon",
+    "file": "mm/swapfile.c",
+    "line": 3717,
+    "kind": "pr_err",
+    "text": "pr_err(\"swap:%u != (max:%u - 1)\\n\", si->pages, si->max);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "sys_swapon",
+    "file": "mm/swapfile.c",
+    "line": 3768,
+    "kind": "pr_err",
+    "text": "pr_err(\"swapon: discard_swap(%p): %d\\n\",",
+    "why": "到达路径上"
+   },
+   {
+    "func": "setup_swap_clusters_info",
+    "file": "mm/swapfile.c",
+    "line": 3570,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"Bad slot offset is out of border: %d (last_page: %d)\\n\",",
+    "why": "到达路径上"
+   }
+  ],
+  "consequence": [
+   {
+    "func": "xas_split_alloc",
+    "file": "lib/xarray.c",
+    "line": 1051,
+    "kind": "WARN_ON",
+    "text": "if (WARN_ON(xas->xa_shift + 2 * XA_CHUNK_SHIFT <= order))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "hugetlb_add_hstate",
+    "file": "mm/hugetlb.c",
+    "line": 4196,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "folio_set_order",
+    "file": "mm/internal.h",
+    "line": 739,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "free_reserved_pages",
+    "file": "mm/page_alloc.c",
+    "line": 6451,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_PAGE_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "alloc_contig_frozen_range_noprof",
+    "file": "mm/page_alloc.c",
+    "line": 7309,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "__fragmentation_index",
+    "file": "mm/vmstat.c",
+    "line": 1118,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(order > MAX_PAGE_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   }
+  ],
+  "points": [
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 809,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"Empty swap-file\\n\");",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 820,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"Duplicated bad slot offset %d\\n\", offset);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 827,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(ci->count > SWAPFILE_CLUSTER);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_setup_bad_slot",
+    "file": "mm/swapfile.c",
+    "line": 828,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(ci->flags);",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "swap_cluster_alloc_table",
+    "file": "mm/swapfile.c",
+    "line": 455,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(ci->flags || !cluster_is_empty(ci));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "swap_cluster_alloc_table",
+    "file": "mm/swapfile.c",
+    "line": 473,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(ci->memcg_table);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "swap_cluster_alloc_table",
+    "file": "mm/swapfile.c",
+    "line": 483,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(ci->zero_bitmap);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "__swap_table_xchg",
+    "file": "mm/swap_table.h",
+    "line": 235,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(off >= SWAPFILE_CLUSTER);",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "sys_swapon",
+    "file": "mm/swapfile.c",
+    "line": 3717,
+    "kind": "pr_err",
+    "text": "pr_err(\"swap:%u != (max:%u - 1)\\n\", si->pages, si->max);",
+    "why": "到达路径上"
+   },
+   {
+    "func": "sys_swapon",
+    "file": "mm/swapfile.c",
+    "line": 3768,
+    "kind": "pr_err",
+    "text": "pr_err(\"swapon: discard_swap(%p): %d\\n\",",
+    "why": "到达路径上"
+   },
+   {
+    "func": "setup_swap_clusters_info",
+    "file": "mm/swapfile.c",
+    "line": 3570,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"Bad slot offset is out of border: %d (last_page: %d)\\n\",",
+    "why": "到达路径上"
+   },
+   {
+    "func": "xas_split_alloc",
+    "file": "lib/xarray.c",
+    "line": 1051,
+    "kind": "WARN_ON",
+    "text": "if (WARN_ON(xas->xa_shift + 2 * XA_CHUNK_SHIFT <= order))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "hugetlb_add_hstate",
+    "file": "mm/hugetlb.c",
+    "line": 4196,
+    "kind": "WARN_ON",
+    "text": "WARN_ON(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "folio_set_order",
+    "file": "mm/internal.h",
+    "line": 739,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_FOLIO_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "free_reserved_pages",
+    "file": "mm/page_alloc.c",
+    "line": 6451,
+    "kind": "VM_WARN_ON_ONCE",
+    "text": "VM_WARN_ON_ONCE(order > MAX_PAGE_ORDER);",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "alloc_contig_frozen_range_noprof",
+    "file": "mm/page_alloc.c",
+    "line": 7309,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE((gfp_mask & __GFP_COMP) && order > MAX_FOLIO_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   },
+   {
+    "func": "__fragmentation_index",
+    "file": "mm/vmstat.c",
+    "line": 1118,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(order > MAX_PAGE_ORDER))",
+    "why": "后果处：ORD 上限的执行处"
+   }
+  ]
+ },
+ "差分对照": {
+  "deviant": [
+   "arm64-64k",
+   "loongarch-64k",
+   "mips-64k"
+  ],
+  "normal": [
+   "arm64-16k",
+   "arm64-4k",
+   "loongarch-16k",
+   "loongarch-4k",
+   "mips-16k",
+   "mips-4k"
+  ],
+  "source": "ORD 违例组合；正常取同架构的不违例组合"
+ },
+ "平台需求": [
+  {
+   "config": "ARM64_64K_PAGES",
+   "need": "arm64 64K 页内核：QEMU -cpu cortex-a72，大内存（≥ 4G）"
+  },
+  {
+   "config": "SWAP",
+   "need": "交换设备（如 zram）"
+  }
+ ],
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "自动",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "半自动",
+  "前置状态": "半自动",
+  "观测点": "半自动（附近 + 后果处）",
+  "差分对照": "自动",
+  "平台需求": "半自动（按配置查表）",
+  "前置状态入口": "需人工"
+ },
+ "前置状态入口": "需人工"
+}

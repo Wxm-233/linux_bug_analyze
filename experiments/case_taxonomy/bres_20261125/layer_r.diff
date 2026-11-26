@@ -1,0 +1,82 @@
+225a226,246
+> def classify_ids2(ids, cfg_arch, cfg_common, amac):
+>     """bres criteria 一: like classify_ids, but tells arch-related config symbols ("archcfg") from arch macros ("archmac")"""
+>     kinds = set()
+>     for x in ids:
+>         if x.startswith("CONFIG_"):
+>             s = x[7:]
+>             if s.endswith("_MODULE"):
+>                 s = s[:-7]
+>             if s in cfg_arch:
+>                 kinds.add("archcfg")
+>             elif s in cfg_common:
+>                 kinds.add("config")
+>         elif x in PREDEF or x in amac:
+>             kinds.add("archmac")
+>     return kinds
+> 
+> 
+> def kind_of(k):
+>     return "archmac" if "archmac" in k else ("archcfg" if "archcfg" in k else ("config" if "config" in k else "unattr"))
+> 
+> 
+254,255c275,276
+<             k = classify_ids({"CONFIG_" + x for x in makefile_cond(u)}, cfg_arch, cfg_common, amac)
+<             mk_cache[u] = "arch" if "arch" in k else ("config" if "config" in k else "unattr")
+---
+>             k = classify_ids2({"CONFIG_" + x for x in makefile_cond(u)}, cfg_arch, cfg_common, amac)
+>             mk_cache[u] = kind_of(k)
+286c307
+<             diffs = []
+---
+>             diffs = []                                       # bres: (where, kind, scope) scope = presence | body
+289c310
+<                     diffs.append(("file", "arch"))
+---
+>                     diffs.append(("file", "archmac", "presence"))
+291,292c312,313
+<                     k = classify_ids({"CONFIG_" + s for s in mk}, cfg_arch, cfg_common, amac)
+<                     diffs.append(("file", "arch" if "arch" in k else ("config" if "config" in k else "unattr")))
+---
+>                     k = classify_ids2({"CONFIG_" + s for s in mk}, cfg_arch, cfg_common, amac)
+>                     diffs.append(("file", kind_of(k), "presence"))
+295,296c316,319
+<                     hk = "arch" if ks == {"arch"} else ("config" if "config" in ks and "arch" not in ks else "unattr")
+<                     diffs.append(("file", hk))
+---
+>                     ks = {"archmac" if x == "arch" else x for x in ks}      # header used only by arch/ units
+>                     hk = ("archmac" if ks == {"archmac"} else "archcfg" if "archcfg" in ks and ks <= {"archcfg", "archmac", "config"}
+>                           else "config" if ks == {"config"} else "unattr")
+>                     diffs.append(("file", hk, "presence"))
+301c324
+<                     vals = {st[b] for b in P}
+---
+>                     vals, scope = {st[b] for b in P}, "presence"
+303c326
+<                     vals = {st[b] for b in cb}
+---
+>                     vals, scope = {st[b] for b in cb}, "body"
+307,308c330,334
+<                     k = classify_ids(g["ids"], cfg_arch, cfg_common, amac)
+<                     diffs.append(("cond:" + g["cond"][:80], "arch" if "arch" in k else ("config" if "config" in k else "unattr")))
+---
+>                     k = classify_ids2(g["ids"], cfg_arch, cfg_common, amac)
+>                     diffs.append(("cond:" + g["cond"][:80], kind_of(k), scope))
+>             body_arch = any(d[2] == "body" and d[1] in ("archcfg", "archmac") for d in diffs)
+>             pres_mac = any(d[2] == "presence" and d[1] == "archmac" for d in diffs)
+>             pres_cfg = any(d[2] == "presence" and d[1] == "archcfg" for d in diffs)
+313c339
+<             elif any(d[1] == "arch" for d in diffs):
+---
+>             elif body_arch or pres_mac:                       # bres criteria 一
+316a343,344
+>             elif pres_cfg and all(d[1] in ("archcfg", "config") for d in diffs):
+>                 label = "公共层（部分架构）"
+321c349
+<             if it["kind"] == "macro" and label in ("公共层", "公共层-配置差异", "未归因"):
+---
+>             if it["kind"] == "macro" and label in ("公共层", "公共层-配置差异", "公共层（部分架构）", "未归因"):
+331c359
+<     COMMON = ("公共层", "公共层-配置差异")
+---
+>     COMMON = ("公共层", "公共层-配置差异", "公共层（部分架构）")

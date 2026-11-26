@@ -1,0 +1,30 @@
+1c1
+< """bres criteria 二: whole-tree boundary records and resource records, bound by clang per translation unit, five builds. WSL.
+---
+> """task4 amendment 1.1 copy of bres.py (weak definitions bound by link result). bres criteria 二: whole-tree boundary records and resource records, bound by clang per translation unit, five builds. WSL.
+208a209,228
+> WEAKMEMO = {}
+> 
+> 
+> def is_weak(d):
+>     """task4 amendment 1.1: `__weak` / `weak` among the tokens from the definition's start to its name"""
+>     k = (d.location.file.name, d.location.line, d.spelling)
+>     if k not in WEAKMEMO:
+>         w = False
+>         try:
+>             rng = CI.SourceRange.from_locations(d.extent.start, d.location)
+>             for t in d.translation_unit.get_tokens(extent=rng):
+>                 if t.spelling in ("__weak", "weak", "__weak__"):
+>                     w = True
+>                     break
+>         except Exception:                                    # noqa: BLE001
+>             w = False
+>         WEAKMEMO[k] = w
+>     return WEAKMEMO[k]
+> 
+> 
+220a241,244
+>         cands = LINK.get(ref.spelling, [])
+>         if cands and is_weak(d):                                  # task4 amendment 1.1: weak default overridden at link time
+>             return True, {"def": "；".join(cands[:4]), "label": "架构层A0", "basis": "链接时解析（本单元的弱定义被架构覆盖）",
+>                           "cursor": None}

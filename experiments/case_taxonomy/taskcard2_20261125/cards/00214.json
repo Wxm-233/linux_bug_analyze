@@ -1,0 +1,383 @@
+{
+ "no": 214,
+ "定位": {
+  "rev": "df2908090cda368b01ff43709f51890076c56157",
+  "report": "fs/jbd2/journal.c:1719 journal_reset",
+  "engine": "WT",
+  "consumers": [
+   "fs/jbd2/journal.c:1710 journal_reset"
+  ],
+  "n_consumers": 1,
+  "bindings": {
+   "riscv": [
+    "include/uapi/linux/swab.h:57"
+   ],
+   "arm64": [
+    "include/uapi/linux/swab.h:57"
+   ]
+  }
+ },
+ "资源与性质": {
+  "resource": "赋给 `journal->j_first` 的值 `first`",
+  "property": "在 32 位架构上，这个值放得下目标类型，高位不被截掉",
+  "ok_if": "在所有架构上它的取值都不超过目标类型的范围"
+ },
+ "触发配置": {
+  "compile": [
+   {
+    "at": "fs/jbd2/journal.c:1719",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "fs/jbd2/Makefile",
+      "line": "jbd2-objs := transaction.o commit.o recovery.o checkpoint.o revoke.o journal.o",
+      "configs": []
+     },
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_JBD2)\t\t+= jbd2/",
+      "configs": [
+       "JBD2"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   },
+   {
+    "at": "fs/jbd2/journal.c:1710",
+    "ifs": [],
+    "makefile": [
+     {
+      "makefile": "fs/jbd2/Makefile",
+      "line": "jbd2-objs := transaction.o commit.o recovery.o checkpoint.o revoke.o journal.o",
+      "configs": []
+     },
+     {
+      "makefile": "fs/Makefile",
+      "line": "obj-$(CONFIG_JBD2)\t\t+= jbd2/",
+      "configs": [
+       "JBD2"
+      ]
+     },
+     {
+      "makefile": "Kbuild",
+      "line": "obj-y\t\t\t+= fs/",
+      "configs": []
+     }
+    ]
+   }
+  ],
+  "compile_configs": [
+   "JBD2"
+  ],
+  "path_configs": {
+   "EXT4_FS": [
+    "__ext4_fill_super",
+    "ext4_fill_super",
+    "ext4_get_tree"
+   ],
+   "JBD2": [
+    "jbd2_journal_load",
+    "journal_reset"
+   ]
+  }
+ },
+ "到达路径": {
+  "entries": [
+   {
+    "entry": "ext4_init_fs",
+    "kind": "启动时（initcall）",
+    "depth": 10,
+    "path": [
+     "ext4_init_fs",
+     "—引用结构→",
+     "var:fs/ext4/super.c::ext4_fs_type",
+     "—登记在 ext4_fs_type.init_fs_context→",
+     "ext4_init_fs_context",
+     "—引用结构→",
+     "var:fs/ext4/super.c::ext4_context_ops",
+     "—登记在 ext4_context_ops.get_tree→",
+     "ext4_get_tree",
+     "—函数指针→",
+     "ext4_fill_super",
+     "—调用→",
+     "__ext4_fill_super",
+     "—调用→",
+     "ext4_load_and_init_journal",
+     "—调用→",
+     "ext4_load_journal",
+     "—调用→",
+     "jbd2_journal_load",
+     "—调用→",
+     "journal_reset"
+    ],
+    "dispatcher": null
+   }
+  ],
+  "n_entries": 1,
+  "n_reached": 18
+ },
+ "运行时开关": "需人工",
+ "前置状态": "需人工",
+ "观测点": {
+  "n": 14,
+  "debug_configs": [],
+  "near": [
+   {
+    "func": "journal_reset",
+    "file": "fs/jbd2/journal.c",
+    "line": 1713,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: Journal too short (blocks %llu-%llu).\\n\",",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "journal_reset",
+    "file": "fs/jbd2/journal.c",
+    "line": 1728,
+    "kind": "printk",
+    "text": "printk(KERN_WARNING \"JBD2: Incorrect Journal head block %lu, \"",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "jbd2_journal_update_sb_log_tail",
+    "file": "fs/jbd2/journal.c",
+    "line": 1864,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!mutex_is_locked(&journal->j_checkpoint_mutex));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "jbd2_write_superblock",
+    "file": "fs/jbd2/journal.c",
+    "line": 1814,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: previous I/O error detected \"",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "jbd2_write_superblock",
+    "file": "fs/jbd2/journal.c",
+    "line": 1830,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: I/O error when updating journal superblock for %s.\\n\",",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "jbd2_journal_abort",
+    "file": "fs/jbd2/journal.c",
+    "line": 2590,
+    "kind": "pr_err",
+    "text": "pr_err(\"Aborting journal on device %s.\\n\", journal->j_devname);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "__brelse",
+    "file": "fs/buffer.c",
+    "line": 1051,
+    "kind": "WARN",
+    "text": "WARN(1, KERN_ERR \"VFS: brelse: Trying to free free buffer\\n\");",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__jbd2_log_start_commit",
+    "file": "fs/jbd2/journal.c",
+    "line": 473,
+    "kind": "WARN_ONCE",
+    "text": "WARN_ONCE(1, \"JBD2: bad log_start_commit: %u %u %u %u\\n\",",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__clear_task_blocked_on",
+    "file": "include/linux/sched.h",
+    "line": 2252,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(m && p->blocked_on && p->blocked_on != m);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__ext4_fill_super",
+    "file": "fs/ext4/super.c",
+    "line": 5611,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"EXT4-fs: failed to create workqueue\\n\");",
+    "why": "到达路径上"
+   },
+   {
+    "func": "ext4_load_journal",
+    "file": "fs/ext4/super.c",
+    "line": 6127,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(!ext4_has_feature_journal(sb)))",
+    "why": "到达路径上"
+   },
+   {
+    "func": "jbd2_journal_load",
+    "file": "fs/jbd2/journal.c",
+    "line": 2069,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"JBD2: journal recovery failed\\n\");",
+    "why": "到达路径上"
+   },
+   {
+    "func": "jbd2_journal_load",
+    "file": "fs/jbd2/journal.c",
+    "line": 2074,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: journal transaction %u on %s \"",
+    "why": "到达路径上"
+   },
+   {
+    "func": "jbd2_journal_load",
+    "file": "fs/jbd2/journal.c",
+    "line": 2090,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"JBD2: journal reset failed\\n\");",
+    "why": "到达路径上"
+   }
+  ],
+  "consequence": [],
+  "points": [
+   {
+    "func": "journal_reset",
+    "file": "fs/jbd2/journal.c",
+    "line": 1713,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: Journal too short (blocks %llu-%llu).\\n\",",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "journal_reset",
+    "file": "fs/jbd2/journal.c",
+    "line": 1728,
+    "kind": "printk",
+    "text": "printk(KERN_WARNING \"JBD2: Incorrect Journal head block %lu, \"",
+    "why": "公共消费函数里"
+   },
+   {
+    "func": "jbd2_journal_update_sb_log_tail",
+    "file": "fs/jbd2/journal.c",
+    "line": 1864,
+    "kind": "BUG_ON",
+    "text": "BUG_ON(!mutex_is_locked(&journal->j_checkpoint_mutex));",
+    "why": "消费函数往下第 1 层"
+   },
+   {
+    "func": "jbd2_write_superblock",
+    "file": "fs/jbd2/journal.c",
+    "line": 1814,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: previous I/O error detected \"",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "jbd2_write_superblock",
+    "file": "fs/jbd2/journal.c",
+    "line": 1830,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: I/O error when updating journal superblock for %s.\\n\",",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "jbd2_journal_abort",
+    "file": "fs/jbd2/journal.c",
+    "line": 2590,
+    "kind": "pr_err",
+    "text": "pr_err(\"Aborting journal on device %s.\\n\", journal->j_devname);",
+    "why": "消费函数往下第 2 层"
+   },
+   {
+    "func": "__brelse",
+    "file": "fs/buffer.c",
+    "line": 1051,
+    "kind": "WARN",
+    "text": "WARN(1, KERN_ERR \"VFS: brelse: Trying to free free buffer\\n\");",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__jbd2_log_start_commit",
+    "file": "fs/jbd2/journal.c",
+    "line": 473,
+    "kind": "WARN_ONCE",
+    "text": "WARN_ONCE(1, \"JBD2: bad log_start_commit: %u %u %u %u\\n\",",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__clear_task_blocked_on",
+    "file": "include/linux/sched.h",
+    "line": 2252,
+    "kind": "WARN_ON_ONCE",
+    "text": "WARN_ON_ONCE(m && p->blocked_on && p->blocked_on != m);",
+    "why": "消费函数往下第 3 层"
+   },
+   {
+    "func": "__ext4_fill_super",
+    "file": "fs/ext4/super.c",
+    "line": 5611,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"EXT4-fs: failed to create workqueue\\n\");",
+    "why": "到达路径上"
+   },
+   {
+    "func": "ext4_load_journal",
+    "file": "fs/ext4/super.c",
+    "line": 6127,
+    "kind": "WARN_ON_ONCE",
+    "text": "if (WARN_ON_ONCE(!ext4_has_feature_journal(sb)))",
+    "why": "到达路径上"
+   },
+   {
+    "func": "jbd2_journal_load",
+    "file": "fs/jbd2/journal.c",
+    "line": 2069,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"JBD2: journal recovery failed\\n\");",
+    "why": "到达路径上"
+   },
+   {
+    "func": "jbd2_journal_load",
+    "file": "fs/jbd2/journal.c",
+    "line": 2074,
+    "kind": "printk",
+    "text": "printk(KERN_ERR \"JBD2: journal transaction %u on %s \"",
+    "why": "到达路径上"
+   },
+   {
+    "func": "jbd2_journal_load",
+    "file": "fs/jbd2/journal.c",
+    "line": 2090,
+    "kind": "pr_warn",
+    "text": "pr_warn(\"JBD2: journal reset failed\\n\");",
+    "why": "到达路径上"
+   }
+  ]
+ },
+ "差分对照": {
+  "deviant": "需人工（引擎不判断哪个架构出错）",
+  "bindings_differ": false,
+  "bindings": {
+   "riscv": [
+    "include/uapi/linux/swab.h:57"
+   ],
+   "arm64": [
+    "include/uapi/linux/swab.h:57"
+   ]
+  }
+ },
+ "平台需求": "需人工",
+ "自动程度": {
+  "定位": "自动",
+  "资源与性质": "半自动（只有主表三列）",
+  "到达路径": "自动（近似）",
+  "触发配置": "自动",
+  "运行时开关": "需人工（没找到 sysfs / 启动参数开关）",
+  "前置状态": "需人工",
+  "观测点": "半自动",
+  "差分对照": "需人工",
+  "平台需求": "需人工"
+ }
+}

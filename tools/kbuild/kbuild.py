@@ -29,9 +29,12 @@ HERE = Path(__file__).resolve().parent
 ROOT = Path("/root/work/kbuild")
 KSRC = Path("/root/repos/linux")
 ENV = dict(os.environ, PATH="/usr/lib/llvm-18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-KARCH = {"riscv": "riscv", "arm64": "arm64", "x86_64": "x86"}
-DEFC = {"riscv": "defconfig", "arm64": "defconfig", "x86_64": "x86_64_defconfig"}
-IMG = {"riscv": "arch/riscv/boot/Image", "arm64": "arch/arm64/boot/Image", "x86_64": "arch/x86/boot/bzImage"}
+KARCH = {"riscv": "riscv", "arm64": "arm64", "x86_64": "x86", "arm": "arm", "powerpc": "powerpc"}
+DEFC = {"riscv": "defconfig", "arm64": "defconfig", "x86_64": "x86_64_defconfig", "arm": "multi_v7_defconfig",
+        "powerpc": "ppc64le_defconfig"}
+# widebuild_20261125: arm and powerpc added; powerpc builds vmlinux only (its zImage boot wrapper is not needed here)
+IMG = {"riscv": "arch/riscv/boot/Image", "arm64": "arch/arm64/boot/Image", "x86_64": "arch/x86/boot/bzImage",
+       "arm": "arch/arm/boot/zImage", "powerpc": "vmlinux"}
 
 
 def log(*a):

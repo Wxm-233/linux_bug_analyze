@@ -83,6 +83,8 @@
   - 2026-11-19 又收到两封（`提交/19.6.14.pdf`、`19.20.11.pdf`），都是对 David《mm/userfaultfd: reject DAX mappings》的 Reviewed-by：Jose A. Perez de Azpillaga（06:14，“LGTM”）、Pankaj Gupta（AMD，20:11）。Pankaj 另问 David 能否改用 `vmf_insert_page_mkwrite`，这是问作者的，我们不用回复。这个补丁现在共有 4 个 Reviewed-by（Gregory Price、Mike Rapoport、Jose、Pankaj）。20:23 David 回复 Pankaj（`提交/19.20.23.pdf`）：`vmf_insert_mixed_mkwrite()` 正在被另外的改动删除，所以这个提交里用哪个都无所谓，补丁不改，并感谢审阅。
   状态：两个修复都有 Reviewed-by。guard 标记那半已进 mm/core 分支；“拒绝 DAX”补丁有 4 个 Reviewed-by，等待收进树。合入主线后补记提交号。
 - **上游状态（2026-11-24，联网只读，kernel.googlesource 镜像读源码）**：guard 标记那半（Mike 3/3，`insert_page_into_pte_locked()` 里 `!mkwrite || !pte_present(pteval)`）已在 mm 新树 `mm/linux.git` 的 `for-next` 和 linux-next（next-20261123）里，主线 v7.4-rc4 还没有；David《mm/userfaultfd: reject DAX mappings》在主线、linux-next、`mm/linux.git` 的 for-next/for-next-fixes/for-test、akpm/mm 各分支都**还没有**（`vma_can_userfault()` 里没有 DAX 判断）。
+- **“拒绝 DAX”补丁已进 -mm（2026-11-24 17:50，`提交/24.17.50.pdf`）**：Andrew Morton 的 mm-commits 通知：`mm-userfaultfd-reject-dax-mappings.patch` 已加入 akpm/mm 的 `mm-new` 分支。补丁带 David 和 Andrew 的 Signed-off-by，**`Reported-by:` 作者本人**（另一位是 Chris Mason），`Closes:` 指向我们的报告，`Fixes: d61ea1cb0095`，4 个 Reviewed-by（Pankaj Gupta、Jose A. Perez de Azpillaga、Gregory Price、Mike Rapoport）。改动只有 3 行：在 `vma_can_userfault()` 里加 `if (vma_is_dax(vma)) return false;`。mm-new 是暂存区，不进 linux-next；测几天没问题会移到 mm-unstable，再进 linux-next。
+  状态：两半都已进维护者的树。guard 标记那半在 mm/core（及 linux-next）；“拒绝 DAX”在 akpm/mm 的 mm-new。进主线后补记提交号。
 
 ## B-2026-11-16-2：MGLRU 回收时清 device-exclusive 页表项的访问位，arm64 上把它改成坏交换项（S4，B-2026-11-15-2 的 MGLRU 变体）
 
@@ -133,6 +135,7 @@
 - **v3 已发出（2026-11-18 18:22，作者本人）**：按 David 的建议改用 goto 写法（Baolin 回复赞同），保留 Baolin 的 Reviewed-by；发送前用 `s6v3_20261118` 重测：原内核 3/3 复现，v3 内核 0/3。Message-ID 记在外层进度日志。等待 Andrew 收进 mm 树。
 - **v3 审阅（2026-11-18 18:26）**：David Hildenbrand（shmem 维护者之一）给出 Reviewed-by，并说 “I'll queue this later.”。补丁已有两个 Reviewed-by，维护者表示会收下。
 - **已收进树（2026-11-24，联网只读，kernel.googlesource 镜像读源码）**：v3 的改法（force 分支 `mask = READ_ONCE(huge_shmem_orders_inherit); goto out;`）已在 mm 新树 `mm/linux.git` 的 `for-next`（David 维护，linux-next 的 mm 来源）和 linux-next（next-20261123）里；主线 v7.4-rc4、akpm/mm 各分支还没有。提交号未取（googlesource 的历史页要登录），进主线后补记。
+- **维护者正式收下（2026-11-20 01:12，`提交/20.1.12.pdf`）**：David Hildenbrand 回复 v3：“Applied, thanks!”。收进 `mm/core.git` 的 `shmem-7.5.misc` 分支，提交 `a0dc4b77`（https://git.kernel.org/mm/core/c/a0dc4b77 ，变基后可能变），随后进 mm-next、linux-next。按分支名，预计在 7.5 合并窗口进主线。进主线后补记最终提交号。
 
 ## B-2026-11-20-1：arm32 原子 DMA 池再分配时不清零，返回上一个使用者留下的内容（E-ZERO 第 1 条）
 

@@ -17,7 +17,7 @@
   - 三、**调用上下文检查**。
   
   文档里固定用这三个名字。定义见 `experiments/case_taxonomy/boundary_taxonomy_20261106/README.md`。
-- **当前在做**：见交接文档“四”开头的总览。截至 2026-11-15，在做的是静态候选 → 性质规则（R1～R4，检查程序 `experiments/case_taxonomy/r4_20261115/propsuite4.c`）→ KCOV 归因这条流水线。各轮入口见 `experiments/README.md` 的“当前方向”表。
+- **当前在做**：见交接文档“四”开头“〇”里的“2026-11-26 最新总览”。现在的静态分析器是一条线：5 个构建 → 相对分层 → 全树边界与资源 → 按性质表分派 → 九个引擎判定 → 主表 224 行、对照表和动态验证任务单（`experiments/case_taxonomy/task4_20261125/`、`taskcard3_20261125/`）。
 - **内核镜像先用 kbuild 取**：`python3 $REPO/tools/kbuild/kbuild.py get <提交号> <架构> plain|kcov [--mut 文件:变异名]`，已有的直接复用，不要每轮重建。说明见 `tools/kbuild/README.md`。
 - **环境**：
   - **大文件不允许放 C 盘**。WSL 的虚拟磁盘在 `D:\WSL\Ubuntu`，上限 200G（11-15 时剩余约 85G）；E 盘是不常连的外接盘，不放常用数据；
